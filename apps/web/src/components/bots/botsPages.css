@@ -471,8 +471,6 @@
 
 .bots-charttools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 0 6px 8px; }
 
-.bots-demobar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: -8px; font-size: 13px; }
-.bots-demobar .tf-choice__l { font-size: 13px; color: var(--tf-muted); }
 
 /* ------------------------------------------------------------ bot page v3 ---- */
 .bots-dgrid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 12px; align-items: start; }
@@ -1167,7 +1165,7 @@ html[data-glass] .bots-page { background: transparent; }
 .bots-xbot .bots-xbot__t { flex-direction: row; justify-content: flex-start; align-items: center; text-align: left; }
 .bots-xbot .bots-xbot__n { text-align: right; }
 
-/* Become VIP: a gold progress bar with a glare across it, the unlock scene, the demo controls. */
+/* Become VIP: a gold progress bar with a glare across it, the unlock scene. */
 .bots-vip { --gold-1: #f6d27a; --gold-2: #e0a93b; --gold-3: #b9832a; }
 .bots-vip__prog { display: flex; flex-direction: column; gap: 8px; }
 .bots-vip__nums { display: flex; align-items: baseline; gap: 8px; }
@@ -1202,7 +1200,6 @@ html[data-glass] .bots-page { background: transparent; }
 .bots-vipwin__act { display: flex; gap: 8px; animation-delay: 1s; }
 @media (max-width: 720px) { .bots-vipwin__perks { grid-template-columns: minmax(0, 1fr); } }
 
-.bots-demobar__play { display: inline-flex; gap: 6px; }
 
 /* Explore v4 (owner 2026-11-08: "still bugs on the sides"): the table fits its card, never scrolls sideways; on a
    narrower card the less telling columns go (xc-a: spread, moves; then xc-b: informed, activity), and Configure
@@ -1247,11 +1244,7 @@ html[data-glass] .bots-page { background: transparent; }
 .bots-mt th:first-child, .bots-mt td:first-child { padding-left: 12px; }
 .bots-wsteps__count { min-width: 118px; text-align: right; }
 @media (max-width: 720px) { .bots-wsteps__count { min-width: 0; } }
-.bots-demobar { flex-wrap: wrap; row-gap: 6px; min-width: 0; }
-.bots-demobar .tf-choice__l { white-space: nowrap; }
-@media (max-width: 640px) { .bots-demobar { justify-content: flex-start; margin-bottom: 0; } .bots-demobar__play { flex-wrap: wrap; } }
 @media (max-width: 640px) { .bots-page .tf-stat__hint { white-space: normal; } }
-.bots-demobar label, .bots-demobar .tf-choice { align-items: center; }
 @media (max-width: 640px) { .tf-shellhead:has(> .tf-shellhead__aside > .tf-btn:only-child) { flex-wrap: nowrap; } .tf-shellhead__aside:has(> .tf-btn:only-child) { width: auto; padding-left: 0; } }
 .bots-page .dc-legend { right: 78px; }
 

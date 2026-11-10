@@ -6,7 +6,6 @@
  */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { VipShare, type ShareWhat } from './VipShare';
-import { onVipPlay } from '../../bots/vipDemo';
 import type { VipMoveView } from '@copy-engine';
 import { fmtUsd } from '../../format';
 import { VIP_BASE, hostedExecutor } from '../../copy/executor';
@@ -311,15 +310,6 @@ function UnlockScene({ onMove, onClose, onShare, volume, promo, stage, onVip = f
   );
 }
 
-/** A made-up move for the demo: every step done in a few hundred ms (the scene paces them). */
-function demoJob(bots: number): VipMoveView {
-  const t = Date.now();
-  const ms = [140, 60, 90, 210, 120, 70];
-  const labels = ['Checking your VIP status', 'Pausing your bots', 'Sealing your key to the VIP servers', 'Handing over bots and books', 'Starting on the VIP servers', 'Releasing the standard servers'];
-  const ids = ['check', 'pause', 'seal', 'send', 'start', 'finish'];
-  return { id: 'demo', state: 'done', startedAt: t, endedAt: t + ms.reduce((a, b) => a + b, 0), steps: ids.map((id, i) => ({ id, label: labels[i]!, state: 'done', ms: ms[i]! })), bots, error: null, session: null };
-}
-
 /** The progress to VIP: a gold bar with a glare running across it. */
 function GoldBar({ value }: { value: number }) {
   const v = Math.max(0, Math.min(1, value));
@@ -334,22 +324,18 @@ function GoldBar({ value }: { value: number }) {
 
 const PERK_ICON = { tag: 'coins', server: 'layers', bolt: 'bolt', star: 'star' } as const;
 
-/** The card (Overview compact, Savings full); `stage`: no card, only the scenes, listening to the demo controls and showing the unlock once. */
+/** The card (Overview compact, Savings full); `stage`: no card, only the scenes, showing the unlock once. */
 export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?: boolean; stage?: boolean; strip?: boolean }) {
-  const real = useEligibility(ctx.demo ? null : ctx.address);
-  // Example bots: a wallet most of the way there.
-  const el = ctx.demo ? { eligible: false, volumeUsd: 684_000, minUsd: 1_000_000, days: 14 } : real;
+  const real = useEligibility(ctx.address);
+  const el = real;
   const [unlock, setUnlock] = useState(false);
-  // The demo plays either unlock: the $1M milestone, or the beta's 30 days.
-  const [demoPromo, setDemoPromo] = useState(false);
   const info = ctx.live.hosted.info;
   const onVip = hostedExecutor.base === VIP_BASE || info?.vip?.tier === 'vip';
   const canMove = !!info?.vip?.canMove && (el?.eligible || !!info.vip.open);
-  // The real move is live.ts's (followed to its end outside React); the demo's is this card's own.
+  // The move is live.ts's (followed to its end outside React).
   const follow = useVipFollow();
-  const mine = !ctx.demo && ctx.address && follow.owner === ctx.address.toLowerCase() ? follow : null;
-  const [demoJobNow, setJob] = useState<VipMoveView | null>(null);
-  const job = ctx.demo ? demoJobNow : mine?.job ?? null;
+  const mine = ctx.address && follow.owner === ctx.address.toLowerCase() ? follow : null;
+  const job = mine?.job ?? null;
   const [open, setOpen] = useState(false);
   /** The move the user closed: not opened again by itself. */
   const hidden = useRef<string | null>(null);
@@ -363,13 +349,6 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
   const [share, setShare] = useState<ShareWhat | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
-  // The demo controls beside "Demo data" (bots/vipDemo.ts).
-  useEffect(() => (!stage ? undefined : onVipPlay((p) => {
-    setFading(false);
-    if (p === 'unlock' || p === 'unlock-promo') { setDemoPromo(p === 'unlock-promo'); setUnlock(true); return; }
-    setJob(demoJob(Math.max(1, ctx.bots.filter((v) => !v.algo.endedAt).length)));
-    setOpen(true);
-  })), [stage, ctx.bots]);
   // A wallet that just became VIP sees the unlock once (this browser).
   useEffect(() => {
     if (!stage || !ctx.address || !real?.eligible) return;
@@ -390,10 +369,10 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
 
   // A move picked up again on load (live.ts resumeVipMove: started in a tab that closed): the scene comes back.
   useEffect(() => {
-    if (!stage || ctx.demo || open || scenesUp > 0 || !mine?.following || !mine.job || mine.job.state !== 'running' || hidden.current === mine.job.id) return;
+    if (!stage || open || scenesUp > 0 || !mine?.following || !mine.job || mine.job.state !== 'running' || hidden.current === mine.job.id) return;
     setFading(false);
     setOpen(true);
-  }, [stage, ctx.demo, open, mine?.following, mine?.job]);
+  }, [stage, open, mine?.following, mine?.job]);
 
   const move = async () => {
     const ok = await confirm({
@@ -437,9 +416,9 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
     <>
       {dialog}
       {(open || unlock || handoff) && <div className={`vipx-stage${fading ? ' is-fading' : ''}${handoff ? ' is-held' : ''}`} aria-hidden="true"><VipGround lit={lit} /></div>}
-      {open && (stage || ctx.demo) && <MoveScene job={job} handoff={handoff} stage={stageApi} stalled={!!mine?.stalled} error={mine?.error ?? null} onShare={(secs) => setShare({ kind: 'move', bots: job?.bots ?? 1, secs })} onClose={() => { hidden.current = job?.id ?? null; setOpen(false); setJob(null); setHandoff(false); setFading(false); if (!ctx.demo) dismissVipMove(); }} />}
+      {open && stage && <MoveScene job={job} handoff={handoff} stage={stageApi} stalled={!!mine?.stalled} error={mine?.error ?? null} onShare={(secs) => setShare({ kind: 'move', bots: job?.bots ?? 1, secs })} onClose={() => { hidden.current = job?.id ?? null; setOpen(false); setHandoff(false); setFading(false); dismissVipMove(); }} />}
       {share && <VipShare what={share} onClose={() => setShare(null)} />}
-      {unlock && <UnlockScene onVip={onVip} stage={stageApi} onShare={() => setShare({ kind: 'unlock', promo: ctx.demo ? demoPromo : !!el?.promo })} promo={ctx.demo ? (demoPromo ? { until: Date.now() + 30 * 86_400_000 } : null) : el?.promo ?? null} volume={el && el.volumeUsd >= el.minUsd ? el.volumeUsd : null} onClose={() => { setUnlock(false); setFading(false); }} onMove={() => { setUnlock(false); setHandoff(true); if (ctx.demo) { setJob(demoJob(Math.max(1, ctx.bots.filter((v) => !v.algo.endedAt).length))); setOpen(true); } else void move(); }} />}
+      {unlock && <UnlockScene onVip={onVip} stage={stageApi} onShare={() => setShare({ kind: 'unlock', promo: !!el?.promo })} promo={el?.promo ?? null} volume={el && el.volumeUsd >= el.minUsd ? el.volumeUsd : null} onClose={() => { setUnlock(false); setFading(false); }} onMove={() => { setUnlock(false); setHandoff(true); void move(); }} />}
       {!stage && <Shell className={`bots-vip${compact ? ' is-compact' : ''}`}>
         <ShellHeader icon="bolt" title={onVip ? 'VIP' : 'Become VIP'} subtitle={onVip ? 'Your bots run on the VIP servers, at the lowest bot fee.' : el?.promo ? 'Your beta VIP: the lowest fee on everything, and VIP servers.' : 'At $1M of your volume in 14 days: bot fees slashed, and VIP servers.'} aside={onVip ? <StatusPill tone="warning" dot>VIP servers</StatusPill> : el?.eligible ? <StatusPill tone="positive" dot>Unlocked</StatusPill> : null} />
         <Panel className="bots-vip__b">

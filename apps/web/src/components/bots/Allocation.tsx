@@ -55,7 +55,7 @@ export interface Allocation {
   practice: number;
 }
 
-/** A copy as the panel needs it (copy/live.ts copyRows, or the demo's). */
+/** A copy as the panel needs it (copy/live.ts copyRows). */
 export interface MarginCopy { id: string; leader: string; mode: string; status: string; settings: { allocationUsd: number; paper: boolean } }
 
 export function marginOf(bots: readonly AlgoView[], copies: readonly MarginCopy[], equity: number | null, positionsMargin = 0): Allocation {
@@ -89,23 +89,12 @@ export function marginCopies(live: LiveCopy | null): MarginCopy[] {
   return copyRows(live).map(({ mode, view }) => ({ id: view.subscription.id, leader: view.subscription.settings.leader.address, mode, status: view.subscription.status, settings: view.subscription.settings }));
 }
 
-/** Example copies beside the example bots. */
-const DEMO_COPIES: MarginCopy[] = [
-  { id: 'demo-c1', leader: '0x8f2a6b1c9d0e4f5a7b3c2d1e0f9a8b7c6d5e41c9', mode: 'hosted', status: 'active', settings: { allocationUsd: 250, paper: false } },
-  { id: 'demo-c2', leader: '0x31c7d2e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b7e0', mode: 'hosted', status: 'paused', settings: { allocationUsd: 150, paper: false } },
-];
-
-/** The account value bots are measured against: the real one, or (example bots) one that fits them. */
+/** The account value bots are measured against. */
 export function useAllocation(ctx: BotsCtx): Allocation {
-  const totals = useAccountTotals(ctx.demo ? null : ctx.address);
-  const pm = usePositionsMargin(ctx.demo ? null : ctx.address);
-  const copies = ctx.demo ? DEMO_COPIES : marginCopies(ctx.live);
-  return useMemo(() => {
-    if (!ctx.demo) return marginOf(ctx.bots, copies, totals.perpsUsd, pm);
-    // Example: $120 of own positions beside the example bots and copies.
-    const a = marginOf(ctx.bots, copies, null, 120);
-    return marginOf(ctx.bots, copies, Math.max(500, Math.ceil((a.used * 1.3) / 100) * 100), 120);
-  }, [ctx.demo, ctx.bots, copies, totals.perpsUsd, pm]);
+  const totals = useAccountTotals(ctx.address);
+  const pm = usePositionsMargin(ctx.address);
+  const copies = useMemo(() => marginCopies(ctx.live), [ctx.live]);
+  return useMemo(() => marginOf(ctx.bots, copies, totals.perpsUsd, pm), [ctx.bots, copies, totals.perpsUsd, pm]);
 }
 
 /**
@@ -209,7 +198,7 @@ export function MarginPanel({ a, note, className }: { a: Allocation; note?: stri
 
 /** The Bots overview's panel. */
 export function AllocationPanel({ ctx }: { ctx: BotsCtx }) {
-  return <MarginPanel a={useAllocation(ctx)} note={ctx.demo ? 'Example bots and copies.' : null} />;
+  return <MarginPanel a={useAllocation(ctx)} note={null} />;
 }
 
 /** One bot's share, for its page. */

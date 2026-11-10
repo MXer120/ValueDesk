@@ -73,15 +73,7 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
 }
 
 // A build without the section: Bots is a "coming soon" name in the nav and no page (router.ts SOON_TABS).
-/** Demo data is on by default in local builds: these tests use the real executor's bots. */
-const realData = async (page: Page) => {
-  if (await page.evaluate(() => localStorage.getItem('vd.bots.demo') !== '0')) {
-    await page.evaluate(() => localStorage.setItem('vd.bots.demo', '0'));
-    await page.reload();
-  }
-};
 const comingSoon = async (page: Page) => {
-  await realData(page);
   await page.locator('.navlinks').first().waitFor();
   // Bots is coming soon only when the nav has no link to it (a beta pill on the link is not that).
   return (await page.locator('.navlinks a[href="/bots"]').count()) === 0;

@@ -17,7 +17,6 @@ import { ErrorBoundary } from '../ErrorBoundary';
 import { STRATEGIES, STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf, type Strategy } from '../../bots/presets';
 import { useBotLatency } from '../../bots/data';
 import { hostedExecutor } from '../../copy/executor';
-import { demoLatency } from '../../bots/demo';
 import { goBots, type BotsView } from '../../bots/routes';
 import { BotAvatar, BotIcon } from './BotIcon';
 import { LatencyChart, mergeRegions, type ChartMark } from './LatencyChart';
@@ -51,9 +50,7 @@ export function LatencyCard({ marks = [], ctx, bot, practice, compact }: { marks
   const [hours, setHours] = useState<'6' | '24' | '48'>('24');
   const [region, setRegion] = useState<string>('all');
   const token = ctx.address && ctx.live.hosted.signedIn ? hostedExecutor.token(ctx.address) : null;
-  const real = useBotLatency(48, ctx.demo ? null : token, bot, hostedExecutor.base);
-  const demoLat = useMemo(() => (ctx.demo ? demoLatency(Date.now(), bot ? bot.length : 3) : null), [ctx.demo, bot]);
-  const lat = demoLat ? { data: demoLat, error: null, loading: false, refresh: () => {} } : real;
+  const lat = useBotLatency(48, token, bot, hostedExecutor.base);
   const regions = lat.data?.regions ?? [];
   const one = regions.find((r) => r.id === region) ?? null;
   const buckets = one ? one.buckets : mergeRegions(regions);
@@ -85,11 +82,11 @@ export function LatencyCard({ marks = [], ctx, bot, practice, compact }: { marks
         }
       />
       <Panel className="bots-lat__panel">
-        {practice && !ctx.demo
+        {practice
           ? empty('Practice bot', 'It sends no orders, so there is nothing to time.')
           : !ctx.address
           ? empty('Your bots only', 'Connect your wallet to see how fast your orders reach SoDEX.')
-          : !token && !ctx.demo
+          : !token
             ? empty('Your bots only', 'Finish the bot setup to see it.')
             : lat.error && !lat.data
               ? empty('Not available right now', `The executor did not answer (${lat.error}).`)
@@ -446,7 +443,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         ) : undefined}
       />
 
-      {(ctx.address || ctx.demo) && <ErrorBoundary name="VIP" bare><BotsVip ctx={ctx} strip /></ErrorBoundary>}
+      {ctx.address && <ErrorBoundary name="VIP" bare><BotsVip ctx={ctx} strip /></ErrorBoundary>}
 
       {!ctx.ready && (!ctx.seen || !bots.length) && <Setup ctx={ctx} />}
 

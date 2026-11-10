@@ -22,7 +22,6 @@ import { inPlacePatch } from '../../bots/fleet';
 import { canUpdateOn } from '../../algo/executorAlgos';
 import { BotLog } from './BotLog';
 import { MarketConditions } from './BotsRegime';
-import { demoEvents } from '../../bots/demo';
 import { useBotMarkets } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
 import { STRATEGY_INFO, botFeeWords, draftOfSpec, leverageCap, gridRange, specChanges, specOf, strategyOf, type BotDraft } from '../../bots/presets';
@@ -113,10 +112,10 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   const next = () => specOf(effectiveDraft({ ...d, paper: v.algo.spec.paper }, est), null);
   // What the executor changes in place (no restart, nothing closed): a Save. Anything else restarts.
   const patch = useMemo(() => {
-    if (!n || ended || (!ctx.demo && !canUpdateOn('hosted'))) return null;
+    if (!n || ended || !canUpdateOn('hosted')) return null;
     return inPlacePatch(specOf(effectiveDraft({ ...before, paper: v.algo.spec.paper }, est), null), next(), changes.includes('endAt'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [n, ended, before, d, est, ctx.demo]);
+  }, [n, ended, before, d, est]);
   const restart = async (how: How) => {
     setBusy(how);
     setError(null);
@@ -295,9 +294,7 @@ export function LimitsProgress({ v }: { v: AlgoView }) {
 export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id: string }) {
   const v = ctx.bots.find((x) => x.algo.id === id) ?? null;
   const [tab, setTab] = useState<Tab>('overview');
-  const realEv = useBotLog(id, !!v && !ctx.demo && (tab === 'trades' || tab === 'activity' || tab === 'analysis'));
-  const demoEv = useMemo(() => (ctx.demo && v ? demoEvents(v) : null), [ctx.demo, v]);
-  const log = demoEv ? { events: demoEv, error: null, more: false, loading: false, loadMore: () => undefined } : realEv;
+  const log = useBotLog(id, !!v && (tab === 'trades' || tab === 'activity' || tab === 'analysis'));
   const markets = useBotMarkets('24h', !!v && v.algo.spec.kind === 'mm');
   const back = <IconButton icon="arrowLeft" label="All bots" variant="secondary" onClick={() => goBots({ page: 'overview' })} />;
   if (!v) {

@@ -14,7 +14,6 @@
  * One shell holds what every page needs (the wallet's executor setup, the bots, the confirm dialog), so moving
  * between pages keeps the list on screen.
  */
-import { playVip } from '../../bots/vipDemo';
 import { BotsVip } from './BotsVip';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -44,8 +43,7 @@ import type { BotState } from './botWords';
 import { STATE_WORD } from './botWords';
 import { applyForBeta, useBetaAccessState } from '../../beta/access';
 import { openConnectDialog } from '../account/connect';
-import { Button, EmptyState, Icon, IconButton, Panel, Shell, Skeleton, StatusPill as Pill, Switch } from './kit/kit';
-import { demoBots, demoDefault, demoStarted, saveDemo } from '../../bots/demo';
+import { Button, EmptyState, Icon, IconButton, Panel, Shell, Skeleton } from './kit/kit';
 import { listBotsOn } from '../../algo/executorAlgos';
 import { ExecutorError, hostedExecutor, meBots } from '../../copy/executor';
 import { requestDeposit } from '../account/actions';
@@ -75,8 +73,6 @@ export interface BotsCtx {
   /** New settings by restart (feature 'bot-restart'): 'clean' closes first, 'takeover' hands what it holds to the new bot. */
   restart: (v: AlgoView, spec: Record<string, unknown>, how: 'clean' | 'takeover') => Promise<AlgoView>;
   canRestart: boolean;
-  /** Demo data (local builds): example bots, nothing sent anywhere. */
-  demo?: boolean;
   update: (id: string, patch: Record<string, unknown>) => Promise<void>;
   pause: (v: AlgoView) => Promise<void>;
   resume: (v: AlgoView) => Promise<void>;
@@ -450,58 +446,8 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     }
   }, [bots, ctx]);
 
-  // Demo data (owner 2026-11-07), local builds only: on by default, the switch at the top right.
-  const [demo, setDemoOn] = useState(() => BOTS_ON && demoDefault());
-  const [demoList, setDemoList] = useState<AlgoView[]>(() => demoBots());
-  const setDemo = (on: boolean) => { setDemoOn(on); saveDemo(on); };
-  const demoCtx: BotsCtx = useMemo(() => {
-    const set = (id: string, f: (v: AlgoView) => AlgoView) => setDemoList((l) => l.map((x) => (x.algo.id === id ? f(x) : x)));
-    const status = (v: AlgoView, st: AlgoView['algo']['status'], why: string | null): AlgoView => ({
-      ...v,
-      algo: { ...v.algo, status: st, statusReason: why, endedAt: FINAL_STATUSES.has(st) ? Date.now() : v.algo.endedAt },
-      working: st === 'running' ? v.working ?? '2 orders working' : null,
-      bot: v.bot ? { ...v.bot, orders: st === 'running' ? v.bot.orders : [], ...(FINAL_STATUSES.has(st) ? { inventory: 0, inventoryUsd: 0 } : {}) } : v.bot,
-    });
-    const said = (t: string) => notify('ok', `${t} (demo: nothing sent)`);
-    return {
-      ...ctx,
-      demo: true,
-      address: ctx.address ?? '0xdemo',
-      bots: demoList,
-      loading: false,
-      error: null,
-      ready: true,
-      seen: true,
-      signIn: async () => said('Sign in'),
-      supported: true,
-      liveAllowed: true,
-      busy: null,
-      setup: () => said('Set up'),
-      setupWhy: () => null,
-      start: async (spec) => { const n = demoStarted(spec); setDemoList((l) => [n, ...l]); said(`${botName(n)} started`); return n; },
-      restart: async (v, spec, how) => {
-        const n = demoStarted(spec);
-        setDemoList((l) => [n, ...l.map((x) => (x.algo.id === v.algo.id ? status(x, 'cancelled', how === 'clean' ? 'Restarted: closed first.' : 'Restarted: handed over.') : x))]);
-        said(how === 'clean' ? 'Clean restart' : 'Instant restart');
-        goBots({ page: 'bot', id: n.algo.id });
-        return n;
-      },
-      canRestart: true,
-      update: async () => said('Saved'),
-      pause: async (v) => { set(v.algo.id, (x) => status(x, 'paused', 'Paused by you.')); said('Paused'); },
-      resume: async (v) => { set(v.algo.id, (x) => status(x, 'running', null)); said('Resumed'); },
-      stop: async (v) => { set(v.algo.id, (x) => status(x, 'cancelled', 'Stopped by you.')); said('Stopped'); },
-      remove: async (v) => { setDemoList((l) => l.filter((x) => x.algo.id !== v.algo.id)); if (view.page === 'bot') goBots({ page: 'overview' }); said('Deleted'); },
-      closeRest: async () => said('Closed the rest'),
-      stopAll: async () => { setDemoList((l) => l.map((x) => (FINAL_STATUSES.has(x.algo.status) ? x : status(x, 'cancelled', 'Stopped by you.')))); said('Every bot stopped'); },
-      runAgain: (v, real) => { said(real ? 'Run with real orders' : 'Run again'); goBots({ page: 'new', market: v.algo.spec.symbol, kind: strategyOf(v.algo.spec) ?? null }); },
-      pauseAll: async (list) => { for (const v of list) set(v.algo.id, (x) => status(x, 'paused', 'Paused by you.')); said(`${list.length} paused`); },
-      resumeAll: async (list) => { for (const v of list) set(v.algo.id, (x) => status(x, 'running', null)); said(`${list.length} resumed`); },
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx, demoList, view]);
-  const base = demo ? demoCtx : ctx;
-  // Confirmations (owner 2026-11-07): pause and resume ask first; a stop asks in BotsCtx.stop (real) and here (demo).
+  const base = ctx;
+  // Confirmations (owner 2026-11-07): pause and resume ask first; a stop asks in BotsCtx.stop.
   const c: BotsCtx = useMemo(() => ({
     ...base,
     pause: async (v) => {
@@ -516,15 +462,6 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     resumeAll: async (list) => {
       if (await confirm({ title: `Resume ${list.length} bot${list.length === 1 ? '' : 's'}?`, body: 'Each quotes again with its own settings.', confirmLabel: 'Resume all' })) await base.resumeAll(list);
     },
-    stop: base.demo
-      ? async (v, how) => { if (how !== 'ask' && how !== undefined) return base.stop(v, how); if (await confirm({ title: `Stop ${botName(v)}?`, body: 'It pulls its orders and closes what it holds.', confirmLabel: 'Stop bot', danger: true })) await base.stop(v, 'close'); }
-      : base.stop,
-    stopAll: base.demo
-      ? async (how) => { if (await confirm({ title: 'Stop every bot?', body: how && how !== 'keep' ? 'Every bot pulls its orders and closes what it holds.' : 'Every bot pulls its orders. What they hold stays as it is.', confirmLabel: 'Stop all', danger: true })) await base.stopAll(how); }
-      : base.stopAll,
-    remove: base.demo
-      ? async (v) => { if (await confirm({ title: `Delete ${botName(v)}?`, body: 'It leaves your list.', confirmLabel: 'Delete', danger: true })) await base.remove(v); }
-      : base.remove,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [base]);
 
@@ -571,11 +508,11 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   }, [seen]);
   // The trading key's end, said before it comes (audit B): real bots stop sending orders once it has expired.
   // A real bot running without a usable key (expired, or a renewal left half done) reads as expired: renew right here.
-  const keyGone = !demo && seen && !readiness(live, 'hosted').key && bots.some((v) => !v.algo.spec.paper && !FINAL_STATUSES.has(v.algo.status));
+  const keyGone = seen && !readiness(live, 'hosted').key && bots.some((v) => !v.algo.spec.paper && !FINAL_STATUSES.has(v.algo.status));
   const keyEnds = live.hosted.me?.key?.registered ? live.hosted.me.key.expiresAt : keyGone ? 0 : null;
   const realLive = bots.some((v) => !v.algo.spec.paper && !FINAL_STATUSES.has(v.algo.status));
   const [keyNow] = useState(() => Date.now());
-  const keyWarn: BotsNotice | null = !demo && seen && keyEnds !== null && keyEnds - keyNow < KEY_WARN_MS && (realLive || keyEnds - keyNow < 3 * 86_400_000) && (view.page === 'overview' || view.page === 'bot')
+  const keyWarn: BotsNotice | null = seen && keyEnds !== null && keyEnds - keyNow < KEY_WARN_MS && (realLive || keyEnds - keyNow < 3 * 86_400_000) && (view.page === 'overview' || view.page === 'bot')
     ? {
         id: 'key-expiry',
         tone: keyEnds <= keyNow ? 'negative' : 'warning',
@@ -596,24 +533,11 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   return (
     <div className="tf bots-page" aria-busy={loading}>
       <div className="bots-col">
-        {BOTS_ON && (
-          <div className="bots-demobar">
-            {demo && (
-              <span className="bots-demobar__play" aria-label="Play the VIP animations">
-                <Button variant="quiet" size="sm" icon="play" onClick={() => playVip('unlock')}>VIP unlock</Button>
-                <Button variant="quiet" size="sm" icon="play" onClick={() => playVip('unlock-promo')}>Beta VIP unlock</Button>
-                <Button variant="quiet" size="sm" icon="play" onClick={() => playVip('move')}>Move to VIP</Button>
-              </span>
-            )}
-            {demo && <Pill tone="brand" size="sm" dot>Example bots</Pill>}
-            <Switch checked={demo} onChange={setDemo} label="Demo data" />
-          </div>
-        )}
         {/* One section failing never takes the Bots pages down (owner 2026-11-08): the page has its own boundary, reset
             when another page is opened, and the Overview one per panel. */}
-        {!demo && notice && <BotsNoticeBar n={notice} onClose={() => setNotice(null)} />}
+        {notice && <BotsNoticeBar n={notice} onClose={() => setNotice(null)} />}
         {keyWarn && <BotsNoticeBar n={keyWarn} />}
-        <ErrorBoundary key={view.page} name="This page" bare>{settling && !demo && view.page !== 'explore' ? <BotsSettling /> : page}</ErrorBoundary>
+        <ErrorBoundary key={view.page} name="This page" bare>{settling && view.page !== 'explore' ? <BotsSettling /> : page}</ErrorBoundary>
       </div>
       {BOTS_ON && <ErrorBoundary name="VIP" bare><BotsVip ctx={c} stage /></ErrorBoundary>}
       <BotSetupSheet open={!!setup} onClose={() => setSetup(null)} live={live} paper={setup?.paper ?? true} />
