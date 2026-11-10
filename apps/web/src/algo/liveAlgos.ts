@@ -19,7 +19,13 @@ export function liveAlgoWalletsFrom(raw: unknown, dev: boolean): ReadonlySet<str
   return new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter((s) => /^0x[0-9a-f]{40}$/.test(s)));
 }
 
+import { checkAlgoSpec } from '@copy-engine';
 import { hasBetaAccess } from '../beta/access';
+
+/** Whether the engine reads this spec as a bot: a volume maker or a grid is one by its kind, with or without the flag. */
+export function isBotSpecInput(spec: unknown): boolean {
+  return checkAlgoSpec(spec).spec?.bot === true;
+}
 
 const env = (import.meta as { env?: { DEV?: boolean; VITE_LIVE_ALGOS_WALLETS?: string; VITE_CHANNEL?: string } }).env;
 

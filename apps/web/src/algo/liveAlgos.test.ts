@@ -50,3 +50,14 @@ test('real bots: the beta channel (its door lets in only listed wallets) or the 
   assert.equal(liveBotsFor(w, false, new Set([w])), true, 'the live-algo test wallet');
   assert.equal(liveBotsFor(null, true, new Set()), false);
 });
+
+test('a Bots page spec is a bot without the flag, so a real one is not refused as an algo order (2026-11-10)', async () => {
+  const { isBotSpecInput } = await import('./liveAlgos');
+  const { draftFor, specOf } = await import('../bots/presets');
+  const maker = specOf(draftFor('market', 'balanced', 'BTC-USD'), 70_000);
+  assert.equal((maker as { bot?: unknown }).bot, undefined, 'the page sends no flag');
+  assert.equal((maker as { paper?: unknown }).paper, false, 'real by default');
+  assert.ok(isBotSpecInput(maker), 'the engine reads it as a bot');
+  assert.ok(isBotSpecInput(specOf(draftFor('grid', 'balanced', 'BTC-USD'), 70_000)));
+  assert.ok(!isBotSpecInput({ kind: 'twap', symbol: 'BTC-USD', side: 'buy', totalQty: 1, durationMs: 600_000, slices: 5 }), 'an algo order is not');
+});

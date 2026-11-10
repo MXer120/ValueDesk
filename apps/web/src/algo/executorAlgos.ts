@@ -9,7 +9,7 @@
  * wallet shows it) and 'algo-action' (pause / resume / cancel / cancel all,
  * and a size change where the executor offers 'algo-update').
  */
-import { liveBotsFor, requirePaperAlgo } from './liveAlgos';
+import { isBotSpecInput, liveBotsFor, requirePaperAlgo } from './liveAlgos';
 import type { AlgoEvent, AlgoUpdatePatch, AlgoView } from '@copy-engine';
 import { ExecutorClient, ExecutorError, hostedExecutor, selfBase, signCopy, revokeDayKeys } from '../copy/executor';
 import { requireTermsOrThrow } from '../legal/acceptance';
@@ -105,8 +105,10 @@ function readToken(mode: ExecutorMode): { client: ExecutorClient; token: string 
 
 /** Start an algo on an executor: one wallet signature over the spec. */
 export async function startOn(mode: ExecutorMode, spec: unknown, seed: number, restart?: { from: string; how: 'clean' | 'takeover' }): Promise<AlgoView> {
-  // A bot's own rule (beta only); every other algo's: practice unless real algos are on for the wallet.
-  const bot = typeof spec === 'object' && spec !== null && (spec as { bot?: unknown }).bot === true;
+  // A bot's own rule (beta only); every other algo's: practice unless real algos are on for the wallet. A bot is what the
+  // engine reads as one (a volume maker or a grid is a bot by its kind, flag or not): the Bots page's specs carry no
+  // flag, and reading the raw field refused every real bot as an algo order (2026-11-10, a tester's first real bot).
+  const bot = isBotSpecInput(spec);
   if (!bot || !liveBotsFor(getLiveCopy().owner)) requirePaperAlgo(spec, getLiveCopy().owner);
   const { owner, provider } = needWallet();
   const client = clientFor(mode);
