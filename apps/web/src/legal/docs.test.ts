@@ -41,16 +41,16 @@ test('placeholdersIn: every marker, nested, in any case, and a half-edited one',
   assert.deepEqual(placeholdersIn('[[OWNERSHIP]] is a different word'), [], 'only the OWNER marker counts');
 });
 
-test('the drafts as shipped: every page is a draft, and the build check refuses them', () => {
-  for (const page of LEGAL_PAGES) assert.ok(isDraft(LEGAL_DOCS[page]), `${page} has placeholders for the owner`);
-  const left = legalPlaceholders();
-  assert.ok(left.length > 0);
-  assert.deepEqual([...new Set(left.map((l) => l.page))].sort(), [...LEGAL_PAGES].sort());
-  assert.throws(() => assertLegalPagesComplete(), (e: unknown) => {
-    const msg = e instanceof Error ? e.message : '';
-    // One line per placeholder, saying where it is.
-    return /placeholder/.test(msg) && /impressum \/ Angaben gemäß § 5 DDG: \[\[OWNER:/.test(msg) && msg.split('\n').length === left.length + 2;
-  });
+test('as shipped every placeholder is filled in ("Owner", owner 2026-11-10: "every placeholder"): no page is a draft, the build check passes', () => {
+  for (const page of LEGAL_PAGES) assert.equal(isDraft(LEGAL_DOCS[page]), false, `${page} has no placeholder left`);
+  assert.deepEqual(legalPlaceholders(), []);
+  assert.doesNotThrow(() => assertLegalPagesComplete());
+});
+
+test('a placeholder put back makes its page a draft, and the build check refuses it, saying where', () => {
+  const docs = { ...LEGAL_DOCS, impressum: { ...LEGAL_DOCS.impressum, updated: '[[OWNER: Datum]]' } };
+  assert.equal(isDraft(docs.impressum), true);
+  assert.throws(() => assertLegalPagesComplete(docs), (e: unknown) => /placeholder/.test(e instanceof Error ? e.message : ''));
 });
 
 test('once every placeholder is filled in, nothing is a draft and the build check passes', () => {

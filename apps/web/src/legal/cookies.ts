@@ -32,7 +32,7 @@ export const COOKIES: LegalDoc = {
   page: 'cookies',
   title: 'Cookies and storage',
   lang: 'en',
-  updated: '[[OWNER: date, e.g. 1 November 2026]]',
+  updated: 'Owner',
   intro: [
     { p: 'In short: ValueDesk sets no cookies of its own, uses no advertising and no third-party tracking. It keeps what its functions need in your browser\'s own storage, on your device. ValueDesk\'s own usage analytics - kept on its own server, shared with no one - third-party video players, and the usage reports Reown\'s wallet software sends when you connect a wallet, only run after you allow them. Details on all personal data: [Privacy policy](/privacy).' },
   ],
@@ -98,7 +98,7 @@ export const COOKIES: LegalDoc = {
             'a random visitor number kept in your browser (local storage, "vd.an.v1", replaced by a new one after 13 months) to tell new from returning visitors, and a random number for the current visit (session storage, "vd.an.visit"), which ends with the tab or after 30 minutes without use.',
           ],
         },
-        { p: 'Not recorded: your IP address, cookies, what you type, the contents of forms, mouse movements, recordings of your screen, and anything about other websites. Only the operator of ValueDesk can see the data. It is kept [[OWNER: how long analytics data is kept, e.g. 25 months - nothing is deleted automatically until this is set]].' },
+        { p: 'Not recorded: your IP address, cookies, what you type, the contents of forms, mouse movements, recordings of your screen, and anything about other websites. Only the operator of ValueDesk can see the data. It is kept Owner.' },
         { p: 'Legal basis: your consent (§ 25(1) TDDDG for the visitor number in your browser and for reading the details above, Art. 6(1)(a) GDPR for the processing). Without it nothing is measured, and the site works the same. You can withdraw it at any time with the switch below, with effect for the future: nothing more is sent, and the visitor number is deleted from your browser. Details: [Privacy policy](/privacy), section 12.' },
       ],
     },

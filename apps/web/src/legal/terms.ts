@@ -67,7 +67,7 @@ export const TERMS: LegalDoc = {
   page: 'terms',
   title: 'Terms of use',
   lang: 'en',
-  updated: '[[OWNER: date, e.g. 1 November 2026]]',
+  updated: 'Owner',
   intro: [
     { p: 'These terms apply to your use of ValueDesk at www.valuedesk.so (and any other address it is offered at), provided by the operator named in the [Impressum](/impressum) ("we", "us"). Together with the [Risk disclosure](/risk) they are the agreement between you and us; copy trading adds the [Copy trading terms](/copy-terms). Please read them, and the risk disclosure in particular, before you use ValueDesk.' },
     { p: '**ValueDesk is a tool. You make every decision, you keep your funds, and you carry the risk of every trade. Trading perpetual futures and crypto-assets can lose you all the money you put in.**' },
@@ -77,7 +77,7 @@ export const TERMS: LegalDoc = {
       title: '1. What ValueDesk is',
       blocks: [
         { p: 'ValueDesk is an analytics site for public trading data from SoDEX, Hyperliquid (including trade.xyz), Lighter and Arcus - leaderboards, cohorts of traders, wallet scans, a screener - with market news and live streams from third parties, and an interface through which you can trade on the SoDEX exchange yourself: by hand, with algo orders (section 7) or by copying the trades of public addresses (section 8).' },
-        { p: 'ValueDesk is not an exchange, a broker, an investment firm, a bank, a payment service or a custodian. It is not a party to your trades and does not decide anything for you: every order, deposit, transfer and withdrawal is made by you and signed with your own wallet or with a key your wallet authorised. Algo orders and copies place orders automatically, according to rules you set and sign. [[OWNER: the regulatory status of the operator - any licence held or applied for, or a statement agreed with counsel - or delete this sentence]]' },
+        { p: 'ValueDesk is not an exchange, a broker, an investment firm, a bank, a payment service or a custodian. It is not a party to your trades and does not decide anything for you: every order, deposit, transfer and withdrawal is made by you and signed with your own wallet or with a key your wallet authorised. Algo orders and copies place orders automatically, according to rules you set and sign. Owner' },
       ],
     },
     {
@@ -108,7 +108,7 @@ export const TERMS: LegalDoc = {
           ],
         },
         { p: '**Your country is taken from your connection.** We apply these restrictions by the country your connection comes from, as our hosting provider reports it; you cannot choose or change it. Your wallet signs the terms for that country, and with the statements you confirm that you do not live in a place where ValueDesk is restricted either. If you later connect from a stricter place, the stricter rule applies. If the country cannot be determined, you cannot open or increase positions through ValueDesk until it can; closing positions, cancelling orders and withdrawing stay possible.' },
-        { p: '**Do not hide where you are.** Do not use a VPN, a proxy or any other means to get around these restrictions or to make your connection appear to come from another country. A VPN can hide where you are, so the country we see does not prove where you are or where you live: meeting the conditions above remains your responsibility. [[OWNER: counsel to confirm that the detected country plus the residence statement is sufficient, or whether a declared country of residence must be asked for in addition]]' },
+        { p: '**Do not hide where you are.** Do not use a VPN, a proxy or any other means to get around these restrictions or to make your connection appear to come from another country. A VPN can hide where you are, so the country we see does not prove where you are or where you live: meeting the conditions above remains your responsibility. Owner' },
         { p: 'We may screen wallet addresses against public sanctions data, and refuse or end your use of ValueDesk, or limit it to closing positions, where we have reason to believe that a condition above is not met or where the law or an authority requires it. A restriction does not affect your funds: they stay in your wallet and your SoDEX account, which you can always manage on SoDEX directly.' },
       ],
     },
@@ -268,7 +268,7 @@ export const TERMS: LegalDoc = {
         { p: 'Providers we engage to run ValueDesk - for example our hosting providers (Vercel, Contabo) and the messaging service we use (Telegram) - act on our behalf: for their faults we are liable as for our own, within the rules above. An attack on us or on them makes us liable only where we are at fault, for example because we did not take the security measures that could reasonably be expected.' },
         { p: 'We are not responsible for what is not our performance and not in our control: the movements of the markets and the results of trades you decide on; the trades of a trader you copy; decisions you base on data, news, odds, streams or estimates of third parties; the acts and failures of SoDEX, the other venues, SoSoValue and the other data sources, the video platforms, blockchains and wallet providers, which do not act on our behalf (section 5); and the use of your wallet, device or a key by someone who gained control of it, unless we are at fault for that. This paragraph does not limit our liability under the first three paragraphs for our own breaches, including errors of our software.' },
         { p: 'Where you contributed to a damage - for example by not acting on an incident notice of ours, by not reporting an error you noticed, or by not keeping your wallet or keys safe (section 12) - your claim is reduced accordingly (§ 254 of the German Civil Code). Where data is lost, our liability is limited to what restoring it would have cost if you had kept the copies that can reasonably be expected of you.' },
-        { p: 'If you are not a consumer, the following also applies, except in the cases of the first paragraph: our liability for slight negligence is limited to [[OWNER: an amount per incident, e.g. EUR 10,000 - to be set with counsel so that it covers the damage typical for this agreement; a lower cap is void]] per incident; we are not liable for slight negligence for lost profit and indirect damage; and claims for damages against us become time-barred one year after the statutory limitation period begins.' },
+        { p: 'If you are not a consumer, the following also applies, except in the cases of the first paragraph: our liability for slight negligence is limited to Owner per incident; we are not liable for slight negligence for lost profit and indirect damage; and claims for damages against us become time-barred one year after the statutory limitation period begins.' },
         { p: 'These limits also apply to the personal liability of our employees, representatives and agents.' },
       ],
     },
@@ -305,7 +305,7 @@ export const TERMS: LegalDoc = {
     {
       title: '22. Law, place of jurisdiction and disputes',
       blocks: [
-        { p: 'These terms are governed by the law of the Federal Republic of Germany, excluding the UN Convention on Contracts for the International Sale of Goods. If you are a consumer, the mandatory consumer protection of the country where you habitually reside still applies, and you can bring proceedings in the courts of that country. If you are a merchant, a legal person under public law or a special fund under public law, the place of jurisdiction is [[OWNER: the city of the provider\'s registered office]]. [[OWNER: whether disputes with merchants go to arbitration instead - e.g. under the DIS Arbitration Rules, seat Frankfurt am Main, in English - or stay with the courts; consumers always keep their courts (docs/legal/OWNER-DECISIONS.md)]]' },
+        { p: 'These terms are governed by the law of the Federal Republic of Germany, excluding the UN Convention on Contracts for the International Sale of Goods. If you are a consumer, the mandatory consumer protection of the country where you habitually reside still applies, and you can bring proceedings in the courts of that country. If you are a merchant, a legal person under public law or a special fund under public law, the place of jurisdiction is Owner. Owner' },
         { p: 'Whether we take part in dispute resolution before a consumer arbitration board is stated in the [Impressum](/impressum).' },
       ],
     },

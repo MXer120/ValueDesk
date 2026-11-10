@@ -21,7 +21,7 @@ export const LICENSES: LegalDoc = {
   page: 'licenses',
   title: 'Licences and notices',
   lang: 'en',
-  updated: '[[OWNER: date, e.g. 1 November 2026]]',
+  updated: 'Owner',
   intro: [
     { p: 'ValueDesk is built on open-source software and shows data, news and logos from others. This page says under which licences, and gives the notices they ask for.' },
   ],

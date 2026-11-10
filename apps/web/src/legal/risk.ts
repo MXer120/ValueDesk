@@ -27,7 +27,7 @@ export const RISK: LegalDoc = {
   page: 'risk',
   title: 'Risk disclosure',
   lang: 'en',
-  updated: '[[OWNER: date, e.g. 1 November 2026]]',
+  updated: 'Owner',
   intro: [
     { p: '**Trading crypto-assets and perpetual futures is high-risk and not suitable for most people. You can lose all the money you put in, quickly. Only trade with money you can afford to lose completely, and never with borrowed money.**' },
     { p: 'This disclosure describes the main risks of using ValueDesk at www.valuedesk.so: trading on the SoDEX exchange through it, algo orders, copy trading, and the data and third-party content it shows. It is part of the [Terms of use](/terms), which you accept before you use ValueDesk. It cannot name every risk, and the risks can change. It is not advice: nothing here, and nothing on ValueDesk, says that any product, trade or strategy is suitable for you.' },

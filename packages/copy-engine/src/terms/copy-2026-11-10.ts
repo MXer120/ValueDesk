@@ -8,7 +8,7 @@ export const COPY_TERMS_2026_11_10: TermsDoc = {
   page: 'copy-terms',
   title: 'Copy trading terms and risk disclosure',
   lang: 'en',
-  updated: '[[OWNER: date, e.g. 1 November 2026]]',
+  updated: 'Owner',
   intro: [
     { p: `Version 2026-11-10. These terms apply when you copy trades with ValueDesk at www.valuedesk.so (and any other address it is offered at), provided by the operator named in the [Impressum](/impressum) ("we"). They add to the [Terms of use](/terms); for copy trading, these terms prevail where the two differ. You accept them by signing them with your wallet before your first copy.` },
     { p: '**Copy trading can lose you money fast: your whole allocation and, with leverage, more than that. Read the risk disclosure in section 7 before you copy.**' },
@@ -28,7 +28,7 @@ export const COPY_TERMS_2026_11_10: TermsDoc = {
             '**Bots.** The same executor and key also run the bots you start (automated trading strategies such as market making or grids, section 3A). These terms apply to them as they do to copies; what is different for bots is in section 3A.',
           ],
         },
-        { p: '[[OWNER: licence status of the copy trading service, in particular of the hosted executor - or the licensed partner that provides it and its supervisory authority - or delete this paragraph]]' },
+        { p: 'Owner' },
       ],
     },
     {
@@ -44,7 +44,7 @@ export const COPY_TERMS_2026_11_10: TermsDoc = {
         { p: '**What the key can do.** SoDEX offers no API key that can trade but cannot move funds. According to SoDEX\'s documentation, the key used for copying - in every mode - can place and cancel orders and change leverage and margin, and it can also move funds between your own SoDEX spot account, your perps account and your own wallet. According to SoDEX, it cannot send funds to anyone else. Whoever holds the key can trade your account (section 7).' },
         { p: '**If the hosted executor is attacked.** The hosted keys are stored encrypted, and the executor acts only on instructions your wallet signed. But the key that decrypts them is on the same server, so someone who takes control of that server could use the keys stored there until they expire or are revoked. If we suspect that, we stop the executor and the copies and algo orders on it (section 10), tell the followers affected in the app and on our site without undue delay, and ask them to revoke their key on SoDEX - which only your wallet can do. Choose a short key lifetime and keep in your perps account only what you are prepared to have traded by the copier: that limits what a stolen key can do.' },
         { p: '**A key you made yourself.** With the hosted executor you can instead make the API key yourself on sodex.com and give it to the executor. Its private key is encrypted in your browser so that only the executor can read it. The executor uses it only when SoDEX lists it on your own account under the name you give, valid for at most 180 days. Everything in these terms about the copy key applies to such a key too; keeping any other copy of it safe is up to you.' },
-        { p: 'We update the copier we provide - the hosted executor and the browser copier - from time to time, and an update can change how your rules are carried out. [[OWNER: how followers learn of updates, e.g. the version shown in the app and published release notes]]' },
+        { p: 'We update the copier we provide - the hosted executor and the browser copier - from time to time, and an update can change how your rules are carried out. Owner' },
       ],
     },
     {
@@ -135,7 +135,7 @@ export const COPY_TERMS_2026_11_10: TermsDoc = {
         {
           ul: [
             'you are at least 18 years old and able to enter into binding contracts;',
-            'you are not a US person, and you neither live in nor connect from the United States or its territories (Puerto Rico, the US Virgin Islands, Guam, American Samoa, the Northern Mariana Islands and the US Minor Outlying Islands). "US person" means [[OWNER: the definition of US person, e.g. a natural person resident in the United States or its territories, or an entity organised or located there - and whether US citizens living elsewhere are excluded too]];',
+            'you are not a US person, and you neither live in nor connect from the United States or its territories (Puerto Rico, the US Virgin Islands, Guam, American Samoa, the Northern Mariana Islands and the US Minor Outlying Islands). "US person" means Owner;',
             'you neither live in nor connect from the United Kingdom (England, Scotland, Wales and Northern Ireland; not the Channel Islands, the Isle of Man or the British Overseas Territories) or Canada;',
             'you neither live in nor connect from Cuba, Iran, North Korea, Syria, Russia, Belarus or Myanmar, and you are not subject to sanctions. Your wallet and the trader you copy must not be on a sanctions list: the executor checks both addresses against the public sanctions data it holds (the crypto addresses on OFAC\'s Specially Designated Nationals list, as mirrored by the Chainalysis sanctions oracle), refuses to start or change a copy for a listed wallet and holds copies that are running;',
             'copy trading, perpetual futures and the use of a copy service are lawful for you where you live and where you are.',
@@ -248,7 +248,7 @@ export const COPY_TERMS_2026_11_10: TermsDoc = {
             '**Stop** a copy: this is final. You choose whether its copied positions are closed or left open.',
             '**Stop all** (the kill switch) stops every copy at once and, if you choose, closes all copied positions. Closing orders are immediate-or-cancel orders like any copy and can fill partly or not at all in a fast or thin market; check your SoDEX account afterwards.',
             '**Drawdown stop**: closes a copy\'s positions and halts it when the drawdown you set is reached (section 3).',
-            '**Revoke the key on SoDEX** - the hard stop. Once SoDEX has processed the revocation, no order can be placed with the key, whatever happens at ValueDesk. Stop orders the copier already placed stay on SoDEX until they trigger or you cancel them, and open positions stay open. [[OWNER: where the follower revokes the key - the control in the app and/or the place on SoDEX]]',
+            '**Revoke the key on SoDEX** - the hard stop. Once SoDEX has processed the revocation, no order can be placed with the key, whatever happens at ValueDesk. Stop orders the copier already placed stay on SoDEX until they trigger or you cancel them, and open positions stay open. Owner',
             'In browser mode, closing the tab stops copying. A hosted key can also be deleted from ValueDesk\'s server by a signed instruction; revoke it on SoDEX as well.',
             'A copy that is blocked - for a missing or expired key, a missing builder approval or the regional rule - resumes by itself once the condition is met again. To end a copy for good, stop it.',
             'A pause or stop takes effect when the executor has processed it; an order sent before then can still fill.',
@@ -285,7 +285,7 @@ export const COPY_TERMS_2026_11_10: TermsDoc = {
       title: '13. Changes to these terms',
       blocks: [
         { p: '**What does not need a new version.** We improve the service all the time. Within these terms - without a new version and without your signature - we may: lower fees or add lower rates (section 6); add strategies, markets, features, safeguards, servers or settings; change how the software carries out your settings, including the safety measures in section 3A, as long as it does not trade beyond the limits you set; tighten security measures (for example session keys, section 4); correct mistakes in wording; and adapt these terms to changes of SoDEX\'s rules or of the law that do not reduce your rights. We tell you of material changes in the app.' },
-        { p: `We may change these terms for the future, for example when the service, the fees or the law change. Every version has its own number (this one: 2026-11-10). A new version that adds to your obligations, raises a fee above what these terms allow, or reduces your rights applies to you only once you accept it by signing it with your wallet; until then you cannot start a new copy or bot. [[OWNER: what happens to running copies, and to changes of them, until a follower accepts a new version - e.g. they continue under the accepted version for N days and are then paused]] If you do not accept a new version, you can stop copying at any time, and we may end hosted copy trading for you as set out in section 14.` },
+        { p: `We may change these terms for the future, for example when the service, the fees or the law change. Every version has its own number (this one: 2026-11-10). A new version that adds to your obligations, raises a fee above what these terms allow, or reduces your rights applies to you only once you accept it by signing it with your wallet; until then you cannot start a new copy or bot. Owner If you do not accept a new version, you can stop copying at any time, and we may end hosted copy trading for you as set out in section 14.` },
       ],
     },
     {
@@ -294,7 +294,7 @@ export const COPY_TERMS_2026_11_10: TermsDoc = {
         {
           ul: [
             'You can stop copying at any time, without notice and at no cost: stop all copies, revoke the key on SoDEX, and revoke the builder approval if you no longer want it.',
-            'We may end copy trading, or one of its modes, for you or for everyone with [[OWNER: notice period, e.g. 14 days]] notice in the app, and without notice for good cause - in particular if the law or an authority requires it, if you break section 5 or 9, or to protect your account or our systems from an attack. We may also stop accepting new copies while running copies continue.',
+            'We may end copy trading, or one of its modes, for you or for everyone with Owner notice in the app, and without notice for good cause - in particular if the law or an authority requires it, if you break section 5 or 9, or to protect your account or our systems from an attack. We may also stop accepting new copies while running copies continue.',
             'When copying ends, nothing more is copied. Your copied positions stay open in your SoDEX account, and stop orders already on SoDEX stay there; managing them is up to you. A key you registered stays valid on SoDEX until it expires or you revoke it - revoke it.',
             'Records are kept as set out in section 11 and the [Privacy policy](/privacy).',
           ],
@@ -304,13 +304,13 @@ export const COPY_TERMS_2026_11_10: TermsDoc = {
     {
       title: '15. Right of withdrawal',
       blocks: [
-        { p: '[[OWNER: whether consumers have a right of withdrawal for the copy service (distance contract, §§ 312g, 355, 356 BGB, including the rules for financial services) - ask counsel. If they have, insert the withdrawal instructions here and, where required, the online withdrawal function; otherwise delete this section]]' },
+        { p: 'Owner' },
       ],
     },
     {
       title: '16. Law and place of jurisdiction',
       blocks: [
-        { p: 'These terms are governed by [[OWNER: the governing law, e.g. the law of the Federal Republic of Germany, excluding the UN Convention on Contracts for the International Sale of Goods, as in the Terms of use]]. If you are a consumer, the mandatory consumer protection of the country where you habitually reside still applies. If you are a merchant, a legal person under public law or a special fund under public law, the place of jurisdiction is [[OWNER: the city of the provider\'s registered office]].' },
+        { p: 'These terms are governed by Owner. If you are a consumer, the mandatory consumer protection of the country where you habitually reside still applies. If you are a merchant, a legal person under public law or a special fund under public law, the place of jurisdiction is Owner.' },
         { p: 'If a provision of these terms is invalid, the rest remain in force. Questions: see the [Impressum](/impressum).' },
       ],
     },
