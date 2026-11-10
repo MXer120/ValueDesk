@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TAKER_BUYER, TAKER_SELLER, type PrintCols } from '../src/flow/codec.js';
-import { analyzeMarket, weightedPercentile, BOT_BUILDER_BPS } from '../src/flow/botMarkets.js';
+import { analyzeMarket, weightedPercentile, regimeAll, cutAtProgress, BOT_BUILDER_BPS, type MinuteSeries } from '../src/flow/botMarkets.js';
 
 const P1002 = 1, P23342 = 2, DOM = 3, OTHER_TAKER = 50;
 const T0 = 1_762_473_600_000; // a whole UTC hour
@@ -171,4 +171,26 @@ test('1h and 6h windows, minute series and the regime buckets', async () => {
   assert.equal(bucketsOf(ms, now, '6h').length, 72);
   assert.equal(bucketsOf(ms, now, '24h').length, 96);
   assert.equal(bucketsOf(ms, now, '7d').length, 168);
+});
+
+test('ALL holds a bucket only when the markets holding it carry half the volume; minutes past the newest print in the flow are not held', () => {
+  const now = Date.UTC(2026, 10, 10, 11, 0);
+  const m0 = Math.floor((now - 7 * 86_400_000) / 60_000);
+  const nm = Math.floor((now - 1) / 60_000) - m0 + 1;
+  const mk = (perMin: number): MinuteSeries => ({ m0, tot: new Float32Array(nm).fill(perMin), u: new Float32Array(nm), f: new Float32Array(nm), vol: new Float32Array(nm), held: new Uint8Array(nm).fill(1) });
+  const big = mk(1000), small = mk(10);
+  // The big market is not recorded over the last 20 minutes (the indexer behind): ALL must say so, not read 10 $/min.
+  for (let i = nm - 20; i < nm; i++) big.held[i] = 0;
+  const series = new Map([['BTC-USD', big], ['XPL-USD', small]]);
+  const h = regimeAll(series, ['BTC-USD', 'XPL-USD'], now, '1h').hours;
+  assert.equal(h.at(-1)!.volumeUsd, null);
+  assert.equal(h.at(-5)!.volumeUsd, null);
+  assert.equal(h.at(-6)!.volumeUsd, 5 * 1010);
+  // The newest print at 10:50:30: from 10:51 on nothing is held, 10:50 still is.
+  const s = mk(1);
+  cutAtProgress(s, Date.UTC(2026, 10, 10, 10, 50, 30));
+  const at = (hh: number, mm: number): number => Math.floor(Date.UTC(2026, 10, 10, hh, mm) / 60_000) - m0;
+  assert.equal(s.held[at(10, 50)], 1);
+  assert.equal(s.held[at(10, 51)], 0);
+  assert.equal(s.held[at(10, 59)], 0);
 });

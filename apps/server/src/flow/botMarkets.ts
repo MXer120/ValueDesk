@@ -152,6 +152,12 @@ const FLOW_MS = 10 * 60_000;
 const SPREAD_SAMPLES = 50_000;
 const YIELD_MS = 8;
 export const BOT_MARKETS_TTL = 5 * 60_000;
+/** The regime board's newest minutes are re-read this often from the flow (the full 7 d compute stays every 5 min). */
+export const REGIME_TAIL_EVERY = 60_000;
+/** How far back each tail pass rebuilds (from a chunk's start): late prints of the last quarter hour are picked up. */
+const TAIL_MS = 15 * 60_000;
+/** The ledger checks each market every 30 min: an unchecked newest span younger than this is held, older is a hole. */
+export const LEDGER_GRACE_MS = 45 * 60_000;
 const W7 = 7 * DAY_MS;
 const W24 = DAY_MS;
 
@@ -645,6 +651,11 @@ interface Computed {
   rows: Record<BotWindow, BotMarket[]>;
   /** The regime board's minutes per market (SoDEX name). */
   series: Map<string, MinuteSeries>;
+  /** Each series' flow market (for the tail passes) and the two takers' party ids. */
+  mids: Map<string, { id: number; symbol: string }>;
+  ids: { u: number | null; f: number | null };
+  /** How long the compute took (ms). */
+  took: number;
 }
 
 /** Calibration rows from the last compute (BOTS_MARKETS_WATCH only). */
@@ -671,6 +682,8 @@ async function compute(s: FlowStore, now: number): Promise<Computed> {
   const y = yielder();
   const rows: Computed['rows'] = { '1h': [], '6h': [], '24h': [], '7d': [] };
   const series: Computed['series'] = new Map();
+  const mids: Computed['mids'] = new Map();
+  let progress = 0;
   for (const m of markets) {
     const parts: PrintCols[] = [];
     // A day of blobs at a time: never all 7 d of compressed chunks at once.
@@ -684,7 +697,7 @@ async function compute(s: FlowStore, now: number): Promise<Computed> {
     parts.length = 0;
     const sym = findSymbol(list, m.symbol);
     const makerBps = feeBpsOf(sym) ?? common;
-    const holes = flowHoles(m.symbol, now - W7, now, now) ?? undefined;
+    const holes = flowHoles(m.symbol, now - W7, now, now, LEDGER_GRACE_MS) ?? undefined;
     const a = await analyzeMarket(cols, { now, makerBps, builderBps: BOT_BUILDER_BPS, id1002, id23342, watch, holes }, y);
     if (!a) continue;
     if (watch.length) calibration.push({ symbol: m.symbol, w7: a.w7.watched ?? [], w24: a.w24.watched ?? [], est7: a.w7.estCostBps, est24: a.w24.estCostBps });
@@ -693,17 +706,115 @@ async function compute(s: FlowStore, now: number): Promise<Computed> {
     const name = sym?.name ?? m.symbol;
     rows['7d'].push(rowOf(name, base, tick, a, '7d'));
     series.set(name, a.series);
+    mids.set(name, { id: m.id, symbol: m.symbol });
+    if (cols.n) progress = Math.max(progress, cols.t[cols.n - 1]!);
     if (a.w24.volumeUsdH > 0) rows['24h'].push(rowOf(name, base, tick, a, '24h'));
     if (a.w6.volumeUsdH > 0) rows['6h'].push(rowOf(name, base, tick, a, '6h'));
     if (a.w1.volumeUsdH > 0) rows['1h'].push(rowOf(name, base, tick, a, '1h'));
   }
   for (const k of BOT_WINDOWS) rows[k].sort((a, b) => a.estCostBps - b.estCostBps);
-  return { at: now, fee: { makerBps: r2(common), builderBps: BOT_BUILDER_BPS }, rows, series };
+  for (const ms of series.values()) cutAtProgress(ms, progress);
+  return { at: now, fee: { makerBps: r2(common), builderBps: BOT_BUILDER_BPS }, rows, series, mids, ids: { u: id1002, f: id23342 }, took: Date.now() - now };
 }
 
 let kept: Computed | null = null;
 let running: Promise<Computed> | null = null;
 let askedAt = 0;
+/** The kept series with the newest minutes re-read (tail passes), and when. */
+let live: { at: number; series: Map<string, MinuteSeries> } | null = null;
+let tailing: Promise<void> | null = null;
+
+/**
+ * Minutes that start after the newest print the flow holds in any market are not held: the indexer is behind, and what
+ * it has not written yet must not read as a quiet market (2026-11-10 09:55-10:15 UTC read as a false dip).
+ */
+export function cutAtProgress(ms: MinuteSeries, progress: number): void {
+  if (!(progress > 0)) return;
+  for (let i = Math.max(0, Math.floor(progress / 60_000) + 1 - ms.m0); i < ms.held.length; i++) ms.held[i] = 0;
+}
+
+/** The newest TAIL_MS of every kept series again from the flow, to now: the board moves every minute, not every compute. */
+async function tailPass(s: FlowStore, now: number): Promise<void> {
+  const c = kept;
+  if (!c) return;
+  const y = yielder();
+  const from = Math.floor((now - TAIL_MS) / CHUNK_MS) * CHUNK_MS;
+  const read0 = from - CHUNK_MS;                      // one chunk more: the first rebuilt minute's previous mid
+  const startM = Math.floor(from / 60_000);
+  const endM = Math.floor((now - 1) / 60_000);
+  const cols = new Map<string, PrintCols>();
+  let progress = 0;
+  for (const [name, mk] of c.mids) {
+    const p = concatCols(s.chunks(mk.id, read0, now + 1).map((x) => decodeChunk(x.data)));
+    if (p.n) progress = Math.max(progress, p.t[p.n - 1]!);
+    cols.set(name, p);
+    await y();
+  }
+  const out = new Map<string, MinuteSeries>();
+  for (const [name, old] of c.series) {
+    const p = cols.get(name);
+    const mk = c.mids.get(name);
+    if (!p || !mk) { out.set(name, old); continue; }
+    const nm = Math.max(old.tot.length, endM - old.m0 + 1);
+    const keep = Math.max(0, Math.min(old.tot.length, startM - old.m0));
+    const ms: MinuteSeries = { m0: old.m0, tot: new Float32Array(nm), u: new Float32Array(nm), f: new Float32Array(nm), vol: new Float32Array(nm), held: new Uint8Array(nm) };
+    ms.tot.set(old.tot.subarray(0, keep)); ms.u.set(old.u.subarray(0, keep)); ms.f.set(old.f.subarray(0, keep));
+    ms.vol.set(old.vol.subarray(0, keep)); ms.held.set(old.held.subarray(0, keep));
+    // The mid at each minute's end (as analyzeMarket: the pair mid when both sides printed within PAIR_MS), from the
+    // minute before the first rebuilt one.
+    const k0 = old.m0 + keep - 1;
+    const endMid = new Float64Array(Math.max(1, endM - k0 + 1)).fill(NaN);
+    let before = NaN;
+    let lastBuy = NaN, lastBuyT = -Infinity, lastSell = NaN, lastSellT = -Infinity;
+    let firstT = Infinity;
+    for (let i = 0; i < p.n; i++) {
+      const t = p.t[i]!, px = p.px[i]!, tk = p.taker[i]!;
+      if (tk === TAKER_BUYER) { lastBuy = px; lastBuyT = t; } else if (tk === TAKER_SELLER) { lastSell = px; lastSellT = t; }
+      const m = Math.abs(lastBuyT - lastSellT) < PAIR_MS ? (lastBuy + lastSell) / 2 : px;
+      const k = Math.floor(t / 60_000) - k0;
+      if (k < 0) before = m; else if (k < endMid.length) endMid[k] = m;
+      if (t >= now) continue;
+      const mi = Math.floor(t / 60_000) - old.m0;
+      if (mi < keep || mi >= nm) continue;
+      firstT = Math.min(firstT, t);
+      if (tk !== TAKER_BUYER && tk !== TAKER_SELLER) continue;
+      const ntl = px * p.sz[i]!;
+      ms.tot[mi] = ms.tot[mi]! + ntl;
+      const who = tk === TAKER_BUYER ? p.buyer[i]! : p.seller[i]!;
+      if (who === c.ids.u) ms.u[mi] = ms.u[mi]! + ntl;
+      else if (who === c.ids.f) ms.f[mi] = ms.f[mi]! + ntl;
+    }
+    let carry = before;
+    for (let k = 0; k < endMid.length; k++) { if (Number.isNaN(endMid[k]!)) endMid[k] = carry; else carry = endMid[k]!; }
+    // Held as the compute: from the market's first print, outside the ledger's holes (its unchecked newest span within
+    // the grace is held).
+    let firstHeld = -1;
+    for (let i = 0; i < keep; i++) if (old.held[i]) { firstHeld = i; break; }
+    if (firstHeld < 0) firstHeld = Number.isFinite(firstT) ? Math.floor(firstT / 60_000) - old.m0 : nm;
+    const holes = flowHoles(mk.symbol, (old.m0 + keep) * 60_000, now, now, LEDGER_GRACE_MS) ?? [];
+    for (let mi = keep; mi < nm; mi++) {
+      const k = mi + old.m0 - k0;
+      const prev = endMid[k - 1]!, cur = endMid[k]!;
+      ms.vol[mi] = prev > 0 && cur > 0 ? (Math.abs(cur - prev) / prev) * 1e4 : 0;
+      const a = (old.m0 + mi) * 60_000;
+      ms.held[mi] = mi >= firstHeld && overlapMs(holes, a, Math.min(a + 60_000, now)) === 0 ? 1 : 0;
+    }
+    out.set(name, ms);
+  }
+  for (const ms of out.values()) cutAtProgress(ms, progress);
+  if (kept === c) live = { at: now, series: out };
+}
+
+/** Tests and checks: one tail pass now (errors thrown). */
+export function regimeTailNow(): Promise<void> {
+  const s = flowReader();
+  return s ? tail(s) : Promise.resolve();
+}
+
+function tail(s: FlowStore): Promise<void> {
+  if (!tailing) tailing = tailPass(s, Date.now()).finally(() => { tailing = null; });
+  return tailing;
+}
 
 function refresh(s: FlowStore): Promise<Computed> {
   if (!running) {
@@ -742,7 +853,10 @@ export async function botMarkets(window: BotWindow): Promise<BotMarketsResponse 
 }
 
 export interface BotRegimeResponse {
+  /** The newest minute read (tail pass); when the full compute ran and how long it took. */
   at: number;
+  computedAt: number;
+  computeMs: number;
   /** 'ALL' or a SoDEX market. */
   symbol: string;
   window: BotWindow;
@@ -802,21 +916,34 @@ export async function botRegime(symbol: string, win: BotWindow = '7d'): Promise<
   let c = kept;
   if (!c) c = await refresh(s);
   else if (Date.now() - c.at > BOT_MARKETS_TTL) void refresh(s).catch(() => { /* the kept answer stands */ });
-  const markets = [...c.rows['7d']].sort((a, b) => b.volumeUsdH - a.volumeUsdH).map((m) => m.symbol).filter((m) => c!.series.has(m));
-  const base = { at: c.at, window: win, stepMs: REGIME_STEP_MIN[win] * 60_000, markets };
+  if (!live || live.at < c.at || Date.now() - live.at > REGIME_TAIL_EVERY) void tail(s).catch(() => { /* the kept answer stands */ });
+  const fresh = live && live.at >= c.at ? live : { at: c.at, series: c.series };
+  const markets = [...c.rows['7d']].sort((a, b) => b.volumeUsdH - a.volumeUsdH).map((m) => m.symbol).filter((m) => fresh.series.has(m));
+  const base = { at: fresh.at, computedAt: c.at, computeMs: c.took, window: win, stepMs: REGIME_STEP_MIN[win] * 60_000, markets };
   const want = symbol.toUpperCase();
   if (want !== 'ALL') {
     const name = markets.find((m) => m.toUpperCase() === want);
-    const one = name ? c.series.get(name) : undefined;
-    return one ? { ...base, symbol: name!, hours: bucketsOf(one, c.at, win), typicalVolBps: typicalOf(one) } : { ...base, symbol: want, hours: [], typicalVolBps: null };
+    const one = name ? fresh.series.get(name) : undefined;
+    return one ? { ...base, symbol: name!, hours: bucketsOf(one, fresh.at, win), typicalVolBps: typicalOf(one) } : { ...base, symbol: want, hours: [], typicalVolBps: null };
   }
-  return { ...base, symbol: 'ALL', ...regimeAll(c.series, markets, c.at, win) };
+  return { ...base, symbol: 'ALL', ...regimeAll(fresh.series, markets, fresh.at, win) };
 }
 
 /** Every market together: volumes summed, volatility weighted by each market's volume in the bucket (and the typical hour's by its window volume). */
 export function regimeAll(series: ReadonlyMap<string, MinuteSeries>, markets: readonly string[], now: number, win: BotWindow): { hours: RegimeHour[]; typicalVolBps: number | null } {
-  // A bucket is held when any market holds it (a market listed or recorded later does not blank the others).
-  const by = new Map<number, { v: number; held: boolean; a: number; b: number; w: number; wv: number }>();
+  // A bucket is held when the markets holding it carry at least half of all markets' 7 d volume: a few markets recorded
+  // while the big ones are not must not read as a dead market (2026-11-10); one listed later does not blank the others.
+  const weight = new Map<string, number>();
+  let wAll = 0;
+  for (const m of markets) {
+    const ms = series.get(m);
+    if (!ms) continue;
+    let v = 0;
+    for (let i = 0; i < ms.tot.length; i++) v += ms.tot[i]!;
+    weight.set(m, v);
+    wAll += v;
+  }
+  const by = new Map<number, { v: number; hw: number; a: number; b: number; w: number; wv: number }>();
   const typ: Array<[number, number]> = [];
   for (const m of markets) {
     const ms = series.get(m);
@@ -824,9 +951,9 @@ export function regimeAll(series: ReadonlyMap<string, MinuteSeries>, markets: re
     const tv = typicalOf(ms);
     let wsum = 0;
     for (const h of bucketsOf(ms, now, win)) {
-      const x = by.get(h.t) ?? { v: 0, held: false, a: 0, b: 0, w: 0, wv: 0 };
+      const x = by.get(h.t) ?? { v: 0, hw: 0, a: 0, b: 0, w: 0, wv: 0 };
       if (h.volumeUsd !== null) {
-        x.held = true; x.v += h.volumeUsd;
+        x.hw += weight.get(m) ?? 0; x.v += h.volumeUsd;
         x.a += h.t1002Usd; x.b += h.t23342Usd;
         x.w += h.volumeUsd; x.wv += h.volumeUsd * h.volBps; wsum += h.volumeUsd;
       }
@@ -834,7 +961,7 @@ export function regimeAll(series: ReadonlyMap<string, MinuteSeries>, markets: re
     }
     if (tv !== null && wsum > 0) typ.push([tv, wsum]);
   }
-  const hours = [...by].sort((a, b) => a[0] - b[0]).map(([t, x]) => ({ t, volumeUsd: x.held ? Math.round(x.v) : null, t1002Usd: Math.round(x.a), t23342Usd: Math.round(x.b), volBps: r2(x.w > 0 ? x.wv / x.w : 0) }));
+  const hours = [...by].sort((a, b) => a[0] - b[0]).map(([t, x]) => ({ t, volumeUsd: x.hw > 0 && x.hw >= wAll / 2 ? Math.round(x.v) : null, t1002Usd: Math.round(x.a), t23342Usd: Math.round(x.b), volBps: r2(x.w > 0 ? x.wv / x.w : 0) }));
   const tw = typ.reduce((a, [, w]) => a + w, 0);
   return { hours, typicalVolBps: tw > 0 ? r2(typ.reduce((a, [v, w]) => a + v * w, 0) / tw) : null };
 }
@@ -844,8 +971,10 @@ export function keepBotMarketsWarm(): () => void {
   const timer = setInterval(() => {
     if (Date.now() - askedAt > 30 * 60_000) { stopSampling(); return; }
     const s = flowReader();
-    if (s) void refresh(s).catch(() => { /* next round */ });
-  }, BOT_MARKETS_TTL);
+    if (!s) return;
+    if (!kept || Date.now() - kept.at >= BOT_MARKETS_TTL - REGIME_TAIL_EVERY / 2) void refresh(s).catch(() => { /* next round */ });
+    void tail(s).catch(() => { /* next round */ });
+  }, REGIME_TAIL_EVERY);
   timer.unref?.();
   return () => clearInterval(timer);
 }
@@ -853,5 +982,6 @@ export function keepBotMarketsWarm(): () => void {
 /** Tests: forget the kept answer. */
 export function clearBotMarkets(): void {
   kept = null;
+  live = null;
   askedAt = 0;
 }

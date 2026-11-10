@@ -755,7 +755,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const win = q.window === '1h' || q.window === '6h' || q.window === '24h' ? q.window : '7d';
       const body = await botRegime(symbol, win);
       if (!body) return fail(reply, new NotAvailable('The trade flow is not recorded yet'));
-      reply.header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+      reply.header('Cache-Control', 'public, max-age=30, stale-while-revalidate=30');
       return { ok: true, ...body };
     } catch (e) {
       return fail(reply, e);

@@ -278,7 +278,11 @@ function ledgerReader(): LedgerStore | null {
  * reached. Sorted, joined, not capped (coverageOf caps its list for the page). null when there is no ledger to ask:
  * the caller then has nothing to leave out. Slots still forming (SETTLE_MS) are not judged.
  */
-export function flowHoles(symbol: string, from: number, to: number, now = Date.now()): Array<[number, number]> | null {
+/**
+ * `uncheckedGraceMs`: the span after the ledger's last check is not called a hole while that check is younger than this
+ * (the ledger visits each market every 30 min, so the newest half hour is always unchecked; a live board needs it).
+ */
+export function flowHoles(symbol: string, from: number, to: number, now = Date.now(), uncheckedGraceMs = 0): Array<[number, number]> | null {
   const l = ledgerReader();
   if (!l) return null;
   const a = slotDown(from);
@@ -288,7 +292,7 @@ export function flowHoles(symbol: string, from: number, to: number, now = Date.n
   const m = w.market;
   if (!m) return [[a, b]];
   const spans: Array<[number, number]> = [];
-  if (m.checkedTo < b) spans.push([Math.max(a, m.checkedTo), b]);
+  if (m.checkedTo < b && !(uncheckedGraceMs > 0 && m.checkedTo >= now - uncheckedGraceMs)) spans.push([Math.max(a, m.checkedTo), b]);
   if (!m.backDone && m.checkedFrom > a) spans.push([a, Math.min(b, m.checkedFrom)]);
   for (const s of w.off) spans.push([s.t, s.t + SLOT_MS]);
   return joinSpans(spans);
