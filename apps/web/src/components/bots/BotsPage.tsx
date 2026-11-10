@@ -387,11 +387,11 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       const lo = v.bot?.leftover;
       if (!lo) return;
       const ok = await confirm({
-        title: 'Close the rest?',
-        body: `${fmtUsd(lo.usd, 2)} ${lo.side} is left on SoDEX, under its minimum order of ${fmtUsd(lo.minUsd, 2)}. The bot first adds about ${fmtUsd(lo.minUsd, 2)} on the same side, then closes all of it at once: two small taker trades, a few cents in fees.`,
-        confirmLabel: 'Close the rest',
+        title: 'Close the leftover?',
+        body: `${fmtUsd(lo.usd, 2)} ${lo.side} is under SoDEX's ${fmtUsd(lo.minUsd, 2)} minimum order. We add ${fmtUsd(lo.minUsd, 2)}, then close all of it. Fees: a few cents.`,
+        confirmLabel: 'Close it',
       });
-      if (ok) await run(v.algo.id, () => act('close-rest', v.algo.id), 'Closing the rest: a top-up, then all of it.');
+      if (ok) await run(v.algo.id, () => act('close-rest', v.algo.id), 'Closing the leftover.');
     },
     remove: async (v) => {
       const ok = await confirm({ title: `Delete ${botName(v)}?`, body: 'It leaves your list. Its record and log stay kept on the executor.', confirmLabel: 'Delete', danger: true });
@@ -443,7 +443,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     const fresh = bots.filter((v) => FINAL_STATUSES.has(v.algo.status) && v.bot?.leftover && !warned.includes(v.algo.id));
     for (const v of fresh) {
       const lo = v.bot!.leftover!;
-      notify('warn', `${botName(v)} stopped with ${fmtUsd(lo.usd, 2)} ${lo.side} still open on SoDEX, under its ${fmtUsd(lo.minUsd, 2)} minimum order: it cannot be closed alone. Close the rest adds a minimum order, then closes all of it.`, { label: 'Close the rest', run: () => void ctx.closeRest(v) });
+      notify('warn', `${botName(v)} left ${fmtUsd(lo.usd, 2)} ${lo.side} open, too small to close alone.`, { label: 'Close it', run: () => void ctx.closeRest(v) });
     }
     if (fresh.length) {
       try { localStorage.setItem(LEFTOVER_KEY, JSON.stringify([...warned, ...fresh.map((v) => v.algo.id)].slice(-200))); } catch { /* private mode */ }

@@ -55,8 +55,8 @@ function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         ? <Button variant="secondary" icon="play" disabled={busy} onClick={() => void ctx.resume(v)}>Resume</Button>
         : <Button variant="secondary" icon="pause" disabled={busy} onClick={() => void ctx.pause(v)}>Pause</Button>)}
       {!ended && <StopMenu v={v} ctx={ctx} closing={st === 'closing'} />}
-      {ended && v.bot?.leftover && <Button variant="primary" icon="stop" disabled={busy} onClick={() => void ctx.closeRest(v)}>Close the rest</Button>}
-      {ended && <Button variant="danger" icon="trash" disabled={busy || !!v.bot?.leftover} title={v.bot?.leftover ? 'Close the rest first' : undefined} onClick={() => void ctx.remove(v)}>Delete</Button>}
+      {ended && v.bot?.leftover && <Button variant="primary" icon="stop" disabled={busy} onClick={() => void ctx.closeRest(v)}>Close leftover</Button>}
+      {ended && <Button variant="danger" icon="trash" disabled={busy || !!v.bot?.leftover} title={v.bot?.leftover ? 'Close the leftover first' : undefined} onClick={() => void ctx.remove(v)}>Delete</Button>}
       {ended && <Button variant="primary" icon="play" onClick={() => ctx.runAgain(v)}>Run again</Button>}
       {v.algo.spec.paper && ctx.liveAllowed && <Button variant={ended ? 'secondary' : 'primary'} icon="bolt" onClick={() => ctx.runAgain(v, true)} title="New bot opens with these settings, set to real orders">Run with real orders</Button>}
     </>
