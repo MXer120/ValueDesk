@@ -62,15 +62,14 @@ test('the copy fee ladder by 14-day volume', () => {
   assert.equal(feePercent(10), '0.01%');
 });
 
-test('bot fee ladder (owner 2026-11-09): 0.3 bp under $100K, 0.2 bp from $100K, 0.1 bp from $500K (his table rounded down to whole tenths); VIP the lowest', () => {
-  assert.equal(botFeeFor(null), 3);
-  assert.equal(botFeeFor(99_999), 3);
-  assert.equal(botFeeFor(100_000), 2);
-  assert.equal(botFeeFor(250_000), 2, '0.20 bp');
-  assert.equal(botFeeFor(499_999), 2);
-  assert.equal(botFeeFor(500_000), 1, '0.15 bp rounded down');
-  assert.equal(botFeeFor(1_000_000), 1, '0.12 bp rounded down');
-  assert.equal(botFeeFor(10_000_000), 1);
+test('bot fee ladder (owner 2026-11-10): 0.4 bp under $100K, 0.3 bp from $100K, 0.2 bp from $1M; 0.1 bp is VIP only', () => {
+  assert.equal(botFeeFor(null), 4);
+  assert.equal(botFeeFor(99_999), 4);
+  assert.equal(botFeeFor(100_000), 3);
+  assert.equal(botFeeFor(500_000), 3);
+  assert.equal(botFeeFor(999_999), 3);
+  assert.equal(botFeeFor(1_000_000), 2);
+  assert.equal(botFeeFor(10_000_000), 2, 'volume alone never reaches the VIP fee');
   assert.equal(botFeeFor(0, { vip: true }), 1);
   assert.ok(BOT_FEE_LADDER.every((x) => Number.isInteger(x.fee) && x.fee <= 5), 'SoDEX takes whole tenths; the terms cap 0.5 bp');
 });

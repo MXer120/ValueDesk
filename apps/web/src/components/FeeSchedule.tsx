@@ -375,7 +375,7 @@ function ValueDesk({ address }: { address: string | null }) {
               ))}
               <tr>
                 <td>VIP</td>
-                <td>≥ $1,000,000 own volume, or a VIP program</td>
+                <td>≥ $5,000,000 own volume, or a VIP program</td>
                 <td className="num">{fmtRate(builderRateToFraction(BOT_FEE_VIP))}</td>
               </tr>
             </tbody>

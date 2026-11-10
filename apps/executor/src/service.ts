@@ -1025,7 +1025,7 @@ export class ExecutorService {
     const res = await this.deps.fetch(u.toString(), { headers: this.peerHeaders({ Accept: 'application/json' }), signal: AbortSignal.timeout(5_000) });
     const b = JSON.parse(await res.text()) as { ok?: boolean; eligible?: boolean; volumeUsd?: number; minUsd?: number };
     if (!res.ok || !b.ok) throw new Error('VIP status could not be read. Try again in a moment.');
-    return b.eligible ? { ok: true, why: 'eligible' } : { ok: false, why: `Not VIP yet: ${Math.round(b.volumeUsd ?? 0).toLocaleString('en-US')} of $${Math.round(b.minUsd ?? 1_000_000).toLocaleString('en-US')} in 14 days.` };
+    return b.eligible ? { ok: true, why: 'eligible' } : { ok: false, why: `Not VIP yet: ${Math.round(b.volumeUsd ?? 0).toLocaleString('en-US')} of $${Math.round(b.minUsd ?? 5_000_000).toLocaleString('en-US')} in 14 days.` };
   }
 
   /**

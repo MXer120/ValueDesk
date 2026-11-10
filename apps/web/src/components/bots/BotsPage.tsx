@@ -110,8 +110,8 @@ export function BotsHead({ title, sub, actions, lead }: { view?: BotsView; title
 export type StopHow = 'close' | 'instant' | 'keep';
 const LEFTOVER_KEY = 'vs.bots.leftoverSaid';
 
-/** The ladder's first step (0.3 bp since 2026-11-09), the fee a wallet pays before its volume lowers it. */
-export const BOT_FEE_FIRST_STEP_TENTHS = 5;
+/** The ladder's first step (0.4 bp since 2026-11-10), the fee a wallet pays before its volume lowers it. */
+export const BOT_FEE_FIRST_STEP_TENTHS = 4;
 
 /**
  * Where New bot reads a bot to start again (Run again, Run with real orders): its spec, kept for this tab only.

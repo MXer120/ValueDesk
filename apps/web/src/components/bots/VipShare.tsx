@@ -44,7 +44,7 @@ function lines(what: ShareWhat): { head: string; gold: string; sub: string; pill
   }
   return what.promo
     ? { head: 'I am VIP on ValueDesk.', gold: 'Upgraded for 30 days.', sub: 'The lowest fees on futures, spot, copy trading and bots, and VIP servers.', pill: '30 days', pass: 'Early access pass', rows: ['Lowest fees everywhere', 'VIP servers', 'Early access'] }
-    : { head: 'I am VIP on ValueDesk.', gold: 'Bot fees slashed.', sub: '$1M traded in 14 days: the lowest bot fee and the VIP servers.', pill: '$1M · 14 days', pass: 'Volume milestone', rows: ['Bot fees down to 0.1 bp', 'VIP servers', 'Orders 1.6× faster'] };
+    : { head: 'I am VIP on ValueDesk.', gold: 'Bot fees slashed.', sub: '$5M traded in 14 days: the lowest bot fee and the VIP servers.', pill: '$5M · 14 days', pass: 'Volume milestone', rows: ['Bot fees down to 0.1 bp', 'VIP servers', 'Orders 1.6× faster'] };
 }
 
 /** The card at time t (0..1 loops: the glare's sweep and the gold lines' run), drawn at W x H scaled by `k`. */

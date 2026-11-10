@@ -67,7 +67,7 @@ function fakeFetch(w: World): FetchLike {
     }
     if (path === '/api/vs/bots/vip') {
       if (!w.volume) return json(503, { ok: false });
-      return json(200, { ok: true, eligible: w.volume.vip === true, volumeUsd: w.volume.usd, minUsd: 1_000_000 });
+      return json(200, { ok: true, eligible: w.volume.vip === true, volumeUsd: w.volume.usd, minUsd: 5_000_000 });
     }
     if (path.startsWith('/api/vs/builder/beta')) {
       if (w.beta === null) return json(503, { ok: false });
@@ -308,21 +308,21 @@ test('B: /me carries the bot fee - the ladder by volume, or a program\'s (the be
   const h = make(env, { volume: { usd: 0 } });
   const fresh = (s: ExecutorService) => (s as unknown as { freshVolume(o: string): Promise<number | null> }).freshVolume(w.address);
   await fresh(h.svc);
-  assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 3, vip: false, until: null });
+  assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 4, vip: false, until: null });
   const until = Date.now() + 10 * 86_400_000;
   h.w.volume = { usd: 300_000, fees: { bots: { fee: 1, until } } };
   (h.svc as unknown as { volumes: Map<string, unknown> }).volumes.clear();
   await fresh(h.svc);
   assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 1, vip: true, until });
   // VIP by volume (no end).
-  h.w.volume = { usd: 1_500_000, vip: true, fees: { bots: { fee: 1, until: null } } };
+  h.w.volume = { usd: 5_500_000, vip: true, fees: { bots: { fee: 1, until: null } } };
   (h.svc as unknown as { volumes: Map<string, unknown> }).volumes.clear();
   await fresh(h.svc);
   assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 1, vip: true, until: null });
   // C: perks not read again for 6 h end (VIP included): the ladder again.
   const perks = (h.svc as unknown as { perks: Map<string, { at: number }> }).perks;
   perks.get(w.address)!.at = Date.now() - 7 * 3_600_000;
-  assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 1, vip: false, until: null }, 'the ladder at $1.5M');
+  assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 2, vip: false, until: null }, 'the ladder at $5.5M: its top step, not the VIP fee');
   await h.cleanup();
 });
 
@@ -641,7 +641,7 @@ test('VIP both ways: up, then back when VIP ends (bots, books and the key go hom
   const back = p.vip.svc.vipJob(w.address)!;
   assert.equal(back.state, 'done', back.error ?? '');
   assert.equal(back.outcome, 'moved');
-  assert.match(back.reason ?? '', /Not VIP yet: 300,000 of \$1,000,000/);
+  assert.match(back.reason ?? '', /Not VIP yet: 300,000 of \$5,000,000/);
   assert.equal(p.vip.svc.algos.get(b.algo.id)!.status, 'cancelled', 'ended on VIP (handed over)');
   assert.equal(p.std.svc.algos.get(b.algo.id)!.status, 'scheduled', 'home again and resumed on standard');
   assert.equal(p.std.svc.me(w.address, ctx).movedTo, null);

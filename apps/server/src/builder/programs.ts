@@ -23,10 +23,10 @@ export const VIP_PROGRAM_FEE = -1;
 export const BOTS_VIP_FEE = 1;
 /** The bot fee ladder (packages/copy-engine policy.ts BOT_FEE_LADDER), tenths of a bp by 14-day volume; kept equal by test/builderTiers.test.ts. */
 export const BOT_LADDER: ReadonlyArray<{ fromUsd: number; fee: number }> = [
-  // Owner 2026-11-09: 0.3 bp, 0.2 bp from $100k, 0.1 bp from $500k.
-  { fromUsd: 0, fee: 3 },
-  { fromUsd: 100_000, fee: 2 },
-  { fromUsd: 500_000, fee: 1 },
+  // Owner 2026-11-10: 0.4 bp, 0.3 bp from $100k, 0.2 bp from $1M; 0.1 bp is VIP's (from $5M, service.ts VIP_MIN_USD).
+  { fromUsd: 0, fee: 4 },
+  { fromUsd: 100_000, fee: 3 },
+  { fromUsd: 1_000_000, fee: 2 },
 ];
 export function botLadderFee(volumeUsd: number): number {
   let fee = BOT_LADDER[0]!.fee;
