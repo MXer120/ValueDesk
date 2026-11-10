@@ -44,6 +44,7 @@ import { coinOf } from '../valuedesk/cohorts/model.js';
 import { symbols as sodexSymbols, type Symbol as SodexSymbol } from '../sodex/symbols.js';
 import { findSymbol } from '../sodex/symbolRef.js';
 import { shareUnder, startSampling, stopSampling, typicalBps } from './bookSpread.js';
+import { TAPE_MINUTES, boardTape, startBoardTape, stopBoardTape, type BoardTape } from './boardTape.js';
 
 export type BotWindow = '1h' | '6h' | '24h' | '7d';
 export const BOT_WINDOWS: readonly BotWindow[] = ['1h', '6h', '24h', '7d'];
@@ -816,6 +817,31 @@ export function extendSeries(old: MinuteSeries, p: PrintCols, o: { newM0: number
   return ms;
 }
 
+/**
+ * Minutes of the last TAPE_MINUTES that the flow does not hold (the indexer behind, stalled or restarting) taken from
+ * the board's own tape (boardTape.ts), where it held them. How many it filled.
+ */
+export function fillFromTape(ms: MinuteSeries, name: string, tape: Pick<BoardTape, 'minute'>, now: number): number {
+  const endM = Math.floor((now - 1) / 60_000);
+  const from = Math.max(ms.m0, endM - TAPE_MINUTES + 1);
+  let n = 0;
+  let carry = NaN;
+  for (let m = from; m <= endM; m++) {
+    const i = m - ms.m0;
+    if (i < 0 || i >= ms.held.length) continue;
+    const x = tape.minute(name, m);
+    const mid = x && x.mid > 0 ? x.mid : carry;
+    if (!ms.held[i] && x) {
+      ms.tot[i] = x.tot; ms.u[i] = x.u; ms.f[i] = x.f;
+      ms.vol[i] = carry > 0 && mid > 0 ? (Math.abs(mid - carry) / carry) * 1e4 : 0;
+      ms.held[i] = 1;
+      n++;
+    }
+    if (mid > 0) carry = mid;
+  }
+  return n;
+}
+
 /** The board's newest minutes (and the last SETTLE_MS once an hour) read again from the flow, to now. */
 async function tailPass(s: FlowStore, now: number): Promise<void> {
   const r = reg;
@@ -839,6 +865,9 @@ async function tailPass(s: FlowStore, now: number): Promise<void> {
     await y();
   }
   for (const ms of out.values()) cutAtProgress(ms, progress);
+  // What the flow does not hold now, from the board's own tape (it does not depend on the indexer).
+  const tp = boardTape();
+  if (tp) for (const [name, ms] of out) fillFromTape(ms, name, tp, now);
   if (reg === r) reg = { ...r, at: now, settledAt: settle ? now : r.settledAt, series: out };
 }
 
@@ -1043,6 +1072,8 @@ export function regimeAll(series: ReadonlyMap<string, MinuteSeries>, markets: re
  * compute gives the loop back every YIELD_MS, ~25 s of it every 10 min when idle.
  */
 export function keepBotMarketsWarm(): () => void {
+  // The board's own trade tape: always on, so its newest minutes do not depend on the indexer (owner 2026-11-10).
+  if (process.env.VALUESCAN_BOARD_TAPE !== '0') startBoardTape();
   const timer = setInterval(() => {
     const now = Date.now();
     if (now - askedAt > 30 * 60_000) stopSampling();
@@ -1053,7 +1084,7 @@ export function keepBotMarketsWarm(): () => void {
     if (reg) void tail(s).catch(() => { /* next round */ });
   }, REGIME_TAIL_EVERY);
   timer.unref?.();
-  return () => clearInterval(timer);
+  return () => { clearInterval(timer); stopBoardTape(); };
 }
 
 /** Tests: forget the kept answer. */
