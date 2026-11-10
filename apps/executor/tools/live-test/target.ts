@@ -373,6 +373,26 @@ export class HostedTarget extends ExecutorClient implements ExecutorTarget {
     return { job, ms: Date.now() - t0 };
   }
 
+  /**
+   * The kill switch on the VIP executor as well (--stop). 2026-11-09 19:47 UTC: a relaunched run's start-up cleanup
+   * flattened the wallet while the previous run's bots, moved to VIP, kept quoting; every close of the cleanup
+   * ("lt-close-...") read on the bots as "closed outside it" for 3 minutes. Null: the VIP executor did not answer.
+   */
+  async cancelAllOnVip(vipBase = HOSTED_VIP_BASE): Promise<AlgoView[] | null> {
+    if (this.base === vipBase) return [];
+    const home = this.base;
+    this.base = vipBase;
+    this.rebase(vipBase);
+    try {
+      return await this.algoAct('cancel-all');
+    } catch {
+      return null;
+    } finally {
+      this.base = home;
+      this.rebase(home);
+    }
+  }
+
   get where(): string {
     return `ValueDesk's executor (${this.base})`;
   }

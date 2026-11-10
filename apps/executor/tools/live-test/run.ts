@@ -361,7 +361,14 @@ async function main(): Promise<number> {
   if (args.stop) {
     await target.start();
     const left = await target.algoAct('cancel-all');
-    log(`--stop: the kill switch answered, ${left.filter((x) => x.status === 'running' || x.status === 'waiting').length} still running`);
+    log(`--stop: the kill switch answered, ${left.filter((x) => x.algo.status === 'running' || x.algo.status === 'waiting').length} still running`);
+    // Bots a previous run moved to the VIP executor quote on there: stopped too, or the cleanup closes their positions under them.
+    const onVip = (target as Partial<Pick<HostedTarget, 'cancelAllOnVip'>>).cancelAllOnVip;
+    if (onVip) {
+      const vip = await onVip.call(target);
+      if (vip === null) throw new Error('--stop: the VIP executor did not answer its kill switch, so bots a previous run moved there may still quote: the cleanup would close their positions under them. Run again once it answers.');
+      log(`--stop: the VIP kill switch answered, ${vip.filter((x) => x.algo.status === 'running' || x.algo.status === 'waiting').length} still running`);
+    }
     await new Promise((r) => setTimeout(r, 3_000));
   }
   const observed = await target.observedCountry();
