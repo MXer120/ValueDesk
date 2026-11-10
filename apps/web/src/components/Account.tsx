@@ -547,7 +547,8 @@ function PositionsInner({
   const markOf = useMarkPrices(open.map(symbolOf));
   const ordersKey = address && engine === 'perps' ? `orders:perps:${address}` : null;
   const ordersFeed = useAccountResource(ordersKey, () => api.openOrders('perps', address!), 10_000);
-  const { sort, toggle } = useTableSort();
+  // Market A-Z until a column head is pressed: the venue returns positions in no fixed order.
+  const { sort, toggle } = useTableSort({ key: 'market', dir: 'asc' });
   const [posEdit, setPosEdit] = useState<PosEdit | null>(null);
   const [showIds] = useShowIds();
 
@@ -792,6 +793,10 @@ function PositionsInner({
     }
     if (key === 'upnl') return upnl;
     if (key === 'margin') return im > 0 ? im : null;
+    if (key === 'tpsl') {
+      const exits = exitsFor(openOrders, symbol, pick(p, 'id'));
+      return (exits.tp ? 1 : 0) + (exits.sl ? 1 : 0);
+    }
     return null;
   });
 
@@ -816,7 +821,7 @@ function PositionsInner({
               <SortTh k="liq" label={<>Liq. <span className="acct-tag">est.</span></>} numeric sort={sort} onSort={toggle} className="num" title="Isolated: from the position's own margin against the venue's published margin tiers, which is SoDEX's own liquidation price. Cross: an estimate that ignores collateral held elsewhere in the account, which can only move real liquidation further away." />
               <SortTh k="upnl" label="PnL" numeric sort={sort} onSort={toggle} className="num" title="Derived here: (mark − entry) × size, signed by direction; the % is against the position's margin. The venue does not publish an unrealised PnL for a position." />
               <SortTh k="margin" label="Margin" numeric sort={sort} onSort={toggle} className="num" />
-              <th>TP/SL</th>
+              <SortTh k="tpsl" label="TP/SL" numeric sort={sort} onSort={toggle} title="Positions with a take-profit and stop-loss first." />
               {showIds && <IdsTh />}
               {!readOnly && <th className="acct-actions" aria-label="Close" />}
             </tr>
@@ -858,7 +863,7 @@ function PositionsInner({
               return (
                 <tr key={String(pick(p, 'id') ?? i)}>
                   <td>
-                    <MarketCell symbol={symbol} sym={sym} engine="perps" icon={22}>
+                    <MarketCell symbol={symbol} sym={sym} engine="perps" icon={18}>
                       {lev > 0 && (
                         <span
                           className={`acct-levbox${dir ? ` acct-levbox--${dir}` : ''}`}

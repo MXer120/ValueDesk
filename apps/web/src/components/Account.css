@@ -606,24 +606,23 @@
   height: 32px;
   vertical-align: middle;
 }
-/* Open positions carry a logo, a leverage chip and a margin-mode chip.
-   Taller than the 32px history rows, at the page's body size. */
-.acct-table.acct-t.acct-pos th { height: 40px; font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos td { height: 48px; font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos .acct-mkt__n { font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos .acct-act { height: 28px; line-height: 26px; font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos .acct-edit { width: 22px; height: 22px; }
+/* Open positions carry a logo, a leverage chip and a margin-mode chip:
+   36px rows, a step taller than the 32px history rows, at the same size. */
+.acct-table.acct-t.acct-pos th { height: 32px; }
+.acct-table.acct-t.acct-pos td { height: 36px; }
+.acct-table.acct-t.acct-pos .acct-act { height: 24px; line-height: 22px; }
+.acct-table.acct-t.acct-pos .acct-edit { width: 18px; height: 18px; }
 .acct-table.acct-t.acct-pos td.acct-actions { text-align: right; }
 .acct-table.acct-t.acct-pos .acct-x {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   min-height: 0;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   background: color-mix(in srgb, var(--neg) 16%, transparent);
   color: var(--neg);
   cursor: pointer;
@@ -636,10 +635,10 @@
 .acct-table.acct-t.acct-pos .acct-mode {
   display: inline-flex;
   align-items: center;
-  height: 22px;
-  padding: 0 7px;
-  border-radius: 6px;
-  font-size: var(--fs-base);
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
