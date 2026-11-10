@@ -443,7 +443,12 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
               )}
               {err && <p className="bots-err" role="alert">{err}</p>}
               {(!compact || canMove) && <div className="bots-vip__act">
-                <Button variant="primary" size="md" icon="bolt" disabled={!canMove || !ctx.ready} onClick={() => void move()}>Move to VIP</Button>
+                {canMove && !ctx.ready
+                  // Unlocked, but the move is signed on the executor: say so and offer the sign-in right here
+                  // (2026-11-10: a beta VIP saw "Unlocked" beside a grey button and no reason).
+                  ? <Button variant="primary" size="md" icon="bolt" onClick={() => ctx.setup(true)}>Set up to move</Button>
+                  : <Button variant="primary" size="md" icon="bolt" disabled={!canMove || !ctx.ready} onClick={() => void move()}>Move to VIP</Button>}
+                {canMove && !ctx.ready && <small className="bots-fine">VIP is unlocked. Sign in to the bot servers and accept the terms first, then move.</small>}
                 {!info?.vip?.canMove && <small className="bots-fine">The VIP servers open soon.</small>}
                 {info?.vip?.canMove && !canMove && <small className="bots-fine">Unlocks at $5M in 14 days.</small>}
               </div>}
