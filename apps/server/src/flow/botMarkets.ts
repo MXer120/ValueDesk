@@ -729,9 +729,18 @@ let kept: Computed | null = null;
 let running: Promise<Computed> | null = null;
 let askedAt = 0;
 let lastFailLog = 0;
-/** The kept series with the newest minutes re-read (tail passes), and when. */
-let live: { at: number; series: Map<string, MinuteSeries> } | null = null;
+/**
+ * The regime board's minutes, built ONCE from the first full compute and from then on only extended: history does not
+ * change, so it is never rebuilt (owner 2026-11-10). Every minute the newest TAIL_MS (and anything since the last pass)
+ * is read again; every SETTLE_EVERY the last SETTLE_MS, where the ledger's catch-up still adds late prints and marks
+ * slots whole or short. Minutes older than 7 d are dropped. A market the compute finds later joins from its series.
+ */
+interface Regime { at: number; settledAt: number; series: Map<string, MinuteSeries>; mids: Map<string, { id: number; symbol: string }>; ids: { u: number | null; f: number | null } }
+let reg: Regime | null = null;
 let tailing: Promise<void> | null = null;
+/** The ledger's catch-up reaches 7.6 h back on the quietest market (ledger.ts RECENT_MS is 12 h). */
+const SETTLE_MS = 12 * HOUR_MS;
+const SETTLE_EVERY = HOUR_MS;
 
 /**
  * Minutes that start after the newest print the flow holds in any market are not held: the indexer is behind, and what
@@ -742,76 +751,95 @@ export function cutAtProgress(ms: MinuteSeries, progress: number): void {
   for (let i = Math.max(0, Math.floor(progress / 60_000) + 1 - ms.m0); i < ms.held.length; i++) ms.held[i] = 0;
 }
 
-/** The newest TAIL_MS of every kept series again from the flow, to now: the board moves every minute, not every compute. */
-async function tailPass(s: FlowStore, now: number): Promise<void> {
-  const c = kept;
-  if (!c) return;
-  const y = yielder();
-  const from = Math.floor((now - TAIL_MS) / CHUNK_MS) * CHUNK_MS;
-  const read0 = from - CHUNK_MS;                      // one chunk more: the first rebuilt minute's previous mid
-  const startM = Math.floor(from / 60_000);
-  const endM = Math.floor((now - 1) / 60_000);
-  const cols = new Map<string, PrintCols>();
-  let progress = 0;
+/** The first compute seeds the board; later ones only add markets it does not have yet. */
+function seedRegime(c: Computed): void {
+  if (!reg) { reg = { at: c.at, settledAt: c.at, series: new Map(c.series), mids: new Map(c.mids), ids: c.ids }; return; }
   for (const [name, mk] of c.mids) {
+    if (reg.series.has(name)) continue;
+    const ms = c.series.get(name);
+    if (ms) { reg.series.set(name, ms); reg.mids.set(name, mk); }
+  }
+}
+
+/**
+ * One market's minutes with everything from minute `startM` on read again from `p` (its prints from one chunk before),
+ * the window moved to start at `newM0`. Exported for tests.
+ */
+export function extendSeries(old: MinuteSeries, p: PrintCols, o: { newM0: number; startM: number; now: number; ids: { u: number | null; f: number | null }; holes: ReadonlyArray<readonly [number, number]> }): MinuteSeries {
+  const m0 = Math.max(old.m0, o.newM0);
+  const shift = m0 - old.m0;
+  const endM = Math.floor((o.now - 1) / 60_000);
+  const nm = Math.max(1, endM - m0 + 1);
+  const keep = Math.max(0, Math.min(old.tot.length - shift, o.startM - m0, nm));
+  const ms: MinuteSeries = { m0, tot: new Float32Array(nm), u: new Float32Array(nm), f: new Float32Array(nm), vol: new Float32Array(nm), held: new Uint8Array(nm) };
+  if (keep > 0) {
+    ms.tot.set(old.tot.subarray(shift, shift + keep)); ms.u.set(old.u.subarray(shift, shift + keep)); ms.f.set(old.f.subarray(shift, shift + keep));
+    ms.vol.set(old.vol.subarray(shift, shift + keep)); ms.held.set(old.held.subarray(shift, shift + keep));
+  }
+  // The mid at each minute's end (as analyzeMarket: the pair mid when both sides printed within PAIR_MS), from the minute
+  // before the first rebuilt one.
+  const k0 = m0 + keep - 1;
+  const endMid = new Float64Array(Math.max(1, endM - k0 + 1)).fill(NaN);
+  let before = NaN;
+  let lastBuy = NaN, lastBuyT = -Infinity, lastSell = NaN, lastSellT = -Infinity;
+  let firstT = Infinity;
+  for (let i = 0; i < p.n; i++) {
+    const t = p.t[i]!, px = p.px[i]!, tk = p.taker[i]!;
+    if (tk === TAKER_BUYER) { lastBuy = px; lastBuyT = t; } else if (tk === TAKER_SELLER) { lastSell = px; lastSellT = t; }
+    const m = Math.abs(lastBuyT - lastSellT) < PAIR_MS ? (lastBuy + lastSell) / 2 : px;
+    const k = Math.floor(t / 60_000) - k0;
+    if (k < 0) before = m; else if (k < endMid.length) endMid[k] = m;
+    if (t >= o.now) continue;
+    const mi = Math.floor(t / 60_000) - m0;
+    if (mi < keep || mi >= nm) continue;
+    firstT = Math.min(firstT, t);
+    if (tk !== TAKER_BUYER && tk !== TAKER_SELLER) continue;
+    const ntl = px * p.sz[i]!;
+    ms.tot[mi] = ms.tot[mi]! + ntl;
+    const who = tk === TAKER_BUYER ? p.buyer[i]! : p.seller[i]!;
+    if (who === o.ids.u) ms.u[mi] = ms.u[mi]! + ntl;
+    else if (who === o.ids.f) ms.f[mi] = ms.f[mi]! + ntl;
+  }
+  let carry = before;
+  for (let k = 0; k < endMid.length; k++) { if (Number.isNaN(endMid[k]!)) endMid[k] = carry; else carry = endMid[k]!; }
+  // Held as the compute: from the market's first print, outside the ledger's holes.
+  let firstHeld = -1;
+  for (let i = 0; i < keep; i++) if (ms.held[i]) { firstHeld = i; break; }
+  if (firstHeld < 0) firstHeld = Number.isFinite(firstT) ? Math.max(keep, Math.floor(firstT / 60_000) - m0) : nm;
+  for (let mi = keep; mi < nm; mi++) {
+    const k = mi + m0 - k0;
+    const prev = endMid[k - 1]!, cur = endMid[k]!;
+    ms.vol[mi] = prev > 0 && cur > 0 ? (Math.abs(cur - prev) / prev) * 1e4 : 0;
+    const a = (m0 + mi) * 60_000;
+    ms.held[mi] = mi >= firstHeld && overlapMs(o.holes, a, Math.min(a + 60_000, o.now)) === 0 ? 1 : 0;
+  }
+  return ms;
+}
+
+/** The board's newest minutes (and the last SETTLE_MS once an hour) read again from the flow, to now. */
+async function tailPass(s: FlowStore, now: number): Promise<void> {
+  const r = reg;
+  if (!r) return;
+  const y = yielder();
+  const settle = now - r.settledAt >= SETTLE_EVERY;
+  // From the earlier of the newest TAIL_MS and the last pass's own tail (a pass skipped while nobody asked leaves no gap).
+  const since = settle ? now - SETTLE_MS : Math.min(now - TAIL_MS, r.at - TAIL_MS);
+  const from = Math.floor(Math.max(since, now - W7) / CHUNK_MS) * CHUNK_MS;
+  const read0 = from - CHUNK_MS;
+  const newM0 = Math.floor((now - W7) / 60_000);
+  let progress = 0;
+  const out = new Map<string, MinuteSeries>();
+  for (const [name, old] of r.series) {
+    const mk = r.mids.get(name);
+    if (!mk) { out.set(name, old); continue; }
     const p = concatCols(s.chunks(mk.id, read0, now + 1).map((x) => decodeChunk(x.data)));
     if (p.n) progress = Math.max(progress, p.t[p.n - 1]!);
-    cols.set(name, p);
+    const holes = flowHoles(mk.symbol, from, now, now, LEDGER_GRACE_MS) ?? [];
+    out.set(name, extendSeries(old, p, { newM0, startM: Math.floor(from / 60_000), now, ids: r.ids, holes }));
     await y();
   }
-  const out = new Map<string, MinuteSeries>();
-  for (const [name, old] of c.series) {
-    const p = cols.get(name);
-    const mk = c.mids.get(name);
-    if (!p || !mk) { out.set(name, old); continue; }
-    const nm = Math.max(old.tot.length, endM - old.m0 + 1);
-    const keep = Math.max(0, Math.min(old.tot.length, startM - old.m0));
-    const ms: MinuteSeries = { m0: old.m0, tot: new Float32Array(nm), u: new Float32Array(nm), f: new Float32Array(nm), vol: new Float32Array(nm), held: new Uint8Array(nm) };
-    ms.tot.set(old.tot.subarray(0, keep)); ms.u.set(old.u.subarray(0, keep)); ms.f.set(old.f.subarray(0, keep));
-    ms.vol.set(old.vol.subarray(0, keep)); ms.held.set(old.held.subarray(0, keep));
-    // The mid at each minute's end (as analyzeMarket: the pair mid when both sides printed within PAIR_MS), from the
-    // minute before the first rebuilt one.
-    const k0 = old.m0 + keep - 1;
-    const endMid = new Float64Array(Math.max(1, endM - k0 + 1)).fill(NaN);
-    let before = NaN;
-    let lastBuy = NaN, lastBuyT = -Infinity, lastSell = NaN, lastSellT = -Infinity;
-    let firstT = Infinity;
-    for (let i = 0; i < p.n; i++) {
-      const t = p.t[i]!, px = p.px[i]!, tk = p.taker[i]!;
-      if (tk === TAKER_BUYER) { lastBuy = px; lastBuyT = t; } else if (tk === TAKER_SELLER) { lastSell = px; lastSellT = t; }
-      const m = Math.abs(lastBuyT - lastSellT) < PAIR_MS ? (lastBuy + lastSell) / 2 : px;
-      const k = Math.floor(t / 60_000) - k0;
-      if (k < 0) before = m; else if (k < endMid.length) endMid[k] = m;
-      if (t >= now) continue;
-      const mi = Math.floor(t / 60_000) - old.m0;
-      if (mi < keep || mi >= nm) continue;
-      firstT = Math.min(firstT, t);
-      if (tk !== TAKER_BUYER && tk !== TAKER_SELLER) continue;
-      const ntl = px * p.sz[i]!;
-      ms.tot[mi] = ms.tot[mi]! + ntl;
-      const who = tk === TAKER_BUYER ? p.buyer[i]! : p.seller[i]!;
-      if (who === c.ids.u) ms.u[mi] = ms.u[mi]! + ntl;
-      else if (who === c.ids.f) ms.f[mi] = ms.f[mi]! + ntl;
-    }
-    let carry = before;
-    for (let k = 0; k < endMid.length; k++) { if (Number.isNaN(endMid[k]!)) endMid[k] = carry; else carry = endMid[k]!; }
-    // Held as the compute: from the market's first print, outside the ledger's holes (its unchecked newest span within
-    // the grace is held).
-    let firstHeld = -1;
-    for (let i = 0; i < keep; i++) if (old.held[i]) { firstHeld = i; break; }
-    if (firstHeld < 0) firstHeld = Number.isFinite(firstT) ? Math.floor(firstT / 60_000) - old.m0 : nm;
-    const holes = flowHoles(mk.symbol, (old.m0 + keep) * 60_000, now, now, LEDGER_GRACE_MS) ?? [];
-    for (let mi = keep; mi < nm; mi++) {
-      const k = mi + old.m0 - k0;
-      const prev = endMid[k - 1]!, cur = endMid[k]!;
-      ms.vol[mi] = prev > 0 && cur > 0 ? (Math.abs(cur - prev) / prev) * 1e4 : 0;
-      const a = (old.m0 + mi) * 60_000;
-      ms.held[mi] = mi >= firstHeld && overlapMs(holes, a, Math.min(a + 60_000, now)) === 0 ? 1 : 0;
-    }
-    out.set(name, ms);
-  }
   for (const ms of out.values()) cutAtProgress(ms, progress);
-  if (kept === c) live = { at: now, series: out };
+  if (reg === r) reg = { ...r, at: now, settledAt: settle ? now : r.settledAt, series: out };
 }
 
 /** Tests and checks: one tail pass now (errors thrown). */
@@ -958,8 +986,9 @@ export async function botRegime(symbol: string, win: BotWindow = '7d'): Promise<
   const s = flowReader();
   if (!s) return null;
   const c = await current(s);
-  if (!live || live.at < c.at || Date.now() - live.at > REGIME_TAIL_EVERY) void tail(s).catch(() => { /* the kept answer stands */ });
-  const fresh = live && live.at >= c.at ? live : { at: c.at, series: c.series };
+  seedRegime(c);
+  if (Date.now() - reg!.at > REGIME_TAIL_EVERY) void tail(s).catch(() => { /* the kept minutes stand */ });
+  const fresh = { at: reg!.at, series: reg!.series };
   const markets = [...c.rows['7d']].sort((a, b) => b.volumeUsdH - a.volumeUsdH).map((m) => m.symbol).filter((m) => fresh.series.has(m));
   const base = { at: fresh.at, computedAt: c.at, computeMs: c.took, window: win, stepMs: REGIME_STEP_MIN[win] * 60_000, markets };
   const want = symbol.toUpperCase();
@@ -1020,8 +1049,8 @@ export function keepBotMarketsWarm(): () => void {
     if (!warmDue(now, askedAt, kept?.at ?? null)) return;
     const s = flowReader();
     if (!s) return;
-    if (!kept || now - kept.at >= BOT_MARKETS_TTL - 30_000) void refresh(s).catch(() => { /* logged; next round */ });
-    if (now - askedAt <= 30 * 60_000) void tail(s).catch(() => { /* next round */ });
+    if (!kept || now - kept.at >= BOT_MARKETS_TTL - 30_000) void refresh(s).then((c) => { seedRegime(c); }).catch(() => { /* logged; next round */ });
+    if (reg) void tail(s).catch(() => { /* next round */ });
   }, REGIME_TAIL_EVERY);
   timer.unref?.();
   return () => clearInterval(timer);
@@ -1030,6 +1059,6 @@ export function keepBotMarketsWarm(): () => void {
 /** Tests: forget the kept answer. */
 export function clearBotMarkets(): void {
   kept = null;
-  live = null;
+  reg = null;
   askedAt = 0;
 }

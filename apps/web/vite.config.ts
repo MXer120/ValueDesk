@@ -238,6 +238,9 @@ function botsFixtures(): Plugin {
         }
         // The regime board (Explore): <dir>/regime.json holds one answer per 'SYMBOL|window' and 'ALL|window' (make-recorded.ts:
         // the server's own code over server 2's recorded prints).
+        // On production's data (VALUETRADE_DEV_API=prod) the board and the estimates are production's, live: the files are a
+        // frozen night (owner 2026-11-10: "0 datapoints of today on the chart").
+        if (DEV_PROD && (req.url?.startsWith('/api/vs/bots/regime') || req.url?.startsWith('/api/vs/bots/markets'))) return next();
         if (req.url?.startsWith('/api/vs/bots/regime') && existsSync(join(dir, 'regime.json'))) {
           const q = new URL(req.url, 'http://x').searchParams;
           const sym = (q.get('symbol') ?? 'ALL').toUpperCase();

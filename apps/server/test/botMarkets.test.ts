@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TAKER_BUYER, TAKER_SELLER, type PrintCols } from '../src/flow/codec.js';
-import { BOT_BUILDER_BPS, BOT_MARKETS_IDLE_EVERY, BOT_MARKETS_MAX_AGE, BOT_MARKETS_TTL, analyzeMarket, cutAtProgress, regimeAll, servePlan, warmDue, weightedPercentile, type MinuteSeries } from '../src/flow/botMarkets.js';
+import { BOT_BUILDER_BPS, BOT_MARKETS_IDLE_EVERY, BOT_MARKETS_MAX_AGE, BOT_MARKETS_TTL, analyzeMarket, cutAtProgress, extendSeries, regimeAll, servePlan, warmDue, weightedPercentile, type MinuteSeries } from '../src/flow/botMarkets.js';
 
 const P1002 = 1, P23342 = 2, DOM = 3, OTHER_TAKER = 50;
 const T0 = 1_762_473_600_000; // a whole UTC hour
@@ -210,4 +210,29 @@ test('an old answer is never served, and the board stays warm when nobody asks (
   assert.equal(warmDue(now, now - 3 * 60 * min, now - BOT_MARKETS_IDLE_EVERY), true);
   assert.equal(warmDue(now, 0, null), true, 'never computed');
   assert.ok(BOT_MARKETS_IDLE_EVERY + BOT_MARKETS_TTL <= BOT_MARKETS_MAX_AGE, 'an idle answer is still young enough to serve at once');
+});
+
+test('the board minutes extended from the newest prints equal the ones built from scratch (history is never rebuilt)', async () => {
+  const { cols } = market();
+  const cut = (to: number): PrintCols => {
+    let n = 0;
+    while (n < cols.n && cols.t[n]! < to) n++;
+    return { n, t: cols.t.slice(0, n), px: cols.px.slice(0, n), sz: cols.sz.slice(0, n), buyer: cols.buyer.slice(0, n), seller: cols.seller.slice(0, n), taker: cols.taker.slice(0, n) };
+  };
+  const t1 = T0 + 600_000, t2 = T0 + N * 1000 + 200_000;
+  const opts = { makerBps: MAKER_BPS, builderBps: BOT_BUILDER_BPS, id1002: P1002, id23342: P23342 };
+  const early = (await analyzeMarket(cut(t1), { ...opts, now: t1 }, () => undefined))!.series;
+  const whole = (await analyzeMarket(cols, { ...opts, now: t2 }, () => undefined))!.series;
+  // The pass re-reads from 5 min before t1, prints from one chunk earlier (as tailPass).
+  const startM = Math.floor((t1 - 300_000) / 60_000);
+  const ext = extendSeries(early, cut(t2), { newM0: Math.floor((t2 - 7 * 86_400_000) / 60_000), startM, now: t2, ids: { u: P1002, f: P23342 }, holes: [] });
+  const d = ext.m0 - whole.m0;
+  assert.equal(ext.tot.length, whole.tot.length - d);
+  for (let i = 0; i < ext.tot.length; i++) {
+    const w = i + d;
+    assert.ok(Math.abs(ext.tot[i]! - whole.tot[w]!) < 1e-3 * Math.max(1, whole.tot[w]!), `tot minute ${i}`);
+    assert.ok(Math.abs(ext.u[i]! - whole.u[w]!) < 1e-3 * Math.max(1, whole.u[w]!), `1002 minute ${i}`);
+    assert.ok(Math.abs(ext.vol[i]! - whole.vol[w]!) < 1e-3, `vol minute ${i}: ${ext.vol[i]} vs ${whole.vol[w]}`);
+    assert.equal(ext.held[i], whole.held[w], `held minute ${i}`);
+  }
 });
