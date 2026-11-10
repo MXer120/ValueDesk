@@ -213,7 +213,7 @@ test('Settings: a Help & FAQ section with Send feedback, and answers that match 
   for (const c of SANCTIONED_COUNTRIES) assert.ok(text.includes(c.name), c.name);
   assert.ok(['US', 'GB', 'CA'].every((c) => (CLOSE_ONLY_CODES as readonly string[]).includes(c)));
   assert.match(text, /United States, the United Kingdom and Canada it is close-only/);
-  assert.match(text, /2x leverage/);
+  assert.doesNotMatch(text, /2x leverage/); // no regional leverage cap since 2026-11-10
 });
 
 test("Area: several at once, in the list's order, from the server's own list; the button says when one is needed", async () => {

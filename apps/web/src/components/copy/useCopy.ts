@@ -313,7 +313,7 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
     lastRun.current = `${venue}|${leader}|${fills.data === null ? '' : 'f'}`;
     const timer = window.setTimeout(() => {
       try {
-        // The region's leverage cap binds the replay as it binds the live copy (EEA 2x).
+        // A region's leverage cap binds the replay as it binds the live copy (none since 2026-11-10; kept for a future one).
         const regionMax = regionPolicy(live.terms?.country ?? null, live.viewerCountry).maxLeverage;
         const config = regionMax === null ? parsed.config : { ...parsed.config, maxLeverage: Math.min(parsed.config.maxLeverage, regionMax) };
         const out = simulate(prepared.fills, config, {

@@ -29,6 +29,9 @@ import {
 } from '../src/index.ts';
 import { BTC, FOLLOWER, LEADER, ev, marks, state, sub } from './helpers.ts';
 
+/** A region ceiling, to test the mechanism (no region has one since 2026-11-10, owner: "remove everywhere"; the EEA's former 2x is the example). */
+const capped = (p: ReturnType<typeof regionPolicy>, max = 2): ReturnType<typeof regionPolicy> => ({ ...p, maxLeverage: max });
+
 /* ============================================================ planner ===== */
 
 const ctx = (o: Partial<PlanContext> & Pick<PlanContext, 'event'>): PlanContext => ({
@@ -77,8 +80,11 @@ test('US close-only and the EEA 2x cap, decided mid-run: a blocked copy still fo
   assert.deepEqual(legs(blocked), [['close', 'sell', '0.01', true]]);
   const add = planLeaderEvent(ctx({ sub: sub({}, { status: 'blocked' }), state: holding(0.01), policy: regionPolicy('US', null), event: ev('BTC-USD', 1, 2, 80_000) }));
   assert.equal(add.intents.length, 0, 'close-only: an add is not copied');
-  // EEA: $1,000 copied at most 2x = $2,000 of exposure, whatever the follower's own cap says.
-  const eea = planLeaderEvent(ctx({ sub: sub({ maxLeverage: 10, sizingMode: 'fixedNotional', fixedNotionalUsd: 5_000 }), policy: regionPolicy('DE', null), event: ev('BTC-USD', 0, 1, 80_000) }));
+  // A region ceiling of 2x: $1,000 copied at most 2x = $2,000 of exposure, whatever the follower's own cap says.
+  const eea = planLeaderEvent(ctx({ sub: sub({ maxLeverage: 10, sizingMode: 'fixedNotional', fixedNotionalUsd: 5_000 }), policy: capped(regionPolicy('DE', null)), event: ev('BTC-USD', 0, 1, 80_000) }));
+  // No region has one since 2026-11-10: the same German follower copies the whole $5,000.
+  const de = planLeaderEvent(ctx({ sub: sub({ maxLeverage: 10, sizingMode: 'fixedNotional', fixedNotionalUsd: 5_000 }), policy: regionPolicy('DE', null), event: ev('BTC-USD', 0, 1, 80_000) }));
+  assert.ok(de.intents.length === 1 && Number(de.intents[0]!.quantity) * 80_000 > 2_000, `opened ${de.intents[0]?.quantity}`);
   assert.ok(eea.intents.length === 1 && Number(eea.intents[0]!.quantity) * 80_000 <= 2_000 + 1e-6, `opened ${eea.intents[0]?.quantity}`);
 });
 

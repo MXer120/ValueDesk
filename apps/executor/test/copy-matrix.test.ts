@@ -155,7 +155,7 @@ test('a running copy refuses a change of its trader, of paper or live, of copy o
     await act('pause', { id });
     assert.equal(await code(act('resume', { id }, us)), '451:region');
     assert.equal(await code(act('stop', { id, close: true }, us)), 'ok');
-    // From the EEA: allowed (the 2x cap is the planner's, packages/copy-engine/test/matrix-planner.test.ts).
+    // From the EEA: allowed (no regional leverage cap since 2026-11-10).
     assert.equal(await code(sub(rules({ leader: { venue: 'sodex', address: LEADER2 } }), { viewerCountry: 'DE' })), 'ok');
     assert.ok(svc.consents(w.address).some((c) => c.action === 'stop'));
   } finally {

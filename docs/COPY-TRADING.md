@@ -143,7 +143,8 @@ limit are unchanged; the leader's own books (positions, the leader curve) stay r
   and holds what already runs; stopping, cancelling and deleting the key stay open.
   The API signs no builder fee terms for a listed wallet.
   EEA residents (EU + IS LI NO, and the EU's own-code territories RE GP MQ GF YT
-  MF AX): copies capped at 2x. The stricter of the
+  MF AX): no leverage cap since 2026-11-10 (owner: "remove everywhere"; was 2x,
+  terms 2026-11-10 and site terms 2026-11-10 say so). The stricter of the
   declared country and the IP country (hosted, Vercel `x-vercel-ip-country`) applies.
 
 ## Legal safeguards built in
@@ -168,8 +169,8 @@ What the product does for its users before and during a copy.
    trade" in browser mode; paper mode to try a rule without orders.
 5. **Regions**: declared country required; IP country checked by the hosted
    executor; blocked countries refused at terms, at start and at runtime
-   (`blocked`); EEA 2x cap enforced by the planner and on the SoDEX position
-   leverage in every mode.
+   (`blocked`). No regional leverage cap since 2026-11-10 (the region ceiling
+   mechanism stays in the planner and the algo runtime, unused).
 6. **Key hygiene**: copy keys are perps-only, separate from the trading key,
    short-lived (7 / 180 days), named per mode (re-approving replaces, never adds),
    sealed at rest; the hosted-key notice discloses that a SoDEX trading key can

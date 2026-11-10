@@ -19,7 +19,7 @@
  */
 import { decimalInput } from '../numberInput';
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { COPY_FEE_MAX, COPY_FEE_WINDOW_DAYS, EEA_MAX_LEVERAGE, copyFeeFor, feePercent, regionPolicy } from '@copy-engine';
+import { COPY_FEE_MAX, COPY_FEE_WINDOW_DAYS, copyFeeFor, feePercent } from '@copy-engine';
 import { subscribeTerms, termsView } from '../../trading/terms';
 import { Modal } from '../Modal';
 import { DlgSwitch } from '../dialogParts';
@@ -177,7 +177,6 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
   const set = (k: SetupField) => (v: string) => c.patchSetup({ [k]: v } as Partial<SetupState>);
   const e = c.parsed.errors;
   const example = workedExample(c.parsed, c.profile.data ?? null, (sym) => coinOf(c.venue, sym));
-  const eea = regionPolicy(c.live.terms?.country ?? null, c.live.viewerCountry).maxLeverage === EEA_MAX_LEVERAGE;
   const counter = c.setup.direction === 'counter';
   // Which of their positions and recent coins a copy cannot follow on SoDEX, before it starts (owner, 2026-10-29).
   const copyVenue = c.venue === 'sodex' || c.venue === 'hyperliquid' ? c.venue : null;
@@ -258,8 +257,8 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
           <Rule title="Multiplier" hint="Copies a multiple of the trader's positions. 1× mirrors them. Your caps below still apply.">
             <SlideField value={c.setup.multiplier} min={MULTIPLIER_MIN} max={5} step={0.1} unit="×" onChange={set('multiplier')} error={e.multiplier} label="Multiplier" />
           </Rule>
-          <Rule title="Max leverage" hint={eea ? `Caps every copied position. In the EU and EEA copies are capped at ${EEA_MAX_LEVERAGE}x.` : 'Caps every copied position, even when the trader uses more.'}>
-            <SlideField value={c.setup.maxLeverage} min={1} max={eea ? EEA_MAX_LEVERAGE : LEV_MAX} step={1} unit="×" onChange={set('maxLeverage')} error={e.maxLeverage} label="Max leverage" />
+          <Rule title="Max leverage" hint="Caps every copied position, even when the trader uses more.">
+            <SlideField value={c.setup.maxLeverage} min={1} max={LEV_MAX} step={1} unit="×" onChange={set('maxLeverage')} error={e.maxLeverage} label="Max leverage" />
           </Rule>
           <Rule title="Max position" hint="The largest a single copied position may get, in dollars.">
             <Num id={`${uid}-maxpos`} value={c.setup.maxPosition} onChange={set('maxPosition')} unit="USDC" error={e.maxPosition} label="Max position" />

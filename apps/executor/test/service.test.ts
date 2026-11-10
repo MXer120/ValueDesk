@@ -117,7 +117,7 @@ test('terms: every statement, a country, and a region that allows copying', asyn
   assert.equal(await code(() => svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', { ...TERMS, country: 'US' }), { viewerCountry: null })), '451:region');
   assert.equal(await code(() => svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), { viewerCountry: 'US' })), '451:region');
   const me = svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', { ...TERMS, country: 'DE' }), { viewerCountry: 'DE' });
-  assert.equal(me.policy.maxLeverage, 2);
+  assert.equal(me.policy.maxLeverage, null); // no regional leverage cap since 2026-11-10
   assert.equal(me.terms?.country, 'DE');
   await cleanup();
 });

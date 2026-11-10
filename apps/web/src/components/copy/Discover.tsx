@@ -451,7 +451,7 @@ function HowItWorks() {
       <p className="cpy-how__note">
         The copy and counter scores summarise public figures, the same formula for everyone, ranked against the traders on the board (a
         trader on the wrong side of the window scores at most {WRONG_SIDE_CAP}); they are not a recommendation. Past results do not predict future ones. Copy fee up to 0.025% per copied order, on top of SoDEX's fees.
-        Not available in the US, the UK, Canada or sanctioned countries; in the EU and EEA copies are limited to 2x leverage.{' '}
+        Not available in the US, the UK, Canada or sanctioned countries.{' '}
         <a className="fx-link" href="/copy-terms">Copy terms and risks</a>.
       </p>
     </section>

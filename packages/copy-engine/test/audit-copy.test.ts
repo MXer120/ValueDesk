@@ -195,12 +195,16 @@ test('coverage policy: US, its territories and sanctioned countries are blocked,
   assert.equal(regionPolicy('DE', 'US').allowed, false);
   assert.equal(regionPolicy('US', 'DE').allowed, false);
   assert.equal(regionPolicy(null).allowed, false);
-  assert.equal(regionPolicy('SG', 'DE').maxLeverage, 2);
-  assert.equal(effectiveLeverage(20, regionPolicy('FR'), 50), 2);
+  // No regional leverage cap since 2026-11-10: the follower's own cap (and the market's) only.
+  assert.equal(regionPolicy('SG', 'DE').maxLeverage, null);
+  assert.equal(effectiveLeverage(20, regionPolicy('FR'), 50), 20);
 });
 
-test('BUG policy: the EU outermost regions (Reunion, Guadeloupe, Martinique, French Guiana, Mayotte, Saint-Martin) and Aland are EU territory but get no 2x cap', () => {
-  for (const c of ['RE', 'GP', 'MQ', 'GF', 'YT', 'MF', 'AX']) assert.equal(regionPolicy(c).maxLeverage, 2, `${c} is in the EU`);
+test('policy: the EU outermost regions (Reunion, Guadeloupe, Martinique, French Guiana, Mayotte, Saint-Martin) and Aland are EU territory (eea), with no leverage cap since 2026-11-10', () => {
+  for (const c of ['RE', 'GP', 'MQ', 'GF', 'YT', 'MF', 'AX']) {
+    assert.equal(regionPolicy(c).region, 'eea', `${c} is in the EU`);
+    assert.equal(regionPolicy(c).maxLeverage, null, c);
+  }
 });
 
 test('coverage policy: the copy fee ladder steps at its thresholds; unknown volume pays the highest', () => {

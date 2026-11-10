@@ -23,7 +23,7 @@
  *     orders on SoDEX perps only, SoDEX position stops on the mark price, the
  *     drawdown stop, skips: packages/copy-engine/src/types.ts, orders.ts,
  *     planner.ts, runtime.ts;
- *   - regions, the 2x EEA cap (per position and gross), the stricter-country
+ *   - regions (no leverage cap since 2026-11-10), the stricter-country
  *     rule, the copy fee ladder: packages/copy-engine/src/policy.ts - docs.test.ts
  *     checks the ladder, the cap and the excluded countries against it;
  *   - signed instructions (EIP-712) and the append-only consent log:

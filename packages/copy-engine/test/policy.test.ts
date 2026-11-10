@@ -21,13 +21,15 @@ test('the United Kingdom and Canada are blocked like the US, declared or seen; n
   for (const c of ['JE', 'GG', 'IM', 'GI', 'BM', 'KY', 'VG', 'AU', 'NZ', 'CH']) assert.equal(regionPolicy(c).allowed, true, c);
 });
 
-test('EEA residents copy at 2x at most; the stricter of declared and seen applies', () => {
+test('EEA residents copy with no regional leverage cap (owner 2026-11-10: "remove everywhere"); still told apart as eea', () => {
   const de = regionPolicy('DE');
   assert.equal(de.allowed, true);
-  assert.equal(de.maxLeverage, 2);
-  assert.equal(regionPolicy('NO').maxLeverage, 2);
-  assert.equal(regionPolicy('SG', 'FR').maxLeverage, 2);
-  assert.equal(regionPolicy('FR', 'SG').maxLeverage, 2);
+  assert.equal(de.region, 'eea');
+  assert.equal(de.maxLeverage, null);
+  assert.equal(de.reason, null);
+  assert.equal(regionPolicy('NO').maxLeverage, null);
+  assert.equal(regionPolicy('SG', 'FR').maxLeverage, null);
+  assert.equal(regionPolicy('FR', 'SG').maxLeverage, null);
   assert.equal(regionPolicy('SG').maxLeverage, null);
   assert.equal(regionPolicy('CH').maxLeverage, null);
   assert.equal(regionPolicy('CH').allowed, true);

@@ -376,9 +376,9 @@ test('BUG a change of the stop-loss, the take-profit, the leverage or the region
     await change({ maxLeverage: 2 });
     assert.deepEqual(live(), [['stop-loss', 72_000, '0.01'], ['take-profit', 120_000, '0.01']], 'at 2x the same shares of the margin are further away');
     await change({ maxLeverage: 5 }, { country: 'DE' });
-    assert.deepEqual(live(), [['stop-loss', 72_000, '0.01'], ['take-profit', 120_000, '0.01']], 'a German follower is capped at 2x: unchanged');
+    assert.deepEqual(live(), [['stop-loss', 76_800, '0.01'], ['take-profit', 96_000, '0.01']], 'a German follower at 5x: no regional cap since 2026-11-10');
     await change({}, { country: 'SG' });
-    assert.deepEqual(live(), [['stop-loss', 76_800, '0.01'], ['take-profit', 96_000, '0.01']], 'outside the EEA 5x again');
+    assert.deepEqual(live(), [['stop-loss', 76_800, '0.01'], ['take-profit', 96_000, '0.01']], 'outside the EEA 5x as well');
     await change({ stopLossPct: null, takeProfitPct: null });
     assert.deepEqual(live(), [], 'both off: nothing rests on SoDEX that could still close the position');
     const n = rec.stops.length;

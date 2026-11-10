@@ -150,7 +150,7 @@ test('COPY_STATEMENTS are exactly the four statements of AcceptTermsPayload, eac
   for (const s of COPY_STATEMENTS) assert.ok(s.label.trim().length > 20, `${s.id} has a label`);
 });
 
-test('the copy terms disclose the fee ladder, the EEA cap and the excluded countries of policy.ts', () => {
+test('the copy terms disclose the fee ladder, no regional leverage cap, and the excluded countries of policy.ts', () => {
   const doc = text(COPY_TERMS);
   for (const step of COPY_FEE_LADDER) {
     const rate = feePercent(step.fee);
@@ -163,9 +163,10 @@ test('the copy terms disclose the fee ladder, the EEA cap and the excluded count
   assert.ok(doc.includes(`ceiling of ${feePercent(COPY_FEE_MAX)}`), 'the approval ceiling');
   assert.ok(text(COPY_RISK_SUMMARY).includes(`up to ${feePercent(COPY_FEE_MAX)}`), 'the setup sheet names the highest fee');
 
-  assert.ok(doc.includes(`at most ${EEA_MAX_LEVERAGE}x leverage`), 'the EEA cap');
+  // No regional leverage cap since 2026-11-10 (owner: "remove everywhere"): the terms say so and name none.
+  assert.ok(!doc.includes(`at most ${EEA_MAX_LEVERAGE}x leverage`), 'no EEA cap');
+  assert.ok(doc.includes('No regional leverage limit'), 'the terms say there is none');
   assert.equal(EEA_COUNTRIES.length, 37, 'the EEA: the 27 EU member states, Iceland, Liechtenstein and Norway, and the 7 EU territories with a country code of their own');
-  assert.ok(doc.includes('the 27 EU member states, Iceland, Liechtenstein and Norway'));
 
   const NAMES: Record<string, string> = {
     US: 'United States', PR: 'Puerto Rico', VI: 'US Virgin Islands', GU: 'Guam', AS: 'American Samoa',

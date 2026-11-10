@@ -16,6 +16,7 @@ import { canonicalJSON } from '../api.ts';
 import { COPY_TERMS_VERSION } from '../policy.ts';
 import { COPY_TERMS_2026_11_02 } from './copy-2026-11-02.ts';
 import { COPY_TERMS_2026_11_09 } from './copy-2026-11-09.ts';
+import { COPY_TERMS_2026_11_10 } from './copy-2026-11-10.ts';
 import type { TermsDoc } from './doc.ts';
 
 export type { TermsBlock, TermsDoc } from './doc.ts';
@@ -23,6 +24,7 @@ export type { TermsBlock, TermsDoc } from './doc.ts';
 export const COPY_TERMS_DOCS: Readonly<Record<string, TermsDoc>> = {
   '2026-11-02': COPY_TERMS_2026_11_02,
   '2026-11-09': COPY_TERMS_2026_11_09,
+  '2026-11-10': COPY_TERMS_2026_11_10,
 };
 
 /** The text of a version, or null when this build does not know it. */

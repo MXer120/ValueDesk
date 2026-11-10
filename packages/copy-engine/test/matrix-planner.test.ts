@@ -286,8 +286,8 @@ test('caps per mode, direction and region: the follower\'s leverage is named max
       }
     }
   }
-  // The same through regionPolicy: a German follower is capped at 2x, a Singaporean one is not.
-  assert.equal(regionPolicy('DE').maxLeverage, 2);
+  // Through regionPolicy: no region has a cap since 2026-11-10 (a German follower neither).
+  assert.equal(regionPolicy('DE').maxLeverage, null);
   assert.equal(regionPolicy('SG').maxLeverage, null);
 });
 

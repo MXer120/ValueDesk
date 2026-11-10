@@ -17,6 +17,9 @@ import { ALGO_KINDS, BOT_KINDS, regionPolicy, type AlgoKind, type AlgoRecord } f
 import { ETH } from './helpers.ts';
 import { add, clock, crashAndRestart, drive, near, rig, settle, sum, T0, type Rig } from './matrix-rig.ts';
 
+/** A region ceiling, to test the mechanism (no region has one since 2026-11-10, owner: "remove everywhere"; the EEA's former 2x is the example). */
+const capped = (p: ReturnType<typeof regionPolicy>, max = 2): ReturnType<typeof regionPolicy> => ({ ...p, maxLeverage: max });
+
 const MIN = 60_000;
 const realNow = Date.now;
 beforeEach(() => {
@@ -328,8 +331,9 @@ const LEV: Array<{ what: string; leverage: number | null; marginMode: 'cross' | 
   { what: '3x isolated', leverage: 3, marginMode: 'isolated', policy: null, want: { leverage: 3, margin: 'isolated' } },
   { what: '5x cross', leverage: 5, marginMode: 'cross', policy: null, want: { leverage: 5, margin: 'cross' } },
   { what: '100x on a 50x market: the market\'s max', leverage: 100, marginMode: 'cross', policy: null, want: { leverage: 50, margin: 'cross' } },
-  { what: '10x in the EEA: the 2x cap', leverage: 10, marginMode: 'isolated', policy: regionPolicy('DE'), want: { leverage: 2, margin: 'isolated' } },
-  { what: 'no leverage in the EEA: set to the 2x cap', leverage: null, marginMode: null, policy: regionPolicy('FR'), want: { leverage: 2, margin: 'cross' } },
+  { what: '10x under a 2x region ceiling: the 2x cap', leverage: 10, marginMode: 'isolated', policy: capped(regionPolicy('DE')), want: { leverage: 2, margin: 'isolated' } },
+  { what: '10x in the EEA: no cap since 2026-11-10', leverage: 10, marginMode: 'isolated', policy: regionPolicy('DE'), want: { leverage: 10, margin: 'isolated' } },
+  { what: 'no leverage under a 2x region ceiling: set to the 2x cap', leverage: null, marginMode: null, policy: capped(regionPolicy('FR')), want: { leverage: 2, margin: 'cross' } },
   { what: 'no leverage elsewhere: left as it is', leverage: null, marginMode: null, policy: regionPolicy('SG'), want: null },
   { what: 'reduce-only: nothing set (it opens nothing)', leverage: 5, marginMode: 'isolated', policy: null, reduceOnly: true, want: null },
 ];
@@ -346,8 +350,8 @@ for (const c of LEV) {
   });
 }
 
-test('region: the EEA 2x cap on gross exposure shrinks a child to the room left, then holds; paper is not held', async () => {
-  const r = await rig({ policy: regionPolicy('DE') });
+test('region: a 2x region ceiling on gross exposure shrinks a child to the room left, then holds; paper is not held', async () => {
+  const r = await rig({ policy: capped(regionPolicy('DE')) });
   // $500 of equity, $900 already open: $100 of room at 2x.
   r.account = { equity: 500, gross: 900 };
   const a = await add(r, { kind: 'swarm', quantity: '0.005', clips: 1 + 1, inFlight: 2, waveMs: 0, slippageBps: 20 });

@@ -15,7 +15,7 @@
  * their behalf, nothing is pre-ticked.
  */
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { BOT_FEE, COPY_FEE_LADDER, COPY_FEE_MAX, EEA_MAX_LEVERAGE, feePercent, regionPolicy } from '@copy-engine';
+import { BOT_FEE, COPY_FEE_LADDER, COPY_FEE_MAX, feePercent, regionPolicy } from '@copy-engine';
 import { Modal } from '../components/Modal';
 import { openConnectDialog } from '../components/account/connect';
 import { notify } from '../toast';
@@ -391,9 +391,6 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
               Your location: <b>{country ? `${countryName(country)}, from your connection` : 'unknown'}</b>
             </p>
             {!country && <p className="fx-note fx-note--err">{LOCATION_UNKNOWN}</p>}
-            {!bots && country && regionPolicy(country, live.viewerCountry).maxLeverage === EEA_MAX_LEVERAGE && (
-              <p className="fx-note fx-note--warn">In the EU and EEA, copies are limited to {EEA_MAX_LEVERAGE}x leverage.</p>
-            )}
             {country && !regionPolicy(country, live.viewerCountry).allowed && (
               <p className="fx-note fx-note--err">{regionPolicy(country, live.viewerCountry).reason}</p>
             )}

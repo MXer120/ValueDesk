@@ -53,7 +53,7 @@ export const FAQ: readonly Faq[] = [
   },
   {
     q: 'Where can I use ValueDesk?',
-    a: 'Not in sanctioned countries and regions (among them Cuba, Iran, North Korea, Syria, Russia, Belarus and Myanmar). In the United States, the United Kingdom and Canada it is close-only: you can reduce and close positions but not open new ones, and copy trading is not offered. In the EEA, copies and algo orders are limited to 2x leverage.',
+    a: 'Not in sanctioned countries and regions (among them Cuba, Iran, North Korea, Syria, Russia, Belarus and Myanmar). In the United States, the United Kingdom and Canada it is close-only: you can reduce and close positions but not open new ones, and copy trading is not offered.',
   },
   {
     q: 'Where does ValueDesk run?',

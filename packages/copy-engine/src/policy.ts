@@ -6,12 +6,10 @@
  *     Canada (owner's decision, 2026-10-27), and the countries under
  *     comprehensive sanctions or on FATF's call-for-action list. Nobody there
  *     may start or keep a copy, in any mode;
- *   - EEA (the EU plus Iceland, Liechtenstein, Norway): copies are capped at
- *     2x leverage - the retail limit ESMA's CFD product-intervention measures
- *     set for crypto, which ESMA said in February 2026 is likely to apply to
- *     perpetual futures. The cap applies to the leverage set on each copied
- *     position AND to the copy's gross exposure;
- *   - everyone else: the follower's own leverage cap.
+ *   - everyone else, the EEA included: the follower's own leverage cap. The EEA
+ *     2x cap (2026-10-23) is removed (owner 2026-11-10: "remove everywhere"):
+ *     copies, algo orders and bots use the leverage the follower sets, up to the
+ *     market's maximum. The region 'eea' is still told apart (records, tests).
  *
  * WHICH COUNTRY. The country the follower declares when accepting the terms,
  * and - where a server sees the request - the country of the IP address it
@@ -33,10 +31,11 @@
  * '.3': the United Kingdom and Canada excluded, sanctioned wallets screened by the executor, the domain www.valuedesk.so.
  * 2026-10-28: security incidents and the emergency brake, a hacked executor, rate limits, software errors named,
  * the follower's duties to report errors and limit what is at stake, the liability clause rewritten (BGB §§ 307-309).
+ * 2026-11-10: the EEA 2x leverage cap removed (owner 2026-11-10).
  * 2026-11-02: bots (the Bots page) - what they do, that they can lose, no wash trading, no fills between different
  * users' bots, and their 0.5 bp fee in place of the normal one (owner, 2026-11-02; charged 0.1 bp since 2026-11-04, BOT_FEE).
  */
-export const COPY_TERMS_VERSION = '2026-11-09';
+export const COPY_TERMS_VERSION = '2026-11-10';
 
 /** US and its territories (US persons). */
 export const US_REGIONS: readonly string[] = ['US', 'PR', 'VI', 'GU', 'AS', 'MP', 'UM'];
@@ -74,7 +73,7 @@ export const EEA_COUNTRIES: readonly string[] = [
   'RE', 'GP', 'MQ', 'GF', 'YT', 'MF', 'AX',
 ];
 
-/** ESMA's retail leverage limit for crypto CFDs: 50% initial margin. */
+/** ESMA's retail leverage limit for crypto CFDs (50% initial margin). No longer applied (owner 2026-11-10); kept for the records of copies made under it. */
 export const EEA_MAX_LEVERAGE = 2;
 
 /** The highest leverage the copier ever sets, whatever the market allows. */
@@ -150,16 +149,6 @@ export function regionPolicy(declared: string | null | undefined, observed?: str
         : named
           ? `Copy trading is not available to residents of ${named}, or to anyone connecting from there.`
           : 'Copy trading is not available in your country or from where you are connecting.',
-      country,
-      mismatch,
-    };
-  }
-  if (region === 'eea') {
-    return {
-      region,
-      allowed: true,
-      maxLeverage: EEA_MAX_LEVERAGE,
-      reason: `In the EU and EEA, copies are limited to ${EEA_MAX_LEVERAGE}x leverage (the retail limit for leveraged crypto products).`,
       country,
       mismatch,
     };
