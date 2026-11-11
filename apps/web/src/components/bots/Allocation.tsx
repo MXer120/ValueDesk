@@ -10,7 +10,8 @@
 import { useMemo } from 'react';
 import { FINAL_STATUSES, copyReserveUsd, type AlgoView } from '@copy-engine';
 import { botNeedUsd } from '../../bots/presets';
-import { DASH, fmtUsd, num, shortAddr } from '../../format';
+import { positionsMarginOf, splitPositionsMargin, type PositionsMargin } from '../../bots/positionMargin';
+import { DASH, fmtUsd, shortAddr } from '../../format';
 import { api } from '../../api';
 import { useAccountResource } from '../../accountFeeds';
 import { useStored } from '../../hooks';
@@ -36,7 +37,7 @@ export interface Allocation {
   equity: number | null;
   copies: MarginItem[];
   bots: MarginItem[];
-  /** Margin your own open positions hold now (the account's position margin, less what the bots' positions hold). */
+  /** Margin your own open positions hold now: SoDEX's position margin less the bots' share (bots/positionMargin.ts). */
   perpsUsd: number;
   copyUsd: number;
   botUsd: number;
@@ -58,7 +59,7 @@ export interface Allocation {
 /** A copy as the panel needs it (copy/live.ts copyRows). */
 export interface MarginCopy { id: string; leader: string; mode: string; status: string; settings: { allocationUsd: number; paper: boolean } }
 
-export function marginOf(bots: readonly AlgoView[], copies: readonly MarginCopy[], equity: number | null, positionsMargin = 0): Allocation {
+export function marginOf(bots: readonly AlgoView[], copies: readonly MarginCopy[], equity: number | null, positions: PositionsMargin = positionsMarginOf(null)): Allocation {
   const running = bots.filter((v) => v.algo.spec.bot === true && !FINAL_STATUSES.has(v.algo.status));
   // On the quote SoDEX really takes (its minimum where that is larger), as the executor counts it (audit 2026-11-09).
   const need = (v: AlgoView) => botNeedUsd(v.algo.spec, v.bot?.minOrderUsd ?? 0);
@@ -69,10 +70,12 @@ export function marginOf(bots: readonly AlgoView[], copies: readonly MarginCopy[
   const botItems: MarginItem[] = real.map(({ v, usd }, i) => ({ id: `bot:${v.algo.id}`, kind: 'bot', label: botName(v), usd, color: BOT_SHADES[i % BOT_SHADES.length]!, coin: v.algo.spec.symbol }));
   const copyUsd = copyItems.reduce((t, x) => t + x.usd, 0);
   const botUsd = botItems.reduce((t, x) => t + x.usd, 0);
-  // What the running bots' own positions hold of the account's position margin (their holding at their leverage):
-  // taken off, so Perps is the margin of the user's own positions and a bot's is not counted twice.
-  const botPos = running.filter((v) => !v.algo.spec.paper).reduce((t, v) => t + Math.abs(v.bot?.inventoryUsd ?? 0) / Math.max(1, v.algo.spec.leverage ?? 1), 0);
-  const perpsUsd = Math.max(0, positionsMargin - botPos);
+  // SoDEX's own positions, market by market: on a market where real bots run, the position is theirs up to what they
+  // may hold (their margin need), so Perps is the user's own and a bot's is not counted twice. Not the bots' views of
+  // their holding: read at another moment than SoDEX's state, a fast bot's view put its position under Perps.
+  const caps = new Map<string, number>();
+  for (const { v, usd } of real) caps.set(v.algo.spec.symbol, (caps.get(v.algo.spec.symbol) ?? 0) + usd);
+  const perpsUsd = splitPositionsMargin(positions, caps).own;
   const used = perpsUsd + copyUsd + botUsd;
   const executorCopies = cs.filter(({ c }) => c.mode !== 'browser').reduce((t, x) => t + x.usd, 0);
   return {
@@ -98,14 +101,13 @@ export function useAllocation(ctx: BotsCtx): Allocation {
 }
 
 /**
- * The margin the account's open positions hold now: SoDEX's perps state, isolated position margin (im) plus cross
- * position margin (cm). Read from the shared account feed (the order ticket's), every 20 s.
+ * The margin the account's open positions hold now, in all and per market: SoDEX's perps state (im + cm, and each
+ * position at its leverage). Read from the shared account feed (the order ticket's), every 20 s.
  */
-function usePositionsMargin(address: string | null): number {
+function usePositionsMargin(address: string | null): PositionsMargin {
   const acct = useAccountResource(address ? `state:perps:${address}` : null, () => api.state('perps', address!), 20_000);
   const st = (acct.data as { state?: Record<string, unknown> } | null)?.state;
-  const n = (x: unknown) => { const v = num(x); return Number.isFinite(v) ? v : 0; };
-  return st ? n(st.im) + n(st.cm) : 0;
+  return useMemo(() => positionsMarginOf(st), [st]);
 }
 
 /* ------------------------------------------------------------------ the panel ----- */
