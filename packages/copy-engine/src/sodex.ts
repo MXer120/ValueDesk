@@ -30,7 +30,29 @@ import type { FollowerSnapshot, LeaderRead, MarginChoice, MarketInfo } from './t
 export class OutcomeUnknownError extends Error {
   override name = 'OutcomeUnknownError';
   readonly outcomeUnknown = true;
+  /**
+   * SoDEX's gateway answered HTTP 503, or gave no answer while SoDEX is in maintenance (SodexClient.maintenance):
+   * most likely never placed. Still looked up, never re-sent; the algo runtime settles such an order soon after
+   * SoDEX is back once SoDEX lists it nowhere (instead of after UNLISTED_SETTLE_MS).
+   */
+  readonly maintenance: boolean;
+  constructor(message: string, maintenance = false) {
+    super(message);
+    this.maintenance = maintenance;
+  }
 }
+
+/** SoDEX in maintenance (the executor's watch, apps/executor/src/venue.ts): why the engines hold, since when, and when SoDEX expects to be back. */
+export interface VenueHold {
+  /** The words a held copy or algo shows. */
+  reason: string;
+  since: number;
+  /** SoDEX's own estimate (ms), or null. */
+  expectedEnd: number | null;
+}
+
+/** What a write that met SoDEX's maintenance says instead of "it may still have executed". */
+export const MAINTENANCE_UNKNOWN = 'SoDEX is in maintenance - this order was most likely not placed; it is checked again when SoDEX is back.';
 
 /**
  * Refused here, before anything was signed onto the wire: the local rate gate
@@ -41,8 +63,8 @@ export class OutcomeUnknownError extends Error {
 export class LocalRefusal extends SodexApiError {
   override name = 'LocalRefusal';
   readonly local = true;
-  constructor(message: string, path = '', readonly reason: 'rate' | 'account-rate' | 'not-allowed' = 'rate') {
-    super(reason === 'not-allowed' ? 403 : 429, `Not sent: ${message}`, reason === 'not-allowed' ? 403 : 429, path);
+  constructor(message: string, path = '', readonly reason: 'rate' | 'account-rate' | 'not-allowed' | 'maintenance' = 'rate') {
+    super(reason === 'not-allowed' ? 403 : reason === 'maintenance' ? 503 : 429, `Not sent: ${message}`, reason === 'not-allowed' ? 403 : reason === 'maintenance' ? 503 : 429, path);
   }
 }
 
@@ -674,6 +696,12 @@ export class SodexClient {
   readonly queue: SendQueue;
   /** How SoDEX's REST has answered lately (reachability, for the health check and alerts). */
   readonly reach: SodexReach = { lastOkAt: 0, lastFailAt: 0, failingSince: 0, lastError: null };
+  /**
+   * Set by the executor's maintenance watch while SoDEX is in maintenance (null otherwise): an opening order is
+   * refused here (LocalRefusal 'maintenance': nothing sent), and a write that gets no answer or a 5xx says so in
+   * MAINTENANCE_UNKNOWN's words instead of "it may still have executed".
+   */
+  maintenance: VenueHold | null = null;
   private readonly fetch: FetchLike;
   private readonly readTimeoutMs: number;
   private readonly writeTimeoutMs: number;
@@ -770,8 +798,12 @@ export class SodexClient {
       throw new LocalRefusal(`${req.method} ${req.gatewayPath} is not an action this copier sends`, req.gatewayPath, 'not-allowed');
     }
     const shape = writeShape(req.method, req.gatewayPath, req.body);
+    const cls = sendClass(req.method, req.gatewayPath, shape.priority);
+    // Nothing that opens goes into SoDEX's maintenance (the runtimes hold before this; this is the last gate).
+    // Closes, stops, cancels and leverage still go: they only ever protect, and SoDEX may already answer again.
+    if (this.maintenance && cls === 'open') throw new LocalRefusal('SoDEX is in maintenance; nothing new is sent until it is back', req.gatewayPath, 'maintenance');
     // Weight of a signed write: 1 + floor(N/40) for a batch of N (research 01); the queue books it.
-    return this.queue.submit(sendClass(req.method, req.gatewayPath, shape.priority), shape.accountId, shape.orders, ((enqueued) => () => this.transmit<T>(req, enqueued, shape.accountId, shape.symbolId))(Date.now()), req.gatewayPath, this.lanesByMarket ? laneOf(shape.accountId, req.method, req.body) : shape.accountId);
+    return this.queue.submit(cls, shape.accountId, shape.orders, ((enqueued) => () => this.transmit<T>(req, enqueued, shape.accountId, shape.symbolId))(Date.now()), req.gatewayPath, this.lanesByMarket ? laneOf(shape.accountId, req.method, req.body) : shape.accountId);
   }
 
   /** The request as it goes out: as built, or through the fast door (fastDoor) when it is a perps order or cancel. */
@@ -827,6 +859,7 @@ export class SodexClient {
         : await this.fetch(url, { ...init, signal: ctl.signal });
     } catch (e) {
       this.unreached(e);
+      if (this.maintenance) throw new OutcomeUnknownError(MAINTENANCE_UNKNOWN, true);
       throw new OutcomeUnknownError(`SoDEX did not answer (${String(e).slice(0, 120)}); the request may still have executed.`);
     } finally {
       timers.cancel(timer);
@@ -838,7 +871,10 @@ export class SodexClient {
     if (isIpRateLimited(res.status, text)) throw new IpRateLimitedError(req.gatewayPath);
     const unreadable = res.status < 400 && text.trim() !== '' && !/^[\[{]/.test(text.trim());
     if (res.status >= 500 || unreadable) {
-      throw new OutcomeUnknownError(`SoDEX answered HTTP ${res.status} after receiving the request; it may still have executed.`);
+      // HTTP 503 is SoDEX's gateway turning requests away (its maintenance answers every route so): flagged, so the
+      // algo runtime settles the order promptly once SoDEX is back and lists it nowhere. Still never re-sent.
+      if (this.maintenance && res.status >= 500) throw new OutcomeUnknownError(MAINTENANCE_UNKNOWN, true);
+      throw new OutcomeUnknownError(`SoDEX answered HTTP ${res.status} after receiving the request; it may still have executed.`, res.status === 503);
     }
     return parseEnvelope<T>(res.status, text, req.gatewayPath);
   }

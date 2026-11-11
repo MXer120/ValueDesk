@@ -34,14 +34,18 @@
  */
 import type { AlgoRecord, AlgoSink, ChildRequest, ChildResult, MarginChoice, MarketInfo, OrderSink, SendResult, StopOrder, StopRequest, WeightBudget } from '../../../packages/copy-engine/src/index.ts';
 import type { BuilderParams } from '../../../packages/sodex-core/src/index.ts';
+import { MAINTENANCE_TEXT } from '../../../packages/copy-engine/src/algo/refusals.ts';
 
-export type RejectClass = 'key' | 'margin' | 'limit' | 'account-rate' | 'size' | 'gone' | 'unknown' | 'ip-rate' | 'local' | 'post-only' | 'nonce';
+export type RejectClass = 'key' | 'margin' | 'limit' | 'account-rate' | 'size' | 'gone' | 'unknown' | 'ip-rate' | 'local' | 'maintenance' | 'post-only' | 'nonce';
 
 /** Sort one refusal text (SoDEX's words, or the local gate's "Not sent: ..."). SoDEX does not document them, so this reads loosely. */
 export function classifyRejection(error: string | null | undefined): RejectClass {
   const e = String(error ?? '');
   // A local refusal of any kind - the order rate included - never left: waited out, never a strike (research 2026-11-09).
   if (/^Not sent:/i.test(e)) return 'local';
+  // SoDEX's maintenance (copy-engine refusals.ts MAINTENANCE_TEXT): not the order's fault, not ours - never a strike, never an
+  // "unknown refusal" alert. The maintenance watch (venue.ts) holds every copy and algo and tells the operator once.
+  if (MAINTENANCE_TEXT.test(e)) return 'maintenance';
   // The touch moved under a post-only quote: re-priced on the next step; a market maker sees many (research 2026-11-09).
   if (/post[- _]?only|would (immediately )?(take|cross|match|trade)|immediately (match|execute)|maker only/i.test(e)) return 'post-only';
   // A nonce out of order: nothing executed, the next write is fine.
@@ -101,6 +105,7 @@ const COPY_POLICY: Record<RejectClass, Policy> = {
   unknown: { strikes: 5, holdMs: 15 * 60_000, words: 'SoDEX refused several orders' },
   'ip-rate': { strikes: 0, holdMs: 0, words: '' },
   local: { strikes: 0, holdMs: 0, words: '' },
+  maintenance: { strikes: 0, holdMs: 0, words: '' },
   'post-only': { strikes: 0, holdMs: 0, words: '' },
   nonce: { strikes: 0, holdMs: 0, words: '' },
 };

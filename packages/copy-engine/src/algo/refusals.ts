@@ -11,16 +11,25 @@
  *   limit       open-interest or position cap: as margin (limits.ts limitRefusal names it)
  *   rate        IP 429 / Cloudflare 1015 / address quota / account order rate: wait; never counted
  *   local       refused here before sending ("Not sent: ..."): wait; never counted
+ *   maintenance SoDEX is in maintenance (its words, an HTTP 503 or "service unavailable" in a refusal): held until it
+ *               is back (the executor's maintenance watch); never counted, never a reason for a bot to stop
  *   nonce       a nonce out of order: nothing was executed, the next send is fine; never counted
  *   key         the trading key is missing, expired or not approved: the host's problem check holds the bot
  *   halt        the market halted or delisted: the market check holds (delisting ends through the close)
  *   price       tick, lot, band or minimum: re-read the market and re-price; counted (it should not repeat)
  *   unknown     anything else: counted
  */
-export type RefusalKind = 'post-only' | 'position' | 'margin' | 'limit' | 'rate' | 'local' | 'nonce' | 'key' | 'halt' | 'price' | 'unknown';
+export type RefusalKind = 'post-only' | 'position' | 'margin' | 'limit' | 'rate' | 'local' | 'maintenance' | 'nonce' | 'key' | 'halt' | 'price' | 'unknown';
+
+/**
+ * SoDEX's maintenance in a refusal's words. Read before 'margin' ("service unavailable" holds "available") and 'halt'
+ * ("trading suspended for maintenance" is maintenance). Not a bare 503: a size like 0.503 would match it.
+ */
+export const MAINTENANCE_TEXT = /maint[ae]n[ae]nce|HTTP 503|service (is )?(temporarily )?unavailable|upgrade in progress|system (is )?(being )?upgrad/i;
 
 const RULES: ReadonlyArray<[RefusalKind, RegExp]> = [
   ['local', /^not sent\b/i],
+  ['maintenance', MAINTENANCE_TEXT],
   ['post-only', /post[- _]?only|would (immediately )?(take|cross|match|trade)|immediately (match|execute)|maker only|gtx/i],
   ['position', /reduce[- ]?only|no position|position (is )?(not|does not|doesn't)|position not found|exceeds? (the )?position|position size|position.*(zero|empty|closed)/i],
   ['rate', /\b429\b|1015|rate[- ]?limit|too many|quota|weight|order rate|throttl/i],
@@ -53,6 +62,7 @@ export function refusalWords(k: RefusalKind): string {
     case 'limit': return 'a SoDEX position or open-interest limit; new orders wait, closing goes on';
     case 'rate': return 'SoDEX asked to slow down; it waits and goes on';
     case 'local': return 'held back here to keep within SoDEX\'s limits; it goes on';
+    case 'maintenance': return 'SoDEX is in maintenance; it waits and goes on when SoDEX is back';
     case 'nonce': return 'a request arrived out of order; sent again';
     case 'key': return 'the trading key was not accepted; renew it in setup';
     case 'halt': return 'the market is not trading now';

@@ -24,7 +24,7 @@ import { CONFIRM_READS, CONFIRM_GAP_MS, confirmRead, sizeView } from '../confirm
 import { randomId, sleep, timers, type Logger, type WebSocketFactory } from '../io.ts';
 import { MarketBook, notListedLine, snapPrice } from '../markets.ts';
 import type { RegionPolicy } from '../policy.ts';
-import type { SodexClient } from '../sodex.ts';
+import type { SodexClient, VenueHold } from '../sodex.ts';
 import type { MarketInfo } from '../types.ts';
 import { AlgoFeed, BOT_QUOTE_MAX_AGE_MS, type AlgoMarket, type OrderUpdate, type Print } from './feed.ts';
 import {
@@ -130,6 +130,13 @@ const UNLISTED_CANCEL_MS = 120_000;
  * order can ever have. Until then it counts as live in full (pendingQty): nothing is sent in its place.
  */
 const UNLISTED_SETTLE_MS = 20 * 60_000;
+/**
+ * ...except a child whose send SoDEX's gateway turned away (HTTP 503, or no answer while SoDEX was in maintenance:
+ * ChildOrder.maint). It is cancelled by its id as soon as SoDEX, back, lists it nowhere (open orders and history read
+ * after the maintenance), and settled this long after that cancel once CONFIRM_READS more trades reads agree - minutes,
+ * not UNLISTED_SETTLE_MS: an order SoDEX lists nowhere after its maintenance was not placed (owner 2026-11-11).
+ */
+const MAINT_SETTLE_MS = 30_000;
 /** The trades read for unlisted children: a full page may have left fills out, so it confirms nothing. */
 const FILLS_PAGE = 100;
 const DONE_KEPT = 60;
@@ -238,6 +245,13 @@ export interface AlgoHost {
    * they only ever reduce a position. Released, it goes on by itself.
    */
   brake?(a: AlgoRecord): string | null;
+  /**
+   * SoDEX in maintenance (the executor's watch): while it returns one, a live algo or bot is held ('waiting', the
+   * reason in its words) and sends nothing - no child, no close, no exit, no cancel (SoDEX answers every one 503).
+   * Nothing it meets then counts as a refusal (MAX_CONSEC_REJECTS, a bot's stop rounds). Once SoDEX is back it goes on
+   * by itself, and a child sent into the maintenance is settled as soon as SoDEX lists it nowhere (MAINT_SETTLE_MS).
+   */
+  venue?(): VenueHold | null;
   /** The owner's signed position on `symbol` (default: read from SoDEX). */
   position?(a: AlgoRecord, symbol: string): Promise<number | null>;
   /** The owner's positions: signed size and entry per market (default: read from SoDEX). Position conditions read these. */
@@ -413,6 +427,10 @@ export class AlgoRuntime {
   private socketWasUp = false;
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
   private heldNow = new Set<string>();
+  /** Live algos held by SoDEX's maintenance: told once it is back. */
+  private venueHeldIds = new Set<string>();
+  /** SoDEX was in maintenance at the last look (venueNow): its end resets the unlisted reads of children sent into it. */
+  private venueWas = false;
   /** When an account a bot pauses after last took: market:account -> ms. */
   private takerAt = new Map<string, number>();
   /**
@@ -1455,7 +1473,7 @@ export class AlgoRuntime {
     // Handled by the bot itself (a price that moved under a post-only quote, SoDEX asking to slow down, an out-of-order
     // nonce, a send held back here, nothing left to reduce): said as what it is - an info line, never hidden - and
     // folded when it repeats. What the user can act on is an info line too; what nothing handles stays an error.
-    if (k === 'post-only' || k === 'rate' || k === 'nonce' || k === 'local' || k === 'position') {
+    if (k === 'post-only' || k === 'rate' || k === 'nonce' || k === 'local' || k === 'position' || k === 'maintenance') {
       await this.saidOnce(a, `refusal:${k}`, 'info', `SoDEX ${verb} ${c.tag}: ${refusalWords(k)}.`, c);
       return;
     }
@@ -1480,7 +1498,8 @@ export class AlgoRuntime {
     add({ id: 'loop', label: 'Bot loop', state: stepAge === null ? 'off' : stepAge < 5_000 ? 'ok' : stepAge < 30_000 ? 'warn' : 'bad', value: stepAge === null ? 'starting' : `last step ${secs(stepAge)} ago` });
     // The service: the operator's brake (a release, an incident).
     const brake = s.paper ? null : this.host.brake?.(a) ?? null;
-    add({ id: 'service', label: 'ValueDesk service', state: brake ? 'warn' : 'ok', value: brake ? `paused: ${brake}` : 'running' });
+    const venue = s.paper ? null : this.host.venue?.() ?? null;
+    add({ id: 'service', label: 'ValueDesk service', state: brake || venue ? 'warn' : 'ok', value: brake ? `paused: ${brake}` : venue ? `waiting: ${venue.reason}` : 'running' });
     // SoDEX's book on its market.
     const q = this.market.quote(s.symbol);
     const qAge = q ? now - q.at : null;
@@ -1572,10 +1591,12 @@ export class AlgoRuntime {
     this.checkPaperExits();
     // A fresh order every step: bots at one price queue in the order their orders leave, so a fixed order would keep the
     // earliest-added users at the front of the queue for good.
+    const venue = this.venueNow();
     for (const a of shuffled([...this.algos.values()])) {
       // An ended algo is not stepped, but its exits still follow what it filled (a resize whose cancel came late, a refusal tried
       // again), and are held against its position: gone, closed outside it, they are cancelled instead (watchExits).
-      if (FINAL_STATUSES.has(a.status)) {
+      // Not while SoDEX is in maintenance: every one of those would meet a 503 (they go on once it is back).
+      if (FINAL_STATUSES.has(a.status) && !(venue && !a.spec.paper)) {
         const m = this.markets.get(a.spec.symbol);
         if (m && this.exitsWatchDue(a, now)) void this.watchExits(a, m, now).catch((e) => this.host.log.error('algo: exits watch failed', { algo: a.id, error: String(e) }));
         else if (m && !this.exitsWatching.has(a.id) && !this.exitsUnchecked(a) && this.exitsDue(a, now)) {
@@ -1598,8 +1619,23 @@ export class AlgoRuntime {
         })
         .finally(() => this.stepDone(a));
     }
-    // Wallets beyond the socket's places, and all of them after a drop: their orders by REST.
-    void this.pollOrders(now).catch((e) => this.host.log.warn('algo: order poll failed', { error: String(e) }));
+    // Wallets beyond the socket's places, and all of them after a drop: their orders by REST. Not into SoDEX's maintenance.
+    if (!venue) void this.pollOrders(now).catch((e) => this.host.log.warn('algo: order poll failed', { error: String(e) }));
+  }
+
+  /**
+   * SoDEX's maintenance now (host.venue), or null. At its end every child sent into it (ChildOrder.maint) is read
+   * afresh: only reads after the maintenance may show it unlisted.
+   */
+  private venueNow(): VenueHold | null {
+    const v = this.host.venue?.() ?? null;
+    if (!v && this.venueWas) {
+      for (const a of this.algos.values()) {
+        for (const c of [...a.children, ...(a.exitOrders ?? [])]) if (c.maint && c.unlisted && c.unlisted.cancelAt === undefined) delete c.unlisted;
+      }
+    }
+    this.venueWas = !!v;
+    return v;
   }
 
   /** Run one step of one algo and wait for it (tests). */
@@ -1623,6 +1659,17 @@ export class AlgoRuntime {
     if (!m) {
       if (this.markets.size) await this.endBot(a, 'failed', `${s.symbol} is no longer listed on SoDEX perps.`);
       return;
+    }
+    // SoDEX in maintenance: nothing is read or sent (every request meets a 503) - not its limits, not its close, not a
+    // pull. Held with the reason; it goes on by itself once SoDEX is back. A paused algo stays paused.
+    if (!s.paper) {
+      const venue = this.venueNow();
+      if (venue) {
+        this.venueHeldIds.add(a.id);
+        if (a.status !== 'paused') await this.hold(a, `Held: ${venue.reason}`);
+        return;
+      }
+      if (this.venueHeldIds.delete(a.id) && !this.stopped(a)) await this.event(a, 'info', 'SoDEX is back from maintenance; it goes on.');
     }
     await this.settleStale(a, m, now);
     // A bot's own limits (loss limit, end time, volume target) and its close come before every hold below: a held bot
@@ -3760,6 +3807,13 @@ export class AlgoRuntime {
       }
     }
     const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
+    // SoDEX in maintenance (it began during this step): nothing goes into its 503s, a close neither.
+    const venue = s.paper ? null : this.host.venue?.() ?? null;
+    if (venue) {
+      this.venueHeldIds.add(a.id);
+      await this.hold(a, `Held: ${venue.reason}`);
+      return [];
+    }
     const brake = s.paper ? null : this.host.brake?.(a) ?? null;
     // A bot's close is reduce-only: it only makes a position smaller, as an exit does, so the brake lets it through.
     if (brake && (opening || !(s.bot && a.k.closing))) {
@@ -3904,8 +3958,13 @@ export class AlgoRuntime {
         if (a.k.failRounds) delete a.k.failRounds;
       } else if (r.outcomeUnknown) {
         if (c.state === 'sending') c.state = 'unknown';
+        if (r.maintenance) {
+          // Turned away by SoDEX's gateway (its maintenance): most likely never placed, settled soon after SoDEX is back.
+          c.maint = true;
+          await this.event(a, 'info', `SoDEX is in maintenance - ${c.tag} was most likely not placed; it is checked again when SoDEX is back (never re-sent).`, c);
+        }
         // Handled (it is looked up, never sent twice): a bot's activity says so plainly, not as an error.
-        await this.event(a, s.bot ? 'info' : 'error', `No answer from SoDEX for ${c.tag} yet; checking what happened (never re-sent).`, c);
+        else await this.event(a, s.bot ? 'info' : 'error', `No answer from SoDEX for ${c.tag} yet; checking what happened (never re-sent).`, c);
       } else {
         c.state = 'done';
         c.cancelling = false;
@@ -4084,8 +4143,10 @@ export class AlgoRuntime {
    */
   private refusalSeen(a: AlgoRecord, c: ChildOrder, text: string): void {
     const kind = refusalKind(text);
-    // Algo orders count every refusal as before; a bot only what nothing here handles (owner 2026-11-08).
-    if (!a.spec.bot || countsAsFailure(kind)) a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
+    // Algo orders count every refusal as before; a bot only what nothing here handles (owner 2026-11-08). Never one of
+    // SoDEX's maintenance, nor anything refused while it is in maintenance (owner 2026-11-11).
+    const maintenance = kind === 'maintenance' || !!this.host.venue?.();
+    if (!maintenance && (!a.spec.bot || countsAsFailure(kind))) a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
     if (a.spec.bot && kind === 'margin' && !c.reduceOnly) a.k.marginUntil = Date.now() + BOT_MARGIN_WAIT_MS;
     this.host.log.warn('algo: SoDEX refused a child', { algo: a.id, owner: a.owner, symbol: a.spec.symbol, tag: c.tag, kind, text });
     this.dirty.add(a.id);
@@ -4097,6 +4158,12 @@ export class AlgoRuntime {
    * it holds - whatever its On stop says - and stop (owner 2026-11-08: never stop with its position or quotes left).
    */
   private async tooManyRefusals(a: AlgoRecord): Promise<void> {
+    // SoDEX in maintenance: no algo ends and no bot closes or stops for what SoDEX answers then.
+    if (this.host.venue?.() || refusalKind(this.lastRefusal.get(a.id)) === 'maintenance') {
+      a.k.consecRejects = 0;
+      this.dirty.add(a.id);
+      return;
+    }
     if (!a.spec.bot) {
       await this.endBot(a, 'failed', `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
       return;
@@ -4426,6 +4493,7 @@ export class AlgoRuntime {
         } else if (r?.outcomeUnknown) {
           // Asked of SoDEX in settleStale; never sent again blind.
           if (x.state === 'sending') x.state = 'unknown';
+          if (r.maintenance) x.maint = true;
         } else {
           x.state = 'done';
           refused = true;
@@ -4923,7 +4991,7 @@ export class AlgoRuntime {
       if ((missing.length || missingExits.length) && now - this.lastHistoryAt >= HISTORY_EVERY_MS) {
         this.lastHistoryAt = now;
         // Younger ones are only asked of the history again (it is most likely only behind).
-        const unlisted = missing.filter((c) => c.unlisted && now - c.placedAt >= UNLISTED_CANCEL_MS);
+        const unlisted = missing.filter((c) => c.unlisted && (c.maint || now - c.placedAt >= UNLISTED_CANCEL_MS));
         if (unlisted.length && this.tradesTurn) {
           // This turn reads SoDEX's trades for what the history did not list; the next reads the history again.
           this.tradesTurn = false;
@@ -5026,10 +5094,12 @@ export class AlgoRuntime {
         u.cancelAt = Date.now();
         c.cancelling = true;
         c.updatedAt = u.cancelAt;
-        await this.event(a, 'info', `SoDEX does not list ${c.tag}: cancelled by its id, so it can neither rest nor fill. Nothing is sent in its place until SoDEX's trades agree on what it filled (about ${Math.round(UNLISTED_SETTLE_MS / 60_000)} min).`, c);
+        await this.event(a, 'info', c.maint
+          ? `SoDEX, back from maintenance, does not list ${c.tag}: cancelled by its id to be sure, and taken as not placed once SoDEX's trades agree (about a minute).`
+          : `SoDEX does not list ${c.tag}: cancelled by its id, so it can neither rest nor fill. Nothing is sent in its place until SoDEX's trades agree on what it filled (about ${Math.round(UNLISTED_SETTLE_MS / 60_000)} min).`, c);
         continue;
       }
-      if (now - u.cancelAt < UNLISTED_SETTLE_MS) continue;
+      if (now - u.cancelAt < (c.maint ? MAINT_SETTLE_MS : UNLISTED_SETTLE_MS)) continue;
       if (seen === null || full) {
         // Unread, or a page that may have left fills out: confirms nothing, and breaks the agreement so far.
         delete u.agree;

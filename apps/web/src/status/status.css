@@ -138,6 +138,8 @@
 .st-phase.is-active { color: var(--st-tone); }
 .st-phase.is-in_progress, .st-phase.is-upcoming { color: var(--st-maint); }
 .st-notice__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 6px 0 12px 18px; color: var(--dim); font-size: 12px; }
+.st-notice__src { color: var(--accent, inherit); text-decoration: none; margin-left: auto; }
+.st-notice__src:hover { text-decoration: underline; }
 .st-chip {
   padding: 0 6px; border-radius: var(--radius-sm); background: var(--bg-elevated); box-shadow: var(--depth-1);
   color: var(--muted); font-size: var(--fs-label); line-height: 16px;
