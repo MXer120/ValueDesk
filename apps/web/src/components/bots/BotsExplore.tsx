@@ -14,12 +14,11 @@ import { GLOSSARY } from '../../bots/glossary';
 import { DASH, fmtUsd } from '../../format';
 import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, type BotMarket } from '../../bots/data';
-import { draftFor } from '../../bots/presets';
 import { RECIPE, recipesOf, type RecipeId } from '../../bots/recipes';
-import { bestOf, estimate, feeAdjOf, ownRuns, rankRecipes, type OwnRun } from '../../bots/estimate';
+import { bestOf, estimate, exploreDraft, feeAdjOf, ownRuns, rankRecipes, type OwnRun } from '../../bots/estimate';
 import { StrategyTile } from './BotIcon';
 import { goBots, type BotsView } from '../../bots/routes';
-import { BotsHead, type BotsCtx } from './BotsPage';
+import { BOTS_PREFILL_KEY, BotsHead, type BotsCtx } from './BotsPage';
 import { CONF_HINT, CONF_WORDS, TAKER_COLORS, Takers, bpCls, fmtBpUsd } from './BotNewPage';
 import { MarketConditions } from './BotsRegime';
 import { SCORE_WORDS, marketScore, scoreColour } from '../../bots/score';
@@ -65,7 +64,15 @@ function HourProfile({ m, feeBps }: { m: BotMarket; feeBps: number }) {
 }
 
 const PROOF = { proven: { tone: 'positive', label: 'Proven live' }, tested: { tone: 'neutral', label: 'Tested' }, early: { tone: 'warning', label: 'Early' } } as const;
-const BASE = draftFor('market');
+
+/**
+ * Configure: the New bot page on this market with this preset - exactly the bot whose estimate was shown
+ * (exploreDraft). A "Run again" settings copy still waiting in this tab is dropped, so it can never take its place.
+ */
+function configure(market: string, kind: RecipeId | null): void {
+  try { sessionStorage.removeItem(BOTS_PREFILL_KEY); } catch { /* private mode: nothing kept */ }
+  goBots({ page: 'new', market, kind });
+}
 
 /**
  * When the estimates were computed. Fresh: the time and the refresh; older than 15 minutes, the date and how old, so a
@@ -86,7 +93,7 @@ function readWords(at: number, now = Date.now()): string {
  * trades, how the estimate adds up and what our tests measured; Configure starts it.
  */
 function BotsHere({ m, runs, sel, pick, feeAdj = 0 }: { m: BotMarket; runs: readonly OwnRun[]; sel: RecipeId | null; pick: (id: RecipeId) => void; feeAdj?: number }) {
-  const ranked = rankRecipes(m, BASE, runs, feeAdj);
+  const ranked = rankRecipes(m, runs, feeAdj);
   const best = bestOf(ranked);
   return (
     <section className="bots-xd__b">
@@ -112,7 +119,7 @@ function BotsHere({ m, runs, sel, pick, feeAdj = 0 }: { m: BotMarket; runs: read
 /** The picked bot on this market: its estimate, how it adds up, its tests. */
 function BotResult({ m, id, runs, feeAdj = 0 }: { m: BotMarket; id: RecipeId; runs: readonly OwnRun[]; feeAdj?: number }) {
   const rc = RECIPE[id];
-  const est = rankRecipes(m, BASE, runs, feeAdj).find((x) => x.id === id)?.est ?? null;
+  const est = rankRecipes(m, runs, feeAdj).find((x) => x.id === id)?.est ?? null;
   if (!est || est.bp === null) return <section className="bots-xd__b"><h4>{rc.name}</h4><p className="bots-fine">No estimate for this bot here.</p></section>;
   const lines = est.lines.filter((l) => l.id !== 'market');
   return (
@@ -127,14 +134,14 @@ function BotResult({ m, id, runs, feeAdj = 0 }: { m: BotMarket; id: RecipeId; ru
         {lines.map((l) => <div key={l.id} title={l.note}><dt>{l.label}</dt><dd className={l.counted === false ? 'dim' : bpCls(l.bp)}>{l.bp === null ? 'not measured' : fmtBpUsd(l.bp)}{l.counted === false ? ' (not counted)' : ''}</dd></div>)}
       </dl>
       {rc.evidence.length > 0 && <div className="bots-xres__ev">{rc.evidence.map((e) => <span key={e.what} className={`bots-ev is-${e.kind}`}><i aria-hidden="true" />{e.what}<b className={bpCls(e.bp)}>{fmtBpUsd(e.bp)}</b></span>)}</div>}
-      <Button variant="primary" size="sm" icon="gear" onClick={() => goBots({ page: 'new', market: m.symbol, kind: id })}>Configure {rc.name.toLowerCase()}</Button>
+      <Button variant="primary" size="sm" icon="gear" onClick={() => configure(m.symbol, id)}>Configure {rc.name.toLowerCase()}</Button>
     </section>
   );
 }
 
 function Detail({ m, feeBps, runs, feeAdj = 0 }: { m: BotMarket; feeBps: number; runs: readonly OwnRun[]; feeAdj?: number }) {
   const [sel, setSel] = useState<RecipeId | null>(null);
-  const best = bestOf(rankRecipes(m, BASE, runs, feeAdj));
+  const best = bestOf(rankRecipes(m, runs, feeAdj));
   const id = sel ?? best?.id ?? 'r10';
   return (
     <div className="bots-xd">
@@ -190,12 +197,12 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
     const out = new Map<string, { id: RecipeId; bp: number | null; volumeX: number; n: number }>();
     for (const m of r.data?.markets ?? []) {
       if (pick === 'best') {
-        const ranked = rankRecipes(m, BASE, runs, feeAdj);
+        const ranked = rankRecipes(m, runs, feeAdj);
         const top = bestOf(ranked)!;
         out.set(m.symbol, { id: top.id, bp: top.est.bp, volumeX: top.est.volumeX, n: ranked.length });
       } else {
         const id: RecipeId = m.lead === null && RECIPE[pick].oracle ? 'touch' : pick;
-        const e = estimate({ ...BASE, ...RECIPE[id].params, strategy: RECIPE[id].strategy, symbol: m.symbol }, m, runs, feeAdj);
+        const e = estimate(exploreDraft(id, m.symbol), m, runs, feeAdj);
         out.set(m.symbol, { id, bp: e.bp, volumeX: e.volumeX, n: 1 });
       }
     }
@@ -366,7 +373,7 @@ export function BotsExplore({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
                           <td className="right num dim xc-a">{m.spreadBps < 0.05 ? '<0.1' : m.spreadBps.toFixed(1)} bp</td>
                           <td className="right num dim xc-a">{Math.round(m.volBpsH)} bp/h</td>
                           <td className="right num xc-b">{fmtUsd(m.volumeUsdH, 0)}</td>
-                          <td className="right"><Button variant="secondary" icon="gear" className="bots-xcfg" aria-label={`Configure a bot on ${m.base}`} onClick={(e) => { e.stopPropagation(); goBots({ page: 'new', market: m.symbol, kind: row?.id ?? null }); }}><span>Configure</span></Button></td>
+                          <td className="right"><Button variant="secondary" icon="gear" className="bots-xcfg" aria-label={`Configure a bot on ${m.base}`} onClick={(e) => { e.stopPropagation(); configure(m.symbol, row?.id ?? null); }}><span>Configure</span></Button></td>
                         </tr>
                         {isOpen && (
                           <tr className="bots-xdetail">

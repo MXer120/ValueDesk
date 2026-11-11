@@ -17,7 +17,7 @@
 import { ianaZone, type AlgoView } from '@copy-engine';
 import type { BotMarket } from './data';
 import type { BotDraft, QuietWindow } from './presets';
-import { RECIPE, recipeOfDraft, recipeOfSpec, type Recipe, type RecipeId } from './recipes';
+import { RECIPE, draftOfRecipe, recipeOfDraft, recipeOfSpec, type Recipe, type RecipeId } from './recipes';
 
 export type Source = 'market' | 'tests' | 'yours' | 'none';
 /**
@@ -240,11 +240,18 @@ export function estimate(d: BotDraft, m: BotMarket | null, runs: readonly OwnRun
   return { bp, low: m.estCostLowBps + shift, high: m.estCostHighBps + shift, volumeX: x, lines, learned, confidence: conf };
 }
 
+/**
+ * The exact bot Explore estimates for a preset on a market - and the one its Configure opens (BotNewPage builds its
+ * draft with the same draftOfRecipe), so what starts is what was estimated (owner 2026-11-11: "if I'm on Explore and
+ * press Configure I want THAT exact config to be used").
+ */
+export const exploreDraft = (id: RecipeId, symbol: string): BotDraft => draftOfRecipe(id, symbol);
+
 /** The bots a market suits, cheapest first (Explore): every market maker on its reading. */
-export function rankRecipes(m: BotMarket, base: BotDraft, runs: readonly OwnRun[] = [], feeAdjBps = 0): Array<{ id: RecipeId; est: BotEstimate }> {
+export function rankRecipes(m: BotMarket, runs: readonly OwnRun[] = [], feeAdjBps = 0): Array<{ id: RecipeId; est: BotEstimate }> {
   const ids: RecipeId[] = m.lead === null ? ['touch'] : ['r10', 'r10g', 's1', 'n5', 'n5g', 'touch'];
   return ids
-    .map((id) => ({ id, est: estimate({ ...base, ...RECIPE[id].params, strategy: RECIPE[id].strategy, symbol: m.symbol }, m, runs, feeAdjBps) }))
+    .map((id) => ({ id, est: estimate(exploreDraft(id, m.symbol), m, runs, feeAdjBps) }))
     .sort((a, b) => (a.est.bp ?? 99) - (b.est.bp ?? 99));
 }
 

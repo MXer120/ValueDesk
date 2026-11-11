@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import { parseAlgoSpec, type AlgoSpec, type AlgoView } from '@copy-engine';
 import type { BotMarket } from './data';
 import { draftFor, draftOfSpec, specOf, type BotDraft } from './presets';
-import { RECIPE, RECIPES, recipeOfDraft, recipeOfSpec } from './recipes';
-import { PRIOR_USD, bestOf, estimate, feeAdjOf, ownRuns, quietCover, quietCoverLocal, rankRecipes } from './estimate';
+import { RECIPE, RECIPES, draftOfRecipe, recipeOfDraft, recipeOfSpec } from './recipes';
+import { PRIOR_USD, bestOf, estimate, exploreDraft, feeAdjOf, ownRuns, quietCover, quietCoverLocal, rankRecipes } from './estimate';
 
 const M: BotMarket = {
   symbol: 'ETH-USD', base: 'ETH', tick: 0.01, tickBps: 0.03, price: 3000, volumeUsdH: 2_000_000, spreadBps: 0.1, volBpsH: 100,
@@ -53,7 +53,7 @@ test('a saving only tests show is not counted; an extra cost from tests is', () 
   const n5 = estimate({ ...r10(), ...RECIPE.n5.params }, M);
   assert.ok(n5.bp! > 1.6);
   // So the cheapest shown is the best: ties go to the simpler bot (R10 ahead of S1).
-  assert.equal(bestOf(rankRecipes({ ...M, gateCostBps: null }, draftFor('market')))!.id, 'r10');
+  assert.equal(bestOf(rankRecipes({ ...M, gateCostBps: null }))!.id, 'r10');
 });
 
 test('the flow gate: its bucket (the window scales the threshold); pause drops, shrink keeps it smaller', () => {
@@ -122,10 +122,10 @@ test('every market maker makes a spec the engine accepts and reads back as the s
 });
 
 test('ranking: cheapest first; an early bot is never called best', () => {
-  const ranked = rankRecipes(M, draftFor('market'));
+  const ranked = rankRecipes(M);
   for (let i = 1; i < ranked.length; i++) assert.ok((ranked[i - 1]!.est.bp ?? 99) <= (ranked[i]!.est.bp ?? 99));
   assert.notEqual(RECIPE[bestOf(ranked)!.id].proof, 'early');
-  assert.deepEqual(rankRecipes({ ...M, lead: null }, draftFor('market')).map((x) => x.id), ['touch']);
+  assert.deepEqual(rankRecipes({ ...M, lead: null }).map((x) => x.id), ['touch']);
 });
 
 test('fees: the wallet\'s own bot fee, not the flat 0.1 bp the reading was made with', () => {
@@ -164,4 +164,19 @@ test('a maker on the oracle without a rest time is never shown as the book maker
   assert.equal(RECIPE[recipeOfSpec(s)].oracle, true, 'named as an oracle maker');
   const book = { ...parseAlgoSpec({ kind: 'mm', symbol: 'MCD-USD', orderUsd: 60, maxInventoryUsd: 270, maxLossUsd: 5 }), bot: true } as AlgoSpec;
   assert.equal(recipeOfSpec(book), 'touch');
+});
+
+test('Explore -> Configure: the bot that starts is exactly the one estimated (owner 2026-11-11)', () => {
+  for (const r of RECIPES) {
+    if (r.strategy === 'grid') continue;
+    const shown = rankRecipes(M).find((x) => x.id === r.id);
+    // What BotNewPage builds for ?market=&kind=<id> (draftOfRecipe), estimated again: the same figure.
+    const configured = draftOfRecipe(r.id, M.symbol);
+    assert.deepEqual(configured, exploreDraft(r.id, M.symbol), `${r.id}: one draft for both`);
+    if (shown) assert.deepEqual(estimate(configured, M), shown.est, `${r.id}: same estimate`);
+    // And what is sent: the volatility gate only on the calm presets, the spread limit on all.
+    const spec = specOf(configured, null) as { stillBps?: number; maxSpreadBps?: number | null };
+    assert.equal((spec.stillBps ?? 0) > 0, r.id === 'r10g' || r.id === 'n5g', `${r.id}: volatility gate`);
+    assert.equal(spec.maxSpreadBps, 20, `${r.id}: spread limit`);
+  }
 });
