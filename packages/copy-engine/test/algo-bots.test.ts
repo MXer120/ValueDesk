@@ -644,6 +644,15 @@ test('grid: rests on every level but the gap; a buy filled puts a sell one level
   assert.deepEqual(prices('sell'), [60_000, 60_500, 61_000], 'back as they were');
 });
 
+test('grid: a 40-level grid goes out in batches under the account order rate (live 2026-11-12: one batch of 39 was refused every time)', async () => {
+  const r = await rig();
+  const a = await add(r, { kind: 'grid', maxLossUsd: 1_000_000, low: 50_000, high: 70_000, levels: 40, orderUsd: 30, spacing: 'geometric' });
+  await step(r, a.id);
+  assert.ok(r.ex.resting.size > 0 && r.ex.resting.size <= 12, `first batch ${r.ex.resting.size}`);
+  for (let i = 0; i < 5; i++) await step(r, a.id, 500);
+  assert.equal(r.ex.resting.size, 39, 'every level but the gap, after a few steps');
+});
+
 test('grid: a level the price is through waits instead of being refused; sizes reach SoDEX\'s minimum', async () => {
   const r = await rig();
   // Owner 2026-11-08: a bot thinks in USD; a level the step puts under SoDEX's minimum goes out at it, said in a note.

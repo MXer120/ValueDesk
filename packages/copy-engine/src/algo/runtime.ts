@@ -338,6 +338,8 @@ const BOT_CLOSE_REST_MS = 60_000;
 const BOT_CLOSE_SLIP_BPS = 30;
 /** A grid level SoDEX refused (a post-only that would take) is tried again no sooner than this. */
 const GRID_RETRY_MS = 3_000;
+/** A grid's orders in one signed batch: under the account's order rate a second, with room for its other bots. */
+export const GRID_BATCH = 12;
 /** A volume maker side SoDEX refused waits this long first (doubling to a minute while it keeps being refused). */
 const MM_RETRY_MS = 500;
 
@@ -2793,9 +2795,11 @@ export class AlgoRuntime {
       send.push({ side: want, price: p, quantity: qty, tif: (a.spec as { postOnly?: false }).postOnly === false ? 'gtc' : 'gtx', tag: `grid ${i + 1}/${n}` });
     }
     if (pull.length) await this.cancelChildren(a, m, pull);
-    // One signed batch a step, at most 50 orders (the rest the next step).
+    // One signed batch a step, at most GRID_BATCH orders (the rest the next steps): SoDEX's order rate is 20 a second
+    // per account and the executor admits 90% of it (sodex.ts AccountRate), a batch over that is refused whole every
+    // time - live 2026-11-12, a 20- and a 40-level grid never placed a level until the batch was cut.
     if (!send.length || this.stopped(a)) return;
-    const sent = await this.send(a, m, send.slice(0, 50));
+    const sent = await this.send(a, m, send.slice(0, GRID_BATCH));
     // A level SoDEX refused in its answer waits before it goes out again - 3 s, doubling to a minute while it keeps
     // being refused - so one level it will not take never runs the whole grid into its refusal limit.
     const back = { ...((a.k.gback as Record<string, number> | undefined) ?? {}) };
