@@ -97,7 +97,7 @@ __ORIGIN_SITE_ADDRESSES__ {
 		# wallet moved there (web copy/executor.ts VIP_BASE); the path goes on as /api/copy/v1/*.
 		handle /api/copy-vip/* {
 			uri replace /api/copy-vip/ /api/copy/ 1
-			reverse_proxy https://54-249-40-203.sslip.io {
+			reverse_proxy https://54-64-113-41.sslip.io {
 				header_up Host {upstream_hostport}
 				lb_try_duration 20s
 				lb_try_interval 250ms
