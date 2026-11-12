@@ -64,16 +64,22 @@ export function useHourlyVol(symbol: string | null): number | null {
 }
 
 export type GridPresetId = 'gridc' | 'grid' | 'gridv';
-export interface GridPreset { id: GridPresetId; k: number; levels: number; outOfRange: 'wait' | 'stop' }
+export interface GridPreset { id: GridPresetId; k: number; levels: number; outOfRange: 'wait' | 'stop'; runHours: number | null }
 /**
- * The three grids (docs/BOTS.md "Grid backtest"): the step k x the hourly volatility, the levels, out of the range
- * stop (and close) - stopping lost less than waiting in every one of the tested settings.
+ * The three grids (docs/BOTS.md "Grid backtest"): the step k x the hourly volatility, the levels, the out-of-range rule
+ * and the run each was tested for. Owner 2026-11-12: the first presets (2-4x the volatility) took a day or more for a
+ * first fill, "we need them way smaller/tighter for shorter timeframes" - so two run a day with steps of 0.5x and 1x
+ * the hourly swing (fills within the hour), and one runs a week. Over 1-day runs waiting out of the range lost less
+ * than stopping for the tight grid (stopping lost less in the 7-day runs).
  */
 export const GRID_PRESETS: Readonly<Record<GridPresetId, GridPreset>> = {
-  gridc: { id: 'gridc', k: 4, levels: 10, outOfRange: 'stop' },
-  grid: { id: 'grid', k: 2, levels: 20, outOfRange: 'stop' },
-  gridv: { id: 'gridv', k: 1, levels: 40, outOfRange: 'stop' },
+  gridv: { id: 'gridv', k: 0.5, levels: 20, outOfRange: 'wait', runHours: 24 },
+  grid: { id: 'grid', k: 1, levels: 40, outOfRange: 'stop', runHours: 24 },
+  gridc: { id: 'gridc', k: 3, levels: 10, outOfRange: 'stop', runHours: 168 },
 };
+
+/** Runs up to this long read the backtest's 1-day runs, longer ones its 7-day runs. */
+export const GRID_DAY_RUN_MAX_H = 48;
 
 /** The tested grid closest to a step (in k) and a level count, with the same out-of-range rule. */
 export function nearestGridRow(k: number, levels: number, pol: 'wait' | 'stop'): GridRow | null {
@@ -97,6 +103,8 @@ export interface GridEstimate {
   row: GridRow | null;
   /** This market was among the tested ones. */
   market: boolean;
+  /** Which runs the reading is from: 1-day runs (a run of up to 2 days) or 7-day runs. */
+  horizon: '1d' | '7d';
   /** Per $1M traded, bp (negative earns), at the wallet's fee. */
   bp: number | null;
   /** Mean result a day, bp of the grid's notional (levels x order), at the wallet's fee. */
@@ -113,20 +121,23 @@ export interface GridEstimate {
  * The estimate for a grid on `symbol` with this range and level count, at `feeBps` a fill (maker + bot fee), where
  * the hourly volatility is `volBps`. Without a volatility reading the backtest is not read (bp null).
  */
-export function gridEstimate(o: { symbol: string; stepBps: number; levels: number; outOfRange: 'wait' | 'stop'; volBps: number | null; feeBps: number }): GridEstimate {
+export function gridEstimate(o: { symbol: string; stepBps: number; levels: number; outOfRange: 'wait' | 'stop'; volBps: number | null; feeBps: number; runHours?: number | null }): GridEstimate {
   const stepBps = o.stepBps > 0 ? o.stepBps : 0;
   const k = o.volBps && o.volBps > 0 && stepBps > 0 ? stepBps / o.volBps : null;
   const netStepBps = stepBps - 2 * o.feeBps;
   const row = k !== null ? nearestGridRow(k, o.levels, o.outOfRange) : null;
   // Every tested market together: one market's own 120 days flip sign from the 1-day to the 7-day runs (noise), the
   // pooled reading does not. The market's own is shown beside it (own).
-  const st: GridStat | null = row?.all ?? null;
-  if (!st) return { stepBps, k, netStepBps, row, market: false, bp: null, dayBps: null, ploss: null, p10: null, turn: null, runs: 0 };
+  // A short run reads the 1-day runs (a tight grid's 7-day reading is mostly the days after its range was left).
+  const short = o.runHours !== undefined && o.runHours !== null && o.runHours <= GRID_DAY_RUN_MAX_H && !!row?.day;
+  const horizon: '1d' | '7d' = short ? '1d' : '7d';
+  const st: GridStat | null = (short ? row?.day : row?.all) ?? null;
+  if (!st) return { stepBps, k, netStepBps, row, market: false, horizon, bp: null, dayBps: null, ploss: null, p10: null, turn: null, runs: 0 };
   const [mean, ploss, p10, turn, per1m, runs] = st;
   const dFee = o.feeBps - GRID_BT_FEE_BPS;
   // per1m is $ per $1M traded, + earned: as bp of volume, + cost.
   const bp = -per1m / 100 + dFee;
-  return { stepBps, k, netStepBps, row, market: !!row?.m[o.symbol], bp, dayBps: mean - dFee * turn, ploss, p10: p10 - dFee * turn, turn, runs };
+  return { stepBps, k, netStepBps, row, market: !!row?.m[o.symbol], horizon, bp, dayBps: mean - dFee * turn, ploss, p10: p10 - dFee * turn, turn, runs };
 }
 
 /**

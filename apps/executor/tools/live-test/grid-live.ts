@@ -5,6 +5,7 @@
  *
  *   node --import tsx apps/executor/tools/live-test/grid-live.ts --env <.env.live> [--go] [--hours 24] [--order 11] [--loss 5]
  *   ... --status          the running grids: fills, volume, net
+ *   ... --stop            cancel the running grid-live grids (their onStop closes what they hold)
  * Without --go it prints the plan (ranges, margin) and starts nothing.
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -34,11 +35,11 @@ const LEV = Number(arg('--lev') ?? 3);
 const ONLY = arg('--only');
 const VIP_BASE = 'https://www.valuedesk.so/api/copy-vip/v1';
 const GW = 'https://mainnet-gw.sodex.dev/api/v1/perps/markets';
-// web bots/gridPresets.ts GRID_PRESETS
+// web bots/gridPresets.ts GRID_PRESETS (owner 2026-11-12: tighter, for a day)
 const RUNS = [
-  { symbol: 'BTC-USD', name: 'Range grid', k: 2, levels: 20 },
-  { symbol: 'ETH-USD', name: 'Wide grid', k: 4, levels: 10 },
-  { symbol: 'DOGE-USD', name: 'Dense grid', k: 1, levels: 40 },
+  { symbol: 'BTC-USD', name: 'Tight grid', k: 0.5, levels: 20, outOfRange: 'wait' },
+  { symbol: 'DOGE-USD', name: 'Tight grid', k: 0.5, levels: 20, outOfRange: 'wait' },
+  { symbol: 'ETH-USD', name: 'Range grid', k: 1, levels: 40, outOfRange: 'stop' },
 ];
 type Any = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const log = (s: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${s}`);
@@ -70,6 +71,16 @@ if (STATUS) {
   process.exit(0);
 }
 
+if (process.argv.includes('--stop')) {
+  for (const v of (await vip.algos()) as Any[]) {
+    const a = v.algo;
+    if (a.spec?.kind !== 'grid' || !String(a.spec.label ?? '').startsWith('grid-live') || !['running', 'waiting', 'scheduled', 'paused'].includes(a.status)) continue;
+    await vip.algoAct('cancel', a.id);
+    log(`stopped ${a.spec.symbol} ${a.spec.label} ${a.id}`);
+  }
+  process.exit(0);
+}
+
 const me = (await vip.me()) as Any;
 log(`wallet ${wallet.address.slice(0, 6)}…: key ${me.key?.registered ? 'registered' : 'NOT registered'}, bot fee ${JSON.stringify(me.bots)}`);
 const running = ((await vip.algos()) as Any[]).filter((v) => v.algo.spec?.bot && ['running', 'waiting', 'scheduled'].includes(v.algo.status));
@@ -80,7 +91,7 @@ for (const r of RUNS) {
   const { vol, mark } = await volAndMark(r.symbol);
   const step = r.k * vol;
   const p = Number((Math.pow(1 + step / 1e4, (r.levels - 1) / 2) - 1).toPrecision(4));
-  const spec = { kind: 'grid', symbol: r.symbol, paper: false, label: `grid-live ${r.name}`, low: sig(mark * (1 - p)), high: sig(mark * (1 + p)), levels: r.levels, orderUsd: ORDER, spacing: 'geometric', outOfRange: 'stop', maxSpreadBps: 20, leverage: LEV, maxLossUsd: LOSS, onStop: 'close', volumeTargetUsd: null, endAt };
+  const spec = { kind: 'grid', symbol: r.symbol, paper: false, label: `grid-live ${r.name}`, low: sig(mark * (1 - p)), high: sig(mark * (1 + p)), levels: r.levels, orderUsd: ORDER, spacing: 'geometric', outOfRange: r.outOfRange, maxSpreadBps: 20, leverage: LEV, maxLossUsd: LOSS, onStop: 'close', volumeTargetUsd: null, endAt };
   specs.push(spec);
   log(`${r.symbol} ${r.name}: vol ${vol.toFixed(0)} bp/h, step ${step.toFixed(0)} bp, range ${spec.low}-${spec.high} (±${(p * 100).toFixed(1)}%) around ${mark}, ${r.levels} x $${ORDER} = $${r.levels * ORDER} at ${LEV}x`);
 }

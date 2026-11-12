@@ -35,6 +35,9 @@
 import type { AlgoRecord, AlgoSink, ChildRequest, ChildResult, MarginChoice, MarketInfo, OrderSink, SendResult, StopOrder, StopRequest, WeightBudget } from '../../../packages/copy-engine/src/index.ts';
 import type { BuilderParams } from '../../../packages/sodex-core/src/index.ts';
 
+/** The most cancels in one signed write: 90% of SoDEX's 20 orders a second per account (sodex.ts AccountRate). */
+export const CANCEL_PIECE = 18;
+
 export type RejectClass = 'key' | 'margin' | 'limit' | 'account-rate' | 'size' | 'gone' | 'unknown' | 'ip-rate' | 'local' | 'post-only' | 'nonce';
 
 /** Sort one refusal text (SoDEX's words, or the local gate's "Not sent: ..."). SoDEX does not document them, so this reads loosely. */
@@ -279,7 +282,8 @@ export function guardedAlgoSink(inner: AlgoSink, guard: ErrorGuard, budget: Pick
     },
     async cancel(a: AlgoRecord, market: MarketInfo, clOrdIDs: string[]): Promise<void> {
       try {
-        await inner.cancel(a, market, clOrdIDs);
+        // In pieces under SoDEX's 20 orders a second per account (a 40-level grid's stop is 39 cancels).
+        for (let i = 0; i < clOrdIDs.length; i += CANCEL_PIECE) await inner.cancel(a, market, clOrdIDs.slice(i, i + CANCEL_PIECE));
       } catch (e) {
         guard.recordError(target(a), e);
         throw e;

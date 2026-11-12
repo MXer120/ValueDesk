@@ -30,12 +30,18 @@ test('hourly volatility: sd of 5-minute returns x sqrt 12; too few candles read 
   assert.equal(hourlyVolBps([1, 2, 3]), null);
 });
 
+test('the tight presets fill within the hour: steps of at most one hourly swing, a day long', () => {
+  assert.ok(GRID_PRESETS.gridv.k <= 0.5 && GRID_PRESETS.grid.k <= 1);
+  assert.equal(draftOfRecipe('gridv', 'BTC-USD').runHours, 24);
+  assert.equal(draftOfRecipe('grid', 'BTC-USD').runHours, 24);
+});
+
 test('a preset grid follows the volatility: its step is k x the hourly sd', () => {
   const vol = 40;
   const d = { ...draftOfRecipe('grid', 'BTC-USD'), rangePct: presetRangePct(GRID_PRESETS.grid.k, GRID_PRESETS.grid.levels, vol) };
   assert.equal(d.gridK, GRID_PRESETS.grid.k);
   assert.equal(d.levels, GRID_PRESETS.grid.levels);
-  assert.equal(d.outOfRange, 'stop');
+  assert.equal(d.outOfRange, GRID_PRESETS.grid.outOfRange);
   assert.ok(Math.abs(draftStepBps(d, vol) - GRID_PRESETS.grid.k * vol) < 1e-9);
   // its own prices win over the preset
   const own = { ...d, low: 90, high: 110 };
@@ -43,7 +49,7 @@ test('a preset grid follows the volatility: its step is k x the hourly sd', () =
   // the spec it signs carries a range around the price
   const s = specOf(d, 100) as { low: number; high: number; levels: number; outOfRange: string };
   assert.ok(s.low < 100 && s.high > 100);
-  assert.equal(s.outOfRange, 'stop');
+  assert.equal(s.outOfRange, GRID_PRESETS.grid.outOfRange);
 });
 
 test('the estimate is the backtest row nearest the step, moved to the wallet fee', () => {
@@ -58,6 +64,11 @@ test('the estimate is the backtest row nearest the step, moved to the wallet fee
   assert.ok(Math.abs(b.bp! - a.bp! - 0.5) < 1e-9);
   assert.ok(Math.abs(a.dayBps! - b.dayBps! - 0.5 * row.all[3]) < 1e-9);
   assert.ok(Math.abs(a.netStepBps - (2 * vol - 2 * GRID_BT_FEE_BPS)) < 1e-9);
+  // a run of a day reads the 1-day runs
+  const short = gridEstimate({ symbol: 'BTC-USD', stepBps: 2 * vol, levels: 20, outOfRange: 'stop', volBps: vol, feeBps: GRID_BT_FEE_BPS, runHours: 24 });
+  assert.equal(short.horizon, '1d');
+  assert.ok(Math.abs(short.bp! - -row.day![4] / 100) < 1e-9);
+  assert.equal(a.horizon, '7d');
   // no volatility reading: no estimate
   assert.equal(gridEstimate({ symbol: 'BTC-USD', stepBps: 80, levels: 20, outOfRange: 'stop', volBps: null, feeBps: 1.7 }).bp, null);
 });
@@ -70,7 +81,8 @@ test('every preset has a tested row; a running grid reads back as the closest pr
   }
   assert.ok(GRID_BT.length > 0);
   assert.equal(gridRecipeOf(10), 'gridc');
-  assert.equal(gridRecipeOf(20), 'grid');
-  assert.equal(gridRecipeOf(40), 'gridv');
+  assert.equal(gridRecipeOf(20), 'gridv');
+  assert.equal(gridRecipeOf(40), 'grid');
+  assert.equal(gridRecipeOf(20, 0.5), 'gridv');
   assert.equal(recipeOfDraft(draftOfRecipe('gridv', 'ETH-USD')), 'gridv');
 });

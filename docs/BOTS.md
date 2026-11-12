@@ -269,9 +269,9 @@ when the price leaves the range lost less than waiting in every setting. 7-day r
 
 | Preset | k x L | bp/day | lost | p10 | volume/day | per $1M |
 |---|---|---|---|---|---|---|
-| Wide grid | 4 x 10, stop | +1.1 | 38% | -33 | 0.16x | +$675 |
-| Range grid (default) | 2 x 20, stop | +0.16 | 38% | -37 | 0.32x | +$51 |
-| Dense grid | 1 x 40, stop | -0.47 | 38% | -38 | 0.61x | -$77 |
+| 4 x 10, stop (first Wide preset) | 4 x 10, stop | +1.1 | 38% | -33 | 0.16x | +$675 |
+| 2 x 20, stop (first default) | 2 x 20, stop | +0.16 | 38% | -37 | 0.32x | +$51 |
+| 1 x 40, stop (first Dense preset) | 1 x 40, stop | -0.47 | 38% | -38 | 0.61x | -$77 |
 | (for contrast) | 0.5 x 20, wait | -3.5 | 77% | -16 | 0.71x | -$489 |
 
 Single markets flip sign between the 1-day and 7-day runs (noise), so the app shows the pooled reading; the market's
@@ -284,3 +284,25 @@ the range from k x the volatility now (follows the market until the user types p
 levels 10/20/40/60, the levels row says the gap and what a round trip keeps after fees (an error when it does not
 cover them), the receipt shows the backtest's cost per $1M (fees, steps, price moves), how often it lost and an
 average day on the chosen size, all at the wallet's own fee. Out of range defaults to stop for the presets.
+
+**Tight presets (owner 2026-11-12: "the grids are insanely wide which takes weeks to fill. We need them way
+smaller/tighter for saler timeframes").** The first presets (4x10, 2x20, 1x40) put the first level 1-2 hourly swings
+away: live, BTC and ETH had no fill in 2 h, DOGE (1x) one. Now two presets run a day and one a week, and a run of up
+to 48 h reads the backtest's 1-day runs (a grid started every 6 h, 17 markets), longer ones the 7-day runs:
+
+| Preset | k x L, out of range | runs | bp/day | lost | volume/day | per $1M |
+|---|---|---|---|---|---|---|
+| Tight grid | 0.5 x 20, wait | 24 h | -11.5 | 38% | 4.0x | -$287 |
+| Range grid (default) | 1 x 40, stop | 24 h | -1.8 | 30% | 0.78x | -$234 |
+| Wide grid | 3 x 10, stop | 7 d | +1.1 | 45% | 0.23x | +$463 |
+
+Tight grids pay for their fills: the tighter the step, the more a trend costs per $ traded (0.5x ~ -$290..-$490 per
+$1M, the market maker ~-$185). Over 1-day runs waiting out of the range lost less than stopping for the 0.5x grid
+(-$287 vs -$485), so the tight preset waits; the bot still ends when its day is up. A preset's run length is taken
+only over a default one (none, or the previous grid preset's), never over a run length the user set.
+
+**Live bug found with them (2026-11-12, fixed):** stopping a 40-level grid sends 39 cancels in one write; the send
+queue's account-rate wait (sodex.ts AccountRate.waitMs) could never fit 39 into 20 a second and said "1 ms" forever,
+so the cancel never left and every later write of the account (all its bots) stood behind it. Now a queued write
+larger than a whole window goes alone once the window is clear, and algo cancels go in pieces of 18 (guard.ts
+CANCEL_PIECE). Opening writes stay strict (grids place in batches of 12, runtime.ts GRID_BATCH).

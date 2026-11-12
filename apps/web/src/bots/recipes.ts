@@ -11,7 +11,7 @@
  */
 import type { AlgoSpec } from '@copy-engine';
 import { GATE_DEFAULT, R10, draftFor, type BotDraft, type Strategy } from './presets';
-import { GRID_PRESETS } from './gridPresets';
+import { GRID_PRESETS, type GridPresetId } from './gridPresets';
 
 export type RecipeId = 'r10' | 'r10g' | 's1' | 'n5' | 'n5g' | 'touch' | 'gridc' | 'grid' | 'gridv';
 export type Category = 'market' | 'grid';
@@ -112,26 +112,26 @@ export const RECIPES: readonly Recipe[] = [
     ],
   },
   // The grids (bots/gridPresets.ts GRID_PRESETS, from the grid backtest): the step in units of the market's hourly
-  // volatility, stopped (and closed) when the price leaves the range - stopping beat waiting in every test.
+  // volatility; two tight ones for a day (owner 2026-11-12), one wide one for a week.
   {
-    id: 'gridc', category: 'grid', strategy: 'grid', name: 'Wide grid', code: `Grid ${GRID_PRESETS.gridc.k}σ × ${GRID_PRESETS.gridc.levels}`,
-    line: 'Few levels far apart: trades rarely, rides out bigger swings.',
-    plain: 'The calmest grid. Trades little; the range is wide enough for most weeks.',
-    params: { gridK: GRID_PRESETS.gridc.k, levels: GRID_PRESETS.gridc.levels, outOfRange: GRID_PRESETS.gridc.outOfRange, low: null, high: null },
+    id: 'gridv', category: 'grid', strategy: 'grid', name: 'Tight grid', code: `Grid ${GRID_PRESETS.gridv.k}σ × ${GRID_PRESETS.gridv.levels}`,
+    line: 'Levels half an hourly swing apart: fills within minutes, trades the most.',
+    plain: 'The busiest grid, for a day. Fills on small moves; the range is narrow, so a trend leaves it holding.',
+    params: { gridK: GRID_PRESETS.gridv.k, levels: GRID_PRESETS.gridv.levels, outOfRange: GRID_PRESETS.gridv.outOfRange, low: null, high: null },
     deltaBps: 0, volumeX: 1, oracle: false, proof: 'tested', evidence: [],
   },
   {
     id: 'grid', category: 'grid', strategy: 'grid', name: 'Range grid', code: `Grid ${GRID_PRESETS.grid.k}σ × ${GRID_PRESETS.grid.levels}`, tag: 'Recommended',
-    line: 'Buys low and sells high on levels in a range. Earns every swing inside it.',
-    plain: 'The balanced grid: steps twice the hourly swing, stops if the price leaves the range.',
+    line: 'Buys low and sells high, one hourly swing apart. Fills within the hour.',
+    plain: 'The balanced grid, for a day: steps of one hourly swing, stops if the price leaves the range.',
     params: { gridK: GRID_PRESETS.grid.k, levels: GRID_PRESETS.grid.levels, outOfRange: GRID_PRESETS.grid.outOfRange, low: null, high: null },
     deltaBps: 0, volumeX: 1, oracle: false, proof: 'tested', evidence: [],
   },
   {
-    id: 'gridv', category: 'grid', strategy: 'grid', name: 'Dense grid', code: `Grid ${GRID_PRESETS.gridv.k}σ × ${GRID_PRESETS.gridv.levels}`,
-    line: 'Many levels close together: trades the most of the grids.',
-    plain: 'The busiest grid, for volume. Each swing earns less, more of them count.',
-    params: { gridK: GRID_PRESETS.gridv.k, levels: GRID_PRESETS.gridv.levels, outOfRange: GRID_PRESETS.gridv.outOfRange, low: null, high: null },
+    id: 'gridc', category: 'grid', strategy: 'grid', name: 'Wide grid', code: `Grid ${GRID_PRESETS.gridc.k}σ × ${GRID_PRESETS.gridc.levels}`,
+    line: 'Few levels far apart, for a week: trades rarely, rides out bigger swings.',
+    plain: 'The calmest grid. A first fill can take a day; the range is wide enough for most weeks.',
+    params: { gridK: GRID_PRESETS.gridc.k, levels: GRID_PRESETS.gridc.levels, outOfRange: GRID_PRESETS.gridc.outOfRange, low: null, high: null },
     deltaBps: 0, volumeX: 1, oracle: false, proof: 'tested', evidence: [],
   },
 ];
@@ -177,7 +177,11 @@ export function recipeOfDraft(d: BotDraft): RecipeId {
 export function draftOfRecipe(id: RecipeId, symbol: string, keep?: BotDraft): BotDraft {
   const rc = RECIPE[id];
   const base = draftFor(rc.strategy, 'balanced', symbol);
-  if (!keep) return { ...base, ...rc.params, strategy: rc.strategy };
+  // A grid preset's run length (a day for the tight ones): taken over a run length still at a default (none, or the
+  // previous grid preset's), never over one the user set (audit A4).
+  const presetRun = rc.strategy === 'grid' ? GRID_PRESETS[id as GridPresetId].runHours : undefined;
+  if (!keep) return { ...base, ...rc.params, ...(presetRun !== undefined ? { runHours: presetRun } : {}), strategy: rc.strategy };
+  const keptRunIsDefault = keep.runHours === null || (keep.strategy === 'grid' && keep.runHours === GRID_PRESETS[gridRecipeOf(keep.levels, keep.gridK)].runHours);
   const sameKind = (keep.strategy === 'grid') === (rc.strategy === 'grid');
   const kept: Partial<BotDraft> = {
     label: keep.label,
@@ -188,7 +192,7 @@ export function draftOfRecipe(id: RecipeId, symbol: string, keep?: BotDraft): Bo
     quiet: keep.quiet.map((w) => ({ ...w })),
     quietOnly: keep.quietOnly,
     news: keep.news ? { ...keep.news } : null,
-    runHours: keep.runHours,
+    runHours: presetRun !== undefined && keptRunIsDefault ? presetRun : keep.runHours,
     volumeTargetUsd: keep.volumeTargetUsd,
     onStop: keep.onStop,
     outOfRange: keep.outOfRange,
@@ -201,7 +205,7 @@ export function draftOfRecipe(id: RecipeId, symbol: string, keep?: BotDraft): Bo
 
 /** The grid preset a grid is closest to: by its step (in units of the volatility) where known, else by its levels. */
 export function gridRecipeOf(levels: number, k: number | null = null): 'gridc' | 'grid' | 'gridv' {
-  const ids = ['gridc', 'grid', 'gridv'] as const;
+  const ids = ['gridv', 'grid', 'gridc'] as const;
   const dist = (id: (typeof ids)[number]) => (k !== null ? Math.abs(Math.log(k / GRID_PRESETS[id].k)) : 0) + Math.abs(Math.log(Math.max(2, levels) / GRID_PRESETS[id].levels));
   return ids.reduce((a, b) => (dist(b) < dist(a) ? b : a));
 }

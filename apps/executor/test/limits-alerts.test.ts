@@ -804,3 +804,18 @@ test('a crash inside a maintenance window for the executor is planned: maintenan
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('gate: a cancel larger than one second of the account order rate goes once the second is clear, never waits forever (live 2026-11-12)', async () => {
+  const rate = new AccountRate();
+  const q = new SendQueue(new WeightBudget(), rate);
+  // 39 cancels against 20 a second: before the fix waitMs said "1 ms" forever and the account's queue stood still.
+  const sent = await Promise.race([
+    q.submit('cancel', 9, 39, async () => 'gone'),
+    new Promise((r) => setTimeout(() => r('stuck'), 3_000)),
+  ]);
+  assert.equal(sent, 'gone');
+  // An opening write of that size is still refused outright (grids send theirs in pieces).
+  await assert.rejects(new SendQueue(new WeightBudget(), new AccountRate()).submit('open', 10, 39, async () => 'sent'), /order rate/);
+  // A second write right behind waits for the next second instead of piling on.
+  assert.ok(rate.waitMs(9, 5, 1, Date.now(), true) > 0);
+});

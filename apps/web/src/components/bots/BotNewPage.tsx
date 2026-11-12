@@ -293,8 +293,9 @@ function RecipeRow({ rc, on, pick, est, where, best, blocked, grid = null, symbo
             <span className="bots-rrow__howk">How we know</span>
             <span className="bots-rrow__ev">
               {[
-                { what: `7-day runs, ${GRID_BT_MARKETS.length} markets`, per1m: grid.row.all[4] },
-                ...(grid.row.day ? [{ what: '1-day runs', per1m: grid.row.day[4] }] : []),
+                ...(grid.horizon === '1d' && grid.row.day ? [{ what: `1-day runs, ${GRID_BT_MARKETS.length} markets`, per1m: grid.row.day[4] }] : []),
+                { what: grid.horizon === '1d' ? '7-day runs' : `7-day runs, ${GRID_BT_MARKETS.length} markets`, per1m: grid.row.all[4] },
+                ...(grid.horizon === '7d' && grid.row.day ? [{ what: '1-day runs', per1m: grid.row.day[4] }] : []),
                 ...(symbol && grid.row.m[symbol] ? [{ what: `${symbol.replace(/-USD$/, '')} alone, 7-day runs`, per1m: grid.row.m[symbol]![4] }] : []),
               ].map((e) => { const x = costText(-e.per1m / 100); return <span key={e.what} className="bots-ev is-replay"><i aria-hidden="true" />{e.what}<b className={x.cls}>{x.v}</b></span>; })}
             </span>
@@ -426,7 +427,7 @@ function Receipt({ d, eff, picked, markets, feeBps, feeAdj, paper, floor, runs, 
         <span className="bots-rc__meta">
           {conf && <StatusPill size="sm" tone={CONF_TONE[conf]} dot title={CONF_HINT}>{CONF_WORDS[conf]}</StatusPill>}
           {!grid && volX < 0.995 && <span className="bots-rc__chip"><Icon name="clock" size={12} />Quotes {Math.round(volX * 100)}% of the time</span>}
-          {grid && gEst?.ploss != null && <StatusPill size="sm" tone={gEst.ploss > 0.45 ? 'negative' : 'neutral'} dot>Lost in {Math.round(gEst.ploss * 100)}% of 7-day tests</StatusPill>}
+          {grid && gEst?.ploss != null && <StatusPill size="sm" tone={gEst.ploss > 0.45 ? 'negative' : 'neutral'} dot>Lost in {Math.round(gEst.ploss * 100)}% of {gEst.horizon === '1d' ? '1-day' : '7-day'} tests</StatusPill>}
           {grid && gEst?.dayBps != null && gEst.turn != null && (
             <span className="bots-rc__chip" title="The backtest's average day, on this grid's size (levels × order).">
               <Icon name="clock" size={12} />Average day {gEst.dayBps >= 0 ? '+' : '−'}{fmtUsd(Math.abs((gEst.dayBps * d.orderUsd * d.levels) / 10_000), 2)} · trades {fmtUsd(gEst.turn * d.orderUsd * d.levels, 0)}
@@ -565,7 +566,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const feeAdj = feeAdjOf(ctx.feeTenths, markets.data?.fee.builderBps);
   const floor = costPerMillion(eff, market, mark, ctx.feeTenths);
   // A grid's estimate is what the same grid did in our backtest (price moves included), at this wallet's fee.
-  const gridEstOf = (x: BotDraft): GridEstimate => gridEstimate({ symbol: x.symbol, stepBps: draftStepBps(x, vol), levels: x.levels, outOfRange: x.outOfRange, volBps: vol, feeBps });
+  const gridEstOf = (x: BotDraft): GridEstimate => gridEstimate({ symbol: x.symbol, stepBps: draftStepBps(x, vol), levels: x.levels, outOfRange: x.outOfRange, volBps: vol, feeBps, runHours: x.runHours });
   const gEst = grid ? gridEstOf(d) : null;
   const costOf = useMemo(() => (m: BotMarket) => estimate(effectiveDraft({ ...d, symbol: m.symbol }, m), m, runs, feeAdj).bp, [d, runs, feeAdj]);
   const rid = recipeOfDraft(d);
@@ -705,7 +706,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const where = picked.length === 1 ? `on ${picked[0]!.replace(/-USD$/, '')}` : `average, ${picked.length} markets`;
   const bestId = cat === 'market' && pickedMs.length ? bestOf(scored.filter((x): x is typeof x & { e: BotEstimate } => !!x.e && x.e.bp !== null).map((x) => ({ id: x.id, est: x.e })))?.id ?? null : null;
   const blockedRows = recipesOf(cat).filter(blocked);
-  // Grids keep their order (wide, balanced, dense): their costs are within each other's noise, the order says what they are.
+  // Grids keep their order (tight, balanced, wide): their costs are within each other's noise, the order says what they are.
   const rows = cat === 'grid' ? scored : [...scored].sort((a, b) => (a.id === bestId ? -1 : b.id === bestId ? 1 : (a.e?.bp ?? 99) - (b.e?.bp ?? 99)));
   // The spread limit from the picked markets' real spread (the widest of them), while it is still the untouched default.
   const spreadHint = pickedMs.map((m) => suggestedSpreadBps(m)).filter((x): x is number => x !== null);

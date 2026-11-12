@@ -293,17 +293,23 @@ export class AccountRate {
     this.book(id, n, now);
   }
 
-  /** ms until `n` more orders of account `id` fit under `share` of both windows (0: now). */
-  waitMs(id: number, n: number, share = 1, now = Date.now()): number {
+  /**
+   * ms until `n` more orders of account `id` fit under `share` of both windows (0: now). `alone`: a write larger than
+   * a whole window (a 39-order grid's cancel against 20 a second) goes once its window is empty instead of never -
+   * live 2026-11-12, such a cancel waited forever and held every later write of the account behind it.
+   */
+  waitMs(id: number, n: number, share = 1, now = Date.now(), alone = false): number {
     if (!(id > 0) || !(n > 0)) return 0;
     const h = this.window(id, now);
     const c = this.counts(id, now);
     let wait = 0;
-    if (c.second + n > this.perSecond * share) {
+    const capS = this.perSecond * share;
+    const capM = this.perMinute * share;
+    if (c.second + n > capS && !(alone && n > capS && c.second === 0)) {
       const inSecond = h.filter((x) => now - x.at < 1_000);
       wait = Math.max(wait, inSecond.length ? 1_000 - (now - inSecond[0]!.at) + 1 : 1);
     }
-    if (c.minute + n > this.perMinute * share) wait = Math.max(wait, h.length ? 60_000 - (now - h[0]!.at) + 1 : 1);
+    if (c.minute + n > capM && !(alone && n > capM && c.minute === 0)) wait = Math.max(wait, h.length ? 60_000 - (now - h[0]!.at) + 1 : 1);
     return wait;
   }
 
@@ -507,7 +513,7 @@ export class SendQueue {
           wait = Math.min(wait, 250);
           break; // the minute is full: nothing of a lower class jumps ahead
         }
-        const w = this.rate.waitMs(it.accountId, it.orders, 1, now);
+        const w = this.rate.waitMs(it.accountId, it.orders, 1, now, true);
         if (w > 0) {
           wait = Math.min(wait, w);
           continue; // this account waits for its own order rate; others go on
