@@ -11,8 +11,9 @@
  */
 import type { AlgoSpec } from '@copy-engine';
 import { GATE_DEFAULT, R10, draftFor, type BotDraft, type Strategy } from './presets';
+import { GRID_PRESETS } from './gridPresets';
 
-export type RecipeId = 'r10' | 'r10g' | 's1' | 'n5' | 'n5g' | 'touch' | 'grid';
+export type RecipeId = 'r10' | 'r10g' | 's1' | 'n5' | 'n5g' | 'touch' | 'gridc' | 'grid' | 'gridv';
 export type Category = 'market' | 'grid';
 
 export interface Evidence {
@@ -110,11 +111,27 @@ export const RECIPES: readonly Recipe[] = [
       { kind: 'live', what: 'KORU live, 1 round', bp: -3.59 },
     ],
   },
+  // The grids (bots/gridPresets.ts GRID_PRESETS, from the grid backtest): the step in units of the market's hourly
+  // volatility, stopped (and closed) when the price leaves the range - stopping beat waiting in every test.
   {
-    id: 'grid', category: 'grid', strategy: 'grid', name: 'Range grid', code: 'Grid',
+    id: 'gridc', category: 'grid', strategy: 'grid', name: 'Wide grid', code: `Grid ${GRID_PRESETS.gridc.k}σ × ${GRID_PRESETS.gridc.levels}`,
+    line: 'Few levels far apart: trades rarely, rides out bigger swings.',
+    plain: 'The calmest grid. Trades little; the range is wide enough for most weeks.',
+    params: { gridK: GRID_PRESETS.gridc.k, levels: GRID_PRESETS.gridc.levels, outOfRange: GRID_PRESETS.gridc.outOfRange, low: null, high: null },
+    deltaBps: 0, volumeX: 1, oracle: false, proof: 'tested', evidence: [],
+  },
+  {
+    id: 'grid', category: 'grid', strategy: 'grid', name: 'Range grid', code: `Grid ${GRID_PRESETS.grid.k}σ × ${GRID_PRESETS.grid.levels}`, tag: 'Recommended',
     line: 'Buys low and sells high on levels in a range. Earns every swing inside it.',
-    plain: 'Buys lower and sells higher inside a price range you set.',
-    params: {},
+    plain: 'The balanced grid: steps twice the hourly swing, stops if the price leaves the range.',
+    params: { gridK: GRID_PRESETS.grid.k, levels: GRID_PRESETS.grid.levels, outOfRange: GRID_PRESETS.grid.outOfRange, low: null, high: null },
+    deltaBps: 0, volumeX: 1, oracle: false, proof: 'tested', evidence: [],
+  },
+  {
+    id: 'gridv', category: 'grid', strategy: 'grid', name: 'Dense grid', code: `Grid ${GRID_PRESETS.gridv.k}σ × ${GRID_PRESETS.gridv.levels}`,
+    line: 'Many levels close together: trades the most of the grids.',
+    plain: 'The busiest grid, for volume. Each swing earns less, more of them count.',
+    params: { gridK: GRID_PRESETS.gridv.k, levels: GRID_PRESETS.gridv.levels, outOfRange: GRID_PRESETS.gridv.outOfRange, low: null, high: null },
     deltaBps: 0, volumeX: 1, oracle: false, proof: 'tested', evidence: [],
   },
 ];
@@ -128,7 +145,7 @@ export const recipesOf = (c: Category): Recipe[] => RECIPES.filter((r) => r.cate
 
 /** Which bot a running spec is (the closest one: a bot edited by hand stays its recipe's). */
 export function recipeOfSpec(s: AlgoSpec): RecipeId {
-  if (s.kind === 'grid') return 'grid';
+  if (s.kind === 'grid') return gridRecipeOf(s.levels);
   if (s.kind !== 'mm') return 'r10';
   // No oracle: the book maker. An oracle without a rest time (the older oracle-led maker) is closest to R10, never
   // the book maker - it holds when the oracle goes quiet, which the book maker never does (owner 2026-11-09, MCD).
@@ -143,7 +160,7 @@ export function recipeOfSpec(s: AlgoSpec): RecipeId {
 
 /** The recipe a draft still is (null: changed away from every one). */
 export function recipeOfDraft(d: BotDraft): RecipeId {
-  if (d.strategy === 'grid') return 'grid';
+  if (d.strategy === 'grid') return gridRecipeOf(d.levels, d.gridK);
   if (d.strategy !== 'market') return 'touch';
   if (d.noFair) return d.gate ? 'n5g' : 'n5';
   if (d.gate) return 'r10g';
@@ -176,7 +193,15 @@ export function draftOfRecipe(id: RecipeId, symbol: string, keep?: BotDraft): Bo
     onStop: keep.onStop,
     outOfRange: keep.outOfRange,
     ...(sameKind ? { orderUsd: keep.orderUsd, maxInventoryUsd: keep.maxInventoryUsd, maxLossUsd: keep.maxLossUsd } : {}),
-    ...(sameKind && rc.strategy === 'grid' ? { rangePct: keep.rangePct, low: keep.low, high: keep.high, levels: keep.levels } : {}),
+    // A grid preset sets its own step and levels (rc.params): the range is laid out again from them.
+    ...(sameKind && rc.strategy === 'grid' ? { low: null, high: null } : {}),
   };
   return { ...base, ...kept, ...rc.params, strategy: rc.strategy };
+}
+
+/** The grid preset a grid is closest to: by its step (in units of the volatility) where known, else by its levels. */
+export function gridRecipeOf(levels: number, k: number | null = null): 'gridc' | 'grid' | 'gridv' {
+  const ids = ['gridc', 'grid', 'gridv'] as const;
+  const dist = (id: (typeof ids)[number]) => (k !== null ? Math.abs(Math.log(k / GRID_PRESETS[id].k)) : 0) + Math.abs(Math.log(Math.max(2, levels) / GRID_PRESETS[id].levels));
+  return ids.reduce((a, b) => (dist(b) < dist(a) ? b : a));
 }

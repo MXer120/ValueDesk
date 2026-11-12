@@ -152,6 +152,11 @@ export interface BotDraft {
   /** Quotes and levels post-only (maker only, the default); off: plain limits that may take (owner 2026-11-08). */
   postOnly: boolean;
   /* grid */
+  /**
+   * The step in units of the market's hourly volatility (bots/gridPresets.ts): the range follows the market as it is
+   * now (rangePct is set from it once the volatility is read). null: the range is the draft's own (rangePct, low/high).
+   */
+  gridK: number | null;
   rangePct: number;
   low: number | null;
   high: number | null;
@@ -238,6 +243,7 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     moveGuard: 0,
     refBps: 0,
     pullBps: 0,
+    gridK: null,
     rangePct: 0.02,
     low: null,
     high: null,
@@ -372,7 +378,7 @@ export function draftOfSpec(s: AlgoSpec, now = Date.now()): BotDraft {
     return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps ?? null, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, ...safeguardsOf(s, now) };
   }
   if (s.kind === 'grid') {
-    return { ...draftFor('grid', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now), endAt: runHoursLeft(s.endAt, now) !== null ? s.endAt : null, runHoursAt: runHoursLeft(s.endAt, now) };
+    return { ...draftFor('grid', 'balanced', s.symbol), gridK: null, label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now), endAt: runHoursLeft(s.endAt, now) !== null ? s.endAt : null, runHoursAt: runHoursLeft(s.endAt, now) };
   }
   return draftFor('maker', 'balanced', s.symbol);
 }

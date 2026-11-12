@@ -128,7 +128,12 @@ function Guard({ title, line, on, set, children, icon }: { title: string; line: 
   );
 }
 
-export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part, lev, sizeErrors = [], sizeNotes = [], cards = false }: {
+/** A grid's level counts (the presets use 10, 20 and 40). */
+const LEVEL_OPTIONS = [10, 20, 40, 60];
+
+export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part, lev, sizeErrors = [], sizeNotes = [], cards = false, grid }: {
+  /** A grid's step now (bp), what a round trip keeps after the fees, the step in units of the hourly volatility, the fee a fill. */
+  grid?: { stepBps: number; netStepBps: number; k: number | null; feeBps: number };
   d: BotDraft;
   set: (p: Partial<BotDraft>) => void;
   range: { low: number; high: number } | null;
@@ -197,14 +202,26 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
         <div className="bots-fgrid">
           {d.strategy === 'grid' && (
             <>
-              <Row label="Price range" hint={mark ? `Now ${fmtUsd(mark)}` : undefined} wide>
+              <Row
+                label="Price range"
+                wide
+                tag={d.low !== null && d.gridK !== null ? <button type="button" className="bots-link" onClick={() => set({ low: null, high: null })}>Follow the market</button> : undefined}
+                hint={<>{mark ? `Now ${fmtUsd(mark)}. ` : ''}{d.low === null && d.gridK !== null ? `Set by the preset: steps ${d.gridK}× the hourly swing, around the price when it starts.` : 'Your own prices.'}</>}
+              >
                 <div className="bots-pair">
                   <NumberField label="Low" value={range?.low ?? null} onChange={(v) => set({ low: v, high: d.high ?? range?.high ?? null })} unit="USD" />
                   <NumberField label="High" value={range?.high ?? null} onChange={(v) => set({ high: v, low: d.low ?? range?.low ?? null })} unit="USD" />
                 </div>
               </Row>
-              <Row label="Levels">
-                <Segmented label="Levels" value={[5, 10, 20].includes(d.levels) ? String(d.levels) : 'x'} onChange={(v) => v !== 'x' && set({ levels: Number(v) })} options={[{ value: '5', label: '5' }, { value: '10', label: '10' }, { value: '20', label: '20' }, ...([5, 10, 20].includes(d.levels) ? [] : [{ value: 'x', label: String(d.levels) }])]} />
+              <Row
+                label="Levels"
+                hint={grid && grid.stepBps > 0 ? (
+                  grid.netStepBps > 0
+                    ? `Levels ${(grid.stepBps / 100).toFixed(2)}% apart: a buy and its sell keep ${(grid.netStepBps / 100).toFixed(2)}% after the two fees.`
+                    : <span className="bots-err">Levels {(grid.stepBps / 100).toFixed(2)}% apart do not cover the two fees ({((2 * grid.feeBps) / 100).toFixed(3)}%): every round trip loses. Widen the range or use fewer levels.</span>
+                ) : undefined}
+              >
+                <Segmented label="Levels" value={LEVEL_OPTIONS.includes(d.levels) ? String(d.levels) : 'x'} onChange={(v) => v !== 'x' && set({ levels: Number(v) })} options={[...LEVEL_OPTIONS.map((n) => ({ value: String(n), label: String(n) })), ...(LEVEL_OPTIONS.includes(d.levels) ? [] : [{ value: 'x', label: String(d.levels) }])]} />
               </Row>
               <Row label={<Term t="postOnly">Order type</Term>} tag={<R10Tag on={d.postOnly} reset={() => set({ postOnly: true })} />} hint={d.postOnly ? 'Post-only: every order rests in the book and pays the maker fee. One that would trade at once is refused by SoDEX and placed again.' : 'Limit: an order that crosses the book trades at once as a taker and pays the taker fee.'}>
                 <Segmented label="Order type" value={d.postOnly ? 'post' : 'limit'} onChange={(v) => set({ postOnly: v === 'post' })} options={[{ value: 'post', label: 'Post-only' }, { value: 'limit', label: 'Limit (may take)' }]} />
@@ -246,7 +263,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
             <Segmented label="When it stops" value={d.onStop} options={[{ value: 'close', label: 'Close position' }, { value: 'keep', label: 'Keep it' }]} onChange={(v) => set({ onStop: v })} />
           </Row>
           {d.strategy === 'grid' && (
-            <Row label="Out of range" hint={d.outOfRange === 'wait' ? 'If the price leaves the range, it waits for it to come back.' : 'If the price leaves the range, it stops.'}>
+            <Row label="Out of range" hint={d.outOfRange === 'wait' ? 'If the price leaves the range, it waits for it to come back, holding what it bought or sold on the way. In our backtest waiting lost more than stopping.' : 'If the price leaves the range, it stops (and closes as On stop says). In our backtest this lost less than waiting.'}>
               <Segmented label="Out of the range" value={d.outOfRange} options={[{ value: 'wait', label: 'Wait' }, { value: 'stop', label: 'Stop' }]} onChange={(v) => set({ outOfRange: v })} />
             </Row>
           )}

@@ -837,6 +837,7 @@
 /* New bot v5: the picker for someone new (owner 2026-11-08): cost as the one number, the rest in a word each. */
 .bots-rrow__facts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; }
 .bots-vol { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.bots-rrow__fact { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .bots-vol__bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
 .bots-vol__bars i { width: 4px; border-radius: 1px; background: rgb(var(--ink) / 0.14); }
 .bots-vol__bars i:nth-child(1) { height: 5px; }
