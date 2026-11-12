@@ -60,7 +60,13 @@ export interface BotMarket {
   volumeUsdH: number;
   spreadBps: number;
   volBpsH: number;
+  /** Who took, by dollars, over ALL the market's prints (owner 2026-11-12: the board shows 1002's share by dollars). */
   takers: { t1002: number; t23342: number; other: number };
+  /** 1002's taker dollars per hour over the whole market: what a maker can hope to meet. */
+  t1002UsdH?: number;
+  /** The same split over the small makers' fills only (null: no small maker). On thin markets 1002's ~$1 orders fill
+   * the few small makers there are, so this read 90 %+ where 1002 was 1-18 % of the dollars (AAVE, 1000PEPE, LIT). */
+  takersSmall?: { t1002: number; t23342: number; other: number } | null;
   smallMakers: { count: number; volumeUsdH: number; fills: number; markout30Bps: number; on1002Bps: number | null; on23342Bps: number | null };
   estCostBps: number;
   estCostLowBps: number; estCostHighBps: number;
@@ -248,6 +254,8 @@ export interface WindowStats {
   spreadBps: number;
   volBpsH: number;
   takers: BotMarket['takers'];
+  t1002UsdH: number;
+  takersSmall: BotMarket['takers'] | null;
   smallMakers: BotMarket['smallMakers'];
   estCostBps: number;
   estCostLowBps: number;
@@ -545,13 +553,13 @@ export async function analyzeMarket(p: PrintCols, o: AnalyzeOpts, yieldNow: () =
       heldH: r2(hours),
       spreadBps: r2(spreadOf(from)),
       volBpsH: r2(volOf(from)),
-      // Who takes makers OUR size: their fills by taker (all makers' when there is none). 23342 is the dominant
-      // maker on BTC and ETH, so the share of all maker volume would hide that it is also the taker small makers meet.
-      takers: sv > 0
-        ? { t1002: r2(cv[0]! / sv), t23342: r2(cv[1]! / sv), other: r2(cv[2]! / sv) }
-        : total > 0
-          ? { t1002: r2(takerVol[0]! / total), t23342: r2(takerVol[1]! / total), other: r2(takerVol[2]! / total) }
-          : { t1002: 0, t23342: 0, other: 0 },
+      // Who took, by dollars, over all the market's prints (owner 2026-11-12). The small makers' split stays beside it:
+      // on BTC and ETH 23342 is the dominant maker, so the all-maker split hides that it is also the taker small makers meet.
+      takers: total > 0
+        ? { t1002: r2(takerVol[0]! / total), t23342: r2(takerVol[1]! / total), other: r2(takerVol[2]! / total) }
+        : { t1002: 0, t23342: 0, other: 0 },
+      t1002UsdH: r2(takerVol[0]! / hours),
+      takersSmall: sv > 0 ? { t1002: r2(cv[0]! / sv), t23342: r2(cv[1]! / sv), other: r2(cv[2]! / sv) } : null,
       smallMakers: {
         count: makers.size,
         volumeUsdH: r2(sv / hours),

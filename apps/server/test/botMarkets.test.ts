@@ -79,8 +79,14 @@ test('maker side, dominant maker left out, markout sign, gate and cost', async (
   close(w.gateCostBps, MAKER_BPS + BOT_BUILDER_BPS - vw(still));
   // Who took, among the small makers' fills (the dominant maker's are not ours to meet): 1002 took their buys.
   const smallBy1002 = (N / 2) * 1 * 100 * 0.9995;
-  close(w.takers.t1002, vw(small.filter((f) => f.taker === P1002).map((f) => ({ ...f, mk: 1 }))) * smallBy1002 / (small.reduce((x, f) => x + f.px * f.sz, 0)), 0.02);
-  assert.equal(w.takers.t23342, 0);
+  close(w.takersSmall!.t1002, vw(small.filter((f) => f.taker === P1002).map((f) => ({ ...f, mk: 1 }))) * smallBy1002 / (small.reduce((x, f) => x + f.px * f.sz, 0)), 0.02);
+  assert.equal(w.takersSmall!.t23342, 0);
+  // The board's share is by dollars over every print (owner 2026-11-12): the dominant maker's fills count too.
+  const all = Array.from({ length: cols.n }, (_, i) => i).filter((i) => cols.t[i]! >= now - 24 * 3600_000);
+  const usd = (i: number) => cols.px[i]! * cols.sz[i]!;
+  const by1002 = all.filter((i) => (cols.taker[i] === TAKER_BUYER ? cols.buyer[i] : cols.seller[i]) === P1002).reduce((x, i) => x + usd(i), 0);
+  close(w.takers.t1002, by1002 / all.reduce((x, i) => x + usd(i), 0), 0.011);
+  close(w.t1002UsdH, by1002 / w.heldH, Math.max(1, by1002 / w.heldH * 0.01));
   assert.equal(w.confidence, 'medium');
   // Capacity is the small makers' volume per hour; spread from opposite prints is the 10 bp quote (the 30 bp jump is one gap in thousands).
   assert.equal(w.capacityUsdH, w.smallMakers.volumeUsdH);

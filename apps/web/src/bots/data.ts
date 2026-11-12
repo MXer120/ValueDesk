@@ -25,7 +25,12 @@ export interface BotMarket {
   volumeUsdH: number;
   spreadBps: number;
   volBpsH: number;
+  /** Who took, by dollars, over all the market's prints (since 2026-11-12; older servers: over small makers' fills). */
   takers: { t1002: number; t23342: number; other: number };
+  /** 1002's taker dollars per hour over the whole market. */
+  t1002UsdH?: number;
+  /** The split over small makers' fills only (null: none). */
+  takersSmall?: { t1002: number; t23342: number; other: number } | null;
   smallMakers: { count: number; volumeUsdH: number; fills: number; markout30Bps: number; on1002Bps: number | null; on23342Bps: number | null };
   estCostBps: number;
   estCostLowBps: number;

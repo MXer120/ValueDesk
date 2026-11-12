@@ -265,7 +265,7 @@ export function MarketMap({ markets, absent = [], scoreOf, feeBps, window: win, 
             <>
               <b>{hv.base}</b>
               <span>{hv.bp === null ? 'No estimate' : <>Score <b>{marketScore(hv.bp, feeBps)}</b> · <b>{fmtBpUsd(hv.bp)}</b> per $1M</>}</span>
-              <span className="dim">{fmtUsd(hv.m.volumeUsdH, 0)}/h traded · uninformed {Math.round(hv.m.takers.t1002 * 100)}% · informed {Math.round(hv.m.takers.t23342 * 100)}% · volatility {Math.round(hv.m.volBpsH)} bp/h</span>
+              <span className="dim">{fmtUsd(hv.m.volumeUsdH, 0)}/h traded · uninformed {Math.round(hv.m.takers.t1002 * 100)}%{hv.m.t1002UsdH !== undefined ? ` (${fmtUsd(hv.m.t1002UsdH, 0)}/h)` : ''} · informed {Math.round(hv.m.takers.t23342 * 100)}% · volatility {Math.round(hv.m.volBpsH)} bp/h</span>
             </>
           ) : <><b>{hv.base}</b><span className="dim">No trades in {winWords}</span></>
         ) : null}
