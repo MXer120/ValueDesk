@@ -71,6 +71,27 @@ if (STATUS) {
   process.exit(0);
 }
 
+if (process.argv.includes('--stop-all')) {
+  // every bot of the wallet (any kind or label), on the VIP and the standard executor
+  const std = new HostedTarget(wallet, 'live');
+  for (const [name, t] of [['vip', vip], ['standard', std]] as const) {
+    try {
+      if (t !== vip) await t.start();
+      for (const v of (await t.algos()) as Any[]) {
+        const a = v.algo;
+        if (!a.spec?.bot || !['running', 'waiting', 'scheduled', 'paused'].includes(a.status)) continue;
+        await t.algoAct('cancel', a.id);
+        log(`${name}: stopped ${a.spec.symbol} ${a.spec.kind} ${a.spec.label ?? ''} ${a.id}`);
+      }
+      const left = ((await t.algos()) as Any[]).filter((v) => v.algo.spec?.bot && ['running', 'waiting', 'scheduled', 'paused'].includes(v.algo.status));
+      log(`${name}: ${left.length} bots still active`);
+    } catch (e) {
+      log(`${name}: ${(e as Error).message}`);
+    }
+  }
+  process.exit(0);
+}
+
 if (process.argv.includes('--stop')) {
   for (const v of (await vip.algos()) as Any[]) {
     const a = v.algo;
