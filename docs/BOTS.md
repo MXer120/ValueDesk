@@ -123,14 +123,14 @@ answer a minute), the web's Bots nav, sidebar, Portfolio cards and the Bots page
 beta/access.ts useBotsAccess). Off again: unset it and restart; running real bots of unlisted wallets are then held
 (an explicit "not listed"), as for a wallet taken off the list. The advanced algo orders stay on the beta list.
 
-**VIP:** by volume is OFF (`VALUEDESK_VIP_BY_VOLUME` unset; `=1` turns the $5M/14 d milestone back on). VIP comes only
-from what is assigned: the beta list's early-access days (admin store BETA_VIP_DAYS from the listing), the dev page's
-programs, server 2's `EXECUTOR_VIP_WALLETS`, and `VALUEDESK_VIP_KEEP` (wallets that held VIP by volume when it went
-off: none - no wallet had over $500k in 14 days on 2026-11-13). With no milestone the Bots VIP card shows only for
-VIP holders; nobody else sees "Become VIP".
+**VIP (owner 2026-11-13, at launch: "vip still reachable just through the fee tier of course >5m vol"):** set
+`VALUEDESK_VIP_BY_VOLUME=1` together with the switch: VIP by volume ($5M in 14 days) stays the way to reach VIP, and
+the "Become VIP" card shows to everyone. Assigned VIP stays too: the beta list's early-access days (admin store
+BETA_VIP_DAYS), the dev page's programs, server 2's `EXECUTOR_VIP_WALLETS`. Without the variable the code default is
+assigned-only (`VALUEDESK_VIP_KEEP` keeps named wallets; the card then shows only to VIP holders).
 
 **Before turning it on:** ship web + api + executor of this branch (no behaviour change while the switch is off,
-except VIP by volume being off). Capacity: at most `EXECUTOR_MAX_LIVE_BOTS` real bots on the executor, every wallet
+except VIP by volume being off when `VALUEDESK_VIP_BY_VOLUME` is unset). Capacity: at most `EXECUTOR_MAX_LIVE_BOTS` real bots on the executor, every wallet
 together (20 now); past it a start is refused with "try later, or start it as practice".
 
 ## Grid settings (2026-11-13, owner: "just make it a normal good and customizable grid bot. For example trades only in ranges")
