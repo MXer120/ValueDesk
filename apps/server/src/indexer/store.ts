@@ -4430,11 +4430,17 @@ export class IndexStore {
     if (this.readOnly) return 0;
     let n = 0;
     // `onlyIndexed`: the venue's prints name sub-accounts; a wallet whose indices are unknown gets none.
+    // The venue is bound, not `= coverage.venue`: that made the list a correlated subquery, rebuilt from ext_index for
+    // every row the UPDATE visited. On production (2026-11-13: 1,771 Lighter rows, 92k indices) it took 9-14 s every
+    // 30 s on the indexer's thread - 45% of its stalled time, and behind most "indexer degraded" incidents. Bound: 47 ms.
     const sql = onlyIndexed
-      ? 'UPDATE coverage SET to_t = ? WHERE venue = ? AND kind = ? AND to_t >= ? AND to_t < ? AND address IN (SELECT address FROM ext_index WHERE venue = coverage.venue)'
+      ? 'UPDATE coverage SET to_t = ? WHERE venue = ? AND kind = ? AND to_t >= ? AND to_t < ? AND address IN (SELECT address FROM ext_index WHERE venue = ?)'
       : 'UPDATE coverage SET to_t = ? WHERE venue = ? AND kind = ? AND to_t >= ? AND to_t < ?';
     this.tx(() => {
-      for (const kind of kinds) n += Number(this.q(sql).run(now, venue, kind, upSince, now).changes);
+      for (const kind of kinds) {
+        const st = this.q(sql);
+        n += Number((onlyIndexed ? st.run(now, venue, kind, upSince, now, venue) : st.run(now, venue, kind, upSince, now)).changes);
+      }
     });
     return n;
   }
