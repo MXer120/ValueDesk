@@ -301,6 +301,19 @@ $1M, the market maker ~-$185). Over 1-day runs waiting out of the range lost les
 (-$287 vs -$485), so the tight preset waits; the bot still ends when its day is up. A preset's run length is taken
 only over a default one (none, or the previous grid preset's), never over a run length the user set.
 
+**Can a grid be made profitable? (2026-11-13, owner: "they were supposed to be profitable")** Checked on the same
+120 days x 17 markets (server 2 ~/qrec/grid gac.mjs, glat.mjs):
+- Prices do mean-revert over 5 min - 1 h (variance ratio 5m->1h about 0.90 on most markets): the swings a grid trades.
+  Over hours to a day they trend (1h->24h ratio 1.0-1.3), and a grid holds its inventory into that trend.
+- A long/short grid with no range, at ZERO fees, still lost about $155-245 per $1M at every step (0.2x-1.5x the
+  hourly swing; 1.2 bp fee: -$276..-$366). The trend loss on inventory is larger than all the swing income.
+- Capping the inventory (1-8 levels) made it worse: each skipped level throws away a buy-low/sell-high pair.
+- Long-only grids showed +$40..+$584 per $1M - that is the markets' rise over the window (BTC +8.8%, ZEC +85%, LIT
+  +37%; DOGE -8.6%), a bet on the coin, not grid skill.
+- After a 3-sd 15-minute move the next hour reverts about 0.1-0.25 sd on SOL/LIT/HYPE/SUI, about 0 on BTC/ETH: too
+  small and too uneven to build on as it is.
+So no grid setting earns on its own here; a grid's result is the market's direction plus a fee-sized cost.
+
 **Live bug found with them (2026-11-12, fixed):** stopping a 40-level grid sends 39 cancels in one write; the send
 queue's account-rate wait (sodex.ts AccountRate.waitMs) could never fit 39 into 20 a second and said "1 ms" forever,
 so the cancel never left and every later write of the account (all its bots) stood behind it. Now a queued write
