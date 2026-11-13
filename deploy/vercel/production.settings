@@ -18,6 +18,9 @@ VALUESCAN_ORIGIN=api.valuedesk.so
 # The live liquidation heatmap's WebSocket: straight to the instance (Vercel's functions hold no
 # socket); Caddy passes this one path without the origin secret (deploy/server/caddy/Caddyfile.template).
 VITE_LIQ_WS_URL=wss://api.valuedesk.so/ws/liq
+# The bots page's live stream straight to the instance, not through the /api function (apps/web/src/copy/executor.ts
+# streamUrlOf; 2026-11-13: the stream was 95% of the function's billed memory).
+VITE_COPY_STREAM_ORIGIN=https://api.valuedesk.so
 
 VITE_WALLETCONNECT_PROJECT_ID=ea518a95b8c4040554a878d2a9ed1b39
 

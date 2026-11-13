@@ -34,6 +34,8 @@ const CONNECT_SRC = [
   'https://*.boltdns.net', 'https://*.brightcovecdn.com',
   // The live liquidation heatmap: a WebSocket straight to the instance (apps/server routes/liqWs.ts).
   'wss://api.valuedesk.so',
+  // The bots page's live stream (server-sent events), straight to the instance (web copy/executor.ts streamUrlOf).
+  'https://api.valuedesk.so',
 ];
 
 /** The inline script of apps/web/public/scan/index.html (the redirect for old links). */

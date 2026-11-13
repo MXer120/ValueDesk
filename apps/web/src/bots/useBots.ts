@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FINAL_STATUSES, type AlgoEvent, type AlgoUpdatePatch, type AlgoView } from '@copy-engine';
 import { actOn, eventsOn, listBotsOn, startOn, updateOn, viewOn } from '../algo/executorAlgos';
-import { hostedExecutor } from '../copy/executor';
+import { hostedExecutor, streamUrlOf } from '../copy/executor';
 import { pollEvery } from '../exchange/visibility';
 import { newSeed } from '@copy-engine';
 import { keepActed, keepSeries, mergeLog } from './fleet';
@@ -171,7 +171,7 @@ export function useBots(owner: string | null, signedIn: boolean): BotsState {
       let tries = 0;
       while (alive) {
         try {
-          await readStream(`${hostedExecutor.base}/algos/stream`, token, ctl.signal, () => { streaming.current = true; tries = 0; }, (f) => {
+          await readStream(streamUrlOf(hostedExecutor.base), token, ctl.signal, () => { streaming.current = true; tries = 0; }, (f) => {
             if (!alive || g !== gen.current) return;
             const byId = new Map(shown.current.map((v) => [v.algo.id, v]));
             let unknown = false;
