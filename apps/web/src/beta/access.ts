@@ -24,7 +24,10 @@ export const BETA_APPLY_URL = FEEDBACK_URL ?? 'https://discord.gg/TVJKHY9vhK';
 export const OPEN_ALGO_KINDS: ReadonlySet<string> = new Set(['twap', 'trailing', 'sweep', 'conditional']);
 
 const TTL_MS = 60_000;
-const known = new Map<string, { listed: boolean; at: number }>();
+const known = new Map<string, { listed: boolean; bots: boolean; at: number }>();
+/** Real bots open for every wallet (server VALUEDESK_BOTS_OPEN, owner 2026-11-13); null while not read. */
+let botsAll: { open: boolean; at: number } | null = null;
+let askingAll: Promise<void> | null = null;
 const asking = new Map<string, Promise<void>>();
 const listeners = new Set<() => void>();
 const tell = () => listeners.forEach((l) => l());
@@ -32,12 +35,12 @@ const tell = () => listeners.forEach((l) => l());
 async function ask(wallet: string): Promise<void> {
   try {
     const r = await fetch(`/api/vs/beta/listed?address=${wallet}`, { cache: 'no-store' });
-    const body = (await r.json().catch(() => null)) as { ok?: boolean; listed?: unknown } | null;
+    const body = (await r.json().catch(() => null)) as { ok?: boolean; listed?: unknown; bots?: unknown } | null;
     // Unreadable: keep what was known, else not listed (the executor fails closed too).
-    if (r.ok && body?.ok) known.set(wallet, { listed: body.listed === true, at: Date.now() });
-    else if (!known.has(wallet)) known.set(wallet, { listed: false, at: Date.now() });
+    if (r.ok && body?.ok) known.set(wallet, { listed: body.listed === true, bots: body.bots === true || body.listed === true, at: Date.now() });
+    else if (!known.has(wallet)) known.set(wallet, { listed: false, bots: false, at: Date.now() });
   } catch {
-    if (!known.has(wallet)) known.set(wallet, { listed: false, at: Date.now() });
+    if (!known.has(wallet)) known.set(wallet, { listed: false, bots: false, at: Date.now() });
   } finally {
     asking.delete(wallet);
     tell();
@@ -92,6 +95,66 @@ export function useBetaAccessState(address: string | null | undefined): BetaAcce
   return open;
 }
 
+async function askAll(): Promise<void> {
+  try {
+    const r = await fetch('/api/vs/bots/access', { cache: 'no-store' });
+    const body = (await r.json().catch(() => null)) as { ok?: boolean; open?: unknown } | null;
+    if (r.ok && body?.ok) botsAll = { open: body.open === true, at: Date.now() };
+    else botsAll ??= { open: false, at: Date.now() };
+  } catch {
+    botsAll ??= { open: false, at: Date.now() };
+  } finally {
+    askingAll = null;
+    tell();
+  }
+}
+function refreshBotsAll(): void {
+  if (askingAll || (botsAll && Date.now() - botsAll.at < TTL_MS)) return;
+  askingAll = askAll();
+}
+
+/**
+ * Real bots for this wallet (owner 2026-11-13: open for everyone, on his word): the beta site, bots open for all, or a
+ * wallet the list lets in. Only the Bots page's offer: the executor asks server 1 again for the wallet that signs.
+ */
+function botsAccessOf(address: string | null | undefined): BetaAccess {
+  if (BETA_SITE || botsAll?.open) return 'open';
+  const wallet = address?.toLowerCase();
+  const k = wallet ? known.get(wallet) : undefined;
+  if (k?.bots) return 'open';
+  if (!botsAll) return 'checking';
+  if (!wallet) return 'closed';
+  return k ? 'closed' : 'checking';
+}
+
+/** What is known now about real bots for this wallet, asking nothing. */
+export function hasBotsAccess(address: string | null | undefined): boolean {
+  return botsAccessOf(address) === 'open';
+}
+
+/** Real bots open for this wallet: 'open' | 'closed' | 'checking'. Asks the switch and the list as needed. */
+export function useBotsAccessState(address: string | null | undefined): BetaAccess {
+  const state = useSyncExternalStore(
+    (l) => { listeners.add(l); return () => { listeners.delete(l); }; },
+    () => botsAccessOf(address),
+    () => (BETA_SITE ? 'open' : 'checking'),
+  );
+  useEffect(() => {
+    if (BETA_SITE) return;
+    const read = () => { refreshBotsAll(); if (address) refreshBetaAccess(address); };
+    read();
+    const back = () => { if (document.visibilityState === 'visible') read(); };
+    document.addEventListener('visibilitychange', back);
+    return () => document.removeEventListener('visibilitychange', back);
+  }, [address]);
+  return state;
+}
+
+/** Real bots open for this wallet (see useBotsAccessState). */
+export function useBotsAccess(address: string | null | undefined): boolean {
+  return useBotsAccessState(address) === 'open';
+}
+
 /** Open the Discord where testers apply, in a new tab. */
 export function applyForBeta(): void {
   window.open(BETA_APPLY_URL, '_blank', 'noopener,noreferrer');
@@ -101,5 +164,7 @@ export function applyForBeta(): void {
 export function resetBetaAccess(): void {
   known.clear();
   asking.clear();
+  botsAll = null;
+  askingAll = null;
   tell();
 }

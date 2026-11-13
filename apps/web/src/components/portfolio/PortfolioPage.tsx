@@ -49,7 +49,7 @@ import { DASH, MINUS, fmt, fmtUsd, num, pick, signClass } from '../../format';
 import { fmtRate, type VenueFeeRate } from '../../fees';
 import { useAsync, useStored } from '../../hooks';
 import { SOON_TABS, type Tab } from '../../router';
-import { applyForBeta, useBetaAccess } from '../../beta/access';
+import { applyForBeta, useBotsAccess } from '../../beta/access';
 import { useMask } from '../../privacy';
 import { coinPrices, priceOf } from '../../trading/prices';
 import type { Eip1193Provider } from '../../wallet';
@@ -517,7 +517,7 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
   onOpenTab: (t: Tab) => void;
   onWealth: () => void;
 }) {
-  const botsOpen = useBetaAccess(c.address);
+  const botsOpen = useBotsAccess(c.address);
   // The same element, with the same props, as the trade page's bottom band.
   const band = (engine: 'perps' | 'spot') => (
     <div className="dash pf-band" key={engine}>
@@ -574,7 +574,7 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
 
 export function PortfolioPage({ c, provider, onOpenMarket, onOpenTab }: { c: PortfolioContext } & PortfolioPageLinks) {
   const w = useWealth(c.address, c.refreshToken);
-  const botsOpen = useBetaAccess(c.address);
+  const botsOpen = useBotsAccess(c.address);
   const { summary, evmRows, evmLoading } = useSummary(c, w);
   const vol = useVolume7d(c.address);
   const h24 = use24h(c);

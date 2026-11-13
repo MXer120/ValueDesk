@@ -18,7 +18,7 @@ import { Button, Icon, Panel, Shell, ShellHeader, StatusPill } from './kit/kit';
 import { GoldMark, VipGround, VipPass, vipPerks } from './VipScene';
 import { BrandMark } from '../BrandMark';
 
-interface Eligibility { eligible: boolean; volumeUsd: number; minUsd: number; days: number; promo?: { until: number | null; label: string } | null }
+interface Eligibility { eligible: boolean; volumeUsd: number; minUsd: number; days: number; promo?: { until: number | null; label: string } | null; byVolume?: boolean }
 
 /** Set when the server has no VIP read yet (an API older than this page answers 404): said, not shown as dashes. */
 let vipReadMissing = false;
@@ -399,6 +399,10 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
   };
 
   const volPct = el ? Math.min(1, el.volumeUsd / el.minUsd) : 0;
+  // Owner 2026-11-13: "no one gets vip" - with no volume milestone (byVolume false) there is nothing to work towards:
+  // the VIP card is for the wallets VIP was assigned to (early access, programs) and for the ones already on VIP.
+  const assignedOnly = el?.byVolume === false;
+  if (assignedOnly && !onVip && !el?.eligible && !open && !handoff && !unlock) return null;
   // One slim line for the top of the Overview: the gold bar, how far, and the way to the perks (Savings).
   if (strip) {
     const vip = onVip || el?.eligible;
@@ -426,7 +430,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
             <div className="bots-vip__on">
               <span className="bots-vip__badge" aria-hidden="true"><GoldMark size={26} /></span>
               <p>Your bots run on the dedicated VIP servers: orders 1.6× faster, latency down 37% in our tests.</p>
-              <small className="bots-fine">VIP holds while you trade $5M in 14 days. Below it, your bots move back to the standard servers with their books (at most once a day, checked every 10 minutes), and you can move up again whenever you qualify.</small>
+              <small className="bots-fine">{assignedOnly ? 'Your VIP was assigned to this wallet (early access). When it ends, your bots move back to the standard servers with their books.' : 'VIP holds while you trade $5M in 14 days. Below it, your bots move back to the standard servers with their books (at most once a day, checked every 10 minutes), and you can move up again whenever you qualify.'}</small>
             </div>
           ) : (
             <>
@@ -450,7 +454,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
                   : <Button variant="primary" size="md" icon="bolt" disabled={!canMove || !ctx.ready} onClick={() => void move()}>Move to VIP</Button>}
                 {canMove && !ctx.ready && <small className="bots-fine">VIP is unlocked. Sign in to the bot servers and accept the terms first, then move.</small>}
                 {!info?.vip?.canMove && <small className="bots-fine">The VIP servers open soon.</small>}
-                {info?.vip?.canMove && !canMove && <small className="bots-fine">Unlocks at $5M in 14 days.</small>}
+                {info?.vip?.canMove && !canMove && !assignedOnly && <small className="bots-fine">Unlocks at $5M in 14 days.</small>}
               </div>}
             </>
           )}

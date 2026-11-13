@@ -84,12 +84,13 @@ export type GridSide = Side | null;
 
 /**
  * The first assignment at the price `ref`: buys on the levels below it, sells above, and the level nearest it
- * left empty - the gap a fill moves along.
+ * left empty - the gap a fill moves along. A long grid starts with the buys only (it sells what it bought, one level
+ * up), a short grid with the sells only (GridSpec.direction).
  */
-export function gridStart(prices: readonly number[], ref: number): GridSide[] {
+export function gridStart(prices: readonly number[], ref: number, direction: GridSpec['direction'] = 'neutral'): GridSide[] {
   let gap = 0;
   for (let i = 1; i < prices.length; i++) if (Math.abs(prices[i]! - ref) < Math.abs(prices[gap]! - ref)) gap = i;
-  return prices.map((_, i) => (i < gap ? 'buy' : i > gap ? 'sell' : null));
+  return prices.map((_, i) => (i < gap ? (direction === 'short' ? null : 'buy') : i > gap ? (direction === 'long' ? null : 'sell') : null));
 }
 
 /**

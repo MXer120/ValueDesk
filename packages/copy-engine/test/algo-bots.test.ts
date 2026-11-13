@@ -1674,3 +1674,23 @@ test('a stop that leaves less than SoDEX\'s minimum (owner 2026-11-09, 1.51 USDC
   assert.deepEqual(last.map((o) => [o.side, o.tif, !!o.reduceOnly]), [['buy', 'ioc', false], ['sell', 'ioc', true]], 'a top-up on the same side, then one reduce-only close of all');
   assert.ok(Math.abs(Number(last[1]!.quantity) - (0.00005 + Number(last[0]!.quantity))) < 1e-9, 'the close is the whole position');
 });
+
+test('grid direction: a long grid starts with buys only and never sells what it does not hold; a short grid the mirror', () => {
+  const prices = [90, 95, 100, 105, 110];
+  assert.deepEqual(gridStart(prices, 100), ['buy', 'buy', null, 'sell', 'sell']);
+  assert.deepEqual(gridStart(prices, 100, 'long'), ['buy', 'buy', null, null, null]);
+  assert.deepEqual(gridStart(prices, 100, 'short'), [null, null, null, 'sell', 'sell']);
+  // a long grid's buy at 95 puts a sell at 100; that sell filling puts the buy back at 95
+  const afterBuy = gridAfterFill(gridStart(prices, 100, 'long'), 1, 'buy');
+  assert.deepEqual(afterBuy, ['buy', null, 'sell', null, null]);
+  assert.deepEqual(gridAfterFill(afterBuy, 2, 'sell'), ['buy', 'buy', null, null, null]);
+  // the spec keeps a neutral grid as it was (no field) and validates the others
+  const base = { kind: 'grid', symbol: 'BTC-USD', paper: true, low: 90, high: 110, levels: 5, orderUsd: 20 };
+  const n = parseAlgoSpec(base) as { direction?: string };
+  assert.equal(n.direction, undefined);
+  assert.equal((parseAlgoSpec({ ...base, direction: 'long' }) as { direction?: string }).direction, 'long');
+  assert.throws(() => parseAlgoSpec({ ...base, direction: 'sideways' }));
+  // take-profit: optional, positive, absent when unset
+  assert.equal((parseAlgoSpec(base) as { takeProfitUsd?: number }).takeProfitUsd, undefined);
+  assert.equal((parseAlgoSpec({ ...base, takeProfitUsd: 25 }) as { takeProfitUsd?: number }).takeProfitUsd, 25);
+});

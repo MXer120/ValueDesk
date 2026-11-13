@@ -112,8 +112,26 @@ function countedOf(cfg: TiersConfig, store: BuilderStore | null, w: WalletRow | 
 export const VIP_DAYS = 14;
 /** VIP from $5M of the wallet's own 14-day volume (owner 2026-11-10; $1M before). */
 export const VIP_MIN_USD = 5_000_000;
-/** VIP by the wallet's own 14-day volume. */
+/** VIP by the wallet's own 14-day volume (only counts while vipByVolume() is on). */
 export const isVip = (v: { volumeUsd: number } | null): boolean => !!v && v.volumeUsd >= VIP_MIN_USD;
+
+/**
+ * Owner 2026-11-13, bots opening for everyone: "no one gets vip, but the people currently being assigned vip e.g. early
+ * access still have/get it". So VIP by volume is OFF unless VALUEDESK_VIP_BY_VOLUME=1; VIP comes only from what is
+ * assigned by hand - the beta list's early-access days (admin/store.ts), the dev page's programs, the executor's
+ * EXECUTOR_VIP_WALLETS - and VALUEDESK_VIP_KEEP (comma-separated wallets that held VIP by volume when it was turned off).
+ */
+export function vipByVolume(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.VALUEDESK_VIP_BY_VOLUME?.trim() === '1';
+}
+export function vipKept(env: NodeJS.ProcessEnv = process.env): readonly string[] {
+  return (env.VALUEDESK_VIP_KEEP ?? '').split(/[\s,]+/).map((x) => x.trim().toLowerCase()).filter((x) => /^0x[0-9a-f]{40}$/.test(x));
+}
+
+/** Bots with real orders for every wallet (VALUEDESK_BOTS_OPEN=1); off: the beta list only (owner 2026-11-13: live on his word). */
+export function botsOpen(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.VALUEDESK_BOTS_OPEN?.trim() === '1';
+}
 
 export class BuilderService {
   readonly tiers: TiersSource;
@@ -288,9 +306,11 @@ export class BuilderService {
     }
   }
 
-  /** Whether a wallet is VIP now ($1M of its own volume in 14 days): read from the ledger on every ask. */
+  /** Whether a wallet is VIP now by its standing: kept (VALUEDESK_VIP_KEEP), or by volume while that is on (vipByVolume). */
   vipNow(address: string): boolean {
-    return isVip(this.vipOf(address.toLowerCase()));
+    const a = address.toLowerCase();
+    if (vipKept().includes(a)) return true;
+    return vipByVolume() && isVip(this.vipOf(a));
   }
 
   /**

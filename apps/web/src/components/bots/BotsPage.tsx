@@ -41,7 +41,7 @@ import { BotsSavings } from './BotsSavings';
 import { StatusPill, type Tone } from './kit/kit';
 import type { BotState } from './botWords';
 import { STATE_WORD } from './botWords';
-import { applyForBeta, useBetaAccessState } from '../../beta/access';
+import { applyForBeta, useBotsAccessState } from '../../beta/access';
 import { openConnectDialog } from '../account/connect';
 import { Button, EmptyState, Icon, IconButton, Panel, Shell, Skeleton } from './kit/kit';
 import { listBotsOn } from '../../algo/executorAlgos';
@@ -192,9 +192,9 @@ export function StatePill({ s, size = 'md' }: { s: BotState; size?: 'sm' | 'md' 
   return <StatusPill tone={STATE_TONE[s]} size={size} dot pulse={s === 'running'} className={`bots-state is-${s}`}>{STATE_WORD[s]}</StatusPill>;
 }
 
-/** Bots are in beta (owner, 2026-11-06): a wallet on the beta list gets the page, everyone else the way to apply. */
+/** Bots (owner 2026-11-13: open for everyone once VALUEDESK_BOTS_OPEN is on; until then the beta list), else the way to apply. */
 export function BotsPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
-  const listed = useBetaAccessState(address);
+  const listed = useBotsAccessState(address);
   // Local builds of the section (BOTS_ON: dev, or VITE_BOTS) open it for any wallet; real orders stay the executor's call.
   const access = BOTS_ON ? 'open' : listed;
   if (access === 'open') return <BotsPageOpen address={address} provider={provider} />;

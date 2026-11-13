@@ -33,7 +33,7 @@ import type { Engine } from '../api';
 import { BrandMark } from './BrandMark';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { applyForBeta, useBetaAccess } from '../beta/access';
+import { applyForBeta, useBotsAccess } from '../beta/access';
 import { NAV_TABS, SOON_TABS, TAB_LABELS, pathForTab, type LegalPage, type SodexView, type Tab } from '../router';
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
@@ -137,7 +137,7 @@ export function NavBar({
      hidden in another. */
   const maskAddr = useAddressMask();
   // Local builds of the Bots section (BOTS_ON) open it for any wallet, as BotsPage does.
-  const listedForBots = useBetaAccess(address);
+  const listedForBots = useBotsAccess(address);
   const botsOpen = BOTS_ON || listedForBots;
   const addrRoot = useRef<HTMLDivElement>(null);
   const addrHover = useHoverMenu(addrRoot);

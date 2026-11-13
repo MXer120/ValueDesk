@@ -28,7 +28,7 @@ import { historyLabel } from '../dashboard/storage';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../dashboard/tabExtras';
 import { useMoneyNotice } from './funds/moneyNotice';
 import { BOTS_ON, goBots, useBotsView, type BotsView } from '../bots/routes';
-import { useBetaAccess } from '../beta/access';
+import { useBotsAccess } from '../beta/access';
 
 export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onNavigate }: {
   address: string | null;
@@ -41,7 +41,7 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
 }) {
   const terminals = useTerminals(TRADE_DASHBOARD);
   // The Bots pages in the rail wherever the section is open to this wallet (a local build, or the beta list).
-  const botsListed = useBetaAccess(address);
+  const botsListed = useBotsAccess(address);
   const botsOpen = BOTS_ON || botsListed;
   const onTrade = tab === 'trade';
   const open = (id: string) => {

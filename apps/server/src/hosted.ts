@@ -214,6 +214,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/bots/markets', cls: 'read' },
   { method: 'GET', url: '/api/vs/bots/regime', cls: 'read' },
   { method: 'GET', url: '/api/vs/bots/vip', cls: 'read' },
+  // Whether real bots are open for every wallet (routes/builder.ts): one switch, nobody's data.
+  { method: 'GET', url: '/api/vs/bots/access', cls: 'read' },
   // Deep links by SoDEX account id: the index's leaderboard map, on-chain as a fallback.
   { method: 'GET', url: '/api/feed/account', cls: 'upstream' },
   // Global, not per-user (until the web reads alpha-biz directly).

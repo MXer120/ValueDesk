@@ -33,6 +33,8 @@ const BTC_ROW = { id: 1, name: 'BTC-USD', baseCoin: 'BTC', tickSize: '1', stepSi
 
 /** The beta list the fake API server answers /api/vs/builder/beta from (null: it does not answer). */
 let BETA: string[] | null = [];
+/** Server 1's VALUEDESK_BOTS_OPEN: the answer carries bots: true for every wallet. undefined: an older server (no `bots`). */
+let BOTS_OPEN: boolean | undefined;
 function fakeFetch(rows: unknown[] = [BTC_ROW], marks: unknown[] = []): FetchLike {
   const ok = (data: unknown) => ({ status: 200, ok: true, text: async () => JSON.stringify({ code: 0, timestamp: Date.now(), data }) });
   return async (url) => {
@@ -40,7 +42,8 @@ function fakeFetch(rows: unknown[] = [BTC_ROW], marks: unknown[] = []): FetchLik
     if (path.startsWith('/api/vs/builder/beta')) {
       if (BETA === null) return { status: 503, ok: false, text: async () => '{"ok":false}' };
       const a = new URL(url).searchParams.get('address') ?? '';
-      return { status: 200, ok: true, text: async () => JSON.stringify({ ok: true, listed: (BETA ?? []).includes(a) }) };
+      const listed = (BETA ?? []).includes(a);
+      return { status: 200, ok: true, text: async () => JSON.stringify(BOTS_OPEN === undefined ? { ok: true, listed } : { ok: true, listed, bots: listed || BOTS_OPEN }) };
     }
     if (path.endsWith('/markets/symbols')) return ok(rows);
     if (path.endsWith('/markets/mark-prices')) return ok(marks);
@@ -165,4 +168,24 @@ test('bots: real bots only for a listed wallet, on the beta site or the main one
   assert.equal(await code(b.svc.algoStart(z.sign(b.svc.executorId, 'algo-start', { spec: live, seed: 5 }), beta)), '403:beta');
   await b.cleanup();
   BETA = [];
+});
+
+test('bots open for everyone (server 1 VALUEDESK_BOTS_OPEN, owner 2026-11-13): an unlisted wallet passes the gate; switched off it is refused again', async () => {
+  const { svc, cleanup } = make({ EXECUTOR_BUILDER_URL: 'http://127.0.0.1:9/api/vs/builder/volume', EXECUTOR_BUILDER_TOKEN: 't' });
+  const w = new Wallet();
+  const main = { viewerCountry: 'SG', channel: 'main' as const };
+  svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), main);
+  const live = { ...MM, maxLossUsd: 50, paper: false };
+  BETA = [];
+  BOTS_OPEN = true;
+  // Past the gate: it stops at the key it has not registered yet.
+  assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: live, seed: 11 }), main)), '412:key');
+  await cleanup();
+  BOTS_OPEN = false;
+  const b = make({ EXECUTOR_BUILDER_URL: 'http://127.0.0.1:9/api/vs/builder/volume', EXECUTOR_BUILDER_TOKEN: 't' });
+  const z = new Wallet();
+  b.svc.acceptTerms(z.sign(b.svc.executorId, 'accept-terms', TERMS), main);
+  assert.equal(await code(b.svc.algoStart(z.sign(b.svc.executorId, 'algo-start', { spec: live, seed: 12 }), main)), '403:beta');
+  await b.cleanup();
+  BOTS_OPEN = undefined;
 });

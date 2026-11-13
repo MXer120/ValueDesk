@@ -17,6 +17,7 @@ import {
   type AlgoKind,
   type AlgoSpec,
   type BotLimits,
+  type GridSpec,
   type MmSpec,
   type FlowGate,
   type QuietWindow,
@@ -64,7 +65,7 @@ export const ALGO_LIMITS = {
   sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
   mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 }, placeBps: { min: 0, max: 20 }, calmBps: { min: 0, max: 20 }, calmMs: { min: 50, max: 10_000 }, stillBps: { min: 0, max: 500 }, stillMs: { min: 1_000, max: 120_000 }, restMs: { min: 500, max: 120_000 }, flowMinUsd: { min: 1_000, max: 100_000_000 }, flowWindowMs: { min: MIN, max: HOUR }, flowShrink: { min: 0.1, max: 1 }, quietWindows: 6 },
   grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 100_000 } },
-  bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 } },
+  bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 }, takeProfitUsd: { min: 0.01, max: 1e8 } },
   exitPct: { min: 0.001, max: 10 },
   exec: { slippageBps: { min: 1, max: 500 }, offsetTicks: { min: -5, max: 10_000 }, chaseTicks: { min: 1, max: 10_000 }, makerShare: { min: 0.1, max: 0.95 } },
   jitter: { min: 0, max: 0.5 },
@@ -326,9 +327,12 @@ function botLimits(o: Obj, e: Errors, paper: boolean): BotLimits {
   const L = ALGO_LIMITS.bot;
   const maxLossUsd = opt(o, 'maxLossUsd', 'Loss limit', L.maxLossUsd, e);
   if (!paper && maxLossUsd === null && !e.maxLossUsd) e.maxLossUsd = 'A real bot needs a loss limit: set the most it may lose before it stops.';
+  // Kept out of the spec when unset, so a spec from before reads the same.
+  const takeProfitUsd = opt(o, 'takeProfitUsd', 'Take profit', L.takeProfitUsd, e);
   return {
     volumeTargetUsd: opt(o, 'volumeTargetUsd', 'Volume target', L.volumeTargetUsd, e),
     maxLossUsd,
+    ...(takeProfitUsd !== null ? { takeProfitUsd } : {}),
     endAt: time(o, 'endAt', 'End time', e),
     onStop: oneOf(o, 'onStop', 'When it stops', ['close', 'keep'] as const, 'close', e),
     // Post-only unless switched off (kept out of the spec while on, so a spec from before reads the same).
@@ -788,6 +792,10 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         spacing: oneOf(o, 'spacing', 'Spacing', ['linear', 'geometric'] as const, 'geometric', e),
         outOfRange: oneOf(o, 'outOfRange', 'Out of the range', ['wait', 'stop'] as const, 'wait', e),
       };
+      {
+        const direction = oneOf(o, 'direction', 'Direction', ['neutral', 'long', 'short'] as const, 'neutral', e);
+        if (direction !== 'neutral') (spec as GridSpec).direction = direction;
+      }
       break;
     }
     case 'bracket': {

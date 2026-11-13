@@ -1793,7 +1793,8 @@ export class ExecutorService {
   /* ------------------------------------------------------------ algos ----- */
 
   /**
-   * Whether real bots may start for this wallet: the live-algo wallets, or a wallet on the beta list - from
+   * Whether real bots may start for this wallet: the live-algo wallets, or what server 1 answers - every wallet once
+   * bots are open (VALUEDESK_BOTS_OPEN on server 1, owner 2026-11-13), else a wallet on the beta list - from
    * beta.valuedesk.so or the main site alike (owner, 2026-11-06: "if a wallet is whitelisted it can access it on
    * the normal domain"). `owner` is the wallet that signed the request, so the list is asked about the signer.
    */
@@ -1820,9 +1821,11 @@ export class ExecutorService {
       if (this.cfg.builderToken) headers['X-Internal-Token'] = this.cfg.builderToken;
       if (this.cfg.originSecrets[0]) headers['X-Origin-Verify'] = this.cfg.originSecrets[0];
       const res = await this.deps.fetch(u.toString(), { headers, signal: AbortSignal.timeout(5_000) });
-      const body = JSON.parse(await res.text()) as { ok?: boolean; listed?: unknown };
+      const body = JSON.parse(await res.text()) as { ok?: boolean; listed?: unknown; bots?: unknown };
       if (!res.ok || !body.ok || typeof body.listed !== 'boolean') throw new Error(`HTTP ${res.status}`);
-      const listed = body.listed;
+      // `bots` (server 1, routes/builder.ts): real bots may start - every wallet once VALUEDESK_BOTS_OPEN=1, else the
+      // listed. An older server sends only `listed`.
+      const listed = typeof body.bots === 'boolean' ? body.bots : body.listed;
       const now = Date.now();
       remember(this.betaCache, o, { at: now, listed });
       const kept = this.db.betaAnswer(o);

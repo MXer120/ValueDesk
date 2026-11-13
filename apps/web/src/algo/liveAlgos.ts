@@ -20,7 +20,7 @@ export function liveAlgoWalletsFrom(raw: unknown, dev: boolean): ReadonlySet<str
 }
 
 import { checkAlgoSpec } from '@copy-engine';
-import { hasBetaAccess } from '../beta/access';
+import { hasBotsAccess } from '../beta/access';
 
 /** Whether the engine reads this spec as a bot: a volume maker or a grid is one by its kind, with or without the flag. */
 export function isBotSpecInput(spec: unknown): boolean {
@@ -44,7 +44,7 @@ export function liveAlgosFor(owner: string | null | undefined, wallets: Readonly
  * (apps/executor/src/service.ts liveBotFor); this only says what the page offers.
  */
 export const BETA_CHANNEL = env?.VITE_CHANNEL === 'beta';
-export function liveBotsFor(owner: string | null | undefined, beta: boolean = BETA_CHANNEL || hasBetaAccess(owner), wallets: ReadonlySet<string> = LIVE_ALGOS_WALLETS): boolean {
+export function liveBotsFor(owner: string | null | undefined, beta: boolean = BETA_CHANNEL || hasBotsAccess(owner), wallets: ReadonlySet<string> = LIVE_ALGOS_WALLETS): boolean {
   return !!owner && (beta || liveAlgosFor(owner, wallets));
 }
 

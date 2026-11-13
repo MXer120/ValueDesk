@@ -16,7 +16,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { clientKey } from '../hosted.js';
-import { VIP_DAYS, VIP_MIN_USD, builderService, isVip, type BuilderService } from '../builder/service.js';
+import { VIP_DAYS, VIP_MIN_USD, botsOpen, builderService, vipByVolume, type BuilderService } from '../builder/service.js';
 import { ADDRESS_RE, NONCE_RE } from '../builder/terms.js';
 import { SANCTIONED_WALLET_REASON, isSanctionedAddress } from '../builder/sanctions.js';
 import { AdminStore } from '../admin/store.js';
@@ -113,9 +113,12 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     const q = (req.query ?? {}) as Record<string, unknown>;
     if (typeof q.address !== 'string' || !ADDRESS_RE.test(q.address)) return reply.code(400).send({ ok: false, error: 'a valid 0x wallet address is required' });
     try {
-      return { ok: true, listed: betaWallets().includes(q.address.toLowerCase()) };
+      const listed = betaWallets().includes(q.address.toLowerCase());
+      // bots: real bots may start for this wallet - everyone once VALUEDESK_BOTS_OPEN=1, else the listed.
+      return { ok: true, listed, bots: listed || botsOpen() };
     } catch (e) {
       req.log.error({ err: e instanceof Error ? e.message : String(e) }, 'beta list: not readable');
+      if (botsOpen()) return { ok: true, listed: false, bots: true };
       return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the beta list is not readable' });
     }
   });
@@ -146,7 +149,14 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     // A VIP program (fee VIP_PROGRAM_FEE: the beta's 30 days, or one from the dev page) - told by its fee, not its label.
     const g = service.vipProgramOf(q.address.toLowerCase());
     const promo = g ? { until: g.until, label: g.label || 'VIP program' } : null;
-    return { ok: true, eligible: isVip(v) || !!promo, volumeUsd: v.volumeUsd, minUsd: VIP_MIN_USD, days: VIP_DAYS, promo };
+    // byVolume false (owner 2026-11-13: "no one gets vip"): there is no volume milestone to show progress towards.
+    return { ok: true, eligible: service.vipNow(q.address) || !!promo, volumeUsd: v.volumeUsd, minUsd: VIP_MIN_USD, days: VIP_DAYS, promo, byVolume: vipByVolume() };
+  });
+
+  /** GET /api/vs/bots/access  ->  {ok, open}: whether real bots are open for every wallet (VALUEDESK_BOTS_OPEN). */
+  app.get('/api/vs/bots/access', async (_req, reply) => {
+    reply.header('Cache-Control', 'public, max-age=30');
+    return { ok: true, open: botsOpen() };
   });
 
   app.get('/api/vs/beta/listed', async (req, reply) => {
@@ -154,9 +164,12 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     const q = (req.query ?? {}) as Record<string, unknown>;
     if (typeof q.address !== 'string' || !ADDRESS_RE.test(q.address)) return reply.code(400).send({ ok: false, error: 'a valid 0x wallet address is required' });
     try {
-      return { ok: true, listed: betaWallets().includes(q.address.toLowerCase()) };
+      const listed = betaWallets().includes(q.address.toLowerCase());
+      // bots: real bots may start for this wallet - everyone once VALUEDESK_BOTS_OPEN=1, else the listed.
+      return { ok: true, listed, bots: listed || botsOpen() };
     } catch (e) {
       req.log.error({ err: e instanceof Error ? e.message : String(e) }, 'beta list: not readable');
+      if (botsOpen()) return { ok: true, listed: false, bots: true };
       return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the beta list is not readable' });
     }
   });

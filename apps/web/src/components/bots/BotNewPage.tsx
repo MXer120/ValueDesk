@@ -34,7 +34,7 @@ import { GRID_BT_DAYS, GRID_BT_MARKETS } from '../../bots/gridBacktest';
 import { BotAvatar, StrategyTile } from './BotIcon';
 import { BrandMark } from '../BrandMark';
 import { useAllocation } from './Allocation';
-import { BotSettings, NameField, SEC_NAMES, type Sec } from './BotSettings';
+import { BotSettings, NameField, SEC_NAMES, gridProblems, type Sec } from './BotSettings';
 import { BOTS_PREFILL_KEY, BotsHead, type BotsCtx } from './BotsPage';
 import { Button, Icon, Inset, Panel, ProgressBar, RollingNumber, SearchField, Segmented, SegmentedBar, Shell, ShellHeader, Skeleton, StatusPill } from './kit/kit';
 
@@ -344,7 +344,9 @@ function RangeTrack({ low, high, v }: { low: number; high: number; v: number }) 
 }
 
 /** The receipt: the estimate, how it adds up, what will run, what it needs. */
-function Receipt({ d, eff, picked, markets, feeBps, feeAdj, paper, floor, runs, chosen, children, free = null, need, ownUsd = 0, gEst = null }: {
+function Receipt({ d, eff, picked, markets, feeBps, feeAdj, paper, floor, runs, chosen, children, free = null, need, ownUsd = 0, gEst = null, range = null }: {
+  /** A grid's range now (null: not a grid, or not set yet). */
+  range?: { low: number; high: number } | null;
   /** A grid's backtest reading (null: not a grid). */
   gEst?: GridEstimate | null;
   d: BotDraft; eff: BotDraft; picked: string[]; markets: BotMarket[]; feeBps: number; feeAdj: number; paper: boolean; floor: ReturnType<typeof costPerMillion>; runs: readonly OwnRun[];
@@ -459,7 +461,12 @@ function Receipt({ d, eff, picked, markets, feeBps, feeAdj, paper, floor, runs, 
         </div>
         <div className="bots-rc__tile"><span>Order size</span><b>{fmtUsd(d.orderUsd, 0)}<small>{grid ? ` × ${d.levels}` : ' a side'}</small></b></div>
         {!grid ? <div className="bots-rc__tile"><span>Max holding</span><b>{fmtUsd(d.maxInventoryUsd, 0)}</b></div> : <div className="bots-rc__tile"><span>Levels</span><b>{d.levels}{gEst && gEst.stepBps > 0 ? <small>{` · ${pct(gEst.stepBps / 100)} apart`}</small> : null}</b></div>}
+        {grid && <div className="bots-rc__tile"><span>Direction</span><b>{d.gridDir === 'long' ? 'Long' : d.gridDir === 'short' ? 'Short' : 'Neutral'}<small>{d.outOfRange === 'wait' ? ' · in range only' : ' · stops out of range'}</small></b></div>}
+        {grid && range && <div className="bots-rc__tile"><span>Range</span><b>{fmtUsd(range.low)}<small>{` – ${fmtUsd(range.high)}`}</small></b></div>}
+        {grid && d.triggerPrice !== null && <div className="bots-rc__tile"><span>Starts at</span><b>{fmtUsd(d.triggerPrice)}</b></div>}
+        {grid && (d.stopAbove !== null || d.stopBelow !== null) && <div className="bots-rc__tile"><span>Stops at</span><b>{[d.stopBelow !== null ? `below ${fmtUsd(d.stopBelow)}` : null, d.stopAbove !== null ? `above ${fmtUsd(d.stopAbove)}` : null].filter(Boolean).join(' · ')}</b></div>}
         <div className="bots-rc__tile"><span>Loss limit</span><b>{d.maxLossUsd === null ? 'None' : fmtUsd(d.maxLossUsd, 0)}</b></div>
+        {d.takeProfitUsd !== null && <div className="bots-rc__tile"><span>Take profit</span><b>{fmtUsd(d.takeProfitUsd, 2)}</b></div>}
         <div className="bots-rc__tile"><span>Runs</span><b>{d.runHours === null ? 'Until stopped' : d.runHours >= 168 ? `${Math.round(d.runHours / 24)} days` : `${d.runHours} h`}</b></div>
       </section>
 
@@ -605,7 +612,9 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
         : `Lower Max holding to about ${fmtUsd(Math.floor(d.maxInventoryUsd * fit), 0)}`)
       + `${atCap ? '' : ', raise the leverage'}, or deposit more.`
     : null;
-  const sizeProblems = marginError ? [...sizeErrors, marginError] : sizeErrors;
+  const gp = gridProblems(d, range, mark);
+  const gridErr = gp.range ?? gp.stop;
+  const sizeProblems = [...sizeErrors, ...(marginError ? [marginError] : []), ...(gridErr ? [gridErr] : [])];
   // Auto leverage (owner 2026-11-08): what the bots may hold and quote at 1x, against what is free.
   const reserveAll = plans.reduce((t, x) => t + x.marginUsd * Math.max(1, d.leverage ?? 1), 0);
   const autoLev = autoLeverage(reserveAll, paper ? null : free, levCap);
@@ -619,6 +628,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     : !ctx.ready ? 'The ValueDesk executor is not ready yet.'
     : !picked.length ? 'Pick at least one market.'
     : grid && !range ? 'Waiting for the price to set the range.'
+    : gridErr ? gridErr
     : allErrors.length ? 'Fix the order size first (see Review).'
     : !paper && d.leverage === null ? "Reading the market's leverage and your account…"
     : clash.length ? `You already run a real bot on ${clash.map((x) => x.replace(/-USD$/, '')).join(', ')}. Stop it, untick it, or turn on Practice.`
@@ -827,7 +837,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
 
         <aside className="bots-newside">
           <Shell className="bots-sidecard">
-            <Receipt chosen={place.step >= 1} gEst={gEst} d={d} eff={eff} picked={picked} markets={markets.data?.markets ?? []} feeBps={feeBps} feeAdj={feeAdj} paper={paper} floor={floor} runs={runs} free={free} need={needAll} ownUsd={alloc.perpsUsd}>
+            <Receipt chosen={place.step >= 1} gEst={gEst} range={range} d={d} eff={eff} picked={picked} markets={markets.data?.markets ?? []} feeBps={feeBps} feeAdj={feeAdj} paper={paper} floor={floor} runs={runs} free={free} need={needAll} ownUsd={alloc.perpsUsd}>
               <div className="bots-sidepanel__act">
                 {at > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
                 {at < last

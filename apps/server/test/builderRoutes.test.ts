@@ -391,3 +391,13 @@ test('route: /api/vs/bots/vip tells a VIP program by its fee (VIP_PROGRAM_FEE), 
     await app.close();
   }
 });
+
+test('bots open switch and VIP by volume off (owner 2026-11-13: "no one gets vip", bots for all on his word)', async () => {
+  const { vipByVolume, vipKept, botsOpen } = await import('../src/builder/service.js');
+  assert.equal(vipByVolume({}), false);
+  assert.equal(vipByVolume({ VALUEDESK_VIP_BY_VOLUME: '1' }), true);
+  assert.equal(botsOpen({}), false);
+  assert.equal(botsOpen({ VALUEDESK_BOTS_OPEN: '1' }), true);
+  const a = '0x' + 'ab'.repeat(20);
+  assert.deepEqual(vipKept({ VALUEDESK_VIP_KEEP: ` ${a.toUpperCase().replace('0X', '0x')}, junk ,` }), [a]);
+});

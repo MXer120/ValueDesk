@@ -284,3 +284,23 @@ test('chart hours in the own zone of the viewer (owner 2026-11-08): stored as th
   assert.deepEqual([...chartHours(old, 60, 'Europe/Berlin')], [9], 'a UTC window from before still shows');
   assert.deepEqual(chartWindows(new Set(Array.from({ length: 24 }, (_, h) => h)), 60, 'Europe/Berlin'), [{ from: '00:00', to: '23:59', zone: 'Europe/Berlin', days: 'all' }]);
 });
+
+test('a customised grid: direction, spacing, start price, stop prices and take-profit go into the spec and read back', () => {
+  const d = { ...draftFor('grid'), low: 90, high: 110, levels: 25, gridDir: 'long' as const, spacing: 'linear' as const, triggerPrice: 95, stopAbove: 120, stopBelow: 80, takeProfitUsd: 12 };
+  const spec = parseAlgoSpec(specOf(d, 100)) as unknown as Record<string, unknown>;
+  assert.equal(spec.direction, 'long');
+  assert.equal(spec.spacing, 'linear');
+  assert.equal(spec.triggerPrice, 95);
+  assert.deepEqual(spec.upper, { price: 120, then: 'stop' });
+  assert.deepEqual(spec.lower, { price: 80, then: 'stop' });
+  assert.equal(spec.takeProfitUsd, 12);
+  const back = draftOfSpec(parseAlgoSpec(specOf(d, 100)));
+  for (const k of ['gridDir', 'spacing', 'triggerPrice', 'stopAbove', 'stopBelow', 'takeProfitUsd', 'levels', 'low', 'high'] as const) assert.equal(back[k], d[k], k);
+  // a neutral grid with none of them signs the same spec as before
+  const plain = parseAlgoSpec(specOf({ ...draftFor('grid'), low: 90, high: 110 }, 100)) as unknown as Record<string, unknown>;
+  assert.equal(plain.direction, undefined);
+  assert.equal(plain.takeProfitUsd, undefined);
+  assert.equal(plain.upper, null);
+  // on a running grid the stop prices and the take-profit may change; the direction may not (a restart)
+  assert.deepEqual(patchOf(back, { ...back, stopAbove: 130, takeProfitUsd: 20, gridDir: 'short' }), { takeProfitUsd: 20, upper: { price: 130, then: 'stop' } });
+});

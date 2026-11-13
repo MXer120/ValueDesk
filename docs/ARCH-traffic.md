@@ -361,6 +361,9 @@ Against this inventory, HOSTED_ROUTES should be:
   without a token, about one address only - it decides what the page offers (Bots, the
   advanced algo orders), never what runs: the executor asks the list again for the wallet
   that signed (routes/builder.ts, apps/web/src/beta/access.ts).
+- **Add**: `GET /api/vs/bots/access` (cls `read`): whether real bots are open for every wallet
+  (`VALUEDESK_BOTS_OPEN` on this server, owner 2026-11-13); no input, nobody's data. The two beta
+  answers above carry `bots` too (listed, or open for all), which the executor's live-bot gate reads.
 - **Add**: `GET /api/vs/status` (cls `read`): the public status page's report - each
   service's last probe and its 90 days, built from `status.db` at most every 30 s and
   cacheable at the edge as long (`perf.ts`); no input (routes/status.ts, ops/status.ts).

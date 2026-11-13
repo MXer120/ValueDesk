@@ -450,6 +450,8 @@ export interface BotLimits {
   volumeTargetUsd: number | null;
   /** Stop once its net PnL (at the mark, after all fees) is this far below 0, USD. null = no loss limit. */
   maxLossUsd: number | null;
+  /** Stop once its net PnL (at the mark, after all fees) reaches this, USD (absent or null: no take-profit). */
+  takeProfitUsd?: number | null;
   /** Stop at this time. null = until stopped. */
   endAt: number | null;
   onStop: BotStop;
@@ -625,6 +627,12 @@ export interface GridSpec extends AlgoBase, BotLimits {
   spacing: 'linear' | 'geometric';
   /** The mark out of the range: keep the orders and wait, or stop. */
   outOfRange: 'wait' | 'stop';
+  /**
+   * neutral (absent): buys below the price and sells above from the start, so it may hold either way. long: only buys
+   * at first, and sells only what it bought - it never goes short. short: only sells at first, buys back only what it
+   * sold - it never goes long (owner 2026-11-13: "a normal good and customizable grid bot").
+   */
+  direction?: 'neutral' | 'long' | 'short';
 }
 
 export type AlgoSpec =

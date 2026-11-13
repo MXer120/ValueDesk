@@ -161,6 +161,15 @@ export interface BotDraft {
   low: number | null;
   high: number | null;
   levels: number;
+  /** Neutral: buys below and sells above from the start; long: buys first and sells only what it bought; short: the mirror. */
+  gridDir: 'neutral' | 'long' | 'short';
+  /** Even steps in percent (geometric) or in dollars (linear). */
+  spacing: 'geometric' | 'linear';
+  /** Start only once the price reaches this (engine triggerPrice); null: at once. */
+  triggerPrice: number | null;
+  /** Stop when the price goes above / below these (engine upper / lower bounds, then 'stop'); null: none. */
+  stopAbove: number | null;
+  stopBelow: number | null;
   /* safeguards (engine flowGate / quiet, owner 2026-11-07) */
   /** The flow gate: pause, or quote smaller, while the patient taker (1002) traded less than flowMinUsd here over flowWindowMin. */
   flowOn: boolean;
@@ -184,6 +193,8 @@ export interface BotDraft {
   /* limits */
   volumeTargetUsd: number | null;
   maxLossUsd: number | null;
+  /** Stop once its net PnL reaches this (engine takeProfitUsd); null: no take-profit. */
+  takeProfitUsd: number | null;
   onStop: 'close' | 'keep';
   outOfRange: 'wait' | 'stop';
 }
@@ -248,8 +259,14 @@ export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symb
     low: null,
     high: null,
     levels: 16,
+    gridDir: 'neutral',
+    spacing: 'geometric',
+    triggerPrice: null,
+    stopAbove: null,
+    stopBelow: null,
     volumeTargetUsd: null,
     maxLossUsd: null,
+    takeProfitUsd: null,
     onStop: 'close',
     outOfRange: 'wait',
     flowOn: false,
@@ -284,7 +301,7 @@ const roundSig = (x: number): number => Number(x.toPrecision(6));
 /** The spec the wallet signs (parseAlgoSpec form; the executor checks it again). */
 export function specOf(d: BotDraft, mark: number | null): Record<string, unknown> {
   const base = { symbol: d.symbol, paper: d.paper, label: d.label.trim() || null, ...(d.leverage !== null ? { leverage: d.leverage } : {}), ...(d.postOnly === false ? { postOnly: false } : {}) };
-  const limits = { volumeTargetUsd: d.volumeTargetUsd, maxLossUsd: d.maxLossUsd, onStop: d.onStop };
+  const limits = { volumeTargetUsd: d.volumeTargetUsd, maxLossUsd: d.maxLossUsd, onStop: d.onStop, ...(d.takeProfitUsd !== null && d.takeProfitUsd > 0 ? { takeProfitUsd: d.takeProfitUsd } : {}) };
   if (d.strategy === 'market') {
     return {
       ...base, ...limits, kind: 'mm', ref: 'binance', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks,
@@ -305,7 +322,11 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
   // are the volume maker's only (spec.ts parses them for 'mm'), so a grid never carries them.
   const r = gridRange(d, mark);
   return {
-    ...base, ...limits, kind: 'grid', low: r?.low ?? null, high: r?.high ?? null, levels: d.levels, orderUsd: d.orderUsd, spacing: 'geometric', outOfRange: d.outOfRange,
+    ...base, ...limits, kind: 'grid', low: r?.low ?? null, high: r?.high ?? null, levels: d.levels, orderUsd: d.orderUsd, spacing: d.spacing, outOfRange: d.outOfRange,
+    ...(d.gridDir !== 'neutral' ? { direction: d.gridDir } : {}),
+    ...(d.triggerPrice !== null && d.triggerPrice > 0 ? { triggerPrice: d.triggerPrice } : {}),
+    ...(d.stopAbove !== null && d.stopAbove > 0 ? { upper: { price: d.stopAbove, then: 'stop' } } : {}),
+    ...(d.stopBelow !== null && d.stopBelow > 0 ? { lower: { price: d.stopBelow, then: 'stop' } } : {}),
     ...(d.maxSpreadBps !== null ? { maxSpreadBps: d.maxSpreadBps } : {}),
     ...runEnd(d),
   };
@@ -369,16 +390,16 @@ export function draftOfSpec(s: AlgoSpec, now = Date.now()): BotDraft {
       ...draftFor('market', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd,
       skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, restS: s.restMs / 1000,
       gate: (s.stillBps ?? 0) > 0, gateBps: s.stillBps ?? GATE_DEFAULT.gateBps, gateWindowS: (s.stillMs ?? GATE_DEFAULT.gateWindowS * 1000) / 1000,
-      maxSpreadBps: s.maxSpreadBps, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop,
+      maxSpreadBps: s.maxSpreadBps, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, takeProfitUsd: s.takeProfitUsd ?? null, onStop: s.onStop,
       refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, noFair: !!s.noFair,
       ...safeguardsOf(s, now),
     };
   }
   if (s.kind === 'mm') {
-    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps ?? null, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, ...safeguardsOf(s, now) };
+    return { ...draftFor(s.ref ? 'lead' : 'maker', 'balanced', s.symbol), refBps: s.refBps ?? 0, pullBps: s.pullBps ?? 0, label: s.label ?? '', paper: s.paper, offsetTicks: s.offsetTicks, orderUsd: s.orderUsd, maxInventoryUsd: s.maxInventoryUsd, skewTicks: s.skewTicks, chaseTicks: s.chaseTicks, minRepriceMs: s.minRepriceMs, edgeBps: s.edgeBps ?? 0, queueGuard: s.queueGuard ?? 0, ladder: s.levels ?? 1, moveGuard: s.moveGuard ?? 0, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, takeProfitUsd: s.takeProfitUsd ?? null, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps ?? null, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, ...safeguardsOf(s, now) };
   }
   if (s.kind === 'grid') {
-    return { ...draftFor('grid', 'balanced', s.symbol), gridK: null, label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, low: s.low, high: s.high, levels: s.levels, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now), endAt: runHoursLeft(s.endAt, now) !== null ? s.endAt : null, runHoursAt: runHoursLeft(s.endAt, now) };
+    return { ...draftFor('grid', 'balanced', s.symbol), gridK: null, label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, low: s.low, high: s.high, levels: s.levels, spacing: s.spacing === 'linear' ? 'linear' : 'geometric', gridDir: s.direction ?? 'neutral', triggerPrice: s.triggerPrice ?? null, stopAbove: s.upper?.then === 'stop' ? s.upper.price : null, stopBelow: s.lower?.then === 'stop' ? s.lower.price : null, takeProfitUsd: s.takeProfitUsd ?? null, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now), endAt: runHoursLeft(s.endAt, now) !== null ? s.endAt : null, runHoursAt: runHoursLeft(s.endAt, now) };
   }
   return draftFor('maker', 'balanced', s.symbol);
 }
@@ -387,7 +408,7 @@ export function draftOfSpec(s: AlgoSpec, now = Date.now()): BotDraft {
 export function patchOf(before: BotDraft, after: BotDraft): Record<string, unknown> {
   if (after.strategy === 'market') {
     const out: Record<string, unknown> = {};
-    for (const k of ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'maxSpreadBps'] as const) if (before[k] !== after[k]) out[k] = after[k];
+    for (const k of ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'onStop', 'maxSpreadBps'] as const) if (before[k] !== after[k]) out[k] = after[k];
     if (before.restS !== after.restS) out.restMs = Math.round(after.restS * 1000);
     // The gate off is stillBps 0 (the spec drops it); on, both numbers so a change of one keeps the other.
     if (before.gate !== after.gate || (after.gate && (before.gateBps !== after.gateBps || before.gateWindowS !== after.gateWindowS))) {
@@ -398,11 +419,16 @@ export function patchOf(before: BotDraft, after: BotDraft): Record<string, unkno
     return out;
   }
   const keys: Array<keyof BotDraft> =
-    after.strategy === 'maker' ? ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'edgeBps', 'queueGuard', 'ladder', 'moveGuard', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'maxSpreadBps']
-    : after.strategy === 'lead' ? ['orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'maxSpreadBps']
-    : ['orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'onStop', 'outOfRange', 'maxSpreadBps'];
+    after.strategy === 'maker' ? ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'edgeBps', 'queueGuard', 'ladder', 'moveGuard', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'onStop', 'maxSpreadBps']
+    : after.strategy === 'lead' ? ['orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'onStop', 'maxSpreadBps']
+    : ['orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'onStop', 'outOfRange', 'maxSpreadBps'];
   const out: Record<string, unknown> = {};
   for (const k of keys) if (before[k] !== after[k]) out[k === 'ladder' ? 'levels' : k] = after[k];
+  // A grid's range, levels, spacing and direction are what it is (a restart changes them); its stop prices may change.
+  if (after.strategy === 'grid') {
+    if (before.stopAbove !== after.stopAbove) out.upper = after.stopAbove ? { price: after.stopAbove, then: 'stop' } : null;
+    if (before.stopBelow !== after.stopBelow) out.lower = after.stopBelow ? { price: after.stopBelow, then: 'stop' } : null;
+  }
   if (before.label.trim() !== after.label.trim()) out.label = after.label.trim() || null;
   return out;
 }

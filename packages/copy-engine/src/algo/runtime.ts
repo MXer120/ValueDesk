@@ -327,8 +327,8 @@ const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 
 /** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
 const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
   // Everything but the market, the kind and practice or real (owner 2026-11-08: every setting saves in place, no restart).
-  mm: new Set(['ref', 'noFair', 'placeBps', 'calmBps', 'calmMs', 'pauseAfter', 'pauseMs', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop']),
-  grid: new Set(['low', 'high', 'levels', 'spacing', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange']),
+  mm: new Set(['ref', 'noFair', 'placeBps', 'calmBps', 'calmMs', 'pauseAfter', 'pauseMs', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'endAt', 'onStop']),
+  grid: new Set(['low', 'high', 'levels', 'spacing', 'direction', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'endAt', 'onStop', 'outOfRange']),
 };
 /** How long the patient taker's prints are kept per market (the longest flowGate window). */
 const FLOW_KEEP_MS = 3_600_000;
@@ -1259,7 +1259,7 @@ export class AlgoRuntime {
     if (spec.kind === 'grid' && 'orderUsd' in patch) delete a.k.gz;
     // A grid's new range, levels or spacing: laid out again around the price now (what it holds stays in its book);
     // every level resting is pulled below and placed again (owner 2026-11-08: no restart for any setting).
-    const relayout = spec.kind === 'grid' && ['low', 'high', 'levels', 'spacing'].some((k) => k in patch);
+    const relayout = spec.kind === 'grid' && ['low', 'high', 'levels', 'spacing', 'direction'].some((k) => k in patch);
     if (relayout && spec.kind === 'grid') {
       const m = this.markets.get(spec.symbol);
       if (m) {
@@ -1267,7 +1267,7 @@ export class AlgoRuntime {
         const q = this.market.quote(spec.symbol);
         const px = this.market.mark(spec.symbol)?.mark ?? (q ? mid(q) : (spec.low + spec.high) / 2);
         a.k.gp = prices;
-        a.k.gs = gridStart(prices, px);
+        a.k.gs = gridStart(prices, px, spec.direction);
         delete a.k.gz;
         delete a.k.gretry;
       }
@@ -1960,7 +1960,7 @@ export class AlgoRuntime {
     } else if (s.kind === 'grid') {
       const prices = gridPrices(s, m.tickSize);
       a.k.gp = prices;
-      a.k.gs = gridStart(prices, a.arrival ?? (s.low + s.high) / 2);
+      a.k.gs = gridStart(prices, a.arrival ?? (s.low + s.high) / 2, s.direction);
     } else if (s.kind === 'swarm') {
       a.k.clips = swarmClips(s, m, a.seed);
       a.k.next = 0;
@@ -2361,6 +2361,7 @@ export class AlgoRuntime {
     if (s.volumeTargetUsd !== null && bookVolume(b) >= s.volumeTargetUsd) hit = { status: 'done', reason: `Reached its volume target of ${money(s.volumeTargetUsd)}.` };
     // The loss limit needs a price: with none (no mark, no book) it is checked on the next step that has one.
     else if (s.maxLossUsd !== null && mk !== null && bookNet(b, mk) <= -s.maxLossUsd) hit = { status: 'expired', reason: `Stopped at its loss limit: net PnL ${money(bookNet(b, mk))} (limit -${money(s.maxLossUsd)}).` };
+    else if (s.takeProfitUsd != null && mk !== null && bookNet(b, mk) >= s.takeProfitUsd) hit = { status: 'done', reason: `Took its profit: net PnL ${money(bookNet(b, mk))} (target ${money(s.takeProfitUsd)}).` };
     else if (s.endAt !== null && now >= s.endAt) hit = { status: 'expired', reason: 'Its end time came.' };
     if (!hit) return false;
     await this.endBot(a, hit.status, hit.reason);

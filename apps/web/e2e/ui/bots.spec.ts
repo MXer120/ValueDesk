@@ -214,7 +214,8 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   const sp = page.locator('.bots-settingspage');
   await sp.waitFor();
   await sp.getByRole('textbox', { name: 'Order size', exact: true }).fill('15');
-  await sp.locator('.bots-stg__nav').getByRole('button', { name: /Safeguards/ }).click();
+  // The settings page shows every section at once as cards since 2026-11-10; an older layout had a side menu.
+  if (await sp.locator('.bots-stg__nav').count()) await sp.locator('.bots-stg__nav').getByRole('button', { name: /Safeguards/ }).click();
   assert.equal(await sp.getByRole('switch', { name: 'Volatility gate' }).getAttribute('aria-checked'), 'true', 'it shows what runs: the gate on');
   await sp.getByRole('switch', { name: 'Volatility gate' }).click();
   // The size, the holding that follows it, and the gate.

@@ -97,8 +97,8 @@ A **real** bot starts on the hosted executor when, in order (each refusal has a 
   `403 beta` ("ask on Discord"). Every answer is kept in the executor's db: when server 1 does not answer, the last
   known one stands. A running real bot is held only on an explicit "not listed", never because the list was down;
   a wallet never answered for is refused a new real bot (fails closed).
-- the executor runs fewer than `EXECUTOR_MAX_LIVE_BOTS` real bots, every wallet together (default 10, ~10 bots with
-  pushed fills per IP measured 2026-11-05) - else `429 bot-capacity`;
+- the executor runs fewer than `EXECUTOR_MAX_LIVE_BOTS` real bots, every wallet together (code default 20, unset on
+  server 2 in production; ~10 bots with pushed fills per IP measured 2026-11-05) - else `429 bot-capacity`;
 - the brake is off; the trading key is registered (`412 key`); the wallet has a SoDEX account (`412 account`);
 - nothing else of the wallet's trades that market: no other real bot (`409 bot-market`), no live algo order
   (`409 market-algo`), no live copy that holds it, whose leader holds it or whose allow list names the coin
@@ -113,6 +113,39 @@ Practice bots run for everyone against the real book and send nothing.
 
 The trading key: the engine reads its expiry (host `keyExpiresAt`) and pulls the quotes before it; the wallet gets a
 notice about 24 h and 1 h before a key that real bots use expires (id `key-expiry:24h|1h:...`).
+
+## Opening bots to everyone (2026-11-13, owner: "make us ready to make the bots live and accessible for all later today - wait for confirmation but no one gets vip, but the people currently being assigned vip e.g. early access still have/get it")
+
+**One switch: `VALUEDESK_BOTS_OPEN=1` in server 1's api env, then restart the API.** The beta answers
+(`/api/vs/builder/beta` for the executor, `/api/vs/beta/listed` for the page) carry `bots: listed || open`, and the
+page reads `GET /api/vs/bots/access` ({open}) for wallets not yet asked about. The executor reads `bots` (it keeps an
+answer a minute), the web's Bots nav, sidebar, Portfolio cards and the Bots page open for every wallet (web
+beta/access.ts useBotsAccess). Off again: unset it and restart; running real bots of unlisted wallets are then held
+(an explicit "not listed"), as for a wallet taken off the list. The advanced algo orders stay on the beta list.
+
+**VIP:** by volume is OFF (`VALUEDESK_VIP_BY_VOLUME` unset; `=1` turns the $5M/14 d milestone back on). VIP comes only
+from what is assigned: the beta list's early-access days (admin store BETA_VIP_DAYS from the listing), the dev page's
+programs, server 2's `EXECUTOR_VIP_WALLETS`, and `VALUEDESK_VIP_KEEP` (wallets that held VIP by volume when it went
+off: none - no wallet had over $500k in 14 days on 2026-11-13). With no milestone the Bots VIP card shows only for
+VIP holders; nobody else sees "Become VIP".
+
+**Before turning it on:** ship web + api + executor of this branch (no behaviour change while the switch is off,
+except VIP by volume being off). Capacity: at most `EXECUTOR_MAX_LIVE_BOTS` real bots on the executor, every wallet
+together (20 now); past it a start is refused with "try later, or start it as practice".
+
+## Grid settings (2026-11-13, owner: "just make it a normal good and customizable grid bot. For example trades only in ranges")
+
+A grid is set like any exchange's grid bot (web BotSettings, engine GridSpec):
+- **Direction** neutral / long / short (`direction`, absent = neutral): a long grid starts with buys only and sells
+  only what it bought (never short), a short grid the mirror (bots.ts gridStart).
+- **Price range** low / high, typed or ±1/2/5/10% around the price; the presets still lay it out from the volatility.
+- **Levels** 3-60 (slider + number), **spacing** equal % (geometric) or equal $ (linear).
+- **Start at price** (`triggerPrice`): nothing is placed until the mark reaches it, then the grid is laid out there.
+- **Stop at price** above / below (`upper` / `lower`, then 'stop'), checked against the price (or the start price).
+- **Take profit** in USD (`takeProfitUsd`, every bot kind): stops once net PnL after fees reaches it.
+- **Out of range**: "Pause until back" (`wait`: trades only inside the range) or "Stop".
+Range, levels, spacing and direction of a running grid change by a restart; its stop prices and take-profit save in
+place.
 
 ## Tests
 
