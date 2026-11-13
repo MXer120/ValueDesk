@@ -46,8 +46,10 @@ function fills(n: number, o: { tag: string; wallets?: number; days?: number; src
 }
 
 const dir = () => mkdtempSync(join(tmpdir(), 'vs-writer-'));
-const count = (s: IndexStore, sql: string, ...p: Array<string | number>) => Number((s.db.prepare(sql).get(...p) as { n: number }).n);
-const table = (s: IndexStore, sql: string) => s.db.prepare(sql).all().map((r) => JSON.stringify(r));
+/** The change log's tables are in their own file (store.ts liqDbPath). */
+const conn = (s: IndexStore, sql: string) => (/\bliq_(log|cur|addr)\b/.test(sql) ? s.liqDb! : s.db);
+const count = (s: IndexStore, sql: string, ...p: Array<string | number>) => Number((conn(s, sql).prepare(sql).get(...p) as { n: number }).n);
+const table = (s: IndexStore, sql: string) => conn(s, sql).prepare(sql).all().map((r) => JSON.stringify(r));
 
 interface Priv { dirtyDays: Set<string>; versions: Map<string, number> }
 const priv = (s: IndexStore) => s as unknown as Priv;

@@ -18,6 +18,11 @@
  * commits as soon as it sees one waiting and starts no transaction while one is, so a write of the indexer's thread waits
  * for one row and a commit, not for a transaction (writeBench.ts measures it).
  *
+ * The level change log in its own file (store.ts liqDbPath, from 2026-11-12): the thread writes its steps on a second
+ * connection to that file, in transactions of their own, and gives way to nothing there - the indexer's thread does not
+ * write that file. Giving way on the shared lock is what made a step of 45,807 rows take 574 s. A file whose index still
+ * holds the log (`liqPath` null) is written as before, on the one connection.
+ *
  * Each transaction also writes `meta.writer_done` = `<op>:<rows done>`: after the thread dies, or at a stop with the store
  * holding the write lock, that row says exactly which rows are in the file, so none is written twice or lost. Should the
  * thread die or hang, the store writes what is left itself and goes on writing inline until a new thread is up a minute
@@ -142,6 +147,16 @@ export interface WriterStatus {
   lastTxMs: number;
   maxTxMs: number;
   maxLockMs: number;
+  /** How long the thread let the store's writes go first, in all (ms), and how many transactions one of them cut short. */
+  yieldMs: number;
+  wantCuts: number;
+  /** The level change log on a file of its own (store.ts liqDbPath): its transactions there. */
+  liqFile: boolean;
+  liqRows: number;
+  liqTxs: number;
+  liqLastTxMs: number;
+  liqMaxTxMs: number;
+  liqMaxLockMs: number;
   /** Rows skipped for a constraint (a broken row; putFills used to fail its whole slice). */
   badRows: number;
   restarts: number;
@@ -151,7 +166,7 @@ export interface WriterStatus {
 
 interface Msg {
   seq?: number; from?: number; to?: number; changed?: number[]; final?: boolean; ids?: Array<[string, number]>;
-  error?: string; bad?: number; txError?: string; tx?: { ms: number; lockMs: number; rows: number }; ready?: boolean;
+  error?: string; bad?: number; txError?: string; tx?: { ms: number; lockMs: number; rows: number; liq?: boolean; yieldMs?: number; cut?: boolean }; ready?: boolean;
 }
 
 // Plain JavaScript in a string, as checkpointer.ts: the thread needs no TypeScript loader, in production or in a test.
@@ -170,12 +185,24 @@ db.exec('PRAGMA temp_store = MEMORY');
 db.exec('PRAGMA journal_size_limit = ' + w.walLimit);
 db.exec('PRAGMA cache_size = -' + w.cacheKb);
 db.exec('PRAGMA wal_autocheckpoint = ' + w.autoCkpt);
+// The change log's own file, when it has one: its own connection, cache and checkpoints (no checkpoint thread there).
+const ldb = w.liqPath ? new DatabaseSync(w.liqPath) : db;
+if (ldb !== db) {
+  ldb.exec('PRAGMA busy_timeout = ' + w.busyMs);
+  ldb.exec('PRAGMA synchronous = NORMAL');
+  ldb.exec('PRAGMA temp_store = MEMORY');
+  ldb.exec('PRAGMA journal_size_limit = ' + w.walLimit);
+  ldb.exec('PRAGMA cache_size = -' + w.liqCacheKb);
+  ldb.exec('PRAGMA wal_autocheckpoint = ' + w.liqAutoCkpt);
+}
 const S = w.sql;
 const FILL = db.prepare(S.fill), DIRTY = db.prepare(S.dirty), HOUR = db.prepare(S.hour), DAYQ = db.prepare(S.day);
-const ADDR = db.prepare(S.addr), LOG = db.prepare(S.log), CUR = db.prepare(S.cur), UNCUR = db.prepare(S.uncur);
+const ADDR = ldb.prepare(S.addr), LOG = ldb.prepare(S.log), CUR = ldb.prepare(S.cur), UNCUR = ldb.prepare(S.uncur);
 const DONE = db.prepare("INSERT INTO meta (key, value) VALUES ('" + S.doneKey + "', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value");
 let UNSPILL = null;
 const queue = [];
+/** The change log's steps, when they have a file of their own: written first, on ldb. */
+const lqueue = [];
 const dirtySeen = new Set();
 let scheduled = false, parked = false, fails = 0;
 // A constraint, a type or a size: the row is broken, not the transaction (SQLite undoes only that statement).
@@ -201,6 +228,7 @@ port.on('message', (m) => {
   }
   // From the row a dead thread had committed (an op handed on after a death), else from the start.
   m.done = m.from > 0 ? m.from : 0;
+  if (m.kind === 'liqLog' && ldb !== db) { lqueue.push(m); kick(); return; }
   // A liq step goes ahead of the stream rows (after any step already there): behind a backlog of millions of rows it waited
   // hours (2026-11-09, the heatmap's history 4.7 h behind). It may: a step is written again whole where it stands (it
   // replaces its own rows), meta.writer_done names stream ops only, and their order among themselves stays.
@@ -247,10 +275,77 @@ function runRow(op, i, changed) {
     }
   }
 }
+const backoff = () => Math.min(5000, 50 * 2 ** Math.min(fails, 7));
+/** A transaction of change log steps on their own file: no one else writes it, so it waits for no one and gives way to no one. */
+function pumpLiq() {
+  const t0 = Date.now();
+  try {
+    ldb.exec('BEGIN IMMEDIATE');
+  } catch (e) {
+    port.postMessage({ txError: 'liq begin: ' + String(e && e.message || e) });
+    setTimeout(kick, 100);
+    return;
+  }
+  const t1 = Date.now();
+  if (Atomics.load(ctl, STOP)) { ldb.exec('ROLLBACK'); return park(); }
+  const out = [];
+  let rows = 0, bad = 0, lastBad = null, qi = 0;
+  const enough = () => rows >= w.maxRows || Atomics.load(ctl, STOP) || Date.now() - t1 >= w.targetMs;
+  const undo = (what, e) => {
+    try { ldb.exec('ROLLBACK'); } catch (x) {}
+    for (const o of out) if (o.from === 0) { o.op.list = null; o.op.idList = null; }
+    fails++;
+    port.postMessage({ txError: what + String(e && e.message || e) });
+    setTimeout(kick, backoff());
+  };
+  try {
+    while (qi < lqueue.length) {
+      const op = lqueue[qi];
+      if (!op.list) prepLiq(op);
+      const from = op.done;
+      let i = from;
+      while (i < op.n) {
+        try {
+          runRow(op, i, null);
+        } catch (e) {
+          if (!rowError(e)) throw e;
+          bad++;
+          lastBad = String(e && e.message || e);
+        }
+        i++;
+        rows++;
+        if ((rows & 15) === 0 && enough()) break;
+      }
+      out.push({ op, seq: op.seq, from, to: i, final: i === op.n, ids: i === op.n ? op.idList : undefined });
+      if (i < op.n) break;
+      qi++;
+      if (enough()) break;
+    }
+  } catch (e) {
+    return undo('liq: ', e);
+  }
+  try {
+    ldb.exec('COMMIT');
+  } catch (e) {
+    return undo('liq commit: ', e);
+  }
+  fails = 0;
+  const t2 = Date.now();
+  for (const o of out) { o.op.done = o.to; if (o.final) o.op.fin = true; }
+  while (lqueue.length && lqueue[0].fin) lqueue.shift();
+  for (let k = 0; k < out.length; k++) {
+    const o = out[k];
+    const m = { seq: o.seq, from: o.from, to: o.to, final: o.final, ids: o.ids };
+    if (k === out.length - 1) { m.tx = { ms: t2 - t1, lockMs: t1 - t0, rows, liq: true }; if (bad) { m.bad = bad; m.error = lastBad; } }
+    port.postMessage(m);
+  }
+  kick();
+}
 function pump() {
   scheduled = false;
   if (parked) return;
   if (Atomics.load(ctl, STOP)) return park();
+  if (lqueue.length) return pumpLiq();
   if (!queue.length) return;
   // The store's writes first: no transaction starts while one waits (they are short).
   const y0 = Date.now();
@@ -261,6 +356,7 @@ function pump() {
     if (Atomics.load(ctl, STOP)) return park();
   }
   const t0 = Date.now();
+  const yieldMs = t0 - y0;
   try {
     db.exec('BEGIN IMMEDIATE');
   } catch (e) {
@@ -339,7 +435,7 @@ function pump() {
   for (let k = 0; k < out.length; k++) {
     const o = out[k];
     const m = { seq: o.seq, from: o.from, to: o.to, changed: o.changed, final: o.final, ids: o.ids };
-    if (k === out.length - 1) { m.tx = { ms: t2 - t1, lockMs: t1 - t0, rows }; if (bad) { m.bad = bad; m.error = lastBad; } }
+    if (k === out.length - 1) { m.tx = { ms: t2 - t1, lockMs: t1 - t0, rows, yieldMs, cut: Atomics.load(ctl, WANT) > 0 }; if (bad) { m.bad = bad; m.error = lastBad; } }
     port.postMessage(m);
   }
   kick();
@@ -360,17 +456,23 @@ export class WriterThread<X = unknown> {
   private retry: NodeJS.Timeout | null = null;
   /** When the thread last died (0: never): two deaths within the restart pause write the backlog here. */
   private diedAt = 0;
-  readonly state: WriterStatus = { running: false, pendingOps: 0, pendingRows: 0, rows: 0, txs: 0, lastTxMs: 0, maxTxMs: 0, maxLockMs: 0, badRows: 0, restarts: 0, inlineOps: 0, lastError: null };
+  readonly state: WriterStatus = {
+    running: false, pendingOps: 0, pendingRows: 0, rows: 0, txs: 0, lastTxMs: 0, maxTxMs: 0, maxLockMs: 0, yieldMs: 0, wantCuts: 0,
+    liqFile: false, liqRows: 0, liqTxs: 0, liqLastTxMs: 0, liqMaxTxMs: 0, liqMaxLockMs: 0, badRows: 0, restarts: 0, inlineOps: 0, lastError: null,
+  };
 
   constructor(
     private readonly path: string,
     private readonly hooks: WriterHooks<X>,
     private readonly o: {
       cacheKb: number; busyMs: number; walLimit: number; autoCkpt: number;
+      /** The change log's own file (null or absent: it is in the index file). */
+      liqPath?: string | null; liqCacheKb?: number; liqAutoCkpt?: number;
       targetMs?: number; maxRows?: number; hungMs?: number; restartAfterMs?: number;
     },
   ) {
     // Ops numbered on from the last process's: `meta.writer_done` must name this process's ops only by a number above it.
+    this.state.liqFile = !!this.o.liqPath;
     const c = this.hooks.committed();
     const n = c ? Number(c.split(':')[0]) : 0;
     this.seq = Number.isFinite(n) && n > 0 ? n : 0;
@@ -410,6 +512,7 @@ export class WriterThread<X = unknown> {
       workerData: {
         path: this.path, ctl: this.ctl.buffer, port: port2,
         cacheKb: this.o.cacheKb, busyMs: this.o.busyMs, walLimit: this.o.walLimit, autoCkpt: this.o.autoCkpt,
+        liqPath: this.o.liqPath ?? null, liqCacheKb: this.o.liqCacheKb ?? this.o.cacheKb, liqAutoCkpt: this.o.liqAutoCkpt ?? 16_000,
         targetMs: this.o.targetMs ?? TARGET_MS, maxRows: this.o.maxRows ?? MAX_ROWS, maxYieldMs: MAX_YIELD_MS,
         sql: { fill: FILL_UPSERT, dirty: DIRTY_INSERT, hour: ACTIVITY_HOUR, day: ACTIVITY_DAY, addr: LIQ_ADDR_INSERT, log: LIQ_LOG_INSERT, cur: LIQ_CUR_INSERT, uncur: LIQ_CUR_DELETE, doneKey: WRITER_DONE_META },
       },
@@ -449,9 +552,19 @@ export class WriterThread<X = unknown> {
     if (m.tx) {
       this.state.txs++;
       this.state.rows += m.tx.rows;
-      this.state.lastTxMs = m.tx.ms;
-      this.state.maxTxMs = Math.max(this.state.maxTxMs, m.tx.ms);
-      this.state.maxLockMs = Math.max(this.state.maxLockMs, m.tx.lockMs);
+      if (m.tx.liq) {
+        this.state.liqTxs++;
+        this.state.liqRows += m.tx.rows;
+        this.state.liqLastTxMs = m.tx.ms;
+        this.state.liqMaxTxMs = Math.max(this.state.liqMaxTxMs, m.tx.ms);
+        this.state.liqMaxLockMs = Math.max(this.state.liqMaxLockMs, m.tx.lockMs);
+      } else {
+        this.state.lastTxMs = m.tx.ms;
+        this.state.maxTxMs = Math.max(this.state.maxTxMs, m.tx.ms);
+        this.state.maxLockMs = Math.max(this.state.maxLockMs, m.tx.lockMs);
+        this.state.yieldMs += m.tx.yieldMs ?? 0;
+        if (m.tx.cut) this.state.wantCuts++;
+      }
     }
     if (m.bad) { this.state.badRows += m.bad; this.state.lastError = `bad row: ${m.error}`; }
     // In order, except a liq step the thread took ahead of the stream rows.

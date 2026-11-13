@@ -103,6 +103,66 @@ export function defaultDbPath(): string {
   return process.env.VALUESCAN_INDEX_DB?.trim() || join(dirname(deviceKeyPath()), 'valuescan-index.db');
 }
 
+/**
+ * THE LEVEL CHANGE LOG'S OWN FILE (2026-11-12). liq_addr, liq_log and liq_cur were in the index file. A writer thread
+ * transaction there waits for every write of the indexer's thread: the two share one write lock, and the thread gives way
+ * to each of them (writerThread.ts ctl[WANT]). On 2026-11-12 a quarter-hour step of 45,807 rows took 574 s, about 80 rows
+ * a second, while the same rows go in at 0.12-0.18 ms each with the lock to themselves (measured on a 20M-row copy of the
+ * table). In a file of their own they have a write lock of their own: the writer thread writes them on a second connection
+ * and gives way to nothing.
+ *
+ * A file whose index still holds liq_log (one from before, until tools/liqSplit.ts has moved the rows during an indexer
+ * stop) keeps the tables there and is written exactly as before. liqSplit.ts renames them liq_*_old in the index; they stay
+ * until the owner says they can go.
+ */
+export function liqDbPath(indexPath: string): string {
+  if (indexPath === ':memory:') return ':memory:';
+  const env = process.env.VALUESCAN_LIQ_DB?.trim();
+  if (env) return env;
+  return indexPath.endsWith('.db') ? `${indexPath.slice(0, -3)}-liq.db` : `${indexPath}-liq`;
+}
+
+/** The level change log's writer-thread page cache, KiB (VALUESCAN_LIQ_CACHE_MB, default 2 GB; the server has 46 GB). */
+export function liqCacheKb(): number {
+  const mb = Number(process.env.VALUESCAN_LIQ_CACHE_MB);
+  return (Number.isFinite(mb) && mb > 0 ? mb : 2048) * 1024;
+}
+
+/**
+ * Every position's liquidation level as a change log (cohortTracker.ts logLevels), for the history's wallet filter: a row
+ * when a position opens, flips, closes (usd 0) or its level or size moves past LIQ_LOG_MOVE / USD_LOG_MOVE, at the
+ * history's 15-minute steps. Addresses by id. From 2026-10-29 a row also keeps the position as it stood: the venue's
+ * symbol, signed size, entry, the mark then, isolated or cross with its leverage, the account's perps equity and cross
+ * cash, and when its book was last read (null before).
+ */
+export const LIQ_SCHEMA = `
+CREATE TABLE IF NOT EXISTS liq_addr (id INTEGER PRIMARY KEY, address TEXT NOT NULL UNIQUE);
+CREATE TABLE IF NOT EXISTS liq_log (
+  aid INTEGER NOT NULL, coin TEXT NOT NULL, venue INTEGER NOT NULL, t INTEGER NOT NULL,
+  side INTEGER NOT NULL, liq REAL NOT NULL, usd INTEGER NOT NULL,
+  sym TEXT, sz REAL, entry REAL, mark REAL, iso INTEGER, lev REAL, eq REAL, cash REAL, read_at INTEGER,
+  PRIMARY KEY (aid, coin, venue, t)) WITHOUT ROWID;
+-- Who sat in one price cell at one time (liqAt): every row of a coin by level, then each
+-- position's state at that time by its key.
+CREATE INDEX IF NOT EXISTS liq_log_cell ON liq_log (coin, liq, t);
+-- The last logged state of every open position: what the next step compares with, across a restart.
+CREATE TABLE IF NOT EXISTS liq_cur (
+  aid INTEGER NOT NULL, coin TEXT NOT NULL, venue INTEGER NOT NULL,
+  side INTEGER NOT NULL, liq REAL NOT NULL, usd INTEGER NOT NULL, t INTEGER NOT NULL,
+  PRIMARY KEY (aid, coin, venue)) WITHOUT ROWID;
+`;
+/** liq_log's columns added after it was made: an index file from before has them added (LIQ_SCHEMA has them). */
+export const LIQ_ADDED_COLUMNS: ReadonlyArray<readonly [string, string]> = [
+  ['sym', 'TEXT'], ['sz', 'REAL'], ['entry', 'REAL'], ['mark', 'REAL'], ['iso', 'INTEGER'], ['lev', 'REAL'], ['eq', 'REAL'], ['cash', 'REAL'], ['read_at', 'INTEGER'],
+];
+/** liq_log's columns in order: what liqSplit.ts copies. */
+export const LIQ_LOG_COLS = 'aid, coin, venue, t, side, liq, usd, sym, sz, entry, mark, iso, lev, eq, cash, read_at';
+
+/** Whether `db`'s main file has table `name`. */
+export function hasTable(db: DatabaseSync, name: string): boolean {
+  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+}
+
 /** History kinds a coverage row can describe. HL has one fill history; SoDEX one per engine plus closes. */
 export type HistoryKind = 'fills' | 'perps' | 'spot' | 'closes';
 
@@ -415,22 +475,7 @@ CREATE TABLE IF NOT EXISTS cohort_series (
 CREATE TABLE IF NOT EXISTS cohort_hist (
   span INTEGER NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, at INTEGER NOT NULL,
   PRIMARY KEY (span, kind, key)) WITHOUT ROWID;
--- Every position's liquidation level as a change log (cohortTracker.ts logLevels), for the
--- history's wallet filter: a row when a position opens, flips, closes (usd 0) or its level or size
--- moves past LIQ_LOG_MOVE / USD_LOG_MOVE, at the history's 15-minute steps. Addresses by id.
-CREATE TABLE IF NOT EXISTS liq_addr (id INTEGER PRIMARY KEY, address TEXT NOT NULL UNIQUE);
-CREATE TABLE IF NOT EXISTS liq_log (
-  aid INTEGER NOT NULL, coin TEXT NOT NULL, venue INTEGER NOT NULL, t INTEGER NOT NULL,
-  side INTEGER NOT NULL, liq REAL NOT NULL, usd INTEGER NOT NULL,
-  PRIMARY KEY (aid, coin, venue, t)) WITHOUT ROWID;
--- Who sat in one price cell at one time (liqAt): every row of a coin by level, then each
--- position's state at that time by its key.
-CREATE INDEX IF NOT EXISTS liq_log_cell ON liq_log (coin, liq, t);
--- The last logged state of every open position: what the next step compares with, across a restart.
-CREATE TABLE IF NOT EXISTS liq_cur (
-  aid INTEGER NOT NULL, coin TEXT NOT NULL, venue INTEGER NOT NULL,
-  side INTEGER NOT NULL, liq REAL NOT NULL, usd INTEGER NOT NULL, t INTEGER NOT NULL,
-  PRIMARY KEY (aid, coin, venue)) WITHOUT ROWID;
+-- The level change log (liq_addr, liq_log, liq_cur) is in a file of its own: LIQ_SCHEMA.
 CREATE TABLE IF NOT EXISTS liq_hist (
   coin TEXT NOT NULL, t INTEGER NOT NULL, data TEXT NOT NULL,
   PRIMARY KEY (coin, t)) WITHOUT ROWID;
@@ -491,18 +536,6 @@ const ADDED_COLUMNS: ReadonlyArray<[string, string, string]> = [
   // stablecoins), and when a read last looked at the spot state (cohortSource.ts).
   ['cohort_book', 'collateral', 'REAL'],
   ['cohort_book', 'spot_at', 'INTEGER'],
-  // The liquidation change log's position as it stood (cohortTracker.ts logLevels, from 2026-10-29):
-  // the venue's symbol, signed size, entry, the mark then, isolated or cross with its leverage,
-  // the account's perps equity and cross cash, and when its book was last read. Null before.
-  ['liq_log', 'sym', 'TEXT'],
-  ['liq_log', 'sz', 'REAL'],
-  ['liq_log', 'entry', 'REAL'],
-  ['liq_log', 'mark', 'REAL'],
-  ['liq_log', 'iso', 'INTEGER'],
-  ['liq_log', 'lev', 'REAL'],
-  ['liq_log', 'eq', 'REAL'],
-  ['liq_log', 'cash', 'REAL'],
-  ['liq_log', 'read_at', 'INTEGER'],
   // The account's cross cash for its liquidation prices (valuedesk/liquidations/math.ts).
   ['cohort_book', 'cash', 'REAL'],
   // What a day row must carry once its raw rows are gone (retention): how many
@@ -899,6 +932,13 @@ function liqLogOrder<T extends { aid: number | string; coin: string; venue: numb
 
 export class IndexStore {
   readonly db: DatabaseSync;
+  /**
+   * The level change log's connection (LIQ_SCHEMA): `db` itself while the index file still holds liq_log, else one to
+   * its own file (liqDbPath). Null: a reader before that file exists (the log reads as empty).
+   */
+  private lqDb: DatabaseSync | null = null;
+  private lqStmts = new Map<string, StatementSync>();
+  private lqDepth = 0;
   private stmts = new Map<string, StatementSync>();
   /** Bumped on every write that can change an address's stats or coverage (in-process cache key). */
   private versions = new Map<string, number>();
@@ -1046,6 +1086,10 @@ export class IndexStore {
         this.totalsSaved = JSON.stringify(this.totals);
       }
     } catch { /* a file from before the retention: nothing in flight */ }
+    // A reader whose file cannot be read reads the log as empty (as the rest: "not indexed yet"); the writer must have it.
+    if (this.readOnly) {
+      try { this.openLiq(); } catch { this.lqDb = null; }
+    } else this.openLiq();
     // A handover (handover.ts): the outgoing process writes its held rows after it let go of the lock; loadHeldLate reads them.
     if (!this.readOnly && path !== ':memory:' && !opts.deferHeld) this.loadHeld();
   }
@@ -1086,6 +1130,8 @@ export class IndexStore {
       return;
     }
     this.db.close();
+    if (this.lqDb && this.lqDb !== this.db) this.lqDb.close();
+    this.lqDb = null;
     lap('database close');
   }
 
@@ -1191,7 +1237,7 @@ export class IndexStore {
    * The bulk writes (fills, activity, the liquidation change log) go to a thread of their own from here on. The running
    * indexer only (worker.ts); off with VALUESCAN_WRITER_THREAD=0 and in the tests unless `force`.
    */
-  startWriter(o: { force?: boolean; targetMs?: number; maxRows?: number; hungMs?: number; restartAfterMs?: number; cacheKb?: number; stopWaitMs?: number } = {}): boolean {
+  startWriter(o: { force?: boolean; targetMs?: number; maxRows?: number; hungMs?: number; restartAfterMs?: number; cacheKb?: number; liqCacheKb?: number; stopWaitMs?: number } = {}): boolean {
     this.writerStopWaitMs = o.stopWaitMs ?? 15_000;
     if (this.readOnly || this.path === ':memory:' || this.writer) return false;
     if (!o.force && !writerThreadOn()) return false;
@@ -1206,6 +1252,7 @@ export class IndexStore {
       log: (line) => console.warn(line),
     }, {
       cacheKb: o.cacheKb ?? WRITER_CACHE_KB, busyMs: WRITER_BUSY_MS, walLimit: WAL_LIMIT_BYTES,
+      liqPath: this.liqFile, liqCacheKb: o.liqCacheKb ?? liqCacheKb(), liqAutoCkpt: WAL_CHECKPOINT_PAGES,
       autoCkpt: this.checkpointer?.state.running ? 0 : WAL_CHECKPOINT_PAGES,
       targetMs: o.targetMs, maxRows: o.maxRows, hungMs: o.hungMs, restartAfterMs: o.restartAfterMs,
     });
@@ -4208,32 +4255,131 @@ export class IndexStore {
 
   // --- the level change log (liq_addr, liq_log, liq_cur) ------------------------------------
 
+  /** The change log's own file (LIQ_SCHEMA), null while the index file holds it. */
+  get liqFile(): string | null {
+    return this.lqDb && this.lqDb !== this.db ? liqDbPath(this.path) : null;
+  }
+
+  /** The change log's connection (a test's look at its rows; null: a reader with no log yet). */
+  get liqDb(): DatabaseSync | null {
+    return this.lqDb;
+  }
+
+  /**
+   * The change log's connection: the index's own while it holds liq_log, else its own file's. The writer makes that file
+   * and the tables; a reader opens it read-only once it is there.
+   */
+  private openLiq(): void {
+    if (this.lqDb && this.lqDb !== this.db) {
+      try { this.lqDb.close(); } catch { /* closing a connection that failed */ }
+    }
+    this.lqStmts.clear();
+    this.lqDb = null;
+    let db: DatabaseSync;
+    if (hasTable(this.db, 'liq_log')) {
+      db = this.db;
+    } else {
+      const p = liqDbPath(this.path);
+      if (this.readOnly && !existsSync(p)) return;
+      db = new DatabaseSync(p, this.readOnly ? { readOnly: true } : {});
+      db.exec(`PRAGMA busy_timeout = ${this.readOnly ? 5_000 : WRITER_BUSY_MS}`);
+      db.exec('PRAGMA temp_store = MEMORY');
+      if (!this.readOnly) {
+        // Before the first table, as the index's: pages freed later can be handed back in slices.
+        db.exec('PRAGMA auto_vacuum = INCREMENTAL');
+        db.exec('PRAGMA journal_mode = WAL');
+        db.exec('PRAGMA synchronous = NORMAL');
+        db.exec(`PRAGMA journal_size_limit = ${WAL_LIMIT_BYTES}`);
+      }
+    }
+    if (!this.readOnly) {
+      db.exec(LIQ_SCHEMA);
+      const have = new Set((db.prepare('PRAGMA table_info(liq_log)').all() as Array<{ name: string }>).map((c) => c.name));
+      for (const [column, type] of LIQ_ADDED_COLUMNS) if (!have.has(column)) db.exec(`ALTER TABLE liq_log ADD COLUMN ${column} ${type}`);
+    }
+    this.lqDb = db;
+  }
+
+  /** A statement on the change log's connection (q() when that is the index's: counted for the writer thread). */
+  private lq(sql: string): StatementSync {
+    const db = this.lqDb!;
+    if (db === this.db) return this.q(sql);
+    let st = this.lqStmts.get(sql);
+    if (!st) {
+      st = db.prepare(sql);
+      this.lqStmts.set(sql, st);
+    }
+    return st;
+  }
+
+  /**
+   * One transaction on the change log's connection: tx() when that is the index's, else its own file's write lock, which
+   * only the writer thread's change log connection shares (nothing to count for it). Nested calls join the outer one.
+   */
+  private lqTx<T>(fn: () => T): T {
+    const db = this.lqDb!;
+    if (db === this.db) return this.tx(fn);
+    if (this.lqDepth > 0) return fn();
+    db.exec('BEGIN IMMEDIATE');
+    this.lqDepth = 1;
+    try {
+      const out = fn();
+      db.exec('COMMIT');
+      return out;
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    } finally {
+      this.lqDepth = 0;
+    }
+  }
+
+  /**
+   * A read of the change log. A reader with no log file yet reads it as empty, and one opened while the index still held
+   * the tables finds the new file once tools/liqSplit.ts has moved them (an API that kept running through the split).
+   */
+  private lqRead<T>(fn: () => T, empty: T): T {
+    if (!this.lqDb && this.readOnly) this.openLiq();
+    if (!this.lqDb) return empty;
+    try {
+      return fn();
+    } catch (e) {
+      if (!this.readOnly || !/no such table/i.test(String(e))) throw e;
+      this.openLiq();
+      return this.lqDb ? fn() : empty;
+    }
+  }
+
   /** Every address the log knows, by id (the tracker holds them; a new one gets its id in putLiqLog). */
   liqAddrs(): Map<string, number> {
-    const out = new Map<string, number>();
-    for (const r of this.q('SELECT id, address FROM liq_addr').all() as Array<{ id: number; address: string }>) out.set(r.address, r.id);
-    return out;
+    return this.lqRead(() => {
+      const out = new Map<string, number>();
+      for (const r of this.lq('SELECT id, address FROM liq_addr').all() as Array<{ id: number; address: string }>) out.set(r.address, r.id);
+      return out;
+    }, new Map<string, number>());
   }
 
   /** Ids of `addresses` the log knows (a reader: none are made). */
   liqAddrIds(addresses: readonly string[]): Map<string, number> {
-    const out = new Map<string, number>();
-    const q = this.q('SELECT id FROM liq_addr WHERE address = ?');
-    for (const a of addresses) {
-      const r = q.get(a) as { id?: number } | undefined;
-      if (r?.id !== undefined) out.set(a, r.id);
-    }
-    return out;
+    return this.lqRead(() => {
+      const out = new Map<string, number>();
+      const q = this.lq('SELECT id FROM liq_addr WHERE address = ?');
+      for (const a of addresses) {
+        const r = q.get(a) as { id?: number } | undefined;
+        if (r?.id !== undefined) out.set(a, r.id);
+      }
+      return out;
+    }, new Map<string, number>());
   }
 
   /** The change log's first step (null: empty). A whole scan: once, at the writer's first step. */
   liqLogFrom(): number | null {
-    return (this.q('SELECT MIN(t) AS t FROM liq_log').get() as { t: number | null }).t;
+    return this.lqRead(() => (this.lq('SELECT MIN(t) AS t FROM liq_log').get() as { t: number | null }).t, null);
   }
 
   /** Every open position's last logged state. */
   liqCur(): Array<{ aid: number; coin: string; venue: number; side: number; liq: number; usd: number; t: number }> {
-    return this.q('SELECT aid, coin, venue, side, liq, usd, t FROM liq_cur').all() as Array<{ aid: number; coin: string; venue: number; side: number; liq: number; usd: number; t: number }>;
+    return this.lqRead(() => this.lq('SELECT aid, coin, venue, side, liq, usd, t FROM liq_cur').all() as Array<{ aid: number; coin: string; venue: number; side: number; liq: number; usd: number; t: number }>, []);
   }
 
   /**
@@ -4250,8 +4396,8 @@ export class IndexStore {
     const ids = new Map<string, number>();
     changed = liqLogOrder(changed);
     closed = liqLogOrder(closed);
-    this.tx(() => {
-      const addr = this.q(LIQ_ADDR_INSERT);
+    this.lqTx(() => {
+      const addr = this.lq(LIQ_ADDR_INSERT);
       for (const a of newAddrs) {
         const r = addr.get(a) as { id: number };
         ids.set(a, r.id);
@@ -4263,14 +4409,14 @@ export class IndexStore {
   }
 
   private liqChangedRow(t: number, aid: number, c: { coin: string; venue: number; side: number; liq: number; usd: number } & LiqLogExtra): void {
-    this.q(LIQ_LOG_INSERT).run(aid, c.coin, c.venue, t, c.side, c.liq, c.usd, c.sym ?? null, finiteOrNull(c.sz), finiteOrNull(c.entry), finiteOrNull(c.mark),
+    this.lq(LIQ_LOG_INSERT).run(aid, c.coin, c.venue, t, c.side, c.liq, c.usd, c.sym ?? null, finiteOrNull(c.sz), finiteOrNull(c.entry), finiteOrNull(c.mark),
       c.iso === undefined || c.iso === null ? null : c.iso ? 1 : 0, finiteOrNull(c.lev), finiteOrNull(c.eq), finiteOrNull(c.cash), finiteOrNull(c.readAt));
-    this.q(LIQ_CUR_INSERT).run(aid, c.coin, c.venue, c.side, c.liq, c.usd, t);
+    this.lq(LIQ_CUR_INSERT).run(aid, c.coin, c.venue, c.side, c.liq, c.usd, t);
   }
 
   private liqClosedRow(t: number, c: { aid: number; coin: string; venue: number; mark?: number | null }): void {
-    this.q(LIQ_LOG_INSERT).run(c.aid, c.coin, c.venue, t, 0, 0, 0, null, 0, null, finiteOrNull(c.mark), null, null, null, null, null);
-    this.q(LIQ_CUR_DELETE).run(c.aid, c.coin, c.venue);
+    this.lq(LIQ_LOG_INSERT).run(c.aid, c.coin, c.venue, t, 0, 0, 0, null, 0, null, finiteOrNull(c.mark), null, null, null, null, null);
+    this.lq(LIQ_CUR_DELETE).run(c.aid, c.coin, c.venue);
   }
 
   /**
@@ -4304,7 +4450,7 @@ export class IndexStore {
       for (let i = 0; i < rows.length; ) {
         const until = now() + liqTurnMs(now() - started);
         const end = Math.min(rows.length, i + LIQ_LOG_SLICE);
-        this.tx(() => {
+        this.lqTx(() => {
           do write(rows[i++]!);
           while (i < end && ((i & 7) !== 0 || now() < until));
         });
@@ -4324,11 +4470,15 @@ export class IndexStore {
    */
   liqLog(aids: readonly number[], coin: string, fromT: number): Array<{ aid: number; venue: number; t: number; side: number; liq: number; usd: number; sz: number | null; mark: number | null; iso: number | null; lev: number | null; eq: number | null }> {
     type Row = { aid: number; venue: number; t: number; side: number; liq: number; usd: number; sz: number | null; mark: number | null; iso: number | null; lev: number | null; eq: number | null };
+    return this.lqRead(() => this.liqLogRead<Row>(aids, coin, fromT), []);
+  }
+
+  private liqLogRead<Row extends { t: number; usd: number }>(aids: readonly number[], coin: string, fromT: number): Row[] {
     const out: Row[] = [];
     const cols = 'aid, venue, t, side, liq, usd, sz, mark, iso, lev, eq';
-    const before = this.q(`SELECT ${cols} FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t < ? ORDER BY t DESC LIMIT 1`);
-    const venues = this.q('SELECT DISTINCT venue FROM liq_log WHERE aid = ? AND coin = ?');
-    const after = this.q(`SELECT ${cols} FROM liq_log WHERE aid = ? AND coin = ? AND t >= ? ORDER BY t`);
+    const before = this.lq(`SELECT ${cols} FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t < ? ORDER BY t DESC LIMIT 1`);
+    const venues = this.lq('SELECT DISTINCT venue FROM liq_log WHERE aid = ? AND coin = ?');
+    const after = this.lq(`SELECT ${cols} FROM liq_log WHERE aid = ? AND coin = ? AND t >= ? ORDER BY t`);
     for (const aid of aids) {
       for (const v of venues.all(aid, coin) as Array<{ venue: number }>) {
         const r = before.get(aid, coin, v.venue, fromT) as Row | undefined;
@@ -4347,12 +4497,16 @@ export class IndexStore {
    * and its next row after `t` (what happened next: a move, a close - null while unchanged).
    */
   liqAt(coin: string, venues: readonly number[], t: number, lo: number, hi: number, side: 1 | -1 | 0 = 0): LiqAtRow[] {
-    const cand = this.q('SELECT DISTINCT aid, venue FROM liq_log WHERE coin = ? AND liq >= ? AND liq < ? AND t <= ?').all(coin, lo, hi, t) as Array<{ aid: number; venue: number }>;
-    const at = this.q(`SELECT l.aid, a.address, l.venue, l.t, l.side, l.liq, l.usd, l.sym, l.sz, l.entry, l.mark, l.iso, l.lev, l.eq, l.cash, l.read_at
+    return this.lqRead(() => this.liqAtRead(coin, venues, t, lo, hi, side), []);
+  }
+
+  private liqAtRead(coin: string, venues: readonly number[], t: number, lo: number, hi: number, side: 1 | -1 | 0): LiqAtRow[] {
+    const cand = this.lq('SELECT DISTINCT aid, venue FROM liq_log WHERE coin = ? AND liq >= ? AND liq < ? AND t <= ?').all(coin, lo, hi, t) as Array<{ aid: number; venue: number }>;
+    const at = this.lq(`SELECT l.aid, a.address, l.venue, l.t, l.side, l.liq, l.usd, l.sym, l.sz, l.entry, l.mark, l.iso, l.lev, l.eq, l.cash, l.read_at
       FROM liq_log l JOIN liq_addr a ON a.id = l.aid WHERE l.aid = ? AND l.coin = ? AND l.venue = ? AND l.t <= ? ORDER BY l.t DESC LIMIT 1`);
-    const lastClose = this.q('SELECT MAX(t) AS t FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t <= ? AND usd = 0');
-    const since = this.q('SELECT MIN(t) AS t FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t > ? AND t <= ?');
-    const next = this.q('SELECT t, side, liq, usd, mark FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t > ? ORDER BY t LIMIT 1');
+    const lastClose = this.lq('SELECT MAX(t) AS t FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t <= ? AND usd = 0');
+    const since = this.lq('SELECT MIN(t) AS t FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t > ? AND t <= ?');
+    const next = this.lq('SELECT t, side, liq, usd, mark FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t > ? ORDER BY t LIMIT 1');
     const want = new Set(venues);
     const out: LiqAtRow[] = [];
     for (const c of cand) {
@@ -4373,9 +4527,9 @@ export class IndexStore {
    * `beforeT` needs stays - each position's last row before it - and closes older than it go.
    */
   pruneLiqLog(beforeT: number): void {
-    this.q(`DELETE FROM liq_log WHERE t < ?1 AND EXISTS (
+    this.lq(`DELETE FROM liq_log WHERE t < ?1 AND EXISTS (
       SELECT 1 FROM liq_log b WHERE b.aid = liq_log.aid AND b.coin = liq_log.coin AND b.venue = liq_log.venue AND b.t > liq_log.t AND b.t < ?1)`).run(beforeT);
-    this.q('DELETE FROM liq_log WHERE t < ? AND usd = 0').run(beforeT);
+    this.lq('DELETE FROM liq_log WHERE t < ? AND usd = 0').run(beforeT);
   }
 
 
