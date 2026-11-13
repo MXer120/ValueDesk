@@ -9,6 +9,10 @@
  *   - a restarted producer writes a NEW file: the path is looked at again every second and opened anew;
  *   - a market the feed does not carry is served by the own sockets only.
  *
+ * WHAT IT WATCHES, TOLD TO THE FEED (demand.ts, 2026-11-13): the watched markets go into this process's file in the
+ * feed's want directory, so a feed that carries only what its readers want (FEED_ON_DEMAND=1, the VIP box) opens
+ * them within about a second of a bot's start - and until it does, the own socket serves them, so no bot waits.
+ *
  * A STILL market (owner 2026-11-09, MCD): Binance pushes a book tick only when the book changes, so a quiet market -
  * a stock perpetual outside US hours - sends nothing for many seconds while its price is perfectly good, and the
  * engine's 2 s freshness rule (REF_MAX_AGE_MS) held the bot "waiting for the Binance price" for as long as it stayed
@@ -21,6 +25,7 @@ import { existsSync } from 'node:fs';
 import type { Logger, WebSocketFactory } from '../../../../packages/copy-engine/src/io.ts';
 import type { RefQuote, ReferenceSource } from '../../../../packages/copy-engine/src/algo/reference.ts';
 import { BinanceBooks } from './binance.ts';
+import { DemandWriter, wantDirOf } from './demand.ts';
 import { RingReader, monoNs } from './ring.ts';
 
 export const POLL_MS = 2;
@@ -50,6 +55,8 @@ export interface BinanceReferenceOptions {
   autoPoll?: boolean;
   /** For the REST confirm of a still market (absent: no confirm). */
   fetch?: FetchFn;
+  /** The feed's want directory (demand.ts; default `<path>.want`, used only where the feed made it); null: none. */
+  want?: string | null;
 }
 
 /** SoDEX market -> Binance USD-M symbol, for the own sockets: ETH-USD -> ETHUSDT. */
@@ -76,13 +83,24 @@ export class BinanceReference implements ReferenceSource {
   private confirming = new Set<string>();
   /** For the status line: ticks from the ring and from the own sockets. */
   readonly stats = { ring: 0, own: 0, lost: 0, confirmed: 0 };
+  /** This process's file in the feed's want directory (demand.ts). */
+  private readonly demand: DemandWriter | null;
 
-  constructor(private readonly o: BinanceReferenceOptions) {}
+  constructor(private readonly o: BinanceReferenceOptions) {
+    this.demand = o.want === null ? null : new DemandWriter(o.want ?? wantDirOf(o.path), (msg, data) => o.log.warn(msg, data));
+  }
 
   watch(markets: readonly string[]): void {
     const next = new Set(markets);
     if (next.size === this.watched.size && [...next].every((m) => this.watched.has(m))) return;
+    // A market no longer watched forgets its quote. Watched again later, its old price must not pass for a still
+    // market's (keepStill stamps a quote "now" while its source is connected): it starts again from the ring's latest
+    // tick, a new tick or a confirm.
+    for (const m of this.watched) if (!next.has(m)) this.quotes.delete(m);
+    const added = [...next].some((m) => !this.watched.has(m));
     this.watched = next;
+    this.demand?.set([...next]);
+    if (added) this.seed();
     if (next.size && this.o.autoPoll !== false) this.startTimers();
     this.check();
   }
@@ -104,6 +122,7 @@ export class BinanceReference implements ReferenceSource {
     this.own = null;
     this.reader?.close();
     this.reader = null;
+    this.demand?.clear();
   }
 
   /** Whether the ring serves the watched markets now (false: the own sockets do, or nothing yet). */
@@ -212,6 +231,7 @@ export class BinanceReference implements ReferenceSource {
 
   /** The ring's state, every 250 ms: open it, follow a restart, fall back and return. */
   check(): void {
+    this.demand?.tick();
     if (!this.watched.size) {
       if (this.own) this.closeOwn();
       return;
