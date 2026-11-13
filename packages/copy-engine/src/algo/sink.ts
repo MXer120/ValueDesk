@@ -51,6 +51,8 @@ export interface ChildResult {
   error: string | null;
   /** No readable answer: it may or may not exist. Never re-sent. */
   outcomeUnknown: boolean;
+  /** With outcomeUnknown: SoDEX's gateway turned it away (HTTP 503, or SoDEX in maintenance) - most likely not placed. */
+  maintenance?: boolean;
 }
 
 /**
@@ -203,7 +205,8 @@ export class KeyAlgoSink implements AlgoSink {
       return readBatch(await this.signAndSend(childrenAction(a.accountId, market, orders, builder)), orders);
     } catch (e) {
       const unknown = e instanceof OutcomeUnknownError;
-      return orders.map((o) => ({ clOrdID: o.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: unknown }));
+      const maint = unknown && e.maintenance ? { maintenance: true } : {};
+      return orders.map((o) => ({ clOrdID: o.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: unknown, ...maint }));
     }
   }
 
@@ -215,7 +218,8 @@ export class KeyAlgoSink implements AlgoSink {
       return readStops(await this.signAndSend(stopsAction(a.accountId, market, stops, builder)), stops);
     } catch (e) {
       const unknown = e instanceof OutcomeUnknownError;
-      return stops.map((s) => ({ clOrdID: s.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: unknown }));
+      const maint = unknown && e.maintenance ? { maintenance: true } : {};
+      return stops.map((s) => ({ clOrdID: s.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: unknown, ...maint }));
     }
   }
 

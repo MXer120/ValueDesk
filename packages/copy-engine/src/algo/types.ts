@@ -716,6 +716,8 @@ export interface ChildOrder {
    * Gone once any read or update lists it.
    */
   unlisted?: { at: number; cancelAt?: number; fill?: number; agree?: number };
+  /** Its send met SoDEX's maintenance (HTTP 503, or no answer then): most likely never placed (runtime.ts MAINT_SETTLE_MS). */
+  maint?: boolean;
 }
 
 /** An algo: what the trader asked for, and where it stands. One JSON document. */

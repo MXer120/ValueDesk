@@ -32,6 +32,8 @@ export type AlertKind =
   | 'key-refused'
   | 'sodex-down'
   | 'sodex-up'
+  | 'sodex-maintenance'
+  | 'sodex-maintenance-end'
   | 'rate-limited'
   | 'rate-cleared'
   | 'brake-on'
@@ -63,6 +65,8 @@ const LABEL: Record<AlertKind, string> = {
   'key-refused': 'Key refused by SoDEX',
   'sodex-down': 'SoDEX UNREACHABLE',
   'sodex-up': 'SoDEX reachable again',
+  'sodex-maintenance': 'SoDEX in maintenance',
+  'sodex-maintenance-end': 'SoDEX back from maintenance',
   'rate-limited': 'RATE LIMITED by SoDEX',
   'rate-cleared': 'Rate limit lifted',
   'brake-on': 'BRAKE ON',
@@ -97,6 +101,9 @@ export const CLASS: Record<AlertKind, AlertClass> = {
   'key-refused': 'failure',
   'sodex-down': 'failure',
   'sodex-up': 'recovered',
+  // SoDEX's own maintenance is not our failure (owner 2026-11-11): told as INFO, start and end.
+  'sodex-maintenance': 'info',
+  'sodex-maintenance-end': 'info',
   'rate-limited': 'failure',
   'rate-cleared': 'recovered',
   'brake-on': 'brake',
@@ -301,9 +308,10 @@ export class ReachWatch {
     private readonly afterMs = 3 * 60_000,
   ) {}
 
-  check(reach: { lastOkAt: number; failingSince: number; lastError: string | null }, now = Date.now()): void {
+  /** `maintenance`: SoDEX is in its maintenance (venue.ts), told as INFO there - no FAILURE for the same thing here. */
+  check(reach: { lastOkAt: number; failingSince: number; lastError: string | null }, now = Date.now(), maintenance = false): void {
     if (reach.failingSince && now - reach.failingSince >= this.afterMs) {
-      if (!this.down) {
+      if (!this.down && !maintenance) {
         this.down = true;
         this.alerts.raise('sodex-down', '', `No answer from SoDEX's REST for ${Math.round((now - reach.failingSince) / 60_000)} min (last error: ${reach.lastError ?? 'none'}). Copies and algos cannot trade.`);
       }

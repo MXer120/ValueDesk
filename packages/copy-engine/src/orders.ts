@@ -49,6 +49,8 @@ export interface SendResult {
   error: string | null;
   /** The request may or may not have executed (no readable answer). */
   outcomeUnknown: boolean;
+  /** With outcomeUnknown: SoDEX's gateway turned it away (HTTP 503, or SoDEX in maintenance) - most likely not placed. */
+  maintenance?: boolean;
   /** Paper copies report their simulated fill. */
   paperFill?: { qty: number; price: number };
 }
@@ -146,7 +148,8 @@ export class KeySink implements OrderSink {
       });
     } catch (e) {
       const unknown = e instanceof OutcomeUnknownError;
-      return intents.map((i) => ({ clOrdID: i.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: unknown }));
+      const maint = unknown && e.maintenance ? { maintenance: true } : {};
+      return intents.map((i) => ({ clOrdID: i.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: unknown, ...maint }));
     }
   }
 
@@ -161,7 +164,7 @@ export class KeySink implements OrderSink {
       const bad = failedOrders(rows)[0];
       return { clOrdID: stop.clOrdID, ok: !bad, orderId: null, error: bad ? bad.error || `code ${bad.code}` : null, outcomeUnknown: false };
     } catch (e) {
-      return { clOrdID: stop.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: e instanceof OutcomeUnknownError };
+      return { clOrdID: stop.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: e instanceof OutcomeUnknownError, ...(e instanceof OutcomeUnknownError && e.maintenance ? { maintenance: true } : {}) };
     }
   }
 

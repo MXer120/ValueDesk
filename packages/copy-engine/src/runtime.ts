@@ -54,7 +54,7 @@ import {
   unrealized,
 } from './planner.ts';
 import { effectiveLeverage, type RegionPolicy } from './policy.ts';
-import { HL_DEXES, type HyperliquidClient, type SodexClient } from './sodex.ts';
+import { HL_DEXES, type HyperliquidClient, type SodexClient, type VenueHold } from './sodex.ts';
 import type { CopyStore } from './store.ts';
 import { copyAssetNotice, copyClosedNotice, copyDelistedNotice, copyNotCopiedNotice, copyNotice, copyReducedNotice, delistedDetail, type EngineNotice } from './notices.ts';
 import type {
@@ -92,6 +92,8 @@ const MARKETS_RETRY_MS = 15_000;
 const BRAKE_CHECK_MS = 2_000;
 /** A release's brake up to this long: what the leader opened meanwhile is still copied. The longest of 34 ships held it 59 s. */
 const SHORT_BRAKE_MS = 5 * 60_000;
+/** While SoDEX is in maintenance, a copy's stops are asked again this often (quietly). */
+const VENUE_RETRY_MS = 30_000;
 /** How long the copier remembers its own opens and reductions, for a fill the stream did not show (refreshFollower). */
 const RECENT_ORDERS_MS = 10 * 60_000;
 /** SoDEX's fills behind a change in the follower's account are read from this long before the last read that did not show it. */
@@ -153,6 +155,15 @@ export interface RuntimeHost {
   brake?(sub: Subscription): string | null;
   /** When the brake on this copy began, when it is a release's (they last about a minute); otherwise null. */
   shortBrakeSince?(sub: Subscription): number | null;
+  /**
+   * SoDEX in maintenance (the executor's watch): while it returns one, a live copy is held as under the brake - the
+   * leader's moves wait (its position in the copy's books does not move), and nothing is sent into SoDEX's 503s:
+   * no copied order, no guard or stray close, no stop (they go once SoDEX is back). On the lift a copy goes through
+   * what the leader did: every close and reduction, and what it opened or added at most SHORT_BRAKE_MS before the
+   * lift (an older entry is not made late at another price, as after a long brake). One activity line at the start
+   * of the hold, one at its end.
+   */
+  venue?(): VenueHold | null;
   /**
    * Approval mode 'confirm': ask the follower; resolve true to place the orders, false when the
    * follower declined, 'timeout' when nobody answered in time (logged as such, not as declined).
@@ -311,6 +322,14 @@ export class CopyRuntime {
   private heldTold = new Set<string>();
   /** Whether the brake is on what it did, while it was on: asked when it began, as it is gone at the lift. */
   private heldShort = new Map<string, number>();
+  /**
+   * Copies held because SoDEX is in maintenance (host.venue): when the hold began, whether the brake held it too
+   * (then the brake's rule decides the lift), whether its activity said so, and the markets a restart under the
+   * hold would have replayed (start: settleSending).
+   */
+  private heldVenue = new Map<string, { since: number; brake: boolean; told: boolean; replay: Set<string> }>();
+  /** subId|leaderSymbol -> the time of the first leader print held there while SoDEX was in maintenance. */
+  private heldFirstPrint = new Map<string, number>();
   private running = false;
   private feedUp = { sodex: false, hyperliquid: false };
   private dirty = new Set<string>();
@@ -519,13 +538,16 @@ export class CopyRuntime {
   async stopCopy(id: string, o: { close: boolean }): Promise<Subscription> {
     const s = this.need(id);
     if (!o.close) return this.setStatus(id, 'stopped', 'Stopped by you; positions kept.');
+    const maintenance = this.venueHeld(s);
     const open = await this.closeAll(s, 'stop-all');
     const keep = new Set(open);
     this.cancelStopsWhere(s, (sym) => !keep.has(sym));
     return this.setStatus(
       id,
       'stopped',
-      open.length
+      open.length && maintenance
+        ? `Stopped by you; not closed: SoDEX is in maintenance, so no close could be sent. ${open.join(', ')} ${open.length > 1 ? 'are' : 'is'} still open on SoDEX, with any stop-loss the copier placed there; close ${open.length > 1 ? 'them' : 'it'} on SoDEX once it is back.`
+        : open.length
         ? `Stopped by you; not confirmed closed: ${open.join(', ')}. ${open.length > 1 ? 'They' : 'It'} may still be open on SoDEX, with any stop-loss the copier placed there; check your SoDEX account.`
         : 'Stopped by you; positions closed.',
     );
@@ -626,9 +648,9 @@ export class CopyRuntime {
     if (!this.markets.size) return;
     // Braked: the state stays where it was, so the lift sees this move (resumeHeld). It used to move on with the
     // leader here, the order dropped: a leader's close during a release left the follower holding the position.
-    const braked = this.brakedNow(s);
-    if (braked) {
-      await this.noteHeld(s, e.symbol, market?.name ?? e.symbol, braked);
+    const hold = this.holdNow(s);
+    if (hold) {
+      await this.noteHeld(s, e.symbol, market?.name ?? e.symbol, hold, Math.min(e.time, Date.now()));
       return;
     }
     const st = this.stateOf(s);
@@ -1505,6 +1527,8 @@ export class CopyRuntime {
     for (const s of this.list()) {
       // A halted or blocked copy is guarded too: its stop-loss, take-profit and drawdown closes are reduce-only.
       if (s.status === 'stopped') continue;
+      // SoDEX in maintenance: nothing can be closed; the guard runs again (quietly) once it is back.
+      if (this.venueHeld(s)) continue;
       const st = this.stateOf(s);
       if (!Object.keys(st.owned).length) {
         st.peakEquity = Math.max(st.peakEquity, copyEquity(s.settings, st, (m) => this.markets.mark(m)));
@@ -1538,7 +1562,9 @@ export class CopyRuntime {
           // not found", it is not: the market is flat (execute booked it, detached as SoDEX's trades tell);
           // where that left it attached (the books were flat already: the stop's fill), it is detached here.
           const why = g.closed[sym];
-          if (why && results.some((r) => r.ok || r.outcomeUnknown)) for (const lsym of this.leaderSymbolsFor(s, sym)) st.detached[lsym] = why;
+          // A close SoDEX's gateway turned away (HTTP 503, its maintenance) most likely never left: the market stays
+          // attached and the guard plans it again (reduce-only: a close that did fill is refused as "no position").
+          if (why && results.some((r) => r.ok || (r.outcomeUnknown && !r.maintenance))) for (const lsym of this.leaderSymbolsFor(s, sym)) st.detached[lsym] = why;
           else if (why && list.some((it, i) => results[i] && noPosition(it, results[i]!))) {
             for (const lsym of this.leaderSymbolsFor(s, sym)) if (st.leaderPos[lsym] && !st.detached[lsym]) st.detached[lsym] = why;
           }
@@ -1557,6 +1583,11 @@ export class CopyRuntime {
     const tag = `${leg}:${Date.now()}`;
     return new Promise<string[]>((resolve) => {
       this.enqueue(s.owner, async () => {
+        // SoDEX in maintenance: no close can be sent; every position stays open (stopCopy says so).
+        if (this.venueHeld(s)) {
+          resolve(Object.keys(st.owned));
+          return;
+        }
         const open: string[] = [];
         const sent: string[] = [];
         try {
@@ -1641,6 +1672,8 @@ export class CopyRuntime {
   private async closeStrays(subId: string): Promise<void> {
     const s = this.subs.get(subId);
     if (!s || s.status === 'stopped' || s.status === 'paused') return;
+    // SoDEX in maintenance: tried again by the reconcile once it is back (no close and no line per pass meanwhile).
+    if (this.venueHeld(s)) return;
     const l = s.settings.leader;
     if (!this.leaders.seeded(l)) return;
     const st = this.stateOf(s);
@@ -1691,13 +1724,17 @@ export class CopyRuntime {
    * as a missed print is while running - except a position opened meanwhile, which is
    * pre-existing (joined only with "copy existing"), as when a copy starts.
    */
-  private catchUp(subId: string, o: { open?: Set<string> | 'all'; reduceOnly?: boolean } = {}): void {
+  private catchUp(subId: string, o: { open?: Set<string> | 'all'; reduceOnly?: boolean; fresh?: ReadonlySet<string> } = {}): void {
     const s = this.subs.get(subId);
     if (!s || s.status === 'stopped') return;
     // Started under the brake (a release's restart): nothing is decided before the lift, or what the leader
     // opened meanwhile would be marked pre-existing here.
-    if (this.brakedNow(s)) {
-      this.markHeld(s);
+    const hold = this.holdNow(s);
+    if (hold) {
+      this.markHeld(s, hold.venue);
+      // Held by SoDEX's maintenance at a restart: the markets the restart would replay are replayed at the lift.
+      const v = this.heldVenue.get(s.id);
+      if (v && o.open instanceof Set) for (const x of o.open) v.replay.add(x);
       return;
     }
     const l = s.settings.leader;
@@ -1720,8 +1757,9 @@ export class CopyRuntime {
       }
       const price = this.priceFor(l.venue, sym) ?? 0;
       // After a long brake only what takes risk off: an add or the new side of a flip made now would be a late
-      // entry at another price. The books move on, and the follower's position stays as it is.
-      if (o.reduceOnly) {
+      // entry at another price. The books move on, and the follower's position stays as it is. After SoDEX's
+      // maintenance a market the leader first moved at most SHORT_BRAKE_MS before the lift (`fresh`) is caught up in full.
+      if (o.reduceOnly && !o.fresh?.has(sym)) {
         const flipped = before !== 0 && after !== 0 && Math.sign(before) !== Math.sign(after);
         if (!flipped && Math.abs(after) > Math.abs(before)) {
           st.leaderPos[sym] = after;
@@ -1743,23 +1781,53 @@ export class CopyRuntime {
   }
 
   private brakedNow(s: Subscription): string | null {
-    if (!this.live(s)) return null;
-    return this.host.brake?.(s) ?? null;
+    return this.holdNow(s)?.why ?? null;
   }
 
-  private markHeld(s: Subscription): void {
+  /** Why a live copy sends nothing now: the operator's brake, or SoDEX's maintenance (`venue`). */
+  private holdNow(s: Subscription): { why: string; venue: boolean } | null {
+    if (!this.live(s)) return null;
+    const brake = this.host.brake?.(s) ?? null;
+    if (brake) return { why: brake, venue: false };
+    const v = this.host.venue?.() ?? null;
+    return v ? { why: v.reason, venue: true } : null;
+  }
+
+  /** SoDEX is in maintenance and this copy is live: nothing of it can be sent. */
+  private venueHeld(s: Subscription): boolean {
+    return this.live(s) && !!this.host.venue?.();
+  }
+
+  private markHeld(s: Subscription, venue = false): void {
+    const v = this.heldVenue.get(s.id);
+    if (venue && !v) this.heldVenue.set(s.id, { since: Date.now(), brake: this.held.has(s.id), told: false, replay: new Set() });
+    else if (!venue && v) v.brake = true;
     if (this.held.has(s.id)) return;
     this.held.set(s.id, Date.now());
     const since = this.host.shortBrakeSince?.(s) ?? null;
     if (since !== null) this.heldShort.set(s.id, since);
   }
 
-  private async noteHeld(s: Subscription, leaderSymbol: string, symbol: string, why: string): Promise<void> {
-    this.markHeld(s);
+  private async noteHeld(s: Subscription, leaderSymbol: string, symbol: string, hold: { why: string; venue: boolean }, at = Date.now()): Promise<void> {
+    this.markHeld(s, hold.venue);
     const k = `${s.id}|${leaderSymbol}`;
+    if (hold.venue) {
+      if (!this.heldFirstPrint.has(k)) this.heldFirstPrint.set(k, at);
+      // One line per copy for the whole maintenance (not one per print or market).
+      const v = this.heldVenue.get(s.id)!;
+      if (v.told) return;
+      v.told = true;
+      await this.activity(s, {
+        kind: 'status',
+        reason: 'maintenance',
+        symbol,
+        detail: `Waiting: ${hold.why} What the leader closes or reduces meanwhile is followed once SoDEX is back; what it opens or adds is copied then only if it is at most ${Math.round(SHORT_BRAKE_MS / 60_000)} min old.`,
+      });
+      return;
+    }
     if (this.heldTold.has(k)) return;
     this.heldTold.add(k);
-    await this.activity(s, { kind: 'error', reason: 'brake', symbol, detail: `Waiting: ${why} What the leader closes meanwhile is followed once this is over.` });
+    await this.activity(s, { kind: 'error', reason: 'brake', symbol, detail: `Waiting: ${hold.why} What the leader closes meanwhile is followed once this is over.` });
   }
 
   /** The brake is off for these copies: the leader's moves it held are planned now, as after a restart. */
@@ -1772,7 +1840,23 @@ export class CopyRuntime {
       const since = this.heldShort.get(id);
       this.heldShort.delete(id);
       for (const k of [...this.heldTold]) if (k.startsWith(`${id}|`)) this.heldTold.delete(k);
+      const venue = this.heldVenue.get(id);
+      this.heldVenue.delete(id);
+      // The markets the leader first moved at most SHORT_BRAKE_MS before the lift (each print's own time).
+      const fresh = new Set<string>(venue?.replay ?? []);
+      for (const [k, at] of [...this.heldFirstPrint]) {
+        if (!k.startsWith(`${id}|`)) continue;
+        this.heldFirstPrint.delete(k);
+        if (now - at <= SHORT_BRAKE_MS) fresh.add(k.slice(id.length + 1));
+      }
       if (!s) continue;
+      if (venue && !venue.brake) {
+        // Held by SoDEX's maintenance alone: every close and reduction, and the fresh markets in full.
+        this.host.log.info('copy: SoDEX is back; going through what the leader did', { sub: id, heldMs: now - venue.since, fresh: [...fresh] });
+        if (venue.told) void this.activity(s, { kind: 'status', reason: 'maintenance', detail: 'SoDEX is back from maintenance; going through what the leader did meanwhile.' });
+        this.enqueue(s.owner, async () => this.catchUp(id, { open: fresh, reduceOnly: true, fresh }));
+        continue;
+      }
       const short = since !== undefined && now - since <= SHORT_BRAKE_MS;
       this.host.log.info('copy: brake off; going through what the leader did', { sub: id, opens: short });
       this.enqueue(s.owner, async () => this.catchUp(id, short ? { open: 'all' } : { reduceOnly: true }));
@@ -1860,6 +1944,19 @@ export class CopyRuntime {
     const sink = this.host.sinkFor(s);
     const m = this.markets.get(symbol);
     if (!sink || sink.paper || !m) return;
+    // SoDEX in maintenance: the stops are placed (or cancelled) once it is back - asked again quietly until then.
+    if (this.venueHeld(s)) {
+      const k = `${s.id}|${symbol}`;
+      timers.cancel(this.stopTimers.get(k));
+      this.stopTimers.set(
+        k,
+        timers.after(VENUE_RETRY_MS, () => {
+          this.stopTimers.delete(k);
+          this.enqueue(s.owner, () => this.refreshStops(s.id, symbol, force));
+        }),
+      );
+      return;
+    }
     const p = st.owned[symbol];
     const cur = st.stops[symbol];
     if (!force && p && cur && Math.abs(cur.size - p.size) < 1e-12) return;

@@ -16,7 +16,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   NOTICE_LIMITS, NOTICE_SHOW_DAYS, STATUS_SERVICES, cleanText, closingStage, healthNotices, noticePhase, parseNotice, stagesOf,
-  type HealthNotice, type Impact, type Notice, type NoticeKind, type NoticeOutcome, type NoticePart, type NoticeStage, type ServiceId,
+  isNoticeLink, type HealthNotice, type Impact, type Notice, type NoticeKind, type NoticeSource, type NoticeOutcome, type NoticePart, type NoticeStage, type ServiceId,
 } from './statusModel.js';
 
 export const NOTICE_SCHEMA = `
@@ -56,6 +56,10 @@ export interface NewNotice {
   parts?: readonly NoticePart[];
   /** A maintenance: in progress past its end until completed (statusModel.ts Notice.holdOpen). */
   holdOpen?: boolean;
+  /** Whose it is (statusModel.ts Notice.source): absent ours, `sodex` SoDEX's own (ops/sodexWatch.ts). */
+  source?: NoticeSource;
+  /** SoDEX's announcement it was read from (statusModel.ts isNoticeLink). */
+  link?: string;
 }
 
 /** A part's impact now; its words stay as they were while its impact does (they described the plan), unless given. */
@@ -201,6 +205,11 @@ export class NoticeStore {
         ...(o.parts?.length ? { parts: [...o.parts] } : {}),
         ...(o.holdOpen ? { holdOpen: true } : {}),
       };
+    }
+    if (o.source) n = { ...n, source: o.source };
+    if (o.link) {
+      if (!isNoticeLink(o.link)) throw new NoticeError('a link is a https://sodex.com/ page');
+      n = { ...n, link: o.link };
     }
     return this.tx(() => {
       // Never a number used before, even one deleted since: a feed reader keeps its entries by it.

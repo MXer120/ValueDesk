@@ -13,8 +13,8 @@ import { Guarded } from './components/ErrorBoundary';
 import { ShortcutsDialog, openShortcuts } from './components/ShortcutsDialog';
 import { CommandPalette, loadPalette, openPalette, paletteReady } from './components/palette/lazyPalette';
 import type { TradeContext } from './dashboard';
-import { MaintenanceBanner } from './components/MaintenanceBanner';
 import { SiteNoticeBanner, navAlertOf, useHealthDown } from './status/SiteNoticeBanner';
+import { setSodexMaintFrom, useSodexMaint } from './status/sodexMaint';
 import { UpdateHeldBanner } from './status/UpdateHeldBanner';
 import { MaintNote } from './status/MaintNote';
 import { IncidentNote } from './status/IncidentNote';
@@ -498,9 +498,12 @@ function AppShell() {
   );
 
   const upstreamState = upstream[engine];
+  // In words (owner 2026-11-11): "hub ok · sodex closed" said nothing to a trader.
+  const sodexMaint = useSodexMaint();
+  useEffect(() => setSodexMaintFrom(health), [health]);
   const connLabel =
     connState === 'open' && upstreamState === 'open' ? 'live'
-    : connState === 'open' ? `hub ok · sodex ${upstreamState ?? '…'}`
+    : connState === 'open' ? (sodexMaint ? 'SoDEX maintenance' : 'SoDEX reconnecting…')
     : connState;
 
   return (
@@ -567,7 +570,8 @@ function AppShell() {
         {/* Our own scheduled maintenance (status/), from /api/health: no request of its own. */}
         <SiteNoticeBanner health={health} onOpenStatus={openStatus} />
         <UpdateHeldBanner />
-        <MaintenanceBanner />
+        {/* SoDEX's own maintenance is a notification card now, from its flag and announcements read on the
+            server (apps/server/src/ops/sodexWatch.ts -> status notices -> MaintNote), not a bar (owner 2026-11-11). */}
       </Guarded>
       <Guarded name="Brake">
         <BrakeBanner health={health} />

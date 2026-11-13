@@ -92,8 +92,14 @@ export async function sendSigned<T = unknown>(req: SignedHttpRequest, what: stri
       ms,
       body: text.slice(0, 200),
     });
+    // 502-504 with a web page instead of SoDEX's JSON: the gateway in front of SoDEX said it is not
+    // available (maintenance, as on 2026-11-11, or overload). Still unknown - never "not placed" -
+    // but said in words, so a trader knows what is going on (owner 2026-11-11).
+    const unavailable = res.status >= 502 && res.status <= 504 && !/^[\[{]/.test(text.trim());
     throw new OutcomeUnknownError(
-      `SoDEX answered with an error (HTTP ${res.status}) after receiving the ${what}. It may still have gone through - check your open orders, positions and balances before trying again.`,
+      unavailable
+        ? `SoDEX is not available right now (HTTP ${res.status}, usually maintenance). The ${what} was most likely not placed - once SoDEX is back, check your open orders and positions before trying again.`
+        : `SoDEX answered with an error (HTTP ${res.status}) after receiving the ${what}. It may still have gone through - check your open orders, positions and balances before trying again.`,
     );
   }
   try {
