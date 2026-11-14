@@ -179,9 +179,10 @@ function StrategyPick({ ctx }: { ctx: BotsCtx }) {
   const pick = (s: Strategy) => { if (ctx.ready) goBots({ page: 'new', market: null, kind: s }); else if (ctx.address) ctx.setup(true); else void openConnectDialog(); };
   return (
     <div className="bots-strats">
-      {STRATEGIES.map((s) => {
+      {[...STRATEGIES, 'hedge' as const].map((s) => {
         const info = STRATEGY_INFO[s];
-        const cost = costPerMillion(draftFor(s), null, null, ctx.feeTenths);
+        // A hedge only takes: SoDEX's taker fee (4.0 bp) and the bot fee on every $1M it opens or closes.
+        const cost = s === 'hedge' ? { fees: (4 + ctx.feeTenths / 10) * 100 } : costPerMillion(draftFor(s), null, null, ctx.feeTenths);
         return (
           <Panel key={s} className="bots-strat">
             <div className="bots-strat__top">
@@ -478,7 +479,7 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
       <ErrorBoundary name="Your bots">
       {!ready || (!bots.length && !ctx.loading) ? (
         <Shell className="bots-listcard">
-          <ShellHeader icon="layers" title="Strategies" subtitle="Maker fee only, never the spread" />
+          <ShellHeader icon="layers" title="Strategies" subtitle="Makers rest and pay the maker fee; the hedge takes on both legs" />
           <StrategyPick ctx={ctx} />
         </Shell>
       ) : (

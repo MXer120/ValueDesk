@@ -91,6 +91,8 @@
 
 /* -------------------------------------------------------- strategies ---- */
 .bots-strats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+/* A third card (the hedge) spans the row under the two makers. */
+.bots-strats > :nth-child(3):last-child { grid-column: 1 / -1; }
 .bots-strat { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
 .bots-strat__top { display: flex; gap: 12px; align-items: flex-start; }
 .bots-strat__t { min-width: 0; }
