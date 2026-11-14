@@ -416,6 +416,15 @@ export class BuilderStore {
     if (newest && mayPrune('builder')) this.q('DELETE FROM days WHERE builder = ? AND address = ? AND engine = ? AND day < ?').run(builder, address, engine, newest - KEEP_DAYS);
   }
 
+  /**
+   * A wallet's counted orders (state counted) whose last fill is at or after `since`: what the fee credits take in
+   * (invites/service.ts). Newest last.
+   */
+  countedOrders(builder: number, address: string, since: number): Array<{ key: string; engine: Engine; cl: string | null; t: number; rate: number; countedMicro: number }> {
+    const rows = this.q(`SELECT order_key, engine, cl, t, rate, counted_micro FROM orders WHERE builder = ? AND address = ? AND state = ${OrderState.counted} AND last_t >= ? ORDER BY last_t`).all(builder, address, since) as Row[];
+    return rows.map((r) => ({ key: str(r.order_key), engine: (str(r.engine) === 'spot' ? 'spot' : 'perps') as Engine, cl: typeof r.cl === 'string' ? r.cl : null, t: num(r.t), rate: num(r.rate), countedMicro: num(r.counted_micro) }));
+  }
+
   /** How many wallets the ledger holds (one count at open; kept current by the caller). */
   walletCount(): number {
     return num((this.q('SELECT count(*) AS n FROM wallets').get() as Row).n);

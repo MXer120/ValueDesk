@@ -43,6 +43,7 @@ import { statusRoutes } from './routes/status.js';
 import { adminRoutes } from './routes/admin.js';
 import { analyticsRoutes, analyticsStore } from './routes/analytics.js';
 import { profileRoutes } from './routes/profiles.js';
+import { inviteRoutes } from './routes/invites.js';
 import { adminOriginsFrom } from './admin/auth.js';
 import { fetchExecutorHealth } from './admin/statusView.js';
 import { swr } from './admin/swr.js';
@@ -285,6 +286,8 @@ await app.register(profileRoutes, {
   // An order counted through ValueDesk's builder: a returning user, whatever browser they are on.
   known: (address: string) => !!(adminLedger ??= openLedger(builderDbPath()))?.prepare('SELECT 1 FROM orders WHERE address = ? LIMIT 1').get(address),
 });
+// Invites and fee credits (routes/invites.ts): codes, signed joins, the credit job on the main API.
+await app.register(inviteRoutes);
 let adminLedger: ReturnType<typeof openLedger> = null;
 let adminStatusDb: StatusStore | null = null;
 let adminErrorsDb: ClientErrorStore | null = null;

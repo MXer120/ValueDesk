@@ -292,3 +292,4 @@ html[data-theme='light'] .onb-go:hover { filter: brightness(1.6); }
 .ref-offer__list a:hover { color: var(--text); }
 .ref-offer__go { display: inline-grid; place-items: center; text-decoration: none; }
 @media (max-width: 560px) { .ref-offer__cols { grid-template-columns: 1fr; } }
+.ref-offer__cols.is-one { grid-template-columns: 1fr; }

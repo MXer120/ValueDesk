@@ -1,6 +1,8 @@
 /**
- * Bots > Savings: what would make the bots' volume cheaper, each in dollars at the pace they trade now, in the Bots
- * kit.
+ * Bots > Savings (redesigned 2026-11-14, owner: "redesign the savings page" / "For fee tier, needs to show both sodex
+ * fee tier, our fee tiers, the fee credits"): the wallet's fees on SoDEX and on ValueDesk side by side with where it
+ * stands (SavingsFees), its fee credits and invite link (SavingsCredits), then what would make its bots cheaper, each
+ * in dollars at the pace they trade now:
  *
  *   Fee tier     SoDEX's maker fee falls with 14-day volume (fees.ts FEE_TIERS): how far the next tier is, how much
  *                more a day reaches it, and what it saves on every $1M after
@@ -26,6 +28,12 @@ import { botName } from './botWords';
 import { BotsVip } from './BotsVip';
 import { BotsHead, isLive, type BotsCtx } from './BotsPage';
 import { Button, EmptyState, IconTile, Panel, ProgressBar, Shell, ShellHeader, StatCard, StatusPill, type IconName, type Tone } from './kit/kit';
+import { useEffect, useSyncExternalStore } from 'react';
+import { BOT_FEE_VIP } from '@copy-engine';
+import { refreshTerms, subscribeTerms, termsRevision, termsView } from '../../trading/terms';
+import { useInviteMe } from '../../invites/invites';
+import { SavingsFees } from './SavingsFees';
+import { SavingsCredits } from './SavingsCredits';
 
 const DAY = 86_400_000;
 
@@ -75,6 +83,14 @@ function WfRow({ label, value, max, from, kind }: { label: string; value: number
 
 export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   const fees = useVenueFees(ctx.address, !!ctx.address);
+  // The 14-day volume the builder ledger counted (the signed terms): where the wallet stands on ValueDesk's ladders.
+  useSyncExternalStore(subscribeTerms, termsRevision, termsRevision);
+  useEffect(() => { if (ctx.address && !termsView(ctx.address)) void refreshTerms(ctx.address); }, [ctx.address]);
+  const terms = ctx.address ? termsView(ctx.address) : null;
+  const me = useInviteMe(ctx.address);
+  const creditWords = me?.welcome?.active
+    ? `Your invite welcome: 0.1 bp on your next ${fmtUsd(me.welcome.leftUsd, 0)} of volume.`
+    : me?.credits.paying ? `Your fee credits pay it down: ${fmtUsd(me.credits.balanceUsd, 2)} left.` : null;
   const markets = useBotMarkets('7d');
   const now = Date.now();
   const live = ctx.bots.filter(isLive).filter((v) => !v.algo.spec.paper);
@@ -143,7 +159,7 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
 
   return (
     <>
-      <BotsHead view={view} title="Savings" sub="Ways to make your bots' volume cheaper." />
+      <BotsHead view={view} title="Savings" sub="Your fees on SoDEX and on ValueDesk, what lowers them, and credits from invites." />
       {!ctx.address ? (
         <Shell>
           <Panel>
@@ -152,17 +168,25 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         </Shell>
       ) : (
         <>
-          <BotsVip ctx={ctx} />
           <Shell className="bots-kpis">
-            <ShellHeader icon="piggy" title="Where you stand" subtitle={basis ? `At ${basis}` : 'Start a bot to see savings at its pace'} />
+            <ShellHeader icon="piggy" title="Where you stand" subtitle={basis ? `Savings at ${basis}` : "Your fees now; savings show at your bots' pace once one runs"} />
             <div className="bots-kpigrid is-5">
-              <StatCard index={0} label="Your maker fee" value={perps ? `${(makerNow * 10_000).toFixed(2)} bp` : DASH} hint="Staking included" />
-              <StatCard index={1} label="Fee tier" value={perps ? `Tier ${tier.tier}` : DASH} hint={`Maker ${(tier.perpsMaker * 10_000).toFixed(1)} bp here`} />
-              <StatCard index={2} label="Staking" value={perps ? (stake.discount ? `${Math.round(stake.discount * 100)}% off` : 'None') : DASH} hint="Off every SoDEX fee" />
-              <StatCard index={3} label="Bots trade" value={perDay > 0 ? `${fmtUsd(perDay, 0)}/day` : DASH} hint={livePace > 0 ? 'Running bots, over the time they ran' : 'While they ran'} />
+              <StatCard index={0} label="SoDEX maker fee" value={perps ? `${(makerNow * 10_000).toFixed(2)} bp` : DASH} hint={perps ? `Tier ${tier.tier}${stake.discount ? `, ${Math.round(stake.discount * 100)}% staking off` : ''}` : 'Read from SoDEX'} />
+              <StatCard index={1} label="ValueDesk trading fee" value={terms ? `${(Math.min(terms.fee.perps, terms.fee.spot) / 10).toFixed(1)} bp` : DASH} hint={terms?.volumeUsd != null ? `${fmtUsd(terms.volumeUsd, 0)} counted in ${terms.volumeDays ?? 14} days` : 'Futures and spot orders'} />
+              <StatCard index={2} label="ValueDesk bot fee" value={`${(ctx.feeTenths / 10).toFixed(1)} bp`} hint={ctx.feeTenths <= BOT_FEE_VIP ? 'VIP' : 'By 14-day volume'} />
+              <StatCard index={3} label="Fee credits" value={me ? fmtUsd(me.credits.balanceUsd, 2) : DASH} valueTone={me && me.credits.balanceUsd > 0 ? 'positive' : undefined} hint={me?.credits.paying ? 'Paying your ValueDesk fees' : 'Earned from invites'} />
               <StatCard index={4} label="Could save per $1M" value={totalPerM > 0 ? fmtUsd(totalPerM, 0) : DASH} valueTone={totalPerM > 0 ? 'positive' : undefined} hint={total > 0 ? monthWords(total) : 'What applies, added up'} />
             </div>
           </Shell>
+
+          <Shell className="bots-listcard">
+            <ShellHeader icon="layers" title="Your fees" subtitle="Every order pays SoDEX's fee and ValueDesk's builder fee; both fall with your 14-day volume" />
+            <SavingsFees sodexTier={perps ? tier.tier : null} stakeOff={stake.discount} volumeUsd={terms?.volumeUsd ?? null} botTenths={ctx.feeTenths} vip={ctx.feeTenths <= BOT_FEE_VIP} credit={creditWords} />
+          </Shell>
+
+          <SavingsCredits address={ctx.address} />
+
+          <BotsVip ctx={ctx} />
 
           <Shell className="bots-listcard">
             <ShellHeader icon="piggy" title="Every saving, per $1M" subtitle={nowPerM !== null ? `From what $1M costs your bots now to where these levers take it` : 'What each lever takes off $1M of volume'} />
@@ -183,7 +207,7 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
           <div className="bots-savegrid">
 
           <Shell className="bots-listcard">
-            <ShellHeader icon="chart" title="Fee tier" subtitle="SoDEX's maker fee falls with your 14-day volume" aside={perps ? <StatusPill tone="neutral">Tier {tier.tier}</StatusPill> : undefined} />
+            <ShellHeader icon="chart" title="Next SoDEX tier" subtitle="At your bots' pace" aside={perps ? <StatusPill tone="neutral">Tier {tier.tier}</StatusPill> : undefined} />
             {next && tierSavePerM !== null ? (
               <>
                 <Panel className="bots-tier">

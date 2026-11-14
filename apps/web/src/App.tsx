@@ -1,5 +1,7 @@
 import './cssOrder';
 import { ShareHost } from './components/share/host';
+import { InviteHost } from './invites/InviteHost';
+import { captureInvite } from './invites/invites';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
@@ -306,6 +308,8 @@ function AppShell() {
   useWalletBridge({ address, setAddress, setProvider });
   /* First signup (onboarding/): a new wallet's username, the features, dark or light. */
   const onboarding = useOnboardingGate(address);
+  // An invite link (?i=<code>): checked, kept in this browser, taken off the address bar (invites/invites.ts).
+  useEffect(() => { void captureInvite(); }, []);
 
   const [refreshToken, setRefreshToken] = useState(0);
   // Surfaced from the tab content up to the tab label, e.g. "Positions (2)".
@@ -698,6 +702,7 @@ function AppShell() {
         </Guarded>
         <Guarded name="Share">
           <ShareHost address={address} />
+          <InviteHost address={address} provider={provider} hold={onboarding.holdSetup || !!onboarding.open} />
         </Guarded>
         <Guarded name="Indexing">
           <IndexPrompt address={address} />

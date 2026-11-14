@@ -390,6 +390,9 @@ Against this inventory, HOSTED_ROUTES should be:
 - **Add**: `GET /api/vs/profile?address=`, `GET /api/vs/username/check?name=` (cls `read`), `POST /api/vs/username` and
   `POST /api/vs/username/change` (cls `write`, 1 and 4 KB, one limit of 12 a minute per client): a wallet's username.
   The first needs no signature, a change is signed by the wallet (routes/profiles.ts, `profiles.db`).
+- **Add**: `GET /api/vs/invites/code?address=`, `GET /api/vs/invites/check?code=`, `GET /api/vs/invites/me?address=` (cls `read`)
+  and `POST /api/vs/invites/join` (cls `write`, 4 KB, 12 a minute per client): invite codes, a signed join, a wallet's fee
+  credits (routes/invites.ts, `invites.db`). No upstream read: the credits come from the builder ledger on this server.
 - **Add**: `POST /api/vs/a` (cls `write`, 16 KB, `application/json` or `text/plain`): the app's own
   analytics, sent only after the visitor allowed analytics (ops/analyticsModel.ts says what one batch
   holds; routes/analytics.ts). The Vercel function lets POST + `Content-Type` through on this path and adds

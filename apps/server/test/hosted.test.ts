@@ -271,6 +271,9 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/flow/wallet read',
       'GET /api/vs/indicator read',
       'GET /api/vs/indicators read',
+      'GET /api/vs/invites/check read',
+      'GET /api/vs/invites/code read',
+      'GET /api/vs/invites/me read',
       'GET /api/vs/last-trades read',
       'GET /api/vs/lbrow read',
       'GET /api/vs/leaderboard read',
@@ -337,6 +340,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/vs/feedback/upload write',
       'POST /api/vs/inbox/add write',
       'POST /api/vs/inbox/list write',
+      'POST /api/vs/invites/join write',
       'POST /api/vs/username write',
       'POST /api/vs/username/change write',
     ],
@@ -359,7 +363,7 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
     // and a signed-in wallet keeps its own algos' and copies' notices in its inbox (ops/inbox.ts).
     if (r.url === '/api/vs/feedback/image') assert.ok(r.method === 'GET' && r.cls === 'read', r.url);
     else if (r.url === '/api/vs/feedback/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
-    else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors' || r.url === '/api/vs/a' || r.url === '/api/vs/username' || r.url === '/api/vs/username/change') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
+    else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors' || r.url === '/api/vs/a' || r.url === '/api/vs/username' || r.url === '/api/vs/username/change' || r.url === '/api/vs/invites/join') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
     // The owner's admin suite (routes/admin.ts): POST only, its own class (the suite's Origin, its own limits).
     else if (r.url.startsWith('/api/admin/')) assert.ok(r.method === 'POST' && r.cls === 'admin', r.url);
     // The beta channel's sign-in (routes/beta.ts, beta API only): a wallet's free signature, cls auth.

@@ -16,8 +16,8 @@
  * With no configuration file the feature is off: no database is opened, no
  * timer but the one that looks for the file, and the answer says so.
  */
-import { AdminStore, type FeeProgram } from '../admin/store.js';
-import { VIP_PROGRAM_FEE, lowered, soonestEnd, type Lowered } from './programs.js';
+import { AdminStore, type FeeProduct, type FeeProgram } from '../admin/store.js';
+import { VIP_PROGRAM_FEE, botLadderFee, lowered, soonestEnd, type Lowered } from './programs.js';
 import { channelFrom } from '../beta/gate.js';
 import { NET, NETWORK } from '../config.js';
 import { sodex } from '../sodex/rest.js';
@@ -29,7 +29,7 @@ import { builderDbPath, termsKeyPath, tiersPath } from './paths.js';
 import { BuilderStore, type WalletRow } from './store.js';
 import { dayOf } from './counting.js';
 import { KeySource, TERMS_TTL_MS, termsMessage } from './terms.js';
-import { MICRO, NO_FACTS, decide, type Decision, type Flag, type NextTier, type WalletFacts } from './tiers.js';
+import { COPY_LADDER_DAYS, MICRO, NO_FACTS, copyLadderFee, decide, type Decision, type Flag, type NextTier, type WalletFacts } from './tiers.js';
 import {
   APPROVALS_PER_MIN_DEFAULT, APPROVALS_PER_MIN_MAX, EXPLORER_PER_MIN_DEFAULT, EXPLORER_PER_MIN_MAX, ExplorerError, VERIFY_PER_MIN_DEFAULT,
   VERIFY_PER_MIN_MAX, Verifier, perMinFrom, type VerifierIo,
@@ -143,6 +143,13 @@ export class BuilderService {
   private noted: { builder: number; perps: number; spot: number } | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private started = false;
+  /** Programs from elsewhere on this server (the fee credits and the invite welcome: invites/service.ts). */
+  private extra: ((address: string, now: number) => FeeProgram[]) | null = null;
+
+  /** Add a source of programs (the invites' credits and welcome), read with the dev page's on every fee decision. */
+  setExtraPrograms(f: ((address: string, now: number) => FeeProgram[]) | null): void {
+    this.extra = f;
+  }
 
   constructor(private readonly o: BuilderServiceOptions) {
     this.tiers = new TiersSource(o.tiersPath, o.log);
@@ -297,13 +304,47 @@ export class BuilderService {
   }
 
   /** The wallet's running programs (never throws: an unreadable store means none; no source given, none). */
-  private programsOf(address: string, now: number): FeeProgram[] {
+  private programsOf(address: string, now: number, withExtra = true): FeeProgram[] {
+    let out: FeeProgram[] = [];
     try {
-      return this.o.programs ? this.o.programs(address, now) : [];
+      out = this.o.programs ? this.o.programs(address, now) : [];
     } catch (e) {
       this.o.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'builder tiers: fee programs could not be read');
-      return [];
     }
+    if (withExtra && this.extra) {
+      try {
+        out = [...out, ...this.extra(address, now)];
+      } catch (e) {
+        this.o.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'builder tiers: credit programs could not be read');
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The builder fee a wallet would pay on a product now WITHOUT the fee credits and the invite welcome (tenths of a bp):
+   * its tier (site trading), its ladder step (copy trading, bots), lowered by VIP and the dev page's programs. What a
+   * fee paid by credits is valued at (invites/service.ts). Null while the ledger or the tiers cannot be read.
+   */
+  standardFee(address: string, product: FeeProduct, now = this.now()): number | null {
+    const cfg = this.tiers.current();
+    const rt = cfg ? this.open() : null;
+    if (!cfg || !rt) return null;
+    const a = address.toLowerCase();
+    let base: number;
+    try {
+      if (product === 'perps' || product === 'spot') {
+        const w = rt.store.wallet(cfg.builderId, a);
+        base = decide(cfg, a, factsOf(w, countedOf(cfg, rt.store, w, now)), now).fee[product];
+      } else {
+        const v = this.volumeUsd(cfg.builderId, a, COPY_LADDER_DAYS) ?? 0;
+        base = product === 'copy' ? copyLadderFee(v) : botLadderFee(v);
+      }
+    } catch {
+      return null;
+    }
+    const l = lowered(this.programsOf(a, now, false), this.vipNow(a), cfg, now);
+    return Math.min(base, l.fees[product]?.fee ?? Infinity);
   }
 
   /** Whether a wallet is VIP now by its standing: kept (VALUEDESK_VIP_KEEP), or by volume while that is on (vipByVolume). */

@@ -198,6 +198,11 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/username/check', cls: 'read' },
   { method: 'POST', url: '/api/vs/username', cls: 'write' },
   { method: 'POST', url: '/api/vs/username/change', cls: 'write' },
+  // Invites and fee credits (routes/invites.ts): a wallet's code, a code's check, a wallet's credits, a signed join.
+  { method: 'GET', url: '/api/vs/invites/code', cls: 'read' },
+  { method: 'GET', url: '/api/vs/invites/check', cls: 'read' },
+  { method: 'GET', url: '/api/vs/invites/me', cls: 'read' },
+  { method: 'POST', url: '/api/vs/invites/join', cls: 'write' },
   // The builder fee a wallet owes, signed (routes/builder.ts, docs/BUILDER-TIERS.md §3). Asking is a
   // read of this server's own ledger and one signature. A hint is what later costs SoDEX reads from
   // this server's address, so a request that carries one counts as `upstream` too.
