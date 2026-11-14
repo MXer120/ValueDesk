@@ -412,6 +412,12 @@ export const ALGO_UPDATE_FIELDS: ReadonlyArray<keyof AlgoUpdatePatch> = [
 export interface ExecutorInfo {
   /** What requests must name in `executor`. */
   executorId: string;
+  /**
+   * SoDEX as this executor sees it (apps/executor venue.ts): 'maintenance' while SoDEX is in its maintenance - every
+   * copy, algo and bot here is held and goes on by itself after - since when (ms), and SoDEX's own expected end (ms,
+   * null when it gave none). Absent on an older executor.
+   */
+  venue?: { state: 'normal' | 'maintenance'; since: number | null; expectedEnd: number | null };
   kind: Exclude<CopyMode, 'browser'>;
   version: string;
   network: 'mainnet' | 'testnet';

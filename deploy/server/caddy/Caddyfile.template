@@ -89,6 +89,52 @@ __ORIGIN_SITE_ADDRESSES__ {
 		}
 	}
 
+	# THE BOTS PAGE'S LIVE STREAM without the secret (2026-11-13): GET /api/copy/v1/algos/stream (and the VIP
+	# executor's twin) from the browser directly - through the site's Vercel function a stream held it for as long as a
+	# tab stayed open, 95% of what the function was billed. Only these two exact paths, GET and the CORS preflight,
+	# and only a request WITHOUT X-Origin-Verify (one through the function keeps the gated route below). The executor
+	# reads the wallet's own token (Authorization) and answers that wallet's bots only, at most a few streams per
+	# wallet; it answers the preflight for the site's origins (EXECUTOR_ALLOWED_ORIGINS). Here the secret is added for
+	# the executor's own gate, and what a client could choose is replaced or dropped: X-Forwarded-For is the peer
+	# (its per-address limits), no X-Viewer-Country and no channel header (the stream applies neither).
+	@algostream {
+		method GET OPTIONS
+		path /api/copy/v1/algos/stream
+		not header X-Origin-Verify *
+	}
+	handle @algostream {
+		reverse_proxy __EXECUTOR_UPSTREAM__ {
+			__EXECUTOR_HOST_LINE__
+			header_up X-Forwarded-For {remote_host}
+			header_up -X-Viewer-Country
+			header_up -X-VS-Channel
+			header_up -X-VS-Beta
+			header_up X-Origin-Verify {$VALUESCAN_ORIGIN_SECRET_1}
+			flush_interval -1
+			lb_try_duration 20s
+			lb_try_interval 250ms
+		}
+	}
+	@algostreamvip {
+		method GET OPTIONS
+		path /api/copy-vip/v1/algos/stream
+		not header X-Origin-Verify *
+	}
+	handle @algostreamvip {
+		uri replace /api/copy-vip/ /api/copy/ 1
+		reverse_proxy https://54-64-113-41.sslip.io {
+			header_up Host {upstream_hostport}
+			header_up X-Forwarded-For {remote_host}
+			header_up -X-Viewer-Country
+			header_up -X-VS-Channel
+			header_up -X-VS-Beta
+			header_up X-Origin-Verify {$VALUESCAN_ORIGIN_SECRET_1}
+			flush_interval -1
+			lb_try_duration 20s
+			lb_try_interval 250ms
+		}
+	}
+
 	handle @edge {
 		# Past the gate, by path. Nested handle blocks are mutually exclusive like
 		# the outer ones: the first that matches is the only one that runs.

@@ -117,16 +117,16 @@ test('builder beta: the token holder learns whether a wallet is on the beta list
   await app.ready();
   try {
     const ask = (address: string, token?: string) => app.inject({ method: 'GET', url: `/api/vs/builder/beta?address=${address}`, headers: token ? { 'x-internal-token': token } : {} });
-    assert.deepEqual((await ask(WALLET.toUpperCase().replace('0X', '0x'), TOKEN)).json(), { ok: true, listed: true });
-    assert.deepEqual((await ask('0x00000000000000000000000000000000000000b1', TOKEN)).json(), { ok: true, listed: false });
+    assert.deepEqual((await ask(WALLET.toUpperCase().replace('0X', '0x'), TOKEN)).json(), { ok: true, listed: true, bots: true });
+    assert.deepEqual((await ask('0x00000000000000000000000000000000000000b1', TOKEN)).json(), { ok: true, listed: false, bots: false });
     assert.equal((await ask(WALLET)).statusCode, 404, 'no token: a path that does not exist');
     assert.equal((await ask(WALLET, 'wrong')).statusCode, 404);
     assert.equal((await ask('nope', TOKEN)).statusCode, 400);
     assert.ok(HOSTED_ROUTES.some((r) => r.url === '/api/vs/builder/beta'), 'past the hosted gate');
     // The page's own question (main site, owner 2026-11-06): one address, no token, never the list.
     const page = (address: string) => app.inject({ method: 'GET', url: `/api/vs/beta/listed?address=${address}` });
-    assert.deepEqual((await page(WALLET)).json(), { ok: true, listed: true });
-    assert.deepEqual((await page('0x00000000000000000000000000000000000000b1')).json(), { ok: true, listed: false });
+    assert.deepEqual((await page(WALLET)).json(), { ok: true, listed: true, bots: true });
+    assert.deepEqual((await page('0x00000000000000000000000000000000000000b1')).json(), { ok: true, listed: false, bots: false });
     assert.equal((await page('nope')).statusCode, 400);
     assert.ok(!JSON.stringify((await page(WALLET)).json()).includes('wallets'), 'answers about one address only');
     assert.ok(HOSTED_ROUTES.some((r) => r.url === '/api/vs/beta/listed'), 'past the hosted gate');

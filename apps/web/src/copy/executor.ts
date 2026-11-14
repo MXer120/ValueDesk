@@ -33,6 +33,19 @@ import { bytesToHex, hexToBytes } from '@sodex-core';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
 export const HOSTED_BASE = '/api/copy/v1';
+
+/**
+ * Where the bots page opens its live stream (GET <base>/algos/stream). In production straight to the instance
+ * (VITE_COPY_STREAM_ORIGIN=https://api.valuedesk.so: server 1's Caddy passes exactly the two stream paths without the
+ * origin secret and adds it itself, deploy/server/caddy/Caddyfile.template), not through the site's /api function: a
+ * stream holds that function for as long as the tab is open (cut at its 35 s and opened again), and on 2026-11-12 the
+ * two streams were 49.5 of its 52 GB-hours, 87% of its CPU and nearly all of its origin transfer. Unset (dev, tests) or a
+ * base that is already a full URL (a self-hosted executor): the base itself, as before.
+ */
+export function streamUrlOf(base: string, origin: string | undefined = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_COPY_STREAM_ORIGIN): string {
+  const o = origin?.trim().replace(/\/+$/, '');
+  return `${o && base.startsWith('/') ? o : ''}${base}/algos/stream`;
+}
 export const DEFAULT_SELF_URL = 'http://127.0.0.1:8799';
 
 export class ExecutorError extends Error {

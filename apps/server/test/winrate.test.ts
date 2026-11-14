@@ -145,6 +145,18 @@ test('coverage: a venue whose prints name sub-accounts moves only wallets whose 
   s.close();
 });
 
+test('coverage: moving the sub-account venue reads its indices once, not once per row (2026-11-13: 9-14 s a turn)', () => {
+  const s = new IndexStore(':memory:');
+  const N = 1_000;
+  const M = 50_000;
+  for (let i = 0; i < N; i++) s.addCoverage('lighter', `0x${i}`, 'fills', { fromT: 0, toT: T0, exhausted: true }, T0);
+  s.putExtIndex('lighter', Array.from({ length: M }, (_, i) => ({ idx: String(i), address: `0x${i}` })));
+  const t = performance.now();
+  assert.equal(s.advanceCoverage('lighter', ['fills'], T0 - 1, T0 + 1_000, true), N);
+  assert.ok(performance.now() - t < 2_000, 'one pass over the indices, not one per row');
+  s.close();
+});
+
 // --- board rank snapshots and trader stats -------------------------------------------------------
 
 test('store: rank snapshots answer "where was it a day ago", and trader stats round-trip', () => {

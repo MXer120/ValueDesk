@@ -151,7 +151,7 @@ export const incidentTitle = (impact: 'minor' | 'major' | 'critical' | null | un
   impact === 'critical' ? 'Outage' : impact === 'major' ? 'Partial outage' : `${IMPACT_TEXT[impact ?? 'minor']} incident`;
 
 /** "Partial outage", "Maintenance". */
-export const noticeKindText = (n: Notice): string => (n.kind === 'incident' ? incidentTitle(n.impact) : 'Maintenance');
+export const noticeKindText = (n: Notice): string => (n.kind === 'incident' ? incidentTitle(n.impact) : n.source === 'sodex' ? 'SoDEX maintenance' : 'Maintenance');
 
 /** When it was (or is): "27 Oct 14:02 – 15:10 UTC", "since 27 Oct 14:02 UTC", a maintenance's window. */
 export function noticeTimes(n: Notice, now: number): string {
@@ -212,6 +212,11 @@ export function healthNoticesOf(health: unknown): HealthNotice[] {
 export function healthNoticeText(n: HealthNotice): string {
   const title = n.title.length > 120 ? `${n.title.slice(0, 119)}…` : n.title;
   if (n.kind === 'incident') return `${n.impact === 'critical' ? 'Outage' : 'Incident'}: ${title}`;
+  // SoDEX's own maintenance (ops/sodexWatch.ts): said as SoDEX's.
+  if (n.source === 'sodex') {
+    if (n.phase === 'in_progress') return `SoDEX maintenance in progress${typeof n.endsAt === 'number' ? `, expected until ${fmtUtc(n.endsAt, { date: false })}` : ''}: trading on SoDEX is paused`;
+    return `Announced by SoDEX: ${title}, ${typeof n.endsAt === 'number' ? fmtWindow(n.startsAt, n.endsAt) : fmtUtc(n.startsAt)}`;
+  }
   if (n.phase === 'in_progress') return `Maintenance in progress: ${title}${typeof n.endsAt === 'number' ? `, until ${fmtUtc(n.endsAt, { date: false })}` : ''}`;
   return `Scheduled maintenance: ${title}, ${typeof n.endsAt === 'number' ? fmtWindow(n.startsAt, n.endsAt) : fmtUtc(n.startsAt)}`;
 }

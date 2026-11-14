@@ -62,6 +62,7 @@ import type { HealthNotice } from './statusModel.js';
 import { mayPrune } from '../retention.js';
 import { IndexerJudge, type FreshReading } from './indexerJudge.js';
 import { FRESH_IDS, FRESH_TARGETS, freshItems, type FreshId, type Freshness } from './statusModel.js';
+import { SodexWatch } from './sodexWatch.js';
 
 export const PROBE_EVERY_MS = 60_000;
 export const PROBE_TIMEOUT_MS = 10_000;
@@ -673,6 +674,8 @@ export function startStatusProber(o: {
   firstAfterMs?: number;
   /** The backup export (writeHistory); null: none (tests). Default next to status.db. */
   historyFile?: string | null;
+  /** SoDEX's own maintenance as notices (ops/sodexWatch.ts); null: off (tests). Default on, unless VALUESCAN_SODEX_WATCH=0. */
+  sodexWatch?: SodexWatch | null;
 }): StatusProber {
   const store = o.store ?? new StatusStore();
   const targets = o.targets ?? probeTargetsFromEnv();
@@ -692,6 +695,9 @@ export function startStatusProber(o: {
   }
   let running = false;
   const indexerJudge = new IndexerJudge();
+  const sodexWatch = o.sodexWatch !== undefined ? o.sodexWatch
+    : process.env.VALUESCAN_SODEX_WATCH?.trim() === '0' ? null
+    : new SodexWatch(store.notices, { fetch: o.fetch, log: o.log });
   // The datasets past half their target in the last round: each is logged once, as it gets there.
   let warned = new Set<FreshId>();
   const tick = async (): Promise<void> => {
@@ -702,6 +708,9 @@ export function startStatusProber(o: {
     // later), a round near a minute's end landed in the next one and left a minute with no sample
     // (three on 2026-10-31 with nothing down - owner 2026-11-01: the checker must not go blind).
     const started = Date.now();
+    // SoDEX's maintenance first: the notice it opens covers the executor before this round's
+    // samples are judged, so no automatic incident blames our executor for SoDEX's maintenance.
+    if (sodexWatch) await sodexWatch.step(started);
     try {
       const samples = await probeAll({ targets, fetch: o.fetch, indexerStatus: o.indexerStatus, indexerJudge });
       const fresh = samples.find((s) => s.service === 'indexer')?.fresh;

@@ -43,6 +43,7 @@
  * and states its own chrome in OrderEntry.css. Those five rules in styles.css
  * now match nothing and can be deleted by whoever owns that file.
  */
+import { useSodexMaint } from '../status/sodexMaint';
 import { fmtFixed, fmtNum, toInputText } from '../numStyle';
 import { Suspense, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
@@ -974,6 +975,9 @@ export function OrderEntry({
      refuses with the executor's reason, even before a wallet is connected -
      the executor is the fix, not Connect wallet. */
   const algoBlocked = isAlgo && algoState.blocked !== null;
+  // SoDEX's own maintenance (status/sodexMaint.ts): an order now would only run into SoDEX's HTTP 503.
+  // Not algos: those run on the executor, which holds them through it (owner 2026-11-11).
+  const sodexPaused = useSodexMaint() && !isAlgo;
   // A trailing stop only ever closes: Reduce only is on the moment it is chosen (long or short alike),
   // and goes back to what it was when another order type is picked.
   const reduceBefore = useRef<boolean | null>(null);
@@ -2480,12 +2484,14 @@ export function OrderEntry({
           <button
             type="button"
             className={`oe-side__btn is-${side}${btnGate?.busy && !algoBlocked ? ' is-wait' : ''}`}
-            onClick={unlisted || algoBlocked ? undefined : btnGate ? btnGate.act : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
-            disabled={unlisted || algoBlocked ? true : btnGate ? btnGate.busy : isAlgo ? !algoState.ready || (accountMismatch && !paperAlgo) : !canSend}
+            onClick={unlisted || algoBlocked || sodexPaused ? undefined : btnGate ? btnGate.act : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
+            disabled={unlisted || algoBlocked || sodexPaused ? true : btnGate ? btnGate.busy : isAlgo ? !algoState.ready || (accountMismatch && !paperAlgo) : !canSend}
             aria-busy={btnGate?.busy || busy || undefined}
-            title={unlisted ? notListed(symbol) : algoBlocked ? `${algoState.blocked}. Open Advanced to run it elsewhere.` : btnGate?.why ?? (isAlgo ? algoState.why ?? undefined : undefined)}
+            title={sodexPaused ? 'SoDEX is in maintenance: trading on SoDEX is paused until it is back. Your funds stay in your SoDEX account.' : unlisted ? notListed(symbol) : algoBlocked ? `${algoState.blocked}. Open Advanced to run it elsewhere.` : btnGate?.why ?? (isAlgo ? algoState.why ?? undefined : undefined)}
           >
-            {algoBlocked
+            {sodexPaused
+              ? 'SoDEX maintenance'
+              : algoBlocked
               ? algoState.blocked
               : btnGate
                 ? (btnGate.approving ? <ApproveLabel /> : btnGate.label)

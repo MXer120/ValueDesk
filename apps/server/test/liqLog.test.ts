@@ -70,7 +70,7 @@ test('a step written in slices is row for row the step written at once, and the 
   assert.deepEqual([...idsSliced], [...idsWhole], 'the same ids');
   assert.equal(pauses, 4, 'a clock that stands still: three slices of changes, one of closes');
   const dump = (s: InstanceType<typeof IndexStore>) => ({
-    log: s.db.prepare('SELECT * FROM liq_log ORDER BY aid, coin, venue, t').all(),
+    log: s.liqDb!.prepare('SELECT * FROM liq_log ORDER BY aid, coin, venue, t').all(),
     cur: s.liqCur().sort((a, b) => a.aid - b.aid || a.coin.localeCompare(b.coin)),
   });
   assert.deepEqual(dump(sliced), dump(whole));
@@ -96,13 +96,13 @@ test('slow rows end a transaction on time, not at a row count, and every row sti
   let clock = 0;
   let pauses = 0;
   const rowsAtPause: number[] = [];
-  const count = () => Number((timed.db.prepare('SELECT COUNT(*) AS n FROM liq_log').get() as { n: number }).n);
+  const count = () => Number((timed.liqDb!.prepare('SELECT COUNT(*) AS n FROM liq_log').get() as { n: number }).n);
   const idsTimed = await timed.putLiqLogSliced(5_000, wallets, changed, [], async () => { pauses++; rowsAtPause.push(count()); }, () => (clock += 20.8));
   assert.deepEqual([...idsTimed], [...idsWhole]);
   assert.ok(pauses > 1, `a turn at 100 ms is far under 500 slow rows (${pauses} transactions for 400 rows)`);
   assert.ok(rowsAtPause.every((n, i) => i === 0 || n > rowsAtPause[i - 1]!), 'each transaction went further');
   assert.equal(count(), 400);
-  assert.deepEqual(timed.db.prepare('SELECT * FROM liq_log ORDER BY aid').all(), whole.db.prepare('SELECT * FROM liq_log ORDER BY aid').all());
+  assert.deepEqual(timed.liqDb!.prepare('SELECT * FROM liq_log ORDER BY aid').all(), whole.liqDb!.prepare('SELECT * FROM liq_log ORDER BY aid').all());
   assert.deepEqual(timed.liqCur().sort((a, b) => a.aid - b.aid), whole.liqCur().sort((a, b) => a.aid - b.aid));
 });
 

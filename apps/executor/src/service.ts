@@ -106,6 +106,7 @@ import { plainSockets } from './feed/binance.ts';
 import { BinanceReference } from './feed/reference.ts';
 import { DEFAULT_FEED_PATH } from './feed/ring.ts';
 import { CalendarFeed } from './calendar.ts';
+import { SodexMaintenanceWatch, type VenueView } from './venue.ts';
 import { VIP_SWEEP_MS, downgradedToday, newVipJob, vipJobView, vipStep, type VipJob } from './vip.ts';
 
 /** The pairing code's letters: no 0/O, 1/I/L, so it reads back from a terminal without doubt. */
@@ -440,6 +441,11 @@ export class ExecutorService {
   private pairLockedUntil = 0;
   /** The operator's emergency brake (brake.ts): read from cfg.brakeFile. */
   readonly brake: Brake;
+  /**
+   * SoDEX's maintenance (venue.ts): while it lasts every live copy, algo and bot is held (the engines' `venue`) and
+   * SodexClient sends nothing that opens. Polled once main.ts starts it (start()); tests call poll().
+   */
+  readonly venue: SodexMaintenanceWatch;
 
   constructor(
     readonly cfg: ExecutorConfig,
@@ -478,6 +484,20 @@ export class ExecutorService {
       if (logWrites) deps.log.info('write', w);
     } });
     this.hyperliquid = new HyperliquidClient(deps.fetch);
+    // SoDEX's maintenance flag (alpha-biz, venue.ts MAINTENANCE_STATUS_URL); EXECUTOR_SODEX_MAINT_URL names another (a test box).
+    const maintUrl = process.env.EXECUTOR_SODEX_MAINT_URL?.trim();
+    this.venue = new SodexMaintenanceWatch({
+      fetch: deps.fetch,
+      ...(maintUrl ? { url: maintUrl } : {}),
+      reach: () => this.sodex.reach,
+      probe: () => this.sodex.get('/api/v1/perps/markets/mark-prices', undefined, 1),
+      alerts: deps.alerts ?? null,
+      log: deps.log,
+      onChange: (hold) => {
+        this.sodex.maintenance = hold;
+        this.db.audit('venue', null, null, { maintenance: hold !== null, since: hold?.since ?? null, expectedEnd: hold?.expectedEnd ?? null });
+      },
+    });
     this.runtime = new CopyRuntime({
       store: db,
       sodex: this.sodex,
@@ -498,6 +518,8 @@ export class ExecutorService {
         const b = this.brake.current();
         return b?.copies && b.cause === 'maintenance' ? b.since : null;
       },
+      // SoDEX's maintenance holds every live copy as the brake does; caught up once it is back (runtime.ts resumeHeld).
+      venue: () => this.venue.hold(),
       // Reads that confirm a change outside the copier (copy-engine confirm.ts), as far apart as the key reads.
       confirmGapMs: deps.readGapMs,
     });
@@ -525,6 +547,8 @@ export class ExecutorService {
       builderRate: (a) => (cfg.builderId > 0 ? (a.spec?.bot === true ? this.botFee(a.owner, this.volumeOf(a.owner)) : this.copyFee(a.owner, this.volumeOf(a.owner))) / 100_000 : 0),
       problem: async (a) => this.guard.holdOf({ kind: 'algo', id: a.id, owner: a.owner }) ?? this.algoProblem(a),
       brake: () => this.brakeText('algos'),
+      // SoDEX's maintenance holds every live algo and bot; nothing counts as a refusal meanwhile.
+      venue: () => this.venue.hold(),
       // The copy region rules, from the country declared with the terms and the one the request came from.
       policyFor: (a) => this.algoPolicy(a),
       // A sweep's reference price: the shared oracle (oracle.ts) - Binance futures and spot, Bitget,
@@ -570,6 +594,7 @@ export class ExecutorService {
   }
 
   async stop(): Promise<void> {
+    this.venue.stop();
     if (this.signerSweep) clearInterval(this.signerSweep);
     this.signerSweep = null;
     await this.algos.stop();
@@ -618,7 +643,14 @@ export class ExecutorService {
       features: [...EXECUTOR_FEATURES],
       vip: { tier: this.cfg.tier, canMove: this.cfg.tier === 'standard' && !!this.cfg.vipUrl && !!this.cfg.vipToken && !!this.cfg.vipPubkey, canMoveBack: this.canMoveBack(), location: this.cfg.location, open: this.cfg.vipOpen },
       brake: this.brakeView(),
+      venue: this.venueView(),
     };
+  }
+
+  /** SoDEX's state for the site: normal, or in maintenance since when and until when SoDEX expects (venue.ts). */
+  private venueView(): NonNullable<ExecutorInfo['venue']> {
+    const v = this.venue.view();
+    return { state: v.state, since: v.since, expectedEnd: v.expectedEnd };
   }
 
   /* ------------------------------------------------------------ audit ----- */
@@ -648,21 +680,26 @@ export class ExecutorService {
     if (t) throw new ApiError(503, 'brake', `${t} Nothing new starts until it is lifted; what you stop, pause or cancel still goes through.`);
   }
 
-  /** What release.sh and the health check read: ok only while the database answers and the SoDEX feed is up. */
-  health(): { ok: boolean; db: boolean; copies: number; active: number; algos: number; feeds: { sodex: boolean }; brake?: BrakeState | null; queue?: QueueStats } {
+  /**
+   * What release.sh and the health check read: ok only while the database answers and the SoDEX feed is up - or SoDEX
+   * is in maintenance (venue.ts): then the feed being down is SoDEX's, not ours, so `ok` stays true (the health check
+   * and the status prober read ok) and `venue` says why; `feeds.sodex` still tells the feed as it is (a warning there).
+   */
+  health(): { ok: boolean; db: boolean; copies: number; active: number; algos: number; feeds: { sodex: boolean }; brake?: BrakeState | null; queue?: QueueStats; venue?: VenueView } {
     let db = true;
     try {
       this.db.ping();
     } catch {
       db = false;
     }
-    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false }, brake: this.brake.current(), queue: this.sodex.queue.stats() };
+    const venue = this.venue.view();
+    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false }, brake: this.brake.current(), queue: this.sodex.queue.stats(), venue };
     const all = this.runtime.list();
     const v = all[0] ? this.runtime.view(all[0].id) : null;
     const algos = this.algos.list().filter((a) => !FINAL_STATUSES.has(a.status)).length;
     const sodex = v?.feeds.sodex ?? true;
     // The send queue: how many signed writes wait, the oldest's age, the cooldown left (sodex.ts SendQueue).
-    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === 'active').length, algos, feeds: { sodex }, brake: this.brake.current(), queue: this.sodex.queue.stats() };
+    return { ok: sodex || venue.state === 'maintenance', db, copies: all.length, active: all.filter((s) => s.status === 'active').length, algos, feeds: { sodex }, brake: this.brake.current(), queue: this.sodex.queue.stats(), venue };
   }
 
   /**
@@ -1571,6 +1608,11 @@ export class ExecutorService {
    * own matters (the key, margin, a hold they chose, a pause) never alert. The alerts' own dedupe holds repeats.
    */
   watchBotHealth(now = Date.now()): void {
+    // SoDEX in maintenance: its book, orders and fills are still because SoDEX is - not our side. The clocks start again.
+    if (this.venue.active) {
+      for (const v of this.healthBad.values()) if (!v.said) v.at = now;
+      return;
+    }
     const OURS = new Set(['loop', 'book', 'oracle', 'orders', 'fills', 'refusals']);
     const seen = new Set<string>();
     for (const a of this.algos.list()) {

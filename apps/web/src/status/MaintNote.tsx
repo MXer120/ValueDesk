@@ -180,6 +180,11 @@ export function MaintCard({ s, now, onDismiss, onOpenStatus, timeZone }: {
           )}
           {s.note && v.tone !== 'done' && <p className="mn-note__note">{s.note}</p>}
           {v.eta && <p className="mn-note__eta">{v.eta}</p>}
+          {s.link && (
+            <a className="mn-note__link" href={s.link} target="_blank" rel="noopener noreferrer">
+              SoDEX&apos;s announcement ↗
+            </a>
+          )}
           <a
             className="mn-note__link"
             href={href}

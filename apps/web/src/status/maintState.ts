@@ -21,7 +21,7 @@
  * browser never saw in progress is not shown at all.
  */
 import {
-  STATUS_SERVICES, isServiceId, parseParts,
+  STATUS_SERVICES, isNoticeLink, isServiceId, parseParts,
   type HealthNotice, type NoticeOutcome, type NoticePart, type PartImpact, type ServiceId,
 } from '@sign/ops/statusModel.js';
 
@@ -55,6 +55,10 @@ export interface MaintSeen {
   end: MaintEnd | null;
   /** Clicked away: not shown again, in any tab. */
   dismissed: boolean;
+  /** SoDEX's own maintenance (HealthNotice.source), not ours: worded as SoDEX's. */
+  sodex?: true;
+  /** SoDEX's announcement (HealthNotice.link). */
+  link?: string;
 }
 
 export type MaintEnd = 'ok' | 'rolled_back' | 'unconfirmed' | 'ended';
@@ -87,6 +91,8 @@ export function maintNoticesOf(health: unknown): HealthNotice[] {
       ...(v.holdOpen === true ? { holdOpen: true } : {}),
       ...(v.outcome === 'ok' || v.outcome === 'rolled_back' ? { outcome: v.outcome } : {}),
       ...(typeof v.note === 'string' && v.note.trim() ? { note: v.note.trim().slice(0, 200) } : {}),
+      ...(v.source === 'sodex' ? { source: 'sodex' as const } : {}),
+      ...(isNoticeLink(v.link) ? { link: v.link } : {}),
     });
   }
   return out;
@@ -118,6 +124,8 @@ export function maintStep(prev: MaintState, health: unknown, now: number): Maint
     const facts = {
       id: n.id, title: n.title, startsAt: n.startsAt, endsAt: n.endsAt, holdOpen: n.holdOpen === true,
       parts: n.parts ?? null, components: n.components ?? [], note: n.note ?? null,
+      ...(n.source === 'sodex' ? { sodex: true as const } : {}),
+      ...(n.link ? { link: n.link } : {}),
     };
     if (n.phase === 'in_progress') put({ ...facts, seenAt: had?.seenAt ?? now, doneAt: null, end: null, dismissed: had?.dismissed ?? false });
     // Completed - only where it was shown in progress: green on the server's `ok` alone (endOf).
@@ -169,6 +177,8 @@ export function parseMaint(raw: string | null): MaintState {
         parts: parseParts(s.parts), components: Array.isArray(s.components) ? s.components.filter(isServiceId) : [],
         note: typeof s.note === 'string' && s.note ? s.note.slice(0, 200) : null,
         seenAt: s.seenAt, doneAt: end === null ? null : doneAt ?? s.seenAt, end, dismissed: s.dismissed === true,
+        ...(s.sodex === true ? { sodex: true as const } : {}),
+        ...(isNoticeLink(s.link) ? { link: s.link } : {}),
       }];
     }).slice(-MAINT_KEEP);
   } catch {
@@ -230,6 +240,7 @@ export function maintView(s: MaintSeen, now: number, timeZone?: string): MaintVi
     return local === utc ? `${utc} UTC` : `${local} (${utc} UTC)`;
   };
   const ended = s.doneAt ?? now;
+  if (s.sodex) return sodexView(s, now, at, timeZone);
   if (s.end === 'ok') return { tone: 'done', title: 'Maintenance complete', line: 'Everything runs normally again.', left: null, eta: `Completed ${at(ended)}.` };
   if (s.end === 'rolled_back') return { tone: 'warn', title: 'Update rolled back', line: 'Everything runs as before.', left: null, eta: `Rolled back ${at(ended)}.` };
   if (s.end === 'unconfirmed') {
@@ -240,4 +251,21 @@ export function maintView(s: MaintSeen, now: number, timeZone?: string): MaintVi
   return left
     ? { tone: 'live', title: 'Maintenance', line: `Expected by ${clockOf(s.endsAt, timeZone)}`, left, eta: `Expected by ${at(s.endsAt)}, ${left} left - an estimate, not a promise.` }
     : { tone: 'live', title: 'Maintenance', line: 'Taking longer than expected', left: null, eta: `It was expected by ${at(s.endsAt)}; it is taking longer than expected.` };
+}
+
+/**
+ * SoDEX's own maintenance (ops/sodexWatch.ts on the server): said as SoDEX's, with what it means
+ * here - trading on SoDEX pauses, funds stay in the user's SoDEX account, copies, algos and bots
+ * wait - and green "SoDEX is back" once SoDEX's flag reads normal again.
+ */
+function sodexView(s: MaintSeen, now: number, at: (ms: number) => string, timeZone?: string): MaintView {
+  const ended = s.doneAt ?? now;
+  if (s.end === 'ok') return { tone: 'done', title: 'SoDEX is back', line: 'Trading on SoDEX works normally again.', left: null, eta: `SoDEX's maintenance ended ${at(ended)}.` };
+  if (s.end !== null) return { tone: 'warn', title: 'SoDEX maintenance ended', line: 'Not confirmed by SoDEX yet: check before trading.', left: null, eta: `Ended ${at(ended)}.` };
+  const title = 'SoDEX maintenance';
+  if (s.endsAt === null) return { tone: 'live', title, line: 'Trading on SoDEX is paused', left: null, eta: null };
+  const left = leftText(s.endsAt - now);
+  return left
+    ? { tone: 'live', title, line: `Trading paused · expected by ${clockOf(s.endsAt, timeZone)}`, left, eta: `SoDEX expects to be back by ${at(s.endsAt)}, ${left} left - SoDEX's estimate, not a promise.` }
+    : { tone: 'live', title, line: 'Trading paused · taking longer', left: null, eta: `SoDEX expected to be back by ${at(s.endsAt)}; it is taking longer.` };
 }

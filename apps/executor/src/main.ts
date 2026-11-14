@@ -197,10 +197,14 @@ async function main(): Promise<void> {
   }, 60 * 60_000);
   anchoring.unref();
 
-  // SoDEX unreachable for 3 minutes (and back): from the REST answers every copy and algo reads.
+  // SoDEX's maintenance (venue.ts): its flag read every 30 s; copies, algos and bots held while it lasts, told once as INFO.
+  // The flag is mainnet's: a testnet executor watches it only when EXECUTOR_SODEX_MAINT_URL names one.
+  if (cfg.network === 'mainnet' || process.env.EXECUTOR_SODEX_MAINT_URL?.trim()) svc.venue.start();
+  // SoDEX unreachable for 3 minutes (and back): from the REST answers every copy and algo reads. Not a FAILURE while
+  // SoDEX is in its maintenance (the INFO above says it).
   const reach = new ReachWatch(alerts);
   const watching = setInterval(() => {
-    if (svc) reach.check(svc.sodex.reach);
+    if (svc) reach.check(svc.sodex.reach, Date.now(), svc.venue.active);
     alerts.flush();
   }, 30_000);
   watching.unref();

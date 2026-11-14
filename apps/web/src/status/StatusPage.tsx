@@ -112,6 +112,7 @@ export function NoticeCard({ n, now, open = false }: { n: Notice; now: number; o
       <p className="st-notice__meta">
         <span className="st-chip">{noticeKindText(n)}</span>
         <span>{componentNames(n)} · {noticeTimes(n, now)}</span>
+        {n.link && <a className="st-notice__src" href={n.link} target="_blank" rel="noopener noreferrer">SoDEX&apos;s announcement ↗</a>}
       </p>
       <Timeline n={n} />
     </article>
@@ -137,6 +138,7 @@ export function NoticeRow({ n, now, open, onToggle }: { n: Notice; now: number; 
         <div id={bodyId} className="st-row__body">
           <p className="st-notice__meta">
             <span>{componentNames(n)} · {noticeTimes(n, now)}</span>
+            {n.link && <a className="st-notice__src" href={n.link} target="_blank" rel="noopener noreferrer">SoDEX&apos;s announcement ↗</a>}
           </p>
           <Timeline n={n} />
         </div>

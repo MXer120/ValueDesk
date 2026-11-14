@@ -166,7 +166,20 @@ export interface Notice {
   holdOpen?: boolean;
   /** A maintenance completed by hand or by a release: how (NoticeOutcome). */
   outcome?: NoticeOutcome;
+  /**
+   * Whose it is: absent - ours (a release, the owner's, the probes'); `sodex` - SoDEX's own
+   * maintenance, written by the SoDEX watch (ops/sodexWatch.ts) from SoDEX's maintenance flag
+   * or one of its announcements. The app words it as SoDEX's, not ours.
+   */
+  source?: NoticeSource;
+  /** SoDEX's announcement it was read from (https://sodex.com/...), when there is one. */
+  link?: string;
 }
+
+export const NOTICE_SOURCES = ['sodex'] as const;
+export type NoticeSource = (typeof NOTICE_SOURCES)[number];
+/** A link a notice may carry: SoDEX's own pages only (it is shown as a link in the app). */
+export const isNoticeLink = (v: unknown): v is string => typeof v === 'string' && v.length <= 300 && /^https:\/\/sodex\.com\/[\w\-./?=&%#]*$/.test(v);
 
 export const NOTICE_LIMITS = { title: 120, text: 1000, updates: 50, partText: 200 } as const;
 /** How long a held-open maintenance may run past its planned end (ship.sh's maintenance window: maint.sh on 60). */
@@ -250,6 +263,8 @@ export function parseNotice(v: unknown): Notice | null {
     ...(parts ? { parts } : {}),
     ...(n.kind === 'maintenance' && n.holdOpen === true ? { holdOpen: true } : {}),
     ...(n.kind === 'maintenance' && isTime(n.closedAt) && (OUTCOMES as readonly unknown[]).includes(n.outcome) ? { outcome: n.outcome } : {}),
+    ...((NOTICE_SOURCES as readonly unknown[]).includes(n.source) ? { source: n.source as NoticeSource } : {}),
+    ...(isNoticeLink(n.link) ? { link: n.link } : {}),
   };
 }
 
@@ -346,6 +361,10 @@ export interface HealthNotice {
   outcome?: NoticeOutcome;
   /** Its latest words, once there is more than the first (what is still affected, how it ended); at most 200 characters. */
   note?: string;
+  /** Whose it is (Notice.source): absent ours, `sodex` SoDEX's own maintenance. */
+  source?: NoticeSource;
+  /** SoDEX's announcement (Notice.link). */
+  link?: string;
 }
 
 /** How soon an upcoming maintenance is announced in the app. */
@@ -402,6 +421,8 @@ export function healthNotices(notices: readonly Notice[], now: number, max = 3):
     ...(n.holdOpen ? { holdOpen: true } : {}),
     ...(n.outcome ? { outcome: n.outcome } : {}),
     ...(n.kind === 'maintenance' && n.updates.length > 1 && n.updates.at(-1)!.text ? { note: cleanText(n.updates.at(-1)!.text, 200) } : {}),
+    ...(n.source ? { source: n.source } : {}),
+    ...(n.link ? { link: n.link } : {}),
   }));
 }
 
