@@ -1,0 +1,986 @@
+{
+ "source": "https://mainnet-gw.sodex.dev/api/v1/perps/markets/symbols",
+ "asOf": "2026-11-14",
+ "markets": [
+  {
+   "name": "1000BONK-USD",
+   "base": "1000BONK",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.000001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "1000PEPE-USD",
+   "base": "1000PEPE",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.000001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "1000SHIB-USD",
+   "base": "1000SHIB",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.000001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "AAPL-USD",
+   "base": "AAPL",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "AAVE-USD",
+   "base": "AAVE",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "ADA-USD",
+   "base": "ADA",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "AMD-USD",
+   "base": "AMD",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "AMZN-USD",
+   "base": "AMZN",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "APT-USD",
+   "base": "APT",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "ARB-USD",
+   "base": "ARB",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "ASTER-USD",
+   "base": "ASTER",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "AVAX-USD",
+   "base": "AVAX",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "AXS-USD",
+   "base": "AXS",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "BCH-USD",
+   "base": "BCH",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "BERA-USD",
+   "base": "BERA",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "BIANRENSHENG-USD",
+   "base": "BIANRENSHENG",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "BNB-USD",
+   "base": "BNB",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.1",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "BRENTOIL-USD",
+   "base": "BRENTOIL",
+   "maxLeverage": 20,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "BTC-USD",
+   "base": "BTC",
+   "maxLeverage": 40,
+   "minNotional": 10,
+   "tickSize": "1",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "CASHCAT-USD",
+   "base": "CASHCAT",
+   "maxLeverage": 3,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "CHZ-USD",
+   "base": "CHZ",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "CL-USD",
+   "base": "CL",
+   "maxLeverage": 20,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "COIN-USD",
+   "base": "COIN",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "COPPER-USD",
+   "base": "COPPER",
+   "maxLeverage": 20,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "CRCL-USD",
+   "base": "CRCL",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "CRWD-USD",
+   "base": "CRWD",
+   "maxLeverage": 25,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "CRWV-USD",
+   "base": "CRWV",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "CXMT-USD",
+   "base": "CXMT",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "DASH-USD",
+   "base": "DASH",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "DOGE-USD",
+   "base": "DOGE",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "DRAM-USD",
+   "base": "DRAM",
+   "maxLeverage": 20,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "ENA-USD",
+   "base": "ENA",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "ETC-USD",
+   "base": "ETC",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "ETH-USD",
+   "base": "ETH",
+   "maxLeverage": 40,
+   "minNotional": 10,
+   "tickSize": "0.1",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "EWY-USD",
+   "base": "EWY",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "FARTCOIN-USD",
+   "base": "FARTCOIN",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "FIL-USD",
+   "base": "FIL",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "GOOGL-USD",
+   "base": "GOOGL",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "HBAR-USD",
+   "base": "HBAR",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "HOOD-USD",
+   "base": "HOOD",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "HYPE-USD",
+   "base": "HYPE",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "INTC-USD",
+   "base": "INTC",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "KORU-USD",
+   "base": "KORU",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "LINK-USD",
+   "base": "LINK",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "LIT-USD",
+   "base": "LIT",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "LITE-USD",
+   "base": "LITE",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "LTC-USD",
+   "base": "LTC",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "MCD-USD",
+   "base": "MCD",
+   "maxLeverage": 20,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "META-USD",
+   "base": "META",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "MINIMAX-USD",
+   "base": "MINIMAX",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "MON-USD",
+   "base": "MON",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "MORPHO-USD",
+   "base": "MORPHO",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "MRNA-USD",
+   "base": "MRNA",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "MRVL-USD",
+   "base": "MRVL",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "MSFT-USD",
+   "base": "MSFT",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "MSTR-USD",
+   "base": "MSTR",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "MU-USD",
+   "base": "MU",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "NBIS-USD",
+   "base": "NBIS",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "NEAR-USD",
+   "base": "NEAR",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "NIULAI-USD",
+   "base": "NIULAI",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "NKE-USD",
+   "base": "NKE",
+   "maxLeverage": 20,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "NVDA-USD",
+   "base": "NVDA",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "ONDO-USD",
+   "base": "ONDO",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "OP-USD",
+   "base": "OP",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "ORCL-USD",
+   "base": "ORCL",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "PENGU-USD",
+   "base": "PENGU",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.000001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "PLTR-USD",
+   "base": "PLTR",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "PONS-USD",
+   "base": "PONS",
+   "maxLeverage": 3,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "PUMP-USD",
+   "base": "PUMP",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.000001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "QNT-USD",
+   "base": "QNT",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "SAMSUNG-USD",
+   "base": "SAMSUNG",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "SILVER-USD",
+   "base": "SILVER",
+   "maxLeverage": 20,
+   "minNotional": 10,
+   "tickSize": "0.001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "SKHX-USD",
+   "base": "SKHX",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "SKHY-USD",
+   "base": "SKHY",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "SMCI-USD",
+   "base": "SMCI",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "SNDK-USD",
+   "base": "SNDK",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "SOL-USD",
+   "base": "SOL",
+   "maxLeverage": 20,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "SPCX-USD",
+   "base": "SPCX",
+   "maxLeverage": 20,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "SUI-USD",
+   "base": "SUI",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "TRUMP-USD",
+   "base": "TRUMP",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "TRX-USD",
+   "base": "TRX",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "TSLA-USD",
+   "base": "TSLA",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "TSM-USD",
+   "base": "TSM",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "UNI-USD",
+   "base": "UNI",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "UNITREE-USD",
+   "base": "UNITREE",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "US500-USD",
+   "base": "US500",
+   "maxLeverage": 20,
+   "minNotional": 10,
+   "tickSize": "0.1",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "USTECH100-USD",
+   "base": "USTECH100",
+   "maxLeverage": 25,
+   "minNotional": 10,
+   "tickSize": "1",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "VIRTUAL-USD",
+   "base": "VIRTUAL",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "WIF-USD",
+   "base": "WIF",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "WLD-USD",
+   "base": "WLD",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "WLFI-USD",
+   "base": "WLFI",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "XAUT-USD",
+   "base": "XAUt",
+   "maxLeverage": 25,
+   "minNotional": 10,
+   "tickSize": "0.1",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "XLM-USD",
+   "base": "XLM",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.00001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "XMR-USD",
+   "base": "XMR",
+   "maxLeverage": 5,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "XPL-USD",
+   "base": "XPL",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "XRP-USD",
+   "base": "XRP",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.0001",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "ZEC-USD",
+   "base": "ZEC",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  },
+  {
+   "name": "ZHIPU-USD",
+   "base": "ZHIPU",
+   "maxLeverage": 10,
+   "minNotional": 10,
+   "tickSize": "0.01",
+   "fundingHours": 1,
+   "makerFee": 0.00012,
+   "takerFee": 0.0004
+  }
+ ]
+}
