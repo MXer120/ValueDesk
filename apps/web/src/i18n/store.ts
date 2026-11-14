@@ -14,10 +14,39 @@ let current = FALLBACK;
 const listeners = new Set<() => void>();
 const say = () => listeners.forEach((f) => f());
 
+/**
+ * The first of the browser's languages we have a catalogue for (2026-11-14): the page turns the browser's own
+ * translation off (index.html, it broke React), so a visitor who read us through it starts in their language
+ * here instead. 'pt-BR' is 'pt'; Chinese goes by script or region (Hant, TW, HK, MO = Traditional).
+ */
+export function browserLanguage(langs: readonly string[]): string | null {
+  for (const raw of langs) {
+    const tag = raw.trim();
+    if (!tag) continue;
+    if (READY.has(tag)) return tag;
+    const [primary, ...rest] = tag.toLowerCase().split('-');
+    if (primary === 'zh') {
+      const traditional = rest.some((p) => p === 'hant' || p === 'tw' || p === 'hk' || p === 'mo');
+      const code = traditional ? 'zh-TW' : 'zh-CN';
+      if (READY.has(code)) return code;
+      continue;
+    }
+    if (primary && READY.has(primary)) return primary;
+  }
+  return null;
+}
+
 function stored(): string {
   try {
     const v = localStorage.getItem(KEY);
-    return v && READY.has(v) ? v : FALLBACK;
+    if (v) return READY.has(v) ? v : FALLBACK;
+  } catch {
+    return FALLBACK;
+  }
+  /* Nothing picked here yet: the browser's language, not kept, so a later change of it is followed. */
+  try {
+    const langs = navigator.languages?.length ? navigator.languages : [navigator.language];
+    return browserLanguage(langs) ?? FALLBACK;
   } catch {
     return FALLBACK;
   }

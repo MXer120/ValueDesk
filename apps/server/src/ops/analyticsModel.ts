@@ -40,6 +40,10 @@ export type EventKind = (typeof EVENT_KINDS)[number];
  */
 export const FEATURES: Readonly<Record<string, string>> = {
   'wallet.connect': 'Connected a wallet',
+  'onboarding.open': 'Welcome flow: opened',
+  'onboarding.step': 'Welcome flow: reached a step',
+  'onboarding.done': 'Welcome flow: finished',
+  'onboarding.skip': 'Welcome flow: skipped',
   'terms.sign': 'Signed the terms',
   'trading.enable': 'Enabled trading (API key)',
   'builder.approve': 'Approved the builder fee',
@@ -50,6 +54,8 @@ export const FEATURES: Readonly<Record<string, string>> = {
   'algo.stop': 'Stopped an algo order',
   'copy.start': 'Started copying a trader',
   'copy.stop': 'Stopped copying',
+  'bot.start': 'Started a bot',
+  'bot.stop': 'Stopped a bot',
   'deposit.open': 'Opened deposit',
   'withdraw.open': 'Opened withdraw',
   'transfer.open': 'Opened transfer',

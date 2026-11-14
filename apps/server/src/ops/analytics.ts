@@ -202,7 +202,22 @@ export interface AnalyticsSummary {
   features: Array<{ key: string; label: string; n: number; visitors: number }>;
   vitals: Array<{ name: string; n: number; p50: number; p75: number }>;
   returning: { visitors: number; returning: number };
+  /** From a visit to a first real action, in distinct visitors (2026-11-14, owner: "measure activation"). */
+  funnel: Array<{ key: string; label: string; visitors: number }>;
+  welcome: Welcome;
 }
+
+/** The first-signup welcome flow (apps/web/src/onboarding): who opened it, finished it, skipped it, and where. */
+export interface Welcome {
+  opened: number;
+  finished: number;
+  skipped: number;
+  /** In flow order: visitors who reached the step, and who pressed Skip on it. */
+  steps: Array<{ step: string; reached: number; skipped: number }>;
+}
+
+/** The flow's order (onboarding/model.ts STEPS), for the table; a step not listed goes last. */
+const WELCOME_ORDER = ['username', 'referral', 'traders', 'copy', 'heatmap', 'flow', 'overview', 'theme'];
 
 export class AnalyticsStore {
   private readonly db: DatabaseSync;
@@ -311,6 +326,52 @@ export class AnalyticsStore {
       features,
       vitals,
       returning: { visitors: num(ret.u), returning: num(ret.back) },
+      funnel: this.funnel(from, to, num(v.visitors)),
+      welcome: this.welcome(from, to),
+    };
+  }
+
+  /**
+   * The activation funnel for [from, to): distinct visitors who reached each step. A step counts a visitor who did it
+   * in the range, whatever they did before; "Did any of them" is a visitor with at least one of the four actions.
+   */
+  funnel(from: number, to: number, visitors: number): Array<{ key: string; label: string; visitors: number }> {
+    const did = (names: string[]) => num((this.db.prepare(
+      `SELECT COUNT(DISTINCT visitor) AS u FROM events WHERE kind = 'feature' AND at >= ? AND at < ? AND name IN (${names.map(() => '?').join(', ')})`,
+    ).get(from, to, ...names) as Row | undefined)?.u);
+    const wallet = num((this.db.prepare(
+      `SELECT COUNT(DISTINCT visitor) AS u FROM (SELECT visitor FROM visits WHERE started_at >= ? AND started_at < ? AND wallet IS NOT NULL
+         UNION SELECT visitor FROM events WHERE kind = 'feature' AND name = 'wallet.connect' AND at >= ? AND at < ?)`,
+    ).get(from, to, from, to) as Row | undefined)?.u);
+    const actions = ['order.place', 'copy.start', 'algo.start', 'bot.start'];
+    return [
+      { key: 'visit', label: 'Visited', visitors },
+      { key: 'wallet', label: 'Connected a wallet', visitors: wallet },
+      { key: 'trading', label: 'Enabled trading', visitors: did(['trading.enable']) },
+      { key: 'action', label: 'Placed an order, started a copy, an algo or a bot', visitors: did(actions) },
+      ...actions.map((n) => ({ key: n, label: FEATURES[n] ?? n, visitors: did([n]) })),
+    ];
+  }
+
+  /** The welcome flow for [from, to), as distinct visitors. "Finished" and "skipped" are counted apart: one who skipped and later finished on another wallet is in both. */
+  welcome(from: number, to: number): Welcome {
+    const count = (name: string) => num((this.db.prepare(
+      `SELECT COUNT(DISTINCT visitor) AS u FROM events WHERE kind = 'feature' AND name = ? AND at >= ? AND at < ?`,
+    ).get(name, from, to) as Row | undefined)?.u);
+    const per = (name: string) => new Map((this.db.prepare(
+      `SELECT json_extract(data, '$.step') AS s, COUNT(DISTINCT visitor) AS u FROM events
+       WHERE kind = 'feature' AND name = ? AND at >= ? AND at < ? AND json_valid(data) GROUP BY s`,
+    ).all(name, from, to) as Row[]).filter((r) => typeof r.s === 'string').map((r) => [String(r.s), num(r.u)]));
+    const reached = per('onboarding.step');
+    const skipped = per('onboarding.skip');
+    const names = [...new Set([...reached.keys(), ...skipped.keys()])];
+    const rank = (s: string) => (WELCOME_ORDER.indexOf(s) + 1 || 99);
+    names.sort((a, b) => rank(a) - rank(b));
+    return {
+      opened: count('onboarding.open'),
+      finished: count('onboarding.done'),
+      skipped: count('onboarding.skip'),
+      steps: names.map((step) => ({ step, reached: reached.get(step) ?? 0, skipped: skipped.get(step) ?? 0 })),
     };
   }
 

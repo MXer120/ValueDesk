@@ -128,6 +128,9 @@ export interface AnalyticsSummary {
   features: Array<{ key: string; label: string; n: number; visitors: number }>;
   vitals: Array<{ name: string; n: number; p50: number; p75: number }>;
   returning: { visitors: number; returning: number };
+  /** Absent from a server before 2026-11-14. */
+  funnel?: Array<{ key: string; label: string; visitors: number }>;
+  welcome?: { opened: number; finished: number; skipped: number; steps: Array<{ step: string; reached: number; skipped: number }> };
 }
 
 export interface RecentVisit {

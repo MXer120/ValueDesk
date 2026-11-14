@@ -5,6 +5,7 @@
  *
  * Bots run on the hosted executor only: a bot quotes around the clock, and a browser tab is not.
  */
+import { track } from '../analytics/usage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FINAL_STATUSES, type AlgoEvent, type AlgoUpdatePatch, type AlgoView } from '@copy-engine';
 import { actOn, eventsOn, listBotsOn, startOn, updateOn, viewOn } from '../algo/executorAlgos';
@@ -222,12 +223,16 @@ export function useBots(owner: string | null, signedIn: boolean): BotsState {
   const start = useCallback(async (spec: Record<string, unknown>, restart?: { from: string; how: 'clean' | 'takeover' }) => {
     const g = gen.current;
     const v = await startOn('hosted', spec, newSeed(), restart);
+    track('bot.start', { kind: String(spec.kind ?? ''), paper: !!spec.paper, restart: !!restart });
     merge([v], g);
     // A restart stopped the old bot too: read the list again for its new state.
     if (restart) void refresh();
     return v;
   }, [merge, refresh]);
-  const act = useCallback((op: 'pause' | 'resume' | 'cancel' | 'archive' | 'close-rest', id: string, o: { now?: boolean; how?: 'close' | 'instant' | 'keep' } = {}) => acting([id], () => actOn('hosted', op, id, o)), [acting]);
+  const act = useCallback((op: 'pause' | 'resume' | 'cancel' | 'archive' | 'close-rest', id: string, o: { now?: boolean; how?: 'close' | 'instant' | 'keep' } = {}) => {
+    if (op === 'cancel') track('bot.stop', { how: o.how ?? 'keep' });
+    return acting([id], () => actOn('hosted', op, id, o));
+  }, [acting]);
   const stopAll = useCallback(() => acting(shown.current.filter((v) => !FINAL_STATUSES.has(v.algo.status)).map((v) => v.algo.id), () => actOn('hosted', 'cancel-all')), [acting]);
   const update = useCallback((id: string, patch: AlgoUpdatePatch, o: { terms?: boolean } = {}) => acting([id], () => updateOn('hosted', id, patch, o)), [acting]);
 

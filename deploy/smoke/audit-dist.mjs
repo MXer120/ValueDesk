@@ -80,11 +80,13 @@ info.bytes = files.reduce((n, p) => n + bytes(p), 0);
 const html = readFileSync(join(dist, 'index.html'), 'utf8');
 const body = html.replace(/<!--[\s\S]*?-->/g, '');
 
-const inline = [...body.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter(([, attrs, code]) => !/\bsrc\s*=/.test(attrs) && code.trim() !== '');
+// A JSON-LD block (apps/web/tools/seo.mjs) is data, never run: the CSP does not apply to it, and search engines read it only inline.
+const inline = [...body.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)].filter(([, attrs, code]) => !/\bsrc\s*=/.test(attrs) && !/\btype\s*=\s*"application\/ld\+json"/i.test(attrs) && code.trim() !== '');
 if (inline.length) fail(`index.html has ${inline.length} inline <script> block(s): script-src 'self' refuses them`);
 if (/\son[a-z]+\s*=\s*["']/i.test(body.replace(/<meta[\s\S]*?>/gi, ''))) fail('index.html has an inline event handler attribute: the CSP refuses it');
 
-const refs = [...body.matchAll(/\b(?:src|href)\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
+// Links to pages (<a href="/bots">, the crawler text tools/seo.mjs puts in #root) are routes, not files of the build.
+const refs = [...body.replace(/<a\b[^>]*>/gi, '').matchAll(/\b(?:src|href)\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
 const local = refs.filter((r) => r.startsWith('/') && !r.startsWith('//'));
 for (const r of local) {
   const path = r.split(/[?#]/)[0];

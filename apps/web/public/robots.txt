@@ -3,6 +3,23 @@
 # /api/  the index API: JSON for the app, nothing for a search result.
 # /scan  pages about one wallet address each (/scan?address=0x...): kept out of
 #        search results on purpose.
+# Language models' crawlers are welcome to the rest (2026-11-14): llms.txt is the map.
 User-agent: *
 Disallow: /api/
 Disallow: /scan
+
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-User
+User-agent: Claude-SearchBot
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: CCBot
+Disallow: /api/
+Disallow: /scan
+
+Sitemap: https://www.valuedesk.so/sitemap.xml
