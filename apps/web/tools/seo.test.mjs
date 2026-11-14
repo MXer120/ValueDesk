@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run } from './seo.mjs';
-import { PAGES, marketPath } from '../seo/site.mjs';
+import { GUIDES, PAGES, guidePath, marketPath } from '../seo/site.mjs';
 
 const SHELL = `<!doctype html>
 <html lang="en" translate="no">
@@ -75,7 +75,17 @@ test('a static page per SoDEX market, the markets index, sitemap and llms.txt', 
     const sm = readFileSync(join(dist, 'sitemap.xml'), 'utf8');
     for (const p of PAGES) assert.ok(sm.includes(`<loc>https://www.valuedesk.so${p.path}</loc>`), p.path);
     assert.ok(sm.includes(`<loc>https://www.valuedesk.so${marketPath('ETH')}</loc>`));
-    assert.equal((sm.match(/<url>/g) ?? []).length, PAGES.length + markets.length + 1);
+    assert.equal((sm.match(/<url>/g) ?? []).length, PAGES.length + markets.length + 1 + GUIDES.length + 1);
+    assert.equal(r.guides, GUIDES.length + 1);
+    for (const g of GUIDES) {
+      const html = readFileSync(join(dist, guidePath(g.slug).slice(1), 'index.html'), 'utf8');
+      const graph = ldOf(html)[0]['@graph'];
+      assert.ok(graph.some((n) => n['@type'] === 'Article'), g.slug);
+      if (g.steps) assert.equal(graph.find((n) => n['@type'] === 'HowTo').step.length, g.steps.length);
+      assert.ok(sm.includes(`${guidePath(g.slug)}</loc>`));
+    }
+    assert.ok(ldOf(btc)[0]['@graph'].some((n) => n['@type'] === 'HowTo'), 'market page: how to trade it');
+    assert.match(readFileSync(join(dist, 'llms.txt'), 'utf8'), /## Guides/);
     const llms = readFileSync(join(dist, 'llms.txt'), 'utf8');
     assert.match(llms, /^# ValueDesk\n\n> /);
     assert.match(readFileSync(join(dist, 'llms-full.txt'), 'utf8'), /## Questions/);

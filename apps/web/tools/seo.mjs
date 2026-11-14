@@ -19,7 +19,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FAQ, FEES, NAME, ORIGIN, PAGES, SUMMARY, marketPath } from '../seo/site.mjs';
+import { FAQ, FEES, GUIDES, NAME, ORIGIN, PAGES, SUMMARY, guidePath, marketPath } from '../seo/site.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const web = resolve(here, '..');
@@ -78,7 +78,7 @@ export function jsonLd(p) {
 
 /** What #root holds until React mounts: the page's words and links to the rest, in the app's own type. */
 export function bodyText(p) {
-  const links = PAGES.filter((q) => q.path !== p.path && q.path !== '/').map((q) => `<a href="${q.path}">${esc(q.h1)}</a>`).concat('<a href="/markets">Markets</a>');
+  const links = PAGES.filter((q) => q.path !== p.path && q.path !== '/').map((q) => `<a href="${q.path}">${esc(q.h1)}</a>`).concat('<a href="/markets">Markets</a>', '<a href="/learn">Guides</a>');
   const faq = p.faq ? `<h2>Questions</h2>${FAQ.map(([q, a]) => `<h3>${esc(q)}</h3><p>${esc(a)}</p>`).join('')}` : '';
   return `<main class="seo-pre"><h1>${esc(p.h1)}</h1>${p.text.map((t) => `<p>${esc(t)}</p>`).join('')}${faq}<nav>${links.join(' · ')}</nav></main>`;
 }
@@ -130,14 +130,15 @@ p{color:var(--dim);max-width:680px}.num{font-family:'Asap',sans-serif;color:var(
 .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;padding:0;list-style:none}
 .list a{display:block;padding:10px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--line);text-decoration:none;font-family:'Asap',sans-serif}
 .list a:hover,.btn:hover{border-color:rgba(255,255,255,.28)}
+ol,ul:not(.list){color:var(--dim);padding-left:22px;max-width:680px}li{margin:6px 0}
 footer{margin-top:56px;font-size:13px;color:var(--dim)}footer a{color:var(--dim)}
 `;
 }
 
 const MARK = '<svg width="26" height="20" viewBox="0 0 26 20" aria-hidden="true"><rect x="0" y="0" width="5" height="5" rx="1.35" fill="#f2f2f0"/><rect x="21" y="0" width="5" height="5" rx="1.35" fill="#f2f2f0"/><rect x="5.5" y="7.5" width="5" height="5" rx="1.35" fill="#f2f2f0"/><rect x="15.5" y="7.5" width="5" height="5" rx="1.35" fill="#f2f2f0"/><rect x="10.5" y="15" width="5" height="5" rx="1.35" fill="#00b481"/></svg>';
 
-function staticPage({ path, title, description, h1, body, beta, ldExtra = [] }) {
-  const p = { path, title, description, og: 'markets', h1 };
+function staticPage({ path, title, description, h1, body, beta, ldExtra = [], og = 'markets' }) {
+  const p = { path, title, description, og, h1 };
   const graph = { '@context': 'https://schema.org', '@graph': [{ '@type': 'WebPage', url: `${ORIGIN}${path}`, name: title, description, isPartOf: { '@id': `${ORIGIN}/#site` } }, ...ldExtra] };
   return `<!doctype html>
 <html lang="en">
@@ -182,7 +183,9 @@ export function marketPages(data, { beta = false } = {}) {
       <p>Market details as SoDEX listed them on <span class="num">${esc(asOf)}</span>. ${NAME} adds a builder fee of ${FEES.trade / 10} bp to orders placed through it.</p>
       <h2>Work ${esc(coin)} orders your way</h2>
       <p>Split a large ${esc(coin)} order with TWAP, VWAP, Iceberg or Scale, set a trailing stop or a bracket, or run a market-making or grid bot that rests on the book around the clock.</p>
-      <p><a href="/markets">All SoDEX markets</a></p>`;
+      <h2>How to trade ${esc(coin)} on SoDEX with ${NAME}</h2>
+      <ol>${HOW_TO(m.name).map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+      <p><a href="/markets">All SoDEX markets</a> · <a href="/learn/liquidation-heatmap">How to read a liquidation heatmap</a> · <a href="/learn/sodex-builder-fee">Fees explained</a></p>`;
     out.set(path, staticPage({
       path, beta, h1: `${m.name} perpetual on SoDEX`,
       title: `${m.name} perp on SoDEX: liquidation heatmap, chart and bots - ${NAME}`,
@@ -191,7 +194,7 @@ export function marketPages(data, { beta = false } = {}) {
       ldExtra: [{ '@type': 'BreadcrumbList', itemListElement: [
         { '@type': 'ListItem', position: 1, name: 'Markets', item: `${ORIGIN}/markets` },
         { '@type': 'ListItem', position: 2, name: m.name, item: `${ORIGIN}${path}` },
-      ] }],
+      ] }, howTo(`How to trade ${m.name} on SoDEX`, HOW_TO(m.name))],
     }));
   }
   const list = data.markets.map((m) => `<li><a href="${marketPath(m.base)}">${esc(m.name)}</a></li>`).join('');
@@ -200,6 +203,38 @@ export function marketPages(data, { beta = false } = {}) {
     title: `All SoDEX perpetual markets - ${NAME}`,
     description: `The ${data.markets.length} perpetual futures markets SoDEX lists - crypto, stocks, indices and commodities - each with its liquidation heatmap, order book and bots on ${NAME}.`,
     body: `<h1>SoDEX perpetual markets</h1><p>The ${data.markets.length} perpetual futures markets SoDEX listed on <span class="num">${esc(asOf)}</span>. Open one to trade it with the liquidation heatmap, order book and algo orders, or run a bot on it.</p><ul class="list">${list}</ul>`,
+  }));
+  return out;
+}
+
+const HOW_TO = (sym) => [
+  'Connect your wallet on ValueDesk and accept the terms.',
+  'Deposit USDC into your SoDEX account.',
+  'Enable trading: approve a trading key for your SoDEX account in your wallet.',
+  `Open ${sym} on the Trade page, set size, leverage and take-profit / stop-loss, and place the order.`,
+];
+const howTo = (name, steps) => ({ '@type': 'HowTo', name, step: steps.map((t, i) => ({ '@type': 'HowToStep', position: i + 1, text: t })) });
+
+export function guidePages({ beta = false, day } = {}) {
+  const out = new Map();
+  for (const g of GUIDES) {
+    const path = guidePath(g.slug);
+    const others = GUIDES.filter((x) => x !== g).map((x) => `<li><a href="${guidePath(x.slug)}">${esc(x.h1)}</a></li>`).join('');
+    const body = `
+      <h1>${esc(g.h1)}</h1>
+      ${g.text.map((t) => `<p>${esc(t)}</p>`).join('')}
+      ${g.steps ? `<h2>Step by step</h2><ol>${g.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>` : ''}
+      <div class="ctas"><a class="btn main" href="${g.cta[0]}">${esc(g.cta[1])}</a></div>
+      <h2>More guides</h2><ul>${others}</ul>`;
+    const ldExtra = [{ '@type': 'Article', headline: g.h1, description: g.description, ...(day ? { dateModified: day } : {}), author: { '@type': 'Organization', name: NAME }, publisher: { '@id': `${ORIGIN}/#org` }, mainEntityOfPage: `${ORIGIN}${path}` }];
+    if (g.steps) ldExtra.push(howTo(g.h1, g.steps));
+    out.set(path, staticPage({ path, beta, title: g.title, description: g.description, h1: g.h1, body, ldExtra, og: 'home' }));
+  }
+  out.set('/learn', staticPage({
+    path: '/learn', beta, og: 'home', h1: 'Guides',
+    title: `Guides: liquidation heatmaps, copy trading, builder fees, algo orders, bots - ${NAME}`,
+    description: 'Short guides to reading a liquidation heatmap, copy trading on SoDEX, builder fees, algo orders and market-making bots.',
+    body: `<h1>Guides</h1><p>Short answers to what traders ask about ${NAME} and SoDEX.</p><ul>${GUIDES.map((g) => `<li><a href="${guidePath(g.slug)}">${esc(g.h1)}</a> - ${esc(g.description)}</li>`).join('')}</ul>`,
   }));
   return out;
 }
@@ -227,6 +262,10 @@ ${NAME} is non-custodial: orders are placed in the user's own SoDEX account. It 
 ${pages}
 - [SoDEX markets](${ORIGIN}/markets): the ${markets.length} SoDEX perpetual markets, one page each.
 
+## Guides
+
+${GUIDES.map((g) => `- [${g.h1}](${ORIGIN}${guidePath(g.slug)}): ${g.description}`).join('\n')}
+
 ## Optional
 
 - [Full text for language models](${ORIGIN}/llms-full.txt)
@@ -237,6 +276,10 @@ ${pages}
 export function llmsFull(markets) {
   const sections = PAGES.map((p) => `## ${p.h1}\n\nURL: ${ORIGIN}${p.path === '/' ? '/' : p.path}\n\n${p.text.join('\n\n')}`).join('\n\n');
   const faq = FAQ.map(([q, a]) => `### ${q}\n\n${a}`).join('\n\n');
+  const guides = GUIDES.map((g) => {
+    const steps = g.steps ? `\n\n${g.steps.map((t, i) => `${i + 1}. ${t}`).join('\n')}` : '';
+    return `## ${g.h1}\n\nURL: ${ORIGIN}${guidePath(g.slug)}\n\n${g.text.join('\n\n')}${steps}`;
+  }).join('\n\n');
   return `# ${NAME} - full text
 
 > ${SUMMARY}
@@ -246,6 +289,8 @@ ${sections}
 ## Questions
 
 ${faq}
+
+${guides}
 
 ## Markets
 
@@ -271,14 +316,16 @@ export function run(dist, { beta = process.env.VITE_CHANNEL === 'beta', day = ne
   write(join('markets', 'markets.css'), marketCss(dist));
   const mp = marketPages(markets, { beta });
   for (const [path, html] of mp) write(join(path.slice(1), 'index.html'), html);
+  const gp = guidePages({ beta, day });
+  for (const [path, html] of gp) write(join(path.slice(1), 'index.html'), html);
   if (beta) {
     write('robots.txt', 'User-agent: *\nDisallow: /\n');
   } else {
-    write('sitemap.xml', sitemap([...PAGES.map((p) => p.path), ...mp.keys()], day));
+    write('sitemap.xml', sitemap([...PAGES.map((p) => p.path), ...mp.keys(), ...gp.keys()], day));
     write('llms.txt', llmsTxt(markets.markets));
     write('llms-full.txt', llmsFull(markets.markets));
   }
-  return { pages: PAGES.length, markets: mp.size, beta };
+  return { pages: PAGES.length, markets: mp.size, guides: gp.size, beta };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

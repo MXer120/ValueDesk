@@ -145,3 +145,76 @@ export const PAGES = [
 
 /** The market pages (static, built from seo/markets.json). */
 export const marketPath = (base) => `/markets/${base.toLowerCase()}`;
+
+/**
+ * Guides (2026-11-14): plain pages that answer what people search for and ask chats - each tied to the page that
+ * does it. Facts from the app and its terms only; `steps` become a HowTo in JSON-LD.
+ */
+export const GUIDES = [
+  {
+    slug: 'liquidation-heatmap',
+    title: 'How to read a liquidation heatmap (BTC, ETH and SoDEX perps)',
+    description: 'What a liquidation heatmap shows, how the levels are estimated, and how traders use them - with a live heatmap for every SoDEX market on ValueDesk.',
+    h1: 'How to read a liquidation heatmap',
+    cta: ['/trade', 'Open the heatmap'],
+    text: [
+      'A leveraged position is closed by the exchange when the price reaches its liquidation price. A liquidation heatmap puts those prices on the chart: each band is a price level, and the brighter it is, the more open positions would be liquidated there.',
+      `ValueDesk estimates the levels from the open positions it reads on ${VENUES_DATA.join(', ')}, and draws them over the price chart, live and back in time, so you can see how levels formed before a move.`,
+      'Large clusters can act like magnets and like walls: when the price reaches one, forced closes add to the move; once it is cleared, the level disappears. A heatmap shows where that pressure sits, not where the price will go.',
+    ],
+    steps: ['Open the Trade page and pick a market.', 'Turn on the liquidation heatmap on the chart.', 'Read the bright bands above and below the price: those are the levels where the most positions would be closed.', 'Switch to the historical view to see how the levels formed before a move.'],
+  },
+  {
+    slug: 'copy-trading-sodex',
+    title: 'How to copy trade on SoDEX (and copy Hyperliquid traders) - ValueDesk',
+    description: 'Step by step: pick a SoDEX or Hyperliquid trader, set your size and leverage, and copy every trade into your own SoDEX account. Fees and where the copy runs.',
+    h1: 'How to copy trade on SoDEX',
+    cta: ['/copy', 'Start copying'],
+    text: [
+      'Copy trading on ValueDesk mirrors a trader\'s positions into your own SoDEX account: when they open, add, reduce or close, your copy does the same, scaled by a multiplier you set.',
+      'You can copy traders on SoDEX and on Hyperliquid. ValueDesk never holds your funds: orders are placed in your account by a trading key you approve, and you can stop a copy at any time.',
+      `The copy fee is ${ladder(FEES.copy)}, by your ${FEES.windowDays}-day copy volume, on top of SoDEX's own trading fee.`,
+    ],
+    steps: ['Connect your wallet and accept the terms.', 'Enable trading: approve a trading key for your SoDEX account.', 'Pick a trader on the Copy page or the leaderboard.', 'Set the size multiplier and the most leverage your copy may use.', 'Choose where the copy runs: your browser, ValueDesk\'s executor, or your own server.', 'Approve the copy fee once in your wallet and start the copy.'],
+  },
+  {
+    slug: 'sodex-builder-fee',
+    title: 'SoDEX builder fees explained: what ValueDesk charges',
+    description: 'What a builder fee on SoDEX is, how you approve it, and the exact fees ValueDesk adds to trades, copies, algo orders and bots.',
+    h1: 'SoDEX builder fees, explained',
+    cta: ['/trade', 'Open the desk'],
+    text: [
+      'An app that sends orders to SoDEX for you can add a small builder fee to each order. You approve the highest fee an app may charge once, from your wallet; SoDEX then adds the app\'s fee to the orders it places, and never more than you approved.',
+      `ValueDesk has no subscription. Its builder fee is ${FEES.trade / 10} bp on manual trades, ${ladder(FEES.copy)} on copy trades and algo orders run by ValueDesk, and ${ladder(FEES.bot)} on bots, by ${FEES.windowDays}-day volume. SoDEX charges its own maker and taker fee on top.`,
+      'One basis point (bp) is 0.01%: on $10,000 of volume, 1 bp is $1.',
+    ],
+  },
+  {
+    slug: 'twap-vwap-iceberg',
+    title: 'TWAP, VWAP, Iceberg and other algo orders on SoDEX',
+    description: `What TWAP, VWAP, POV, Iceberg, Scale, Trailing stop, Bracket and the rest of the ${ALGOS.length} algo orders do, and when to use each - on SoDEX with ValueDesk.`,
+    h1: 'Algo orders: TWAP, VWAP, Iceberg and more',
+    cta: ['/trade', 'Place an algo order'],
+    text: [
+      'TWAP splits an order into equal pieces over a set time. VWAP sizes the pieces by how much the market usually trades at each moment. POV keeps your order a set share of what trades.',
+      'Iceberg shows only a small part of a large order on the book at a time. Chase keeps a limit order at the best price as the price moves. Scale spreads limit orders over a price range.',
+      'Trailing stop follows the price and closes when it turns by a set amount. Bracket opens a position with its take-profit and stop-loss. Basket trades 2 to 10 markets at once, each long or short. Conditional waits for conditions such as a price, a move, funding or a time, then acts. DCA spends a set dollar amount on a schedule. Swarm works an order in clips and waves with a slippage cap.',
+      `ValueDesk has ${ALGOS.length} of them: ${ALGOS.join(', ')}. Each shows a live preview of its orders before it starts.`,
+    ],
+  },
+  {
+    slug: 'market-making-bot',
+    title: 'How a market-making bot works on SoDEX - cost per $1M explained',
+    description: 'How a market-making or grid bot earns the spread, what it costs per $1M of volume, and how to run one in your own SoDEX account with ValueDesk.',
+    h1: 'How a market-making bot works',
+    cta: ['/bots', 'See the bots'],
+    text: [
+      'A market maker keeps a buy order just below the price and a sell order just above it. When both fill, it has bought low and sold high by the spread. Because its orders rest on the book, it pays the lower maker fee instead of crossing the spread.',
+      'The cost of a bot is best read per $1M of volume: trading fees plus what price moves cost while it held inventory, minus the spread it earned. ValueDesk shows this figure from tested runs before you start a bot.',
+      'A grid bot places buy orders below the price and sell orders above it at fixed steps; each filled buy puts a sell one step higher. It does well when the price moves sideways in a range.',
+      `ValueDesk's bots run around the clock in your own SoDEX account and can run as practice first, with no real orders. Bot fee: ${ladder(FEES.bot)}, by ${FEES.windowDays}-day volume.`,
+    ],
+  },
+];
+
+export const guidePath = (slug) => `/learn/${slug}`;
