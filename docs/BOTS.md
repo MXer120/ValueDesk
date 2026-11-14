@@ -19,8 +19,8 @@ A DCA is not a bot (owner, 2026-11-02): it is an algo order on the ticket. The e
 one stored before that keeps its spec and the bot fee.
 
 Not offered: anything that takes. A taker bot pays SoDEX 4.0 bp + the bot fee + half the spread: $450+ per $1M.
-Delta-neutral across two markets or two accounts is not offered either: SoDEX perps are one-way netted per account,
-so a hedge needs a second account, and a bot trading against its owner's other account is wash trading.
+Delta-neutral across two accounts: the hedge bot (2026-11-14, below) holds it with takers only, so its legs never trade
+with each other; whether real pairs may be offered is open (terms, SoDEX's anti-farming rule: see Hedge bot).
 
 SoDEX tiers (docs/research/10-pooled-fee-account.md): maker 1.2 / 1.0 / 0.6 / 0.2 / 0 bp from $5M / $25M / $100M /
 $500M 14-day volume. A user who reaches tier 1 through bots pays $150 per $1M; tier 3, $70.
@@ -146,6 +146,55 @@ A grid is set like any exchange's grid bot (web BotSettings, engine GridSpec):
 - **Out of range**: "Pause until back" (`wait`: trades only inside the range) or "Stop".
 Range, levels, spacing and direction of a running grid change by a restart; its stop prices and take-profit save in
 place.
+
+## Hedge bot (2026-11-14, owner: "a hedging bot for OI on perps. Needs to manage margining, liquidations .. even at max leverage. Needs to work on perps hedged with spot or 2 sodex accounts")
+
+Open interest held market-neutral (Layer 1 Season SoPoints count "spot and futures trading volume and open interest
+(OI)": docs.sodex.com/sopoints/layer-1-season). Engine kind `hedge` (copy-engine algo/hedge.ts for the arithmetic,
+runtime stepHedge), executor feature `hedge`, web New hedge page (`/bots/new?kind=hedge`).
+
+**Two shapes**
+- `pair`: a long in wallet A, the same short in wallet B. Each wallet signs its own leg (its own bot record, its own
+  key); the legs pair only when both carry the same `pairId` and each names the other (`partner`), so no wallet can
+  attach itself to someone's hedge. The main leg (A) drives both: one plan per step, its orders sent on each leg's own
+  account. B's leg only watches; stopping either stops and closes both.
+- `spot`: a short in one wallet, as large as the coin it holds in its futures balance (bought on spot, moved to
+  Futures). SoDEX counts BTC/ETH/XAUT at 90%, SOL/BNB 80% as cross margin (docs.sodex.com, Multi-Asset Margin): a rise
+  costs the short what it adds to the coin, so the liquidation is far. The short follows the coin, never larger. The
+  executor never buys spot or moves funds (its ALLOWED_WRITES stay perps orders/cancels/leverage): the user does that in
+  the browser; on stop the short is closed and the coin stays.
+
+**Max leverage, margin and liquidations.** SoDEX cannot move margin between two wallets ("Internal transfer between
+perps chains is not supported yet", Trading API), so the losing leg is protected by making both legs smaller:
+- Size by distance, not by leverage: with equity E, maintenance rate m (half the initial rate at the tier's max
+  leverage), the most a leg may hold with its liquidation d away is `E / (P (m + d(1 ± m)))`. The leverage set on SoDEX
+  (the market's max by default) only decides the initial margin locked.
+- `minLiqPct` (default 3%): a leg's liquidation (SoDEX's own `lp`, else the formula) closer than this trims both legs
+  to where every liquidation is half-way to `growLiqPct`; legs grow back a step at a time only while every liquidation
+  stays `growLiqPct` (default 6%) away. Unequal legs (a partial fill, a partial liquidation) are evened out first; a
+  liquidated leg takes the other one down with it. A leg on the wrong side stops the pair without trading.
+- Another position in the same account eats the equity the hedge counts on (maintenance of the rest is subtracted).
+- Limits are the pair's: loss limit and take-profit on both books together (main checks them).
+
+**Never self-trades.** Every hedge order is a taker (IOC within `maxSlipBps` of the mark), so the two legs can never
+fill against each other; a taker stops one tick short of another user's resting bot (otherBotWall), and waits rather
+than rest. Cost: taker fee on both legs, in and out (4 legs x 4.0 bp + the bot fee per round trip).
+
+**Referral.** A second wallet SoDEX says has no inviter is offered VALUEDESK (popup with what it gives and what
+ValueDesk gets, sourced); a NEW one (no SoDEX account yet) starts on it before its leg. A wallet with another code, or
+one SoDEX could not answer for, is never held. The same popup runs for every connected wallet without a code
+(onboarding/ReferralOffer.tsx, referralRules.ts), and Wealth vault requests carry the code only for such wallets.
+
+**Before real hedges go live (open, owner):**
+1. Terms. The bot terms in force (copy-2026-11-10, "No wash trading. A bot must not be used to trade with yourself or
+   with accounts you control, or to create the appearance of trading activity") and this file's earlier line
+   ("Delta-neutral across two accounts is not offered ... wash trading") rule the pair shape out. The legs never trade
+   with each other, but two accounts of one person holding offsetting OI for points is what SoDEX's "zero tolerance for
+   wash trading or any form of manipulative farming" (Layer 1 Season) may flag: points can be deducted. Needs the
+   owner's word (and counsel) and a new terms version before the pair shape is offered for real.
+2. Ship engine + executor + web together (feature `hedge`; the web hides the start until the executor advertises it).
+3. Live test on two test wallets (the follower 0x04Fb…277d and a second one), small size; the spot shape needs coin
+   moved to Futures first (live-test scenario `bot.hedge` covers the no-coin wait).
 
 ## Tests
 
