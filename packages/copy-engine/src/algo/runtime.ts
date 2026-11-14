@@ -92,8 +92,8 @@ export const ALGO_TICK_MS = 500;
 /** A bot is stepped on an update at most this often (stepSoon); the tick still steps it every ALGO_TICK_MS. */
 export const BOT_EVENT_MIN_MS = 50;
 const FLUSH_MS = 2_000;
-/** A hedge leg's account is read again after this (SoDEX's perps state). */
-const HEDGE_READ_MS = 1_500;
+/** A hedge leg's account is read again after this (SoDEX's perps state; 2 legs x 20 reads a minute per pair stays inside the per-IP weight). */
+const HEDGE_READ_MS = 3_000;
 
 /** The part of SoDEX's perps state a hedge leg reads (sodex-core PerpsAccountState). */
 interface RawHedgeState {

@@ -160,7 +160,8 @@ test('pair at max leverage: a move against the short leg shrinks both legs back 
   r.m.set(61_800, 61_802);
   r.acct[A]!.equity += move;
   r.acct[B]!.equity -= move;
-  await step(r, a.id);
+  // The next read of both accounts (HEDGE_READ_MS, 3 s) sees it.
+  await step(r, a.id, 3_500);
   const q1 = r.acct[A]!.position;
   assert.ok(q1 < q0, `trimmed ${q0} -> ${q1}`);
   assert.ok(Math.abs(q1 + r.acct[B]!.position) < 1e-9, 'still equal and opposite');
