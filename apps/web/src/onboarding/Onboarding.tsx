@@ -19,6 +19,7 @@ import { useAsync } from '../hooks';
 import { setTheme, useTheme, type Theme } from '../theme';
 import { VENUE_LABEL, vsApi, type TraderRow, type Venue } from '../vsApi';
 import { USERNAME_MAX } from '@sign/profiles/claim';
+import { track } from '../analytics/usage';
 import { WATCHLIST_EVENT, stepsOf, writeProgress, type Step } from './model';
 import { NameHint, useNameCheck } from './ProfileAccount';
 import { ProfileError, setFirstUsername, useUsername } from './profile';
@@ -39,6 +40,20 @@ export function Onboarding({ startAt, offerReferral, address, onEnd }: {
   const step = steps[index]!;
   const root = useRef<HTMLDivElement>(null);
 
+  /*
+   * How many first signups get through it (admin Analytics, "The welcome flow"). Opened from the Dev panel
+   * (startAt null) is not a signup and is not counted. Like every event, only sent after analytics consent.
+   */
+  const counted = startAt !== null;
+  useEffect(() => {
+    if (counted) track('onboarding.open', { step: steps[index]!, steps: steps.length, resumed: index > 0 });
+    // Once per opening.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (counted) track('onboarding.step', { step, n: index + 1 });
+  }, [counted, step, index]);
+
   useEffect(() => {
     writeProgress(address, { step, closed: false });
     root.current?.scrollTo({ top: 0 });
@@ -58,9 +73,16 @@ export function Onboarding({ startAt, offerReferral, address, onEnd }: {
   }, []);
 
   const next = useCallback(() => {
-    if (index >= steps.length - 1) onEnd(true);
-    else setIndex(index + 1);
-  }, [index, steps.length, onEnd]);
+    if (index >= steps.length - 1) {
+      if (counted) track('onboarding.done', { steps: steps.length });
+      onEnd(true);
+    } else setIndex(index + 1);
+  }, [index, steps.length, onEnd, counted]);
+  /* Every step here is optional (the terms are signed before the flow opens): Skip ends it from any step. */
+  const skip = () => {
+    if (counted) track('onboarding.skip', { step, n: index + 1 });
+    onEnd(false);
+  };
   const back = index > 0 ? () => setIndex(index - 1) : null;
 
   /* The next feature's pictures are in by the time it is asked for. */
@@ -79,9 +101,7 @@ export function Onboarding({ startAt, offerReferral, address, onEnd }: {
             {steps.map((s, i) => <li key={s} className={i < index ? 'is-done' : i === index ? 'is-on' : ''} />)}
           </ol>
         )}
-        <div className="onb__trail">
-          <button type="button" className="onb__skip" onClick={() => onEnd(false)}>Skip</button>
-        </div>
+        <div className="onb__trail" />
       </header>
       <main className="onb__main">
         <div key={step} className="onb__view">
@@ -93,6 +113,7 @@ export function Onboarding({ startAt, offerReferral, address, onEnd }: {
           {step === 'theme' && <ThemeStep onNext={next} />}
         </div>
       </main>
+      <button type="button" className="onb__skip" onClick={skip}>Skip</button>
     </div>
   );
 }

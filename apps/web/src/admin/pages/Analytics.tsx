@@ -14,6 +14,12 @@ const regionNames = (() => {
 })();
 const country = (code: string): string => (/^[A-Z]{2}$/.test(code) ? `${regionNames?.of(code) ?? code}` : code === '(none)' ? 'Unknown' : code);
 
+/** The welcome flow's steps (onboarding/model.ts), as the admin reads them. */
+const WELCOME_STEP: Record<string, string> = {
+  username: 'Username', referral: 'SoDEX referral code', traders: 'Track top traders', copy: 'Copy trading',
+  heatmap: 'Liquidation heatmap', flow: 'Trade flow', overview: 'Everything at a glance', theme: 'Dark or light',
+};
+
 export function Analytics() {
   const [days, setDays] = useState(30);
   const r = useAdmin<{ analytics: AnalyticsSummary | null; recent: RecentVisit[] }>('analytics', { days }, 60_000);
@@ -67,6 +73,27 @@ export function Analytics() {
               </div>
             </Section>
           )}
+          {!!a.welcome?.opened && (() => {
+            const w = a.welcome!;
+            const of = (n: number) => pct(n / w.opened);
+            return (
+              <Section title="The welcome flow (first signups)" flush>
+                <Figures>
+                  <Figure label="Opened" value={int(w.opened)} sub="new wallets that saw it" />
+                  <Figure label="Finished" value={int(w.finished)} sub={`${of(w.finished)} of those who opened it`} />
+                  <Figure label="Skipped" value={int(w.skipped)} sub={`${of(w.skipped)} of those who opened it`} />
+                </Figures>
+                <div className="dv-sheet">
+                  <table className="dv-table">
+                    <thead><tr><th>Step</th><th className="right">Reached</th><th className="right">Of opened</th><th className="right">Skipped here</th></tr></thead>
+                    <tbody>{w.steps.map((s) => (
+                      <tr key={s.step}><td>{WELCOME_STEP[s.step] ?? s.step}</td><td className="right">{int(s.reached)}</td><td className="right">{of(s.reached)}</td><td className="right">{s.skipped ? int(s.skipped) : <span className="dv-quiet">0</span>}</td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </Section>
+            );
+          })()}
           {a.days.length > 1 && (
             <Section title="Visitors per day">
               <BarChart title="Visitors" bars={a.days.map((d) => ({ key: d.day, label: dayLabel(d.day), value: d.visitors }))} fmt={(v) => int(v)} />

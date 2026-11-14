@@ -434,6 +434,29 @@ test('analytics funnel: distinct visitors from a visit to a wallet, trading on, 
   store.close();
 });
 
+test('the welcome flow: opened, finished, skipped, and how far each visitor got, as distinct visitors', () => {
+  const dir = join(DIR, `analytics-${caseNo++}`);
+  const store = new AnalyticsStore(join(dir, 'analytics.db'));
+  const now = Date.now();
+  const run = (events: Array<{ n: string; d?: Record<string, string | number | boolean> }>) => {
+    const p = parseAnalytics({ consent: 'analytics', visitor: id(), visit: id(), events: events.map((e) => ({ t: now, k: 'feature', p: '/trade', ...e })) }, now);
+    assert.ok(p.ok);
+    store.add(p.batch, { country: null, region: null }, now);
+  };
+  const open = { n: 'onboarding.open', d: { step: 'username', steps: 3, resumed: false } };
+  const at = (step: string, n: number) => ({ n: 'onboarding.step', d: { step, n } });
+  run([open, at('username', 1), at('traders', 2), at('theme', 3), { n: 'onboarding.done', d: { steps: 3 } }]);
+  run([open, at('username', 1), at('username', 1), { n: 'onboarding.skip', d: { step: 'username', n: 1 } }]);
+  run([open, at('username', 1), at('traders', 2), { n: 'onboarding.skip', d: { step: 'traders', n: 2 } }]);
+  run([{ n: 'order.place' }]);
+  const w = store.summary(now - 86_400_000, now + 86_400_000).welcome;
+  assert.deepEqual(w, {
+    opened: 3, finished: 1, skipped: 2,
+    steps: [{ step: 'username', reached: 3, skipped: 1 }, { step: 'traders', reached: 2, skipped: 1 }, { step: 'theme', reached: 1, skipped: 0 }],
+  });
+  store.close();
+});
+
 test('a page error goes into the audit log, only with a session, cut to size', async () => {
   const s = await suite();
   assert.equal((await s.post('/api/admin/page-error', { message: 'x' })).statusCode, 401);

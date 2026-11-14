@@ -130,6 +130,7 @@ export interface AnalyticsSummary {
   returning: { visitors: number; returning: number };
   /** Absent from a server before 2026-11-14. */
   funnel?: Array<{ key: string; label: string; visitors: number }>;
+  welcome?: { opened: number; finished: number; skipped: number; steps: Array<{ step: string; reached: number; skipped: number }> };
 }
 
 export interface RecentVisit {
