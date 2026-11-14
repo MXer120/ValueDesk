@@ -221,6 +221,53 @@ function devTestExecutor(): Plugin {
   };
 }
 
+/**
+ * Dev only: /api/vs/invites to the local referral routes (apps/server/tools/invites-dev.ts, 127.0.0.1:18797, or
+ * VS_DEV_INVITES) while they answer - localhost on production's data otherwise has no referrals until they are released.
+ * Probed every 5 s; when it is down the request goes on to the usual proxy. Never in a build.
+ */
+function devInvites(): Plugin {
+  const base = process.env.VS_DEV_INVITES?.trim() || (DEV_PROD ? 'http://127.0.0.1:18797' : '');
+  return {
+    name: 'vs-dev-invites',
+    apply: 'serve',
+    configureServer(server) {
+      if (!base || !/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) return;
+      const target = new URL(base);
+      let up = false;
+      const probe = (): Promise<void> => new Promise((done) => {
+        const q = httpRequest({ host: target.hostname, port: target.port, path: '/api/vs/invites/check?code=PROBE', method: 'GET', timeout: 2000 }, (res) => { up = res.statusCode === 200; res.resume(); res.on('end', () => done()); res.on('error', () => done()); });
+        q.on('timeout', () => { up = false; q.destroy(); done(); });
+        q.on('error', () => { up = false; done(); });
+        q.end();
+      });
+      const first = probe();
+      const timer = setInterval(() => { void probe(); }, 5000);
+      server.httpServer?.on('close', () => clearInterval(timer));
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || !req.url.startsWith('/api/vs/invites/')) return next();
+        void first.then(() => {
+          if (!up) return next();
+          const headers = { ...req.headers, host: target.host };
+          delete headers[TOKEN_HEADER];
+          const out = httpRequest({ host: target.hostname, port: target.port, path: req.url, method: req.method, headers }, (pres) => {
+            res.writeHead(pres.statusCode ?? 502, { ...pres.headers, 'x-vs-dev-invites': 'local' });
+            pres.pipe(res);
+            pres.on('error', () => res.destroy());
+          });
+          out.on('error', () => {
+            up = false;
+            if (!res.headersSent) { res.statusCode = 502; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ error: 'the local referral routes did not answer' })); }
+            else res.destroy();
+          });
+          res.on('close', () => { if (!res.writableFinished) out.destroy(); });
+          req.pipe(out);
+        });
+      });
+    },
+  };
+}
+
 function botsFixtures(): Plugin {
   const dir = process.env.VS_BOTS_FIXTURES?.trim();
   return {
@@ -266,7 +313,7 @@ function botsFixtures(): Plugin {
 
 export default defineConfig({
   customLogger: logger,
-  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences(), devTestExecutor(), botsFixtures()],
+  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences(), devTestExecutor(), devInvites(), botsFixtures()],
   define: { __VS_BUILD__: JSON.stringify(buildId()) },
   /*
    * The EIP-712 signing layer is SHARED with the backend, not copied.

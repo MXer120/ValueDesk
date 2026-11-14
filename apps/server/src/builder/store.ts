@@ -462,6 +462,11 @@ export class BuilderStore {
     return Math.min(one('perps'), one('spot'));
   }
 
+  /** Wallets whose counted volume from UTC day `fromDay` on is at least `minMicro` (VIP by volume). */
+  walletsOver(builder: number, fromDay: number, minMicro: number): string[] {
+    return (this.q('SELECT address, sum(micro) AS m FROM days WHERE builder = ? AND day >= ? GROUP BY address HAVING m >= ?').all(builder, fromDay, minMicro) as Row[]).map((r) => str(r.address));
+  }
+
   /** The first fill of the wallet's oldest order still waiting for the explorer (null: none waits). */
   oldestOpen(builder: number, address: string): number | null {
     const r = this.q(`SELECT min(t) AS t FROM orders WHERE builder = ? AND address = ? AND state IN (${OrderState.pending}, ${OrderState.check})`).get(builder, address) as Row | undefined;

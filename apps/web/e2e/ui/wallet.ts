@@ -23,6 +23,7 @@
  *   day-key       CopyRequest 'delegate'        (once a day: the browser key that then signs sign-in, starts, stops...)
  *   copy-key      CopyRequest 'create-key'      (an executor makes the copy key it
  *                                                then asks SoDEX to register: copy/live.ts approveKey)
+ *   invite-join   InviteJoin                    (joining with a referral link: invites/invites.ts)
  * Every transaction, every personal_sign and any other typed data is refused
  * (EIP-1193 4100) and recorded, so a spec can assert both what was signed and
  * that nothing else was asked for. A kind in `reject` is answered as a user
@@ -32,14 +33,15 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { generatePrivateKey } from 'viem/accounts';
 import { createKeyProvider, type KeyProvider, type ProviderEvent, type TypedDataSeen } from '../live/provider';
 
-export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo' | 'username' | 'vip-move' | 'day-key';
-export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo', 'username', 'vip-move', 'day-key'];
+export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo' | 'username' | 'vip-move' | 'day-key' | 'invite-join';
+export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo', 'username', 'vip-move', 'day-key', 'invite-join'];
 
 /** Which of the allowed signatures this typed data is, or null. */
 export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): Signable | null {
   if (td.primaryType === 'UserSignedAddAPIKeyAction') return 'trading-key';
   if (td.primaryType === 'ApproveBuilderFeeAction') return 'builder';
   if (td.primaryType === 'UsernameChange') return 'username';
+  if (td.primaryType === 'InviteJoin') return 'invite-join';
   if (td.primaryType === 'CopyRequest') {
     const action = (td.message as { action?: unknown }).action;
     if (action === 'accept-site-terms') return 'site-terms';

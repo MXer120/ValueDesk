@@ -279,9 +279,9 @@ h.test('a practice market maker: set up, New bot with the gate, its page, settin
   await page.waitForURL((u) => u.pathname === '/bots', { timeout: 20_000 });
   await page.getByRole('heading', { name: 'Bots', exact: true }).waitFor();
 
-  // Savings, with a wallet: the fee tier, staking and the bots' cards.
+  // Savings, with a wallet: what a bot order pays (SoDEX, ValueDesk bots with VIP, staking) and the bots' cards.
   await go(page, 'Savings', 'Savings');
-  for (const t of ['Fee tier', 'Staking', 'Your bots']) await page.getByText(t, { exact: true }).first().waitFor();
+  for (const t of ['Your fees', 'SoDEX', 'ValueDesk bots', 'VIP', 'Staking', 'Your bots']) await page.getByText(t, { exact: true }).first().waitFor();
   await shot(page, 'savings');
 
   // A new tab of this browser (owner 2026-11-08: no re-signing): the sign-in is kept, nothing is signed.

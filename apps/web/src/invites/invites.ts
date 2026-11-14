@@ -116,7 +116,7 @@ export async function captureInvite(): Promise<void> {
 export type OwnCode = { state: 'loading' } | { state: 'ok'; code: string } | { state: 'none' } | { state: 'error' };
 
 const own = new Map<string, OwnCode>();
-const mes = new Map<string, { me: InviteMe | null; error: boolean }>();
+const mes = new Map<string, { me: InviteMe | null; error: boolean; absent?: boolean }>();
 const asked = new Map<string, Promise<unknown>>();
 const listeners = new Set<() => void>();
 let rev = 0;
@@ -167,6 +167,12 @@ export async function loadMe(address: string): Promise<InviteMe | null> {
   const a = address.toLowerCase();
   try {
     const { status, body } = await json<InviteMe>(`/api/vs/invites/me?address=${a}`);
+    // A server without referrals yet (a release behind): nothing is wrong, there is just nothing to read there.
+    if (status === 404) {
+      mes.set(a, { me: null, error: false, absent: true });
+      changed();
+      return null;
+    }
     if (status !== 200 || !body.ok) throw new Error(String(status));
     mes.set(a, { me: body, error: false });
     changed();
@@ -178,13 +184,16 @@ export async function loadMe(address: string): Promise<InviteMe | null> {
   }
 }
 
-/** The wallet's referrals and credits, and whether the last read failed (no endless "reading"). */
-export function useInviteMeState(address: string | null): { me: InviteMe | null; error: boolean; loading: boolean } {
+/**
+ * The wallet's referrals and credits, whether the last read failed (no endless "reading"), and whether this server has
+ * no referrals at all (`absent`: one a release behind).
+ */
+export function useInviteMeState(address: string | null): { me: InviteMe | null; error: boolean; loading: boolean; absent: boolean } {
   const a = address?.toLowerCase() ?? '';
   useSyncExternalStore(subscribe, () => rev, () => 0);
   useEffect(() => { if (a) void loadMe(a); }, [a]);
   const v = a ? mes.get(a) : undefined;
-  return { me: v?.me ?? null, error: v?.error ?? false, loading: !!a && !v };
+  return { me: v?.me ?? null, error: v?.error ?? false, loading: !!a && !v, absent: v?.absent ?? false };
 }
 
 export const useInviteMe = (address: string | null): InviteMe | null => useInviteMeState(address).me;

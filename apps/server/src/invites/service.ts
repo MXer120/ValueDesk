@@ -24,8 +24,8 @@ import type { BuilderService } from '../builder/service.js';
 import { dayOf } from '../builder/counting.js';
 import { MICRO } from '../builder/tiers.js';
 import {
-  CREDIT_COVER_MIN, CREDIT_FEE, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIER_SHARES, TIERS, WELCOME_CAP, WELCOME_CAP_DAYS,
-  WELCOME_FEE, WELCOME_USD, type InviteMe, type InviteReferral,
+  CREDIT_COVER_MIN, CREDIT_FEE, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIER_SHARES, TIERS, VIP_CREDIT_USD, WELCOME_CAP,
+  WELCOME_CAP_DAYS, WELCOME_FEE, WELCOME_USD, type InviteMe, type InviteReferral,
 } from './claim.js';
 import { sodexOwnerOf } from './sodex.js';
 import type { InviteStore } from './store.js';
@@ -37,6 +37,8 @@ const HOUR = 3_600_000;
 const ALL: FeeProduct[] = ['perps', 'spot', 'copy', 'bots'];
 /** A code SoDEX said nobody owns is asked about again after this long. */
 const NO_OWNER_MS = 10 * 60_000;
+/** How often the job looks for VIP wallets that have not had their credit yet. */
+const VIP_SWEEP_MS = 10 * 60_000;
 
 /** What an order is, by the client order id the engines give theirs (builder/tiers.ts ENGINE_ORDER_ID). */
 export function productOf(engine: 'perps' | 'spot', cl: string | null): FeeProduct {
@@ -76,6 +78,7 @@ export class InviteService {
   /** When the last tick finished: the balance reflects the ledger's counted orders up to then. */
   private tickedAt = 0;
   private readonly noOwner = new Map<string, number>();
+  private vipSweptAt = 0;
 
   constructor(
     readonly store: InviteStore,
@@ -85,6 +88,10 @@ export class InviteService {
       log?: { warn(o: object, m: string): void };
       /** Whose a SoDEX code is (default: SoDEX's public API, sodex.ts). */
       ownerOf?: (code: string) => Promise<string | null | undefined>;
+      /** Whether a wallet is VIP now (default: as the app shows it - builder vipNow or a VIP program). */
+      isVip?: (address: string) => boolean;
+      /** The wallets that are VIP now (default: the builder's vipWallets). */
+      vipWallets?: (now: number) => string[];
     } = {},
   ) {
     for (const w of store.creditWallets()) if (store.stateOf(w)?.paying) this.paying.add(w);
@@ -106,6 +113,40 @@ export class InviteService {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  /* ------------------------------------------------------------------- VIP credit ----- */
+
+  isVip(address: string): boolean {
+    const a = address.toLowerCase();
+    try {
+      return this.o.isVip ? this.o.isVip(a) : this.builder.vipNow(a) || this.builder.vipProgramOf(a) !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  /** A VIP wallet's one-time credit: given the first time it is seen VIP, never again. True when given now. */
+  grantVip(address: string, now = this.now()): boolean {
+    const a = address.toLowerCase();
+    if (this.store.hasGrant(a, 'vip') || !this.isVip(a)) return false;
+    const fresh = this.store.grant(a, 'vip', VIP_CREDIT_USD * MICRO, now);
+    if (fresh) this.switch(a, now);
+    return fresh;
+  }
+
+  /** Every VIP wallet without its credit yet gets it (the job, every VIP_SWEEP_MS). */
+  sweepVip(now = this.now()): number {
+    let n = 0;
+    let list: string[] = [];
+    try {
+      list = this.o.vipWallets ? this.o.vipWallets(now) : this.builder.vipWallets(now);
+    } catch (e) {
+      this.o.log?.warn({ err: String(e) }, 'invites: the VIP wallets could not be listed');
+    }
+    for (const w of list) if (this.grantVip(w, now)) n += 1;
+    this.vipSweptAt = now;
+    return n;
   }
 
   /* ----------------------------------------------------------------------- codes ----- */
@@ -256,6 +297,7 @@ export class InviteService {
       this.switch(w, now);
     }
     this.store.pruneSeen(now - SEEN_KEEP_MS);
+    if (now - this.vipSweptAt >= VIP_SWEEP_MS) this.sweepVip(now);
     this.tickedAt = now;
   }
 
@@ -272,6 +314,8 @@ export class InviteService {
   /** A wallet's referrals and credits, for the Referrals page. Referrals shortened: the page never names them whole. */
   me(address: string): InviteMe {
     const a = address.toLowerCase();
+    // A VIP opening the page gets its credit now, not at the next sweep.
+    try { this.grantVip(a); } catch (e) { this.o.log?.warn({ err: String(e) }, 'invites: the VIP credit could not be given'); }
     const t = this.store.totals(a);
     const join = this.store.joinOf(a);
     const life = this.lifetimeMicro(a);
@@ -306,7 +350,7 @@ export class InviteService {
       joined: join ? { inviter: short(join.inviter), code: join.code, at: join.at } : null,
       canJoin: !join && life === 0 && !this.store.hasReferrals(a),
       welcome: used === null ? null : { active: used < WELCOME_USD * MICRO, usedUsd: Math.min(WELCOME_USD, used / MICRO), leftUsd: Math.max(0, WELCOME_USD - used / MICRO), limitUsd: WELCOME_USD },
-      credits: { balanceUsd: t.balance / MICRO, earnedUsd: t.earned / MICRO, spentUsd: t.spent / MICRO, paying: this.paying.has(a), rates: TIER_SHARES },
+      credits: { balanceUsd: t.balance / MICRO, earnedUsd: t.earned / MICRO, grantedUsd: t.granted / MICRO, spentUsd: t.spent / MICRO, paying: this.paying.has(a), rates: TIER_SHARES },
       stats: { referred, perpsUsd: perps / MICRO, spotUsd: spot / MICRO, earnedUsd: t.earned / MICRO },
       referrals,
       history: this.store.history(a).map((e) => ({ at: e.at, kind: e.kind, usd: e.micro / MICRO, tier: e.tier, from: e.source ? short(e.source) : null })),

@@ -10,6 +10,8 @@
  *   seen       per builder-ledger order, how much of it was taken in already (an order that fills further later adds
  *              only the new part). Old rows go once the builder ledger let go of the order.
  *   state      per wallet: whether credits are paying now, and since when
+ *   grants     credits given rather than earned, once per wallet and reason (the VIP credit): the row and its entry
+ *              are written together, so a grant can never be given twice
  */
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
@@ -58,6 +60,13 @@ CREATE TABLE IF NOT EXISTS seen (
   at INTEGER NOT NULL,
   PRIMARY KEY (address, order_key)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS grants (
+  address TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  micro INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (address, reason)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS state (
   address TEXT PRIMARY KEY,
   paying INTEGER NOT NULL,
@@ -68,7 +77,7 @@ CREATE TABLE IF NOT EXISTS state (
 
 export interface Join { wallet: string; inviter: string; code: string; at: number; welcome: boolean }
 export type JoinResult = { ok: true; join: Join; fresh: boolean } | { ok: false; code: JoinRefusal };
-export interface Entry { address: string; kind: 'earn' | 'spend'; micro: number; source: string | null; tier: number | null }
+export interface Entry { address: string; kind: 'earn' | 'spend' | 'grant'; micro: number; source: string | null; tier: number | null }
 
 const isUnique = (e: unknown): boolean => /UNIQUE|constraint/i.test(String((e as Error).message));
 const joinOfRow = (r: { wallet: string; inviter: string; code: string; at: number | bigint; welcome?: number | bigint }): Join =>
@@ -193,16 +202,41 @@ export class InviteStore {
     }
   }
 
-  /** Earned, spent and the balance of a wallet, micro-USD. */
-  totals(address: string): { earned: number; spent: number; balance: number } {
+  /**
+   * A one-time credit (`reason`: 'vip'), given once per wallet whatever happens: true when given now, false when the
+   * wallet had it already.
+   */
+  grant(address: string, reason: string, micro: number, now: number): boolean {
+    const a = address.toLowerCase();
+    this.db.exec('BEGIN');
+    try {
+      const r = this.db.prepare('INSERT OR IGNORE INTO grants (address, reason, micro, at) VALUES (?, ?, ?, ?)').run(a, reason, Math.round(micro), now);
+      const fresh = Number(r.changes) === 1;
+      if (fresh) this.db.prepare("INSERT INTO entries (address, kind, micro, source, order_key, at, tier) VALUES (?, 'grant', ?, ?, NULL, ?, NULL)").run(a, Math.round(micro), reason, now);
+      this.db.exec('COMMIT');
+      return fresh;
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  hasGrant(address: string, reason: string): boolean {
+    return !!this.db.prepare('SELECT 1 AS x FROM grants WHERE address = ? AND reason = ?').get(address.toLowerCase(), reason);
+  }
+
+  /** Earned (from referrals), granted, spent and the balance of a wallet, micro-USD. */
+  totals(address: string): { earned: number; granted: number; spent: number; balance: number } {
     const rows = this.db.prepare('SELECT kind, sum(micro) AS m FROM entries WHERE address = ? GROUP BY kind').all(address.toLowerCase()) as Array<{ kind: string; m: number }>;
     let earned = 0;
+    let granted = 0;
     let spent = 0;
     for (const r of rows) {
       if (r.kind === 'earn') earned = Number(r.m);
+      else if (r.kind === 'grant') granted = Number(r.m);
       else if (r.kind === 'spend') spent = Number(r.m);
     }
-    return { earned, spent, balance: earned - spent };
+    return { earned, granted, spent, balance: earned + granted - spent };
   }
 
   /** Credit earned from each referral (any tier), micro-USD. */
@@ -212,14 +246,14 @@ export class InviteStore {
   }
 
   /** The newest entries of a wallet. */
-  history(address: string, limit = 300): Array<{ at: number; kind: 'earn' | 'spend'; micro: number; tier: number | null; source: string | null }> {
+  history(address: string, limit = 300): Array<{ at: number; kind: 'earn' | 'spend' | 'grant'; micro: number; tier: number | null; source: string | null }> {
     return (this.db.prepare('SELECT at, kind, micro, tier, source FROM entries WHERE address = ? ORDER BY at DESC, id DESC LIMIT ?').all(address.toLowerCase(), limit) as Array<{ at: number; kind: string; micro: number; tier: number | null; source: string | null }>)
-      .map((r) => ({ at: Number(r.at), kind: r.kind === 'spend' ? 'spend' : 'earn', micro: Number(r.micro), tier: r.tier === null ? null : Number(r.tier), source: r.source }));
+      .map((r) => ({ at: Number(r.at), kind: r.kind === 'spend' ? 'spend' : r.kind === 'grant' ? 'grant' : 'earn', micro: Number(r.micro), tier: r.tier === null ? null : Number(r.tier), source: r.source }));
   }
 
-  /** Wallets that ever had credit (the job's list of whom to spend for). */
+  /** Wallets that ever had credit, earned or granted (the job's list of whom to spend for). */
   creditWallets(): string[] {
-    return (this.db.prepare("SELECT DISTINCT address FROM entries WHERE kind = 'earn'").all() as Array<{ address: string }>).map((r) => r.address);
+    return (this.db.prepare("SELECT DISTINCT address FROM entries WHERE kind IN ('earn', 'grant')").all() as Array<{ address: string }>).map((r) => r.address);
   }
 
   stateOf(address: string): { paying: boolean; since: number } | null {

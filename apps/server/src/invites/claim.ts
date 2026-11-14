@@ -45,6 +45,12 @@ export const WELCOME_CAP_DAYS = 30;
  */
 export const PERK_HORIZON_MS = 3 * 60_000;
 
+/**
+ * Every VIP wallet gets this much fee credit once (owner 2026-11-14: "give vips a $10 Fee credit balance just bc
+ * their vips"): VIP as the app shows it - by volume, kept, or by a VIP program (the beta's 30 days too).
+ */
+export const VIP_CREDIT_USD = 10;
+
 /** ValueDesk's own SoDEX code: it refers nobody on ValueDesk (its fees are ValueDesk's). */
 export const OURS_CODE = 'VALUEDESK';
 /** A SoDEX referral code, upper case. */
@@ -121,7 +127,8 @@ export interface InviteReferral {
 
 export interface InviteEntry {
   at: number;
-  kind: 'earn' | 'spend';
+  /** earn: a share of a referral's fee; spend: a fee credits paid; grant: credit given (the VIP credit). */
+  kind: 'earn' | 'spend' | 'grant';
   usd: number;
   tier: number | null;
   /** The referral it came from, shortened (earn only). */
@@ -136,7 +143,7 @@ export interface InviteMe {
   /** May this wallet still join: never joined, no ValueDesk volume, no referrals of its own. */
   canJoin: boolean;
   welcome: { active: boolean; usedUsd: number; leftUsd: number; limitUsd: number } | null;
-  credits: { balanceUsd: number; earnedUsd: number; spentUsd: number; paying: boolean; rates: readonly number[] };
+  credits: { balanceUsd: number; earnedUsd: number; grantedUsd: number; spentUsd: number; paying: boolean; rates: readonly number[] };
   stats: { referred: [number, number, number]; perpsUsd: number; spotUsd: number; earnedUsd: number };
   referrals: InviteReferral[];
   history: InviteEntry[];

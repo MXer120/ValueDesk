@@ -13,7 +13,6 @@ import { useEffect, useState } from 'react';
 import { TIER_SHARES, WELCOME_USD } from '@sign/invites/claim';
 import { Modal } from '../components/Modal';
 import { DlgFoot } from '../components/dialogParts';
-import { StatusPill } from '../components/bots/kit/kit';
 import { browseAccepted, useAcceptanceRevision } from '../legal/acceptance';
 import { track } from '../analytics/usage';
 import { notify } from '../toast';
@@ -97,16 +96,16 @@ function InviteDialog({ pending, joined: joinedAt, address, provider, onClose }:
         <li className={joined ? 'is-done' : ''}>
           <i aria-hidden="true">{joined ? <Check /> : 1}</i>
           <div><b>Join on ValueDesk</b><small>One signature. Free, never a transaction.</small></div>
-          {joined ? <StatusPill size="sm" tone="positive" dot>Joined</StatusPill> : (
+          {joined ? <span className="inv-pill is-on">Joined</span> : (
             <button type="button" className="dlg-btn is-go" disabled={busy} onClick={() => void join()}>{busy ? 'Check wallet…' : 'Sign'}</button>
           )}
         </li>
         <li className={sodexDone ? 'is-done' : sodexOpen ? '' : 'is-off'}>
           <i aria-hidden="true">{sodexDone ? <Check /> : 2}</i>
           <div><b>Apply {code} on SoDEX</b><small>{sodexOpen ? 'Confirm with your wallet on sodex.com.' : sodex === 'other' || sodex === 'self' ? 'Your wallet has a SoDEX referrer already.' : sodex === 'pending' ? 'SoDEX finishes it after your first deposit.' : sodexDone ? 'Applied.' : 'Checking with SoDEX…'}</small></div>
-          {sodexDone ? <StatusPill size="sm" tone="positive" dot>Applied</StatusPill>
+          {sodexDone ? <span className="inv-pill is-on">Applied</span>
             : sodexOpen ? <a className="dlg-btn ref-offer__go" href={referralUrl(code)} target="_blank" rel="noopener noreferrer" onClick={() => setOpened(true)}>{opened ? 'Open again' : 'Apply'}</a>
-            : sodex === 'unknown' ? null : <StatusPill size="sm" tone="neutral">Skipped</StatusPill>}
+            : sodex === 'unknown' ? null : <span className="inv-pill">Skipped</span>}
         </li>
       </ol>
       {error && <p className="ref-offer__note" role="alert">{error}</p>}

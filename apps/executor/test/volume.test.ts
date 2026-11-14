@@ -94,3 +94,45 @@ test('fees: VIP and a program from the same read lower copy and bot fees; a prog
   assert.equal(await vfee({ kind: 'twap' }), 10, 'VIP: the lowest copy step');
   v.cleanup();
 });
+
+test('fees: the invite welcome and fee credits come with a budget - the lowered fee holds until this executor\'s own fills use it up', async () => {
+  const through = Date.now() - 1_000;
+  const until = Date.now() + 3 * 60_000;
+  // The welcome: $1,000 of volume left at fee 0, every dollar of either product using a dollar of it.
+  const { svc, fresh, cleanup } = make(() => ({ status: 200, body: { ok: true, usd: 50_000, days: 14, vip: false, fees: {
+    copy: { fee: 0, until, budget: { kind: 'welcome', capUsd: 1_000, perUsd: { copy: 1, bots: 1 }, through } },
+    bots: { fee: 0, until, budget: { kind: 'welcome', capUsd: 1_000, perUsd: { copy: 1, bots: 1 }, through } },
+  } } }));
+  const s = svc as unknown as { algoFee(a: { owner: string; spec: unknown }): Promise<number>; noteFill(o: string, p: 'copy' | 'bots', usd: number, at: number): void };
+  await fresh(OWNER);
+  assert.equal(await s.algoFee({ owner: OWNER, spec: { kind: 'mm', bot: true } }), 0, 'bots: the welcome');
+  // Fills from before the ledger's read are in the budget already: they use nothing up.
+  s.noteFill(OWNER, 'bots', 5_000, through - 10);
+  assert.equal(await s.algoFee({ owner: OWNER, spec: { kind: 'mm', bot: true } }), 0);
+  s.noteFill(OWNER, 'bots', 600, Date.now());
+  assert.equal(await s.algoFee({ owner: OWNER, spec: { kind: 'mm', bot: true } }), 0, '$600 of $1,000 used');
+  s.noteFill(OWNER, 'copy', 400, Date.now());
+  assert.equal(await s.algoFee({ owner: OWNER, spec: { kind: 'mm', bot: true } }), 4, 'used up: the bot ladder ($50K: 0.4 bp), until a read says more is left');
+  assert.equal(await s.algoFee({ owner: OWNER, spec: { kind: 'twap' } }), 25, 'copy and algos too');
+  cleanup();
+
+  // Credits: $1 of credit; a dollar of a copy order uses 2.4 bp of it.
+  const c = make(() => ({ status: 200, body: { ok: true, usd: 50_000, days: 14, vip: false, fees: {
+    copy: { fee: 1, until, budget: { kind: 'credits', capUsd: 1, perUsd: { copy: 24 / 100_000, bots: 3 / 100_000 }, through } },
+    bots: { fee: 1, until, budget: { kind: 'credits', capUsd: 1, perUsd: { copy: 24 / 100_000, bots: 3 / 100_000 }, through } },
+  } } }));
+  const cs = c.svc as unknown as typeof s;
+  await c.fresh(OWNER);
+  assert.equal(await cs.algoFee({ owner: OWNER, spec: { kind: 'twap' } }), 1, 'copy: 0.1 bp while credits pay');
+  cs.noteFill(OWNER, 'copy', 4_000, Date.now()); // $0.96 of the $1
+  assert.equal(await cs.algoFee({ owner: OWNER, spec: { kind: 'twap' } }), 1);
+  cs.noteFill(OWNER, 'bots', 2_000, Date.now()); // $0.06 more: over
+  assert.equal(await cs.algoFee({ owner: OWNER, spec: { kind: 'twap' } }), 25, 'the credit is used up');
+  c.cleanup();
+
+  // A budget that cannot be read: no lowered fee at all.
+  const bad = make(() => ({ status: 200, body: { ok: true, usd: 50_000, days: 14, vip: false, fees: { copy: { fee: 0, until, budget: { capUsd: 'lots' } }, bots: null } } }));
+  await bad.fresh(OWNER);
+  assert.equal(await (bad.svc as unknown as typeof s).algoFee({ owner: OWNER, spec: { kind: 'twap' } }), 25);
+  bad.cleanup();
+});

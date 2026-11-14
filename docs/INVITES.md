@@ -32,6 +32,18 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   This lasts as long as the wallet trades.
 - **Credits** pay only the wallet's own ValueDesk builder fee. While they last, its fee is 0.1 bp on every product,
   and the rest of what it would have paid comes off the balance. They are never paid out and never moved.
+- **VIP credit** (owner: "give vips a $10 Fee credit balance just bc their vips"): every wallet that is VIP as the app
+  shows it gets $10 of credit, once:
+  - who counts: VIP by volume, the kept list (`VALUEDESK_VIP_KEEP`), or a running VIP program (the dev page's, and the
+    beta's 30 days from listing);
+  - when: the job sweeps every 10 minutes, and a VIP opening the Referrals page gets it at once;
+  - once: a `grants` row and its entry are written together, so a sweep, the page or a restart never give it twice;
+  - it shows like any credit (balance, Savings "Fee credits"), marked "Includes your $10 VIP credit", and as "VIP credit"
+    in the history.
+
+  Production today (read-only, 2026-11-14): 11 beta wallets inside their 30 days, none by volume, none kept, so at most
+  $110. Server 2's executor has 1 assigned VIP (`EXECUTOR_VIP_WALLETS`) that server 1 cannot see. Add it to
+  `VALUEDESK_VIP_KEEP` or a dev-page VIP program for it to get the credit too.
 - **Referrals page** (`/referrals`, under More), laid out like the reference screenshot:
   - left: the link, a "how it pays" banner, stats and a referrals table;
   - right: credit balance, credits earned, the welcome, and credit history.
@@ -126,6 +138,39 @@ pay themselves, plus one capped welcome per wallet. The terms line below lets Va
 **Analytics:** `invite.copy`, `invite.bind`, `credits.earn`.
 
 **Backups:** add `invites.db` to the off-server backup with `profiles.db` before it holds real credits.
+
+**Localhost:** 5180 reads production's API, which has no referral routes until they are released. The page then said
+"Could not read your referrals"; it now says the stats aren't on this server yet. For the real thing locally, start the
+launch config `invites-dev` (`apps/server/tools/invites-dev.ts`, 127.0.0.1:18797). It runs the real routes on a local
+`invites.db`, with no builder ledger, and asks production whether a wallet is VIP. Vite sends `/api/vs/invites` there
+while it answers.
+
+## Verified (2026-11-14)
+
+- **Server** (`test/invites.test.ts`, `test/invitesFeePath.test.ts`, the `traded` test in `builderVerifier.test.ts`):
+  - SoDEX code owner;
+  - join rules: self, ValueDesk's code, volume, referrals, second join, forged signature;
+  - welcome cap; three tiers forever; spend; the cover rule; overrun;
+  - on the real BuilderService: a joined wallet signs 0 bp in short terms, and the executor's read carries the
+    welcome budget; after $100k of traded volume it is back on its tier;
+  - the VIP $10, given once (sweep, page, restart), lowers the signed fee to 0.1 bp and comes with a credits budget;
+  - fills without a builder fee are counted into `traded` once, across overlapping sweeps.
+- **Executor** (`test/volume.test.ts`, `test/perk-budget.test.ts`): the lowered fee holds until its own fills after
+  the ledger's read use the budget up, for both welcome and credits; an unreadable budget gives no lowered fee.
+- **Engine** (`algo-bots.test.ts`): a bot's real fill reaches the executor's budget hook with its notional.
+- **Browser** (`e2e/ui/referrals.spec.ts`, real Edge, desktop and phone, a throwaway wallet that really signs, local
+  referral routes):
+  - `?ref=` is kept and taken off the address;
+  - the popup shows the code and the $0 welcome, and never VALUEDESK over the inviter's code;
+  - one InviteJoin signature joins, and nothing else is signed;
+  - step 2 links to sodex.com/join/CODE;
+  - the page shows "Referred by", the welcome, and the no-SoDEX-account link state;
+  - the page opens from More without a wallet.
+
+Not verified:
+- a funded wallet's real join and fees on production data (needs the release);
+- binding on sodex.com (SoDEX's own page);
+- the executor on server 2 with a live budget.
 
 ## Terms, for sign-off (section 6, ValueDesk builder fee): NOT in the terms yet
 

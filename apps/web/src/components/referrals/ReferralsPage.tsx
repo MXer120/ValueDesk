@@ -24,6 +24,8 @@ const PAGE = 10;
 const SEEN = (a: string) => `vd.credits.seen.${a.toLowerCase()}`;
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const usd2 = (n: number) => `${n < 0 ? '−' : ''}$${Math.abs(n).toFixed(2)}`;
+/** +$396.32 for something earned, $0.00 for nothing (no plus on zero). */
+const signedUsd = (n: number) => (n > 0 ? `+${usd2(n)}` : usd2(n));
 /** A credit: cents from a dollar on, else four places (a referral's first credits are fractions of a cent). */
 const credit = (n: number) => `${n < 0 ? '−' : ''}$${Math.abs(n).toFixed(Math.abs(n) >= 1 || n === 0 ? 2 : 4)}`;
 /** $53.9M, $2.57M, $48.9K, $140: the reference's compact figures. */
@@ -55,7 +57,7 @@ export function ReferralsPage({ address }: { address: string | null }) {
 }
 
 function Referrals({ address }: { address: string }) {
-  const { me, error, loading } = useInviteMeState(address);
+  const { me, error, loading, absent } = useInviteMeState(address);
   const [how, setHow] = useState(false);
   // New credit since this wallet last looked: counted once (analytics, after consent only).
   const earned = me?.credits.earnedUsd ?? null;
@@ -84,21 +86,23 @@ function Referrals({ address }: { address: string }) {
         </section>
         <Shell className="bots-listcard rf-stats">
           <ShellHeader icon="chart" title="Stats & referrals" />
-          {loading ? <div className="bots-kpigrid is-5">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="rf-skel-kpi" />)}</div> : (
+          {loading ? <div className="bots-kpigrid is-5 rf-kpis">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="rf-skel-kpi" />)}</div> : (
             <div className="bots-kpigrid is-5 rf-kpis">
               <StatCard index={0} label="Referred traders" value={me ? String(me.stats.referred.reduce((x, y) => x + y, 0)) : DASH} hint={me ? `${me.stats.referred.join(' · ')} by tier` : undefined} />
               <StatCard index={1} label="Futures volume referred" value={me ? compact(me.stats.perpsUsd) : DASH} />
               <StatCard index={2} label="Spot volume referred" value={me ? compact(me.stats.spotUsd) : DASH} />
-              <StatCard index={3} label="Credits earned" value={me ? `+${usd2(me.stats.earnedUsd)}` : DASH} valueTone={me && me.stats.earnedUsd > 0 ? 'positive' : undefined} />
+              <StatCard index={3} label="Credits earned" value={me ? signedUsd(me.stats.earnedUsd) : DASH} valueTone={me && me.stats.earnedUsd > 0 ? 'positive' : undefined} />
               <StatCard index={4} label="T1 / T2 / T3 rates" value={TIER_SHARES.map(pct).join(' ')} />
             </div>
           )}
-          {error && !me ? <RetryState address={address} what="your referrals" /> : <ReferralTable rows={me?.referrals ?? null} />}
+          {absent ? (
+            <Panel className="rf-state"><EmptyState compact icon="clock" title="Referral stats are not on this server yet" description="Your link works now; stats and credits show here once the server has them." /></Panel>
+          ) : error && !me ? <RetryState address={address} what="your referrals" /> : <ReferralTable rows={me?.referrals ?? null} />}
         </Shell>
       </div>
       <aside className="rf-side">
-        <CreditCards me={me} loading={loading} />
-        <History me={me} loading={loading} />
+        <CreditCards me={me} loading={loading && !absent} />
+        <History me={me} loading={loading && !absent} />
       </aside>
       {how && <HowItWorks onClose={() => setHow(false)} />}
     </div>
@@ -245,11 +249,12 @@ function CreditCards({ me, loading }: { me: InviteMe | null; loading: boolean })
           {c && <StatusPill size="sm" tone={c.paying ? 'positive' : 'neutral'} dot>{c.paying ? 'Paying your fees' : c.balanceUsd > 0 ? 'Collecting' : 'Empty'}</StatusPill>}
         </div>
         {loading ? <Skeleton className="rf-skel-big" /> : <b className={`rf-big${c && c.balanceUsd < 0 ? ' neg' : ''}`}>{c ? usd2(c.balanceUsd) : DASH}</b>}
+        {c && c.grantedUsd > 0 && <StatusPill size="sm" icon="star" className="sv-gold rf-vipcredit">Includes your {usd2(c.grantedUsd)} VIP credit</StatusPill>}
         <p className="rf-fine">Pays your ValueDesk fees by itself. Never cash.</p>
       </Panel>
       <Panel className="rf-card">
         <span className="rf-k">Total credits earned</span>
-        {loading ? <Skeleton className="rf-skel-big" /> : <b className="rf-big pos">{c ? `+${usd2(c.earnedUsd)}` : DASH}</b>}
+        {loading ? <Skeleton className="rf-skel-big" /> : <b className={`rf-big${c && c.earnedUsd > 0 ? ' pos' : ''}`}>{c ? signedUsd(c.earnedUsd) : DASH}</b>}
         <dl className="rf-kv">
           <div><dt>Spent on fees</dt><dd className="num">{c ? usd2(c.spentUsd) : DASH}</dd></div>
           <div><dt>Your fee while it pays</dt><dd className="num">0.1 bp</dd></div>
@@ -287,8 +292,8 @@ function History({ me, loading }: { me: InviteMe | null; loading: boolean }) {
               {rows.slice(page * PAGE, page * PAGE + PAGE).map((h, i) => (
                 <tr key={`${h.at}-${i}`}>
                   <td className="dim">{day(h.at)}</td>
-                  <td>{h.kind === 'earn' ? <span className="rf-type"><span className={`rf-tier is-${h.tier ?? 1}`}>T{h.tier ?? 1}</span>{h.from}</span> : <span className="rf-type">Fees paid</span>}</td>
-                  <td className={`right num ${h.kind === 'earn' ? 'pos' : 'dim'}`}>{h.kind === 'earn' ? '+' : '−'}{credit(h.usd)}</td>
+                  <td>{h.kind === 'earn' ? <span className="rf-type"><span className={`rf-tier is-${h.tier ?? 1}`}>T{h.tier ?? 1}</span>{h.from}</span> : h.kind === 'grant' ? <span className="rf-type is-vip">VIP credit</span> : <span className="rf-type">Fees paid</span>}</td>
+                  <td className={`right num ${h.kind === 'spend' ? 'dim' : 'pos'}`}>{h.kind === 'spend' ? '−' : '+'}{credit(h.usd)}</td>
                 </tr>
               ))}
             </tbody>

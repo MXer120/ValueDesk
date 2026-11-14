@@ -8,7 +8,8 @@
     "start": "tsx --disable-warning=ExperimentalWarning src/index.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "indexer": "tsx --disable-warning=ExperimentalWarning src/indexer/main.ts"
+    "indexer": "tsx --disable-warning=ExperimentalWarning src/indexer/main.ts",
+    "invites-dev": "tsx --disable-warning=ExperimentalWarning tools/invites-dev.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

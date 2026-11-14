@@ -71,6 +71,8 @@ export interface TermsRequest {
 export interface BuilderServiceOptions {
   /** A wallet's running fee programs (the dev page's, admin/store.ts); default: the admin store on this server. */
   programs?: (address: string, now: number) => FeeProgram[];
+  /** Wallets a VIP program may be running for (vipWallets asks vipProgramOf of each). */
+  vipCandidates?: (now: number) => string[];
   tiersPath: string;
   keyPath: string;
   dbPath: string;
@@ -322,6 +324,25 @@ export class BuilderService {
     return d;
   }
 
+  /**
+   * The wallets that are VIP now as the app shows it (the invites' one-time VIP credit): kept, over the volume line while
+   * VIP by volume is on, and those a VIP program runs for (the dev page's, the beta's 30 days).
+   */
+  vipWallets(now = this.now()): string[] {
+    const out = new Set<string>(vipKept());
+    const cfg = this.tiers.current();
+    const store = this.store;
+    if (vipByVolume() && cfg?.builderId && store) {
+      for (const a of store.walletsOver(cfg.builderId, dayOf(now) - (VIP_DAYS - 1), VIP_MIN_USD * MICRO)) out.add(a);
+    }
+    try {
+      for (const a of this.o.vipCandidates?.(now) ?? []) if (this.vipProgramOf(a, now)) out.add(a.toLowerCase());
+    } catch (e) {
+      this.o.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'builder tiers: the VIP programs could not be listed');
+    }
+    return [...out];
+  }
+
   /** The wallet's running programs (never throws: an unreadable store means none; no source given, none). */
   private programsOf(address: string, now: number, withExtra = true): FeeProgram[] {
     let out: FeeProgram[] = [];
@@ -523,6 +544,11 @@ export function builderService(log: LogLike = consoleLog): BuilderService {
     instance = new BuilderService({
       // The dev page's fee programs, from the admin store on this server.
       programs: (address, at) => (admin ??= new AdminStore()).activeFeePrograms(address, at),
+      // Wallets a VIP program may run for: the dev page's VIP programs and the beta list (vipWallets checks each).
+      vipCandidates: (at) => {
+        const s = (admin ??= new AdminStore());
+        return [...s.feePrograms().filter((g) => g.fee === VIP_PROGRAM_FEE && g.from <= at && (g.until === null || g.until > at)).map((g) => g.address), ...s.betaWallets().map((b) => b.address)];
+      },
       tiersPath: tiersPath(),
       keyPath: termsKeyPath(),
       dbPath: builderDbPath(),

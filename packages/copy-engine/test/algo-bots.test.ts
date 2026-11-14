@@ -233,6 +233,8 @@ interface Rig {
   brake: string | null;
   problem: string | null;
   events?: NewsEvent[] | null;
+  /** Every real fill the host was told of (the executor's budget for a lowered fee counts these). */
+  noted?: Array<{ id: string; usd: number }>;
 }
 
 function runtimeFor(r: Rig): AlgoRuntime {
@@ -252,6 +254,7 @@ function runtimeFor(r: Rig): AlgoRuntime {
     log: silentLogger,
     autoTick: false,
     builderRate: (a) => (a.spec.bot ? BOT_FEE / 100_000 : 0.00025),
+    onFill: (a, usd) => { (r.noted ??= []).push({ id: a.id, usd }); },
     ...(r.ref ? { reference: r.ref } : {}),
     brake: () => r.brake,
     problem: async () => r.problem,
@@ -386,6 +389,7 @@ test('volume maker: two post-only quotes at the touch; fills go into the book at
   assert.ok(Math.abs(v.bot!.builderFees - v.bot!.volume * 0.00001) < 1e-9, 'the bot fee, 0.1 bp');
   assert.ok(Math.abs(v.bot!.tradeFees - v.bot!.volume * 0.00012) < 1e-9, 'SoDEX\'s maker fee');
   assert.equal(v.bot!.makerShare, 1);
+  assert.deepEqual(r.noted?.map((n) => [n.id, Math.round(n.usd * 1e6)]), [[a.id, Math.round(v.bot!.volume * 1e6)]], 'the host is told of the fill and its notional (the budget of a lowered fee)');
   // The filled side goes back out next step; the other one stays where it was.
   await step(r, a.id, 500);
   assert.equal(r.ex.side('buy').length, 1);

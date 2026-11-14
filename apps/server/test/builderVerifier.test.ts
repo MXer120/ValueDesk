@@ -13,7 +13,7 @@ import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { testTiers } from '../src/builder/config.js';
-import { OrderState } from '../src/builder/counting.js';
+import { OrderState, dayOf } from '../src/builder/counting.js';
 import { BuilderService, type TermsBody } from '../src/builder/service.js';
 import { BuilderStore } from '../src/builder/store.js';
 import { termsMessage, writeNewKeyFile } from '../src/builder/terms.js';
@@ -1051,4 +1051,34 @@ test('counting: with volumeDays 14 a new wallet is read back 14 days, and its vo
   const later = w.ask(wallet);
   assert.equal(later.volume.perpsUsd, 0);
   assert.deepEqual(later.fee, { perps: 20, spot: 20 });
+});
+
+test('traded: every fill counts toward all the wallet traded - with no builder fee (the invite welcome), ours or none - once, across overlapping sweeps', async () => {
+  const w = world();
+  const { wallet, app, own } = trader(w, 9);
+  w.clock.advance(SEC);
+  const day = dayOf(w.clock.now());
+  // The welcome's orders name the builder at fee 0: SoDEX charges nothing, the ledger counts nothing - traded does.
+  const free = nextId();
+  w.sodex.order(wallet, { engine: 'perps', orderId: free, at: w.clock.now(), builder: { id: BUILDER, fee: 0 }, key: app, fills: [{ price: '100', quantity: '0.5' }] });
+  w.sodex.order(wallet, { engine: 'perps', orderId: nextId(), at: w.clock.now(), builder: null, key: own, fills: [{ price: '100', quantity: '0.2' }] });
+  w.sodex.order(wallet, { engine: 'spot', orderId: nextId(), at: w.clock.now(), builder: { id: BUILDER, fee: 0 }, key: app, side: 'SELL', fills: [{ price: '100', quantity: '0.1' }] });
+  w.clock.advance(SEC);
+  const t = await w.verify(wallet);
+  assert.equal(t.volume.perpsUsd, 0, 'nothing paid a builder fee: nothing counted');
+  assert.deepEqual(w.svc.store!.tradedMicro(BUILDER, wallet, day), { perps: 70_000_000, spot: 10_000_000 });
+  // Read again (the overlap comes back each time): nothing twice.
+  for (let i = 0; i < 3; i++) {
+    w.clock.advance(SEC);
+    await w.verify(wallet);
+  }
+  assert.deepEqual(w.svc.store!.tradedMicro(BUILDER, wallet, day), { perps: 70_000_000, spot: 10_000_000 });
+  // The order fills further later: only the new fill adds.
+  w.clock.advance(10 * MIN);
+  w.sodex.fillMore(wallet, 'perps', free, [{ price: '100', quantity: '0.3', at: w.clock.now() }]);
+  w.clock.advance(SEC);
+  await w.verify(wallet);
+  assert.deepEqual(w.svc.store!.tradedMicro(BUILDER, wallet, day), { perps: 100_000_000, spot: 10_000_000 });
+  // Up to when every fill was read: what the executor counts its own fills after.
+  assert.ok(w.svc.store!.readThrough(BUILDER, wallet) >= w.clock.now() - 2 * MIN, 'read up to about now');
 });
