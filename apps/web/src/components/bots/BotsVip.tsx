@@ -424,7 +424,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
       {share && <VipShare what={share} onClose={() => setShare(null)} />}
       {unlock && <UnlockScene onVip={onVip} stage={stageApi} onShare={() => setShare({ kind: 'unlock', promo: !!el?.promo })} promo={el?.promo ?? null} volume={el && el.volumeUsd >= el.minUsd ? el.volumeUsd : null} onClose={() => { setUnlock(false); setFading(false); }} onMove={() => { setUnlock(false); setHandoff(true); void move(); }} />}
       {!stage && <Shell className={`bots-vip${compact ? ' is-compact' : ''}`}>
-        <ShellHeader icon="bolt" title={onVip ? 'VIP' : 'Become VIP'} subtitle={onVip ? 'Your bots run on the VIP servers, at the lowest bot fee.' : el?.promo ? 'Your beta VIP: the lowest fee on everything, and VIP servers.' : 'At $5M of your volume in 14 days: bot fees slashed, and VIP servers.'} aside={onVip ? <StatusPill tone="warning" dot>VIP servers</StatusPill> : el?.eligible ? <StatusPill tone="positive" dot>Unlocked</StatusPill> : null} />
+        <ShellHeader icon="bolt" title={onVip ? 'VIP' : 'Become VIP'} subtitle={onVip ? 'Your bots run on the VIP servers, at the lowest bot fee.' : el?.promo ? 'Your beta VIP: the lowest fee on everything, and VIP servers.' : 'At $5M of your volume in 14 days: bot fees slashed, and VIP servers.'} aside={onVip ? <StatusPill dot className="vip-pill">VIP servers</StatusPill> : el?.eligible ? <StatusPill dot className="vip-pill">Unlocked</StatusPill> : null} />
         <Panel className="bots-vip__b">
           {onVip ? (
             <div className="bots-vip__on">
@@ -450,8 +450,8 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
                 {canMove && !ctx.ready
                   // Unlocked, but the move is signed on the executor: say so and offer the sign-in right here
                   // (2026-11-10: a beta VIP saw "Unlocked" beside a grey button and no reason).
-                  ? <Button variant="primary" size="md" icon="bolt" onClick={() => ctx.setup(true)}>Set up to move</Button>
-                  : <Button variant="primary" size="md" icon="bolt" disabled={!canMove || !ctx.ready} onClick={() => void move()}>Move to VIP</Button>}
+                  ? <Button variant="primary" size="md" icon="bolt" className="vip-btn" onClick={() => ctx.setup(true)}>Set up to move</Button>
+                  : <Button variant="primary" size="md" icon="bolt" className="vip-btn" disabled={!canMove || !ctx.ready} onClick={() => void move()}>Move to VIP</Button>}
                 {canMove && !ctx.ready && <small className="bots-fine">VIP is unlocked. Sign in to the bot servers and accept the terms first, then move.</small>}
                 {!info?.vip?.canMove && <small className="bots-fine">The VIP servers open soon.</small>}
                 {info?.vip?.canMove && !canMove && !assignedOnly && <small className="bots-fine">Unlocks at $5M in 14 days.</small>}

@@ -70,6 +70,8 @@ import './components/bots/botsPages.css';
 import './components/bots/hedge.css';
 import './components/share/share.css';
 import './components/referrals/referrals.css';
+// Last: VIP is gold over every pill, button and row it marks (owner 2026-11-14).
+import './components/vip.css';
 import './components/portfolio/PortfolioPage.css';
 import './components/explore/cohorts/Cohorts.css';
 import './components/explore/markets/Markets.css';

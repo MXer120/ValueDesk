@@ -1,0 +1,50 @@
+/*
+ * VIP is gold, everywhere (owner 2026-11-14: "vip credits/vip stuff always needs to be golden"). One set of tokens and
+ * classes for every VIP mark - the word, a pill, a button, a row, a figure, an icon - in both themes; the VIP scenes
+ * (VipScene, the move, the unlock) keep their own richer metal on their black ground. Never a one-side edge.
+ *
+ *   .vip-text   the word or figure in gold (a gradient on dark, a deep gold on light)
+ *   .vip-pill   a pill in gold (StatusPill's or any inline-flex chip; its dot follows)
+ *   .vip-btn    a button in gold (the kit's Button)
+ *   .vip-row    a row of a table or list: its text gold on a faint gold ground
+ *   .vip-icon   an icon in gold
+ */
+:root {
+  --vip-hi: #fff1c4;
+  --vip-1: #f6d27a;
+  --vip-2: #e0a93b;
+  --vip-3: #b9832a;
+  --vip-ink: #f6d27a;
+  --vip-ground: rgba(246, 210, 122, 0.14);
+  --vip-ground-soft: rgba(246, 210, 122, 0.07);
+  --vip-line: rgba(246, 210, 122, 0.28);
+  --vip-on: #1d1504;
+}
+html[data-theme='light'] {
+  --vip-ink: #8a6214;
+  --vip-ground: rgba(201, 160, 72, 0.18);
+  --vip-ground-soft: rgba(201, 160, 72, 0.09);
+  --vip-line: rgba(185, 131, 42, 0.34);
+}
+
+.vip-text {
+  background: linear-gradient(170deg, var(--vip-hi) 0%, var(--vip-1) 45%, var(--vip-2) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+}
+html[data-theme='light'] .vip-text { background: linear-gradient(180deg, #c99a3a 0%, #a77c2a 55%, #7d5a1a 100%); -webkit-background-clip: text; background-clip: text; }
+
+.vip-pill, .tf-pill.vip-pill { background: var(--vip-ground); color: var(--vip-ink); box-shadow: inset 0 0 0 1px var(--vip-line); }
+.vip-pill .tf-pill__dot, .vip-pill::before { background: var(--vip-1); }
+html[data-theme='light'] .vip-pill .tf-pill__dot, html[data-theme='light'] .vip-pill::before { background: var(--vip-3); }
+
+.vip-btn, .tf-btn.vip-btn {
+  background: linear-gradient(180deg, var(--vip-hi) 0%, var(--vip-1) 40%, var(--vip-2) 100%); color: var(--vip-on);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 2px 10px rgba(224, 169, 59, 0.25);
+}
+.vip-btn:hover:not(:disabled), .tf-btn.vip-btn:hover:not(:disabled) { background: linear-gradient(180deg, #fff6d8 0%, #f8dc92 40%, #e8b44c 100%); }
+.vip-btn:disabled, .tf-btn.vip-btn:disabled { background: var(--vip-ground); color: var(--vip-ink); box-shadow: inset 0 0 0 1px var(--vip-line); opacity: 0.7; }
+
+.vip-row, tr.vip-row > td { background: var(--vip-ground-soft); color: var(--vip-ink); }
+.vip-row b, tr.vip-row > td b { color: inherit; }
+.vip-icon { color: var(--vip-1); }
+html[data-theme='light'] .vip-icon { color: var(--vip-3); }

@@ -8,7 +8,7 @@
  * Segmented, the bots table and pager) like the rest of the app's pages.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { TIER_SHARES, WELCOME_USD, type InviteMe, type InviteReferral } from '@sign/invites/claim';
+import { CREDIT_FEE, TIER_SHARES, VIP_CREDIT_USD, WELCOME_CAP, WELCOME_CAP_DAYS, WELCOME_USD, type InviteMe, type InviteReferral } from '@sign/invites/claim';
 import { DASH, fmtUsd } from '../../format';
 import { track } from '../../analytics/usage';
 import { notify } from '../../toast';
@@ -249,7 +249,7 @@ function CreditCards({ me, loading }: { me: InviteMe | null; loading: boolean })
           {c && <StatusPill size="sm" tone={c.paying ? 'positive' : 'neutral'} dot>{c.paying ? 'Paying your fees' : c.balanceUsd > 0 ? 'Collecting' : 'Empty'}</StatusPill>}
         </div>
         {loading ? <Skeleton className="rf-skel-big" /> : <b className={`rf-big${c && c.balanceUsd < 0 ? ' neg' : ''}`}>{c ? usd2(c.balanceUsd) : DASH}</b>}
-        {c && c.grantedUsd > 0 && <StatusPill size="sm" icon="star" className="sv-gold rf-vipcredit">Includes your {usd2(c.grantedUsd)} VIP credit</StatusPill>}
+        {c && c.grantedUsd > 0 && <StatusPill size="sm" icon="star" className="vip-pill rf-vipcredit">Includes your {usd2(c.grantedUsd)} VIP credit</StatusPill>}
         <p className="rf-fine">Pays your ValueDesk fees by itself. Never cash.</p>
       </Panel>
       <Panel className="rf-card">
@@ -292,8 +292,8 @@ function History({ me, loading }: { me: InviteMe | null; loading: boolean }) {
               {rows.slice(page * PAGE, page * PAGE + PAGE).map((h, i) => (
                 <tr key={`${h.at}-${i}`}>
                   <td className="dim">{day(h.at)}</td>
-                  <td>{h.kind === 'earn' ? <span className="rf-type"><span className={`rf-tier is-${h.tier ?? 1}`}>T{h.tier ?? 1}</span>{h.from}</span> : h.kind === 'grant' ? <span className="rf-type is-vip">VIP credit</span> : <span className="rf-type">Fees paid</span>}</td>
-                  <td className={`right num ${h.kind === 'spend' ? 'dim' : 'pos'}`}>{h.kind === 'spend' ? '−' : '+'}{credit(h.usd)}</td>
+                  <td>{h.kind === 'earn' ? <span className="rf-type"><span className={`rf-tier is-${h.tier ?? 1}`}>T{h.tier ?? 1}</span>{h.from}</span> : h.kind === 'grant' ? <span className="rf-type"><b className="vip-text">VIP credit</b></span> : <span className="rf-type">Fees paid</span>}</td>
+                  <td className={`right num ${h.kind === 'spend' ? 'dim' : h.kind === 'grant' ? '' : 'pos'}`}>{h.kind === 'grant' ? <b className="vip-text">+{credit(h.usd)}</b> : <>{h.kind === 'spend' ? '−' : '+'}{credit(h.usd)}</>}</td>
                 </tr>
               ))}
             </tbody>
@@ -315,21 +315,27 @@ function RetryState({ address, what }: { address: string; what: string }) {
 
 /* ---------------------------------------------------------------- how it works ----- */
 
+/**
+ * The programme's current values, all of them, from the shared rules (claim.ts): the terms name this page for them
+ * (owner 2026-11-14: changing a value must never need the terms signed again).
+ */
 function HowItWorks({ onClose }: { onClose: () => void }) {
-  const steps: Array<[string, string]> = [
-    ['Share your link', 'It is your SoDEX referral code: one link for ValueDesk and SoDEX.'],
-    ['They join', `One free signature. No ValueDesk fee on their first $${WELCOME_USD.toLocaleString('en-US')}.`],
-    ['You earn, three tiers deep', `${TIER_SHARES.map(pct).join(' / ')} of the ValueDesk fees paid by your referrals, theirs, and the next. For as long as they trade.`],
-    ['Credits pay your fees', 'While you have credits your ValueDesk fee is 0.1 bp and credits pay the rest. Never cash, never moved.'],
+  const usd = (n: number) => `$${n.toLocaleString('en-US')}`;
+  const steps: Array<{ t: string; l: string; vip?: boolean }> = [
+    { t: 'Share your link', l: 'It is your SoDEX referral code: one link for ValueDesk and SoDEX.' },
+    { t: 'They join', l: `One free signature. No ValueDesk fee on their first ${usd(WELCOME_USD)} (${WELCOME_CAP} welcomes per link in ${WELCOME_CAP_DAYS} days).` },
+    { t: 'You earn, three tiers deep', l: `${TIER_SHARES.map(pct).join(' / ')} of the ValueDesk fees paid by your referrals, theirs, and the next. For as long as they trade.` },
+    { t: 'Credits pay your fees', l: `While you have credits your ValueDesk fee is ${(CREDIT_FEE / 10).toFixed(1)} bp and credits pay the rest. Never cash, never moved.` },
+    { t: 'VIP credit', l: `Every VIP wallet gets ${usd(VIP_CREDIT_USD)} of fee credit, once.`, vip: true },
   ];
   return (
     <Modal open size="sm" title="How referrals work" className="dlg" onClose={onClose}>
       <ol className="rf-how">
-        {steps.map(([t, l], i) => (
-          <li key={t}><i aria-hidden="true">{i + 1}</i><div><b>{t}</b><small>{l}</small></div></li>
+        {steps.map((s, i) => (
+          <li key={s.t} className={s.vip ? 'is-vip' : undefined}><i aria-hidden="true">{i + 1}</i><div><b className={s.vip ? 'vip-text' : undefined}>{s.t}</b><small>{s.l}</small></div></li>
         ))}
       </ol>
-      <p className="rf-how__foot">A wallet joins once, before its first trade on ValueDesk. No one joins their own link, and a wallet with referrals joins no one.</p>
+      <p className="rf-how__foot">These are the current values; they may change for future fees. A wallet joins once, before its first trade on ValueDesk. No one joins their own link, and a wallet with referrals joins no one.</p>
     </Modal>
   );
 }

@@ -373,8 +373,8 @@ function ValueDesk({ address }: { address: string | null }) {
                   <td className="num">{fmtRate(builderRateToFraction(tier.fee))}</td>
                 </tr>
               ))}
-              <tr>
-                <td>VIP</td>
+              <tr className="vip-row">
+                <td><b className="vip-text">VIP</b></td>
                 <td>≥ $5,000,000 own volume, or a VIP program</td>
                 <td className="num">{fmtRate(builderRateToFraction(BOT_FEE_VIP))}</td>
               </tr>

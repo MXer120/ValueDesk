@@ -138,7 +138,7 @@ export function Fees() {
                 ))}
               </tbody>
             </table>
-            <p className="dv-dim">{found.vip ? 'VIP: the lowest tier on every product.' : 'Not VIP.'} 14-day volume {found.volume14dUsd === null ? 'unknown' : `$${int(found.volume14dUsd)}`}.</p>
+            <p className="dv-dim">{found.vip ? <><b className="vip-text">VIP</b>: the lowest tier on every product.</> : 'Not VIP.'} 14-day volume {found.volume14dUsd === null ? 'unknown' : `$${int(found.volume14dUsd)}`}.</p>
           </div>
         )}
       </Section>
@@ -191,7 +191,7 @@ export function Fees() {
                       <td className="dv-mono" title={g.address}>{short(g.address)}</td>
                       <td>{g.label}{!on && <span className="dv-quiet"> · {g.from > now ? 'starts later' : 'ended'}</span>}</td>
                       <td>{g.products.map((x) => PRODUCTS.find((y) => y.id === x)?.label ?? x).join(', ')}</td>
-                      <td className="right dv-mono">{feeWords(g.fee)}</td>
+                      <td className="right dv-mono">{g.fee < 0 ? <b className="vip-text">{feeWords(g.fee)}</b> : feeWords(g.fee)}</td>
                       <td className="right" title={when(g.from)}>{when(g.from)}</td>
                       <td className="right">{g.until === null ? 'No end' : when(g.until)}</td>
                       <td className="right">{on || g.from > now ? <button type="button" className="dv-btn" disabled={!!busy} onClick={() => void end(g)}>{busy === `end-${g.id}` ? 'Signing…' : 'End now'}</button> : null}</td>

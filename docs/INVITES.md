@@ -174,18 +174,25 @@ Not verified:
 
 ## Terms, for sign-off (section 6, ValueDesk builder fee): NOT in the terms yet
 
-> **Referrals and fee credits.** A wallet that has not traded through ValueDesk yet may join with another wallet's
-> referral link by signing once with its wallet. It then pays no ValueDesk builder fee on its first $100,000 of
-> volume after joining (all its volume on SoDEX counts). Of the ValueDesk builder fees a joined wallet pays, the wallet
-> that referred it receives 25% as fee credits, that wallet's referrer 10%, and the next one up 5%, for as long as the
-> joined wallet trades. Fee credits are not money: they cannot be paid out, transferred or exchanged, and they only pay
-> the receiving wallet's own ValueDesk builder fee, which is 0.1 bp while it has credits (the rest of the fee it would
-> have paid is taken from them). SoDEX's own fees and SoDEX's own referral programme are not affected. Referring
-> yourself or wallets you control, or any attempt to obtain credits or the fee waiver by other means than genuine
-> referrals, is not allowed; we may then withhold or remove credits and end the waiver. We may change or end the
-> programme for future fees; credits already earned remain usable.
+Owner, 2026-11-14: "needs to be more general so if we change values terms dont need to be resigned". So the line
+names no amount, share, rate, cap or level count. Like section 6's own "the tiers are shown in the app and may change
+for future orders", it points to the Referrals page. Every current value is listed there, read from the same rules the
+server applies (`claim.ts`): the How it works dialog. Changing a value is then a release, never a new terms version.
+
+Proposed bullet for section 6:
+
+> **Referrals and fee credits.** You may join ValueDesk through another wallet's referral link, once and before you
+> trade through ValueDesk, by signing with your wallet. A wallet that joined may pay a lower ValueDesk builder fee, or
+> none, on part of its volume, and the wallets that referred it may receive fee credits: a share of the ValueDesk
+> builder fees it pays. We may also give fee credits for other reasons, for example to VIP wallets. Who qualifies, the
+> amounts, the shares, the limits and the fee that applies while credits are used are shown on the Referrals page; they
+> may change for future fees without changing these terms. Fee credits are not money: they cannot be paid out,
+> transferred or exchanged, and they only pay your own ValueDesk builder fee. SoDEX's own fees and SoDEX's own referral
+> programme are not affected. Referring yourself or wallets you control, or any other way of obtaining credits or a
+> lower fee than through genuine referrals, is not allowed; we may then withhold or remove credits and end a lower fee.
+> We may change or end the programme for future fees; credits already given remain usable.
 
 Still for the owner to decide:
 - whether unused credits should expire (not built);
-- the welcome cap of 50 per inviter per 30 days;
 - a legal check of a referral reward in the owner's jurisdiction.
+

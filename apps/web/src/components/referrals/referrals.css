@@ -114,5 +114,6 @@
 .rf-stats .rf-table { margin-top: 0; }
 .rf-state { padding: 10px 6px; }
 .rf-vipcredit { align-self: flex-start; }
-.rf-type.is-vip { color: #e0a93b; font-family: var(--font-text); font-weight: 600; }
-html[data-theme='light'] .rf-type.is-vip { color: #9a6c14; }
+/* The VIP credit's line in "How it works": gold like every VIP mark (vip.css). */
+.rf-how li.is-vip { background: var(--vip-ground-soft); }
+.rf-how li.is-vip i { background: var(--vip-ground); color: var(--vip-ink); }

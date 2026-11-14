@@ -933,11 +933,12 @@
 .bots-vip__bars b { font-family: var(--font-num); font-size: 13px; font-weight: 500; }
 .bots-vip__perks { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--muted); }
 .bots-vip__perks li { display: inline-flex; align-items: center; gap: 6px; }
-.bots-vip__perks svg { color: var(--pos); }
+.bots-vip__perks svg { color: var(--vip-1); }
+html[data-theme='light'] .bots-vip__perks svg { color: var(--vip-3); }
 .bots-vip__act { display: flex; align-items: center; gap: 12px; }
 .bots-vip__on { display: flex; align-items: center; gap: 14px; }
 .bots-vip__on p { margin: 0; font-size: 13px; color: var(--muted); }
-.bots-vip__badge { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 12px; background: color-mix(in srgb, var(--pos) 16%, transparent); color: var(--pos); }
+.bots-vip__badge { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 12px; background: var(--vip-ground); color: var(--vip-1); }
 @media (max-width: 720px) { .bots-vip__bars { grid-template-columns: minmax(0, 1fr); } }
 
 /* VIP move, full screen below the navbar and beside the rail. */
@@ -1185,7 +1186,10 @@ html[data-glass] .bots-page { background: transparent; }
 .bots-goldbar.is-full > i { box-shadow: 0 0 18px rgba(246, 210, 122, 0.7); }
 @keyframes goldGlare { 0% { transform: translateX(-120%); } 55%, 100% { transform: translateX(320%); } }
 .bots-vip.is-compact .bots-vip__b { gap: 10px; }
-.bots-vip .tf-shell-head .tf-tile, .bots-vip > header .tf-tile { color: var(--gold-1); background: color-mix(in srgb, #e0a93b 16%, transparent); }
+.bots-vip .tf-shellhead .tf-tile, .bots-vip > header .tf-tile { color: var(--gold-1); background: color-mix(in srgb, #e0a93b 16%, transparent); }
+/* The card's title in gold, like every VIP mark (vip.css). */
+.bots-vip .tf-shellhead__title { background: linear-gradient(170deg, var(--vip-hi) 0%, var(--vip-1) 45%, var(--vip-2) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent; justify-self: start; width: fit-content; }
+html[data-theme='light'] .bots-vip .tf-shellhead__title { background: linear-gradient(180deg, #c99a3a 0%, #a77c2a 55%, #7d5a1a 100%); -webkit-background-clip: text; background-clip: text; }
 
 .bots-vipwin { --gold-1: #f6d27a; }
 .bots-vipwin__bg { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(50% 45% at 50% 32%, rgba(246, 210, 122, 0.22), transparent 70%), radial-gradient(80% 60% at 50% 100%, rgba(224, 169, 59, 0.08), transparent 70%); animation: vipIn 600ms ease both; }
@@ -1759,18 +1763,14 @@ html[data-theme='light'] .bots-vip__nums b, html[data-theme='light'] .bots-vip__
 .sv-ladder__next small, .sv-ladder__credit { color: var(--muted); font-size: 12px; line-height: 1.4; }
 .sv-ladder__credit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
 /* The VIP step in gold (owner 2026-11-14: "make the vip thing gold"): the Become-VIP card's metal, never an edge. */
-.sv-ladder__rows li.is-vip { --gold-1: #f6d27a; --gold-2: #e0a93b; background: linear-gradient(100deg, rgba(246, 210, 122, 0.09) 0%, rgba(224, 169, 59, 0.04) 100%); }
-.sv-ladder__rows li.is-vip .sv-ladder__when { display: inline-flex; align-items: center; gap: 6px; color: var(--gold-1); font-weight: 600; }
+.sv-ladder__rows li.is-vip { background: var(--vip-ground-soft); }
+.sv-ladder__rows li.is-vip .sv-ladder__when { display: inline-flex; align-items: center; gap: 6px; color: var(--vip-ink); font-weight: 600; }
 .sv-ladder__rows li.is-vip .sv-ladder__fee { background: linear-gradient(180deg, #fff1c4 0%, #f6d27a 45%, #c9a04a 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .sv-ladder__rows li.is-vip .sv-ladder__fee small { -webkit-text-fill-color: currentColor; color: color-mix(in srgb, #e0a93b 70%, transparent); }
 .sv-ladder__rows li.is-vip.is-you { background: linear-gradient(100deg, rgba(246, 210, 122, 0.16) 0%, rgba(224, 169, 59, 0.08) 100%); box-shadow: inset 0 0 0 1px rgba(246, 210, 122, 0.22); }
-.sv-crown { width: 14px; height: 14px; flex: none; color: var(--gold-1); }
-.sv-gold.tf-pill { background: rgba(246, 210, 122, 0.16); color: #f6d27a; }
-.sv-gold.tf-pill .tf-pill__dot, .sv-gold .tf-dot { background: #f6d27a; }
-html[data-theme='light'] .sv-ladder__rows li.is-vip { --gold-1: #9a6c14; background: rgba(201, 160, 72, 0.1); }
+.sv-crown { width: 14px; height: 14px; flex: none; color: var(--vip-1); }
+html[data-theme='light'] .sv-crown { color: var(--vip-3); }
 html[data-theme='light'] .sv-ladder__rows li.is-vip .sv-ladder__fee { background: linear-gradient(180deg, #c99a3a 0%, #a77c2a 55%, #7d5a1a 100%); -webkit-background-clip: text; background-clip: text; }
-html[data-theme='light'] .sv-gold.tf-pill { background: rgba(201, 160, 72, 0.18); color: #8a6214; }
-html[data-theme='light'] .sv-gold.tf-pill .tf-pill__dot, html[data-theme='light'] .sv-gold .tf-dot { background: #b8862a; }
 .sv-ladder__note { margin: 0; color: var(--dim); font-size: 11.5px; line-height: 1.4; }
 
 @media (max-width: 1100px) { .sv-fees { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sv-fees > :last-child { grid-column: 1 / -1; } }

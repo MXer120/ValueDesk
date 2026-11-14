@@ -8,6 +8,7 @@
 import { BOT_FEE_LADDER, BOT_FEE_VIP } from '@copy-engine';
 import { FEE_TIERS, STAKING_TIERS, fmtSoso, type FeeTierRow } from '../../fees';
 import { fmtUsd } from '../../format';
+import type { ReactNode } from 'react';
 import { Panel, ProgressBar, StatusPill } from './kit/kit';
 
 const bp = (tenths: number) => `${(tenths / 10).toFixed(1)} bp`;
@@ -25,8 +26,8 @@ export function Ladder({ title, line, rows, at, next, credit, note }: {
   rows: LadderRow[];
   /** The wallet's row (null: not known yet). */
   at: number | null;
-  /** The next step: what it needs and how far the wallet is (0..1, null: no bar). */
-  next?: { words: string; reach: number | null } | null;
+  /** The next step: what it needs and how far the wallet is (0..1, null: no bar); `vip`: the step is VIP (gold). */
+  next?: { words: ReactNode; reach: number | null; vip?: boolean } | null;
   /** Credits or the welcome lower this fee now: said under it, with the fee it is at. */
   credit?: { fee: string; words: string } | null;
   note?: string;
@@ -42,13 +43,13 @@ export function Ladder({ title, line, rows, at, next, credit, note }: {
           <li key={r.key} className={[i === at ? 'is-you' : '', r.vip ? 'is-vip' : ''].filter(Boolean).join(' ')} aria-current={i === at ? 'true' : undefined}>
             <span className="sv-ladder__when">{r.vip && <Crown />}{r.when}</span>
             <span className="sv-ladder__fee">{r.fee}{r.sub && <small>{r.sub}</small>}</span>
-            <span className="sv-ladder__mark">{i === at && <StatusPill size="sm" tone="brand" dot className={r.vip ? 'sv-gold' : undefined}>You</StatusPill>}</span>
+            <span className="sv-ladder__mark">{i === at && <StatusPill size="sm" tone="brand" dot className={r.vip ? 'vip-pill' : undefined}>You</StatusPill>}</span>
           </li>
         ))}
       </ol>
       {next && (
         <div className="sv-ladder__next">
-          {next.reach !== null && <ProgressBar value={next.reach} max={1} size="sm" tone={next.reach >= 1 ? 'positive' : 'brand'} label={`Progress to the next step of ${title}`} />}
+          {next.reach !== null && <ProgressBar value={next.reach} max={1} size="sm" tone={next.reach >= 1 ? 'positive' : 'brand'} color={next.vip ? 'var(--vip-2)' : undefined} label={`Progress to the next step of ${title}`} />}
           <small>{next.words}</small>
         </div>
       )}
@@ -86,7 +87,7 @@ export function SavingsFees({ sodexTier, stakeTier, makerFee, perDay, volumeUsd,
   const botNext = botAt !== null && !vip
     ? botAt + 1 < BOT_FEE_LADDER.length
       ? { words: `${fmtUsd(Math.max(0, BOT_FEE_LADDER[botAt + 1]!.fromUsd - v), 0)} more 14-day volume to ${bp(BOT_FEE_LADDER[botAt + 1]!.fee)}`, reach: Math.min(1, v / BOT_FEE_LADDER[botAt + 1]!.fromUsd) }
-      : { words: `${fmtUsd(Math.max(0, 5e6 - v), 0)} more 14-day volume to VIP`, reach: Math.min(1, v / 5e6) }
+      : { words: <>{fmtUsd(Math.max(0, 5e6 - v), 0)} more 14-day volume to <b className="vip-text">VIP</b></>, reach: Math.min(1, v / 5e6), vip: true }
     : null;
   // SoDEX: the next tier at the bots' pace (SoDEX's own 14-day volume is not public; the bots' is what this page knows).
   const sNext = sodexTier !== null ? FEE_TIERS.find((t) => t.tier === sodexTier + 1) ?? null : null;
