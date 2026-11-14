@@ -14,6 +14,8 @@
  * and Bots are not places. They trade from the same Perps and Spot accounts, so they sit past
  * a divider, carry an "Activity" label, and show what they did, with no balance of their own.
  */
+import { ShareButton } from '../share/host';
+import { portfolioCard } from '../share/shareData';
 import { PortfolioMargin } from '../bots/Allocation';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AccountTabs } from '../AccountTabs';
@@ -223,7 +225,23 @@ function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }
     <Card
       className="pf-card--chart pfx-chart"
       title={<RangePicker value={view} options={CHART_VIEWS} onChange={setView} label="Chart" align="start" />}
-      action={view === 'calendar' ? undefined : <ViewSeg value={range} options={RANGES} onChange={setRange} label="Timeframe" />}
+      action={view === 'calendar' ? undefined : (
+        <span className="pfx-chart__acts">
+          {c.address && c.venue.points && (
+            <ShareButton
+              label="Share this PnL"
+              make={() => {
+                // The card is the PnL over the window shown, whichever chart is open (SoDEX's own series).
+                const pw = curveFor(c, h24, range, (p) => pnlAt('pnl-total', p));
+                if (!pw || pw.change === null) return null;
+                const value = c.model.account?.accountValue;
+                return portfolioCard({ range, change: pw.change, ys: pw.points.map((p) => p.v), trades: null, volume: null, value: typeof value === 'number' && Number.isFinite(value) ? value : null, wallet: c.address });
+              }}
+            />
+          )}
+          <ViewSeg value={range} options={RANGES} onChange={setRange} label="Timeframe" />
+        </span>
+      )}
     >
       {win && win.change !== null && (
         <div className="pfx-chart__head">

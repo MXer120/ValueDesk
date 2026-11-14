@@ -1,4 +1,5 @@
 import './cssOrder';
+import { ShareHost } from './components/share/host';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
@@ -694,6 +695,9 @@ function AppShell() {
           <AccountSetup address={address} hold={onboarding.holdSetup} />
           <OnboardingHost gate={onboarding} address={address} provider={provider} onFinish={() => { setTab('trade'); }} />
           <ReferralOfferHost address={address} provider={provider} hold={onboarding.holdSetup || !!onboarding.open} />
+        </Guarded>
+        <Guarded name="Share">
+          <ShareHost address={address} />
         </Guarded>
         <Guarded name="Indexing">
           <IndexPrompt address={address} />

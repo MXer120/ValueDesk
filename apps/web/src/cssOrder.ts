@@ -68,6 +68,7 @@ import './components/InfoDot.css';
 import './components/bots/kit/kit.css';
 import './components/bots/botsPages.css';
 import './components/bots/hedge.css';
+import './components/share/share.css';
 import './components/portfolio/PortfolioPage.css';
 import './components/explore/cohorts/Cohorts.css';
 import './components/explore/markets/Markets.css';

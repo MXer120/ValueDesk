@@ -36,6 +36,8 @@
  *
  * HISTORY is read in AccountHistory.tsx; `History` below only picks the view.
  */
+import { ShareButton } from './share/host';
+import { positionCard } from './share/shareData';
 import { fmtFixed, fmtNum, toInputText } from '../numStyle';
 import { decimalInput } from './numberInput';
 import { requestDeposit, requestTransfer, requestWithdraw, requestWithdrawFrom } from './account/actions';
@@ -873,6 +875,12 @@ function PositionsInner({
                         </span>
                       )}
                       {margin && <span className="acct-mode">{MARGIN_WORD[margin]}</span>}
+                      {!readOnly && upnl !== null && (
+                        <ShareButton
+                          label={`Share this ${sym?.displayName ?? symbol} position`}
+                          make={() => positionCard({ symbol: sym?.displayName ?? symbol, side: dir, leverage: lev > 0 ? lev : null, entry: entry > 0 ? entry : null, mark, size: size > 0 ? size : null, unit: unit ?? '', upnl, roe, wallet: address ?? null })}
+                        />
+                      )}
                     </MarketCell>
                   </td>
                   <td className="num"><Unit value={qty(size, sym?.stepSize)} unit={unit} /></td>

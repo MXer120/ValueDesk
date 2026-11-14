@@ -20,6 +20,8 @@
  * Same rules as Account.tsx: an absent value is an em-dash, never a 0, and a
  * failed read is ONLY "<What> couldn't load." with a Retry.
  */
+import { ShareButton } from './share/host';
+import { tradeCard, type TradeFigures } from './share/shareData';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { api, type Engine, type Symbol as MarketSymbol } from '../api';
 import { bumpAccountResource, useAccountResource } from '../accountFeeds';
@@ -973,6 +975,18 @@ function closedOf(p: any, byName: Map<string, MarketSymbol>, funding: FundingInd
 
 const TRADE_LINK = (symbol: string) => `/trade?symbol=${encodeURIComponent(symbol)}`;
 
+/** A closed position's figures for its share card (share/shareData.ts tradeCard). */
+function tradeFigures(c: Closed, account: string | null | undefined): TradeFigures {
+  const size = num(c.maxOi);
+  const opened = num(c.opened);
+  const closed = num(c.closed);
+  return {
+    symbol: c.sym?.displayName ?? c.symbol, side: c.side, leverage: c.lev > 0 ? c.lev : null,
+    entry: num(c.entry) || null, exit: c.close > 0 ? c.close : null, size: size > 0 ? size : null, unit: c.unit ?? '',
+    pnl: c.pnl, roe: c.roe, opened: opened > 0 ? opened : null, closed: closed > 0 ? closed : null, wallet: account ?? null,
+  };
+}
+
 /** Image 15: the market line, a row of big figures, a row of small ones. A hairline between cards, no box. */
 function PositionCard({ p, byName, funding, account }: { p: any; byName: Map<string, MarketSymbol>; funding: FundingIndex } & Acct) {
   const c = closedOf(p, byName, funding);
@@ -999,6 +1013,7 @@ function PositionCard({ p, byName, funding, account }: { p: any; byName: Map<str
         <SidePill dir={c.side} prefix={pill} />
         {c.lev > 0 && <span className="acct-lev">{c.lev}x</span>}
         {c.open && <Pill tone="accent">Open</Pill>}
+        {!c.open && <ShareButton label={`Share this ${c.sym?.displayName ?? c.symbol} trade`} make={() => tradeCard(tradeFigures(c, account))} />}
         <a className="acct-card__link" href={TRADE_LINK(c.symbol)} title={`Trade ${c.sym?.displayName ?? c.symbol}`} aria-label={`Open ${c.sym?.displayName ?? c.symbol} on the trade page`}>
           <ExternalIcon />
         </a>
@@ -1077,6 +1092,7 @@ function ClosedTable({ rows, byName, funding, account }: { rows: any[]; byName: 
                 <MarketCell symbol={c.symbol} sym={c.sym} engine="perps">
                   <SidePill dir={c.side} prefix={c.margin ? MARGIN_WORD[c.margin] : undefined} />
                   {c.lev > 0 && <span className="acct-lev">{c.lev}x</span>}
+                  {!c.open && <ShareButton label={`Share this ${c.sym?.displayName ?? c.symbol} trade`} make={() => tradeCard(tradeFigures(c, account))} />}
                 </MarketCell>
               </td>
               <td className={`num ${toneOf(c.pnl)}`}>{signedUsd(c.pnl)}</td>

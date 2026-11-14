@@ -1,0 +1,43 @@
+/* The share dialog (ShareCard.tsx), in the dialog language (dialog.css), after the owner's mock (shareDialog.mjs). */
+.share-dlg .modal-body { max-height: none; }
+.share-stage { position: relative; padding: 6px 0 2px; }
+.share-preview {
+  display: block; width: 100%; border-radius: 12px;
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.08), 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+.share-preview.is-square { width: 58%; margin: 0 auto; }
+.share-wait {
+  display: grid; place-items: center; aspect-ratio: 16 / 9; background: #0b0b0b; color: var(--dim); font-size: var(--fs-xs);
+}
+.share-wait.is-square { aspect-ratio: 1 / 1; }
+.share-stage.is-busy .share-preview { opacity: 0.6; transition: opacity 120ms; }
+
+/* The foot: the note on its own line, the buttons under it on the right (the mock). */
+.share-dlg .dlg-foot { flex-wrap: wrap; row-gap: 10px; }
+.share-dlg .dlg-foot > .share-made { flex: 1 0 100%; }
+.share-dlg .dlg-foot .dlg-actions { margin-left: auto; }
+.share-dlg .dlg-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.share-dlg .dlg-btn svg { flex: none; }
+.share-made { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12px; }
+.share-made i { width: 6px; height: 6px; border-radius: 50%; background: var(--pos); display: inline-block; flex: none; }
+
+/* The small button that opens it, beside a row's other actions. */
+.share-btn {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); cursor: pointer; transition: background 120ms, color 120ms; flex: none;
+}
+.share-btn:hover { background: rgb(var(--ink) / 0.08); color: var(--text); }
+.share-btn:focus-visible { outline: 2px solid var(--focus, #fff); outline-offset: 2px; }
+.share-btn.is-text { width: auto; padding: 0 10px; gap: 6px; display: inline-flex; align-items: center; font: inherit; font-size: var(--fs-xs); }
+
+/* The portfolio chart's head: share beside the timeframe. */
+.pfx-chart__acts { display: inline-flex; align-items: center; gap: 6px; }
+
+/* A phone: the square card larger, the buttons filling the width in one row (two or three). */
+@media (max-width: 560px) {
+  .share-preview.is-square { width: 78%; }
+  .share-dlg .dlg-foot .dlg-actions { margin-left: 0; flex: 1 0 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .share-dlg .dlg-foot .dlg-actions > .dlg-btn { min-width: 0; padding-left: 8px; padding-right: 8px; white-space: nowrap; }
+  /* Three buttons (a narrow window, not a phone): Post on X on its own row first. */
+  .share-dlg .dlg-foot .dlg-actions > .dlg-btn.is-go:nth-child(3) { grid-column: 1 / -1; grid-row: 1; }
+}

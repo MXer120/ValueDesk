@@ -1,6 +1,6 @@
-import { createLogger, defineConfig, type Plugin } from 'vite';
+import { createLogger, defineConfig, searchForWorkspaceRoot, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -326,6 +326,19 @@ export default defineConfig({
   },
   server: {
     host: '127.0.0.1',
+    /*
+     * A git worktree's node_modules are links into the main checkout: their real folders sit outside this root, and
+     * Vite refused their files (the self-hosted fonts came back 403, so every page drew in a fallback face). The
+     * workspace root as usual, plus wherever the two node_modules really are.
+     */
+    fs: {
+      allow: [
+        searchForWorkspaceRoot(process.cwd()),
+        ...[fileURLToPath(new URL('./node_modules', import.meta.url)), fileURLToPath(new URL('../../node_modules', import.meta.url))]
+          .filter((p) => existsSync(p))
+          .map((p) => realpathSync(p)),
+      ],
+    },
     /*
      * 5173 stays. SoPoints authentication needs an origin Privy's allowlist
      * accepts, and this is not one - but the login is proxied through the

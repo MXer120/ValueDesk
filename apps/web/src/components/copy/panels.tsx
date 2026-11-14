@@ -34,6 +34,8 @@ import { skipReasonLabel, type SimTrade } from './sim';
 import { fmtSignedPct, fmtSignedUsd, fmtSize } from './setup';
 import type { CopyContext } from './useCopy';
 import { fmtPlain } from '../../numStyle';
+import { openShare } from '../share/host';
+import { copyCard } from '../share/shareData';
 
 /* ------------------------------------------------------------ helpers ----- */
 
@@ -264,6 +266,13 @@ function MyCopies({ src: c, rows, onActivity }: { src: CopiesSource; rows: CopyR
                 <td className="num">
                   <span className="copy-acts">
                     <button type="button" className="pf-ctl" onClick={() => onActivity(s.id)}>Activity</button>
+                    <button
+                      type="button"
+                      className="pf-ctl"
+                      onClick={() => { const card = copyCard({ leader: lead.address, venue: VENUE_LABEL[lead.venue], pnl: v.pnl, pct: v.pnlPct, since: s.createdAt, multiplier: s.settings.multiplier ?? 1, orders: v.orders, realized: v.realizedPnl, paper: s.settings.paper, wallet: s.owner }); if (card) openShare(card); }}
+                    >
+                      Share
+                    </button>
                     {s.status === 'active' && <button type="button" className="pf-ctl" disabled={busy === s.id} onClick={() => void act(r, 'pause')}>Pause</button>}
                     {(s.status === 'paused' || s.status === 'halted' || s.status === 'blocked') && (
                       <button type="button" className="pf-ctl" disabled={busy === s.id} onClick={() => void act(r, 'resume')}>Resume</button>
