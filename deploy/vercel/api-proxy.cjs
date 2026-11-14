@@ -142,7 +142,12 @@ const isCopyPath = (path) => String(path ?? '').startsWith(COPY_PREFIX) || Strin
  * wallet's inbox (apps/server/src/routes/reports.ts, ops/inbox.ts): POST passes, the thread token or
  * wallet session passes, nothing is cached.
  */
-const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p.startsWith('/api/vs/inbox/') || p === '/api/vs/client-errors' || p === '/api/vs/username' || p === '/api/vs/username/change' || p === ANALYTICS_PATH; };
+const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p.startsWith('/api/vs/inbox/') || p === '/api/vs/client-errors' || p === '/api/vs/username' || p === '/api/vs/username/change' || p === ANALYTICS_PATH || isInvitesPath(p); };
+/**
+ * Referrals (apps/server/src/routes/invites.ts): a code's check, one wallet's credits, a signed join (POST). Like the
+ * username: POST passes, never cached (a wallet's own credits), the small body limit.
+ */
+const isInvitesPath = (p) => p === '/api/vs/invites/check' || p === '/api/vs/invites/me' || p === '/api/vs/invites/join';
 /** The app's own analytics (apps/server/src/routes/analytics.ts): a POST, the viewer's country and region added. */
 const ANALYTICS_PATH = '/api/vs/a';
 /**

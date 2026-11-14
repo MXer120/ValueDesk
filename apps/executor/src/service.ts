@@ -2157,6 +2157,12 @@ export class ExecutorService {
     // the other - the runtime pairs only legs that name each other, so no wallet can attach itself to another's hedge.
     if (spec.kind === 'hedge') {
       if (spec.shape === 'pair' && spec.partner === owner) throw new ApiError(400, 'partner', 'The second leg must be another wallet: one account cannot hold both sides of a market.');
+      // Real two-wallet pairs wait for the owner's terms decision (the bot terms forbid trading with accounts you
+      // control): practice only, but for the live test's own wallets. A hedge against spot is one wallet: real is fine.
+      const tester = Array.isArray(this.cfg.liveAlgoWallets) && this.cfg.liveAlgoWallets.includes(owner.toLowerCase());
+      if (spec.shape === 'pair' && !spec.paper && !this.cfg.hedgePairsLive && !tester) {
+        throw new ApiError(403, 'hedge-pair', 'Two-wallet hedges run as practice for now. A hedge against spot runs with real orders.');
+      }
       await this.needOrderOverMinimum(spec.symbol, Math.min(spec.sliceUsd, spec.sizeUsd));
     }
     // A restart (feature 'bot-restart'): the bot it replaces is this wallet's own bot; a take-over keeps its market and mode.

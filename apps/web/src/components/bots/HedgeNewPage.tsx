@@ -17,6 +17,7 @@ import { goBots, type BotsView } from '../../bots/routes';
 import { refusalOf } from '../../bots/presets';
 import { HEDGE_DEFAULT, hedgeNumbers, hedgeProblems, hedgeSpecs, isAddress, newPairId, savePending, type HedgeDraft } from '../../bots/hedge';
 import { useReferral } from '../../onboarding/referral';
+import { HEDGE_PAIRS_LIVE } from '../../bots/hedgeRules';
 import { requestDeposit, requestTransfer } from '../account/actions';
 import { notify } from '../../toast';
 import { StrategyTile } from './BotIcon';
@@ -50,7 +51,10 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
   const markets = useBotMarkets('24h');
   const mk = markets.data?.markets.find((m) => m.symbol === d.symbol) ?? null;
   const mark = mk?.price ?? null;
-  const paper = !ctx.liveAllowed || d.paper;
+  // Two-wallet hedges run as practice until the terms allow real ones (hedgeRules.ts HEDGE_PAIRS_LIVE; the executor
+  // refuses them too).
+  const pairPractice = d.shape === 'pair' && !HEDGE_PAIRS_LIVE;
+  const paper = !ctx.liveAllowed || d.paper || pairPractice;
   // The market's maximum leverage by default (owner: "even at max leverage"): the least margin locked per leg.
   useEffect(() => { if (sym?.maxLeverage && d.leverage > sym.maxLeverage) set({ leverage: sym.maxLeverage }); }, [sym?.maxLeverage]); // eslint-disable-line react-hooks/exhaustive-deps
   const n = hedgeNumbers({ ...d, paper }, mark ?? 0, maxLev, takerBps, ctx.feeTenths / 10);
@@ -204,8 +208,8 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
                   <Segmented label="On stop" value={d.onStop} onChange={(v) => set({ onStop: v })} options={[{ value: 'close', label: 'Close both' }, { value: 'keep', label: 'Keep' }]} />
                 </Row>
                 {ctx.liveAllowed && (
-                  <Row title="Practice" line="Runs against the live market and sends nothing.">
-                    <Switch checked={d.paper} onChange={(v) => set({ paper: v })} label="Practice" hideLabel />
+                  <Row title="Practice" line={pairPractice ? 'Two-wallet hedges run as practice for now. A hedge against spot runs with real orders.' : 'Runs against the live market and sends nothing.'}>
+                    <Switch checked={paper} disabled={pairPractice} onChange={(v) => set({ paper: v })} label="Practice" hideLabel />
                   </Row>
                 )}
               </Panel>

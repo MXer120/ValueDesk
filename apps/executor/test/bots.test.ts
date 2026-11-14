@@ -204,9 +204,20 @@ test('hedge: two wallets each start their own leg of a pair; a wallet cannot pai
   assert.equal(main.algo.spec.kind, 'hedge');
   assert.equal(leg.algo.owner, b.address);
   assert.ok(main.bot?.hedge, 'the view carries the pair');
-  // A real hedge leg is refused off the beta list like every real bot.
-  assert.equal(await code(svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: { ...HEDGE, pairId: 'pair-exec-0002', side: 'buy', role: 'main', partner: b.address, maxLossUsd: 50, paper: false }, seed: 3 }), ctx)), '403:beta');
+  // A real two-wallet pair waits for the terms (owner 2026-11-14): refused, whatever else the wallet may do.
+  const real = { ...HEDGE, pairId: 'pair-exec-0002', side: 'buy', role: 'main', partner: b.address, maxLossUsd: 50, paper: false };
+  assert.equal(await code(svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: real, seed: 3 }), ctx)), '403:hedge-pair');
   await cleanup();
+  // Switched on (EXECUTOR_HEDGE_PAIRS=1): a real leg is then refused off the beta list like every real bot.
+  const on = make({ EXECUTOR_HEDGE_PAIRS: '1' });
+  on.svc.acceptTerms(a.sign(on.svc.executorId, 'accept-terms', TERMS), ctx);
+  assert.equal(await code(on.svc.algoStart(a.sign(on.svc.executorId, 'algo-start', { spec: real, seed: 3 }), ctx)), '403:beta');
+  await on.cleanup();
+  // The live test's own wallet (EXECUTOR_LIVE_ALGOS_WALLETS) is not held by the pair switch.
+  const tester = make({ EXECUTOR_LIVE_ALGOS_WALLETS: a.address });
+  tester.svc.acceptTerms(a.sign(tester.svc.executorId, 'accept-terms', TERMS), ctx);
+  assert.notEqual(await code(tester.svc.algoStart(a.sign(tester.svc.executorId, 'algo-start', { spec: real, seed: 3 }), ctx)), '403:hedge-pair');
+  await tester.cleanup();
 });
 
 test('bots: a running grid takes its take-profit and stop prices in place (2026-11-13), and a hedge its size and buffers', async () => {

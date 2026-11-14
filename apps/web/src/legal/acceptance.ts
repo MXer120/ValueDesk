@@ -52,9 +52,9 @@ import { normaliseCountry, siteAccess } from './jurisdictions.mjs';
 const log = logger('legal');
 
 /** The terms' version: a date, with a counter when they change twice on one day (2026-10-24.2). */
-export const SITE_TERMS_VERSION = '2026-11-10';
+export const SITE_TERMS_VERSION = '2026-11-14';
 /** keccak256(canonicalJSON({ terms: TERMS, risk: RISK })) of SITE_TERMS_VERSION; acceptance.test.ts recomputes it. */
-export const SITE_TERMS_HASH = '0x8e94a18b26b1d5d0e3345903abecc79594be332b2cedfd003c5436168baa9cf4';
+export const SITE_TERMS_HASH = '0x0f5a0b617b57019850fbb426b40f56351aef2232f5085b35ce524d35d18e2782';
 
 /* ------------------------------------------------------------- statements ----- */
 
