@@ -106,3 +106,20 @@ for (const code of catalogues) {
     assert.deepEqual(bad.slice(0, 20), [], `${bad.length} changed`);
   });
 }
+
+test("with nothing picked, the browser's language is used when we have it; the page keeps Chrome's translation off", async () => {
+  const { browserLanguage } = await import('./store');
+  assert.equal(browserLanguage(['pt-BR', 'en']), 'pt');
+  assert.equal(browserLanguage(['en-US']), 'en');
+  assert.equal(browserLanguage(['am-ET', 'fr-MA', 'en']), 'fr', 'a language we lack is skipped for the next one');
+  assert.equal(browserLanguage(['am-ET']), null, 'none we have: English');
+  assert.equal(browserLanguage(['zh-TW']), 'zh-TW');
+  assert.equal(browserLanguage(['zh-Hant-HK']), 'zh-TW');
+  assert.equal(browserLanguage(['zh', 'en']), 'zh-CN');
+  assert.equal(browserLanguage(['zh-Hans-CN']), 'zh-CN');
+  assert.equal(browserLanguage(['TR-tr']), 'tr');
+  assert.equal(browserLanguage(['', ' de-DE ']), 'de');
+  const html = readFileSync(`${web}index.html`, 'utf8');
+  assert.match(html, /<html lang="en" translate="no">/, 'Chrome Translate rewrites the tree React holds: insertBefore/removeChild crashes');
+  assert.match(html, /<meta name="google" content="notranslate" \/>/);
+});

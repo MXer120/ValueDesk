@@ -1,9 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
+    <!-- No browser page translation (2026-11-14): Chrome's Translate swaps the text nodes React holds for its
+         own <font> wrappers, so React's next insert or remove throws (NotFoundError insertBefore/removeChild,
+         seen on /copy, /trade and /bots/new, Chrome mobile) and every number it updates afterwards goes to a
+         detached node: prices freeze. The app translates itself (src/i18n, 17 languages, the browser's
+         language by default), in place, without touching the tree. -->
+    <meta name="google" content="notranslate" />
     <script src="/theme-boot.js"></script>
     <!-- IBM Plex Sans is self-hosted via @fontsource, imported in main.tsx.
          The Google Fonts CDN link that used to sit here was doing three bad
