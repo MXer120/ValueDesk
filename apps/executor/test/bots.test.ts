@@ -189,3 +189,41 @@ test('bots open for everyone (server 1 VALUEDESK_BOTS_OPEN, owner 2026-11-13): a
   await b.cleanup();
   BOTS_OPEN = undefined;
 });
+
+test('hedge: two wallets each start their own leg of a pair; a wallet cannot pair with itself; the executor advertises it', async () => {
+  const { svc, cleanup } = make();
+  assert.ok(svc.info({ viewerCountry: 'SG' }).features?.includes('hedge'));
+  const a = new Wallet();
+  const b = new Wallet();
+  const ctx = { viewerCountry: 'SG' };
+  for (const w of [a, b]) svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+  const HEDGE = { kind: 'hedge', symbol: 'BTC-USD', shape: 'pair', pairId: 'pair-exec-0001', sizeUsd: 1_000, minLiqPct: 3, growLiqPct: 6, sliceUsd: 200, maxSlipBps: 20, marginUsd: 200, leverage: 40, paper: true };
+  assert.equal(await code(svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: { ...HEDGE, side: 'buy', role: 'main', partner: a.address }, seed: 1 }), ctx)), '400:partner');
+  const main = await svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: { ...HEDGE, side: 'buy', role: 'main', partner: b.address }, seed: 1 }), ctx);
+  const leg = await svc.algoStart(b.sign(svc.executorId, 'algo-start', { spec: { ...HEDGE, side: 'sell', role: 'partner', partner: a.address }, seed: 2 }), ctx);
+  assert.equal(main.algo.spec.kind, 'hedge');
+  assert.equal(leg.algo.owner, b.address);
+  assert.ok(main.bot?.hedge, 'the view carries the pair');
+  // A real hedge leg is refused off the beta list like every real bot.
+  assert.equal(await code(svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: { ...HEDGE, pairId: 'pair-exec-0002', side: 'buy', role: 'main', partner: b.address, maxLossUsd: 50, paper: false }, seed: 3 }), ctx)), '403:beta');
+  await cleanup();
+});
+
+test('bots: a running grid takes its take-profit and stop prices in place (2026-11-13), and a hedge its size and buffers', async () => {
+  const { svc, cleanup } = make();
+  const w = new Wallet();
+  const ctx = { viewerCountry: 'SG' };
+  svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+  const g = await svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { kind: 'grid', symbol: 'BTC-USD', low: 50_000, high: 70_000, levels: 10, orderUsd: 20, paper: true }, seed: 4 }), ctx);
+  const up = (id: string, patch: unknown) => svc.algoAct(w.sign(svc.executorId, 'algo-action', { op: 'update', id, patch }), ctx);
+  const v = await up(g.algo.id, { takeProfitUsd: 25, upper: { price: 72_000, then: 'stop' }, lower: { price: 48_000, then: 'stop' } });
+  const s = v.algos.find((x) => x.algo.id === g.algo.id)!.algo.spec;
+  assert.ok(s.kind === 'grid' && s.takeProfitUsd === 25 && s.upper?.price === 72_000 && s.lower?.then === 'stop');
+  assert.equal(await code(up(g.algo.id, { upper: { price: 72_000, then: 'rush' } })), '400:patch');
+  const h = await svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { kind: 'hedge', symbol: 'BTC-USD', shape: 'spot', sizeUsd: 1_000, minLiqPct: 3, growLiqPct: 6, sliceUsd: 200, maxSlipBps: 20, marginUsd: 200, paper: true }, seed: 5 }), ctx);
+  const hv = await up(h.algo.id, { sizeUsd: 2_000, minLiqPct: 4, growLiqPct: 8 });
+  const hs = hv.algos.find((x) => x.algo.id === h.algo.id)!.algo.spec;
+  assert.ok(hs.kind === 'hedge' && hs.sizeUsd === 2_000 && hs.minLiqPct === 4);
+  assert.equal(await code(up(h.algo.id, { minLiqPct: 9 })), '409:state', 'the buffer must stay under the grow-back buffer');
+  await cleanup();
+});

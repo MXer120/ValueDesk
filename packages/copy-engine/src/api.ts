@@ -398,6 +398,16 @@ export interface AlgoUpdatePatch {
   low?: number;
   high?: number;
   spacing?: 'linear' | 'geometric';
+  /** A bot's take-profit (USD, null: none) and its stop prices (a bound that stops it; null: none). */
+  takeProfitUsd?: number | null;
+  upper?: { price: number; then: 'hold' | 'stop' } | null;
+  lower?: { price: number; then: 'hold' | 'stop' } | null;
+  /** A hedge: its size per leg and its buffers (hedge.ts). */
+  sizeUsd?: number;
+  minLiqPct?: number;
+  growLiqPct?: number;
+  sliceUsd?: number;
+  maxSlipBps?: number;
 }
 
 /** The fields of an AlgoUpdatePatch, for checking a signed one. */
@@ -405,6 +415,8 @@ export const ALGO_UPDATE_FIELDS: ReadonlyArray<keyof AlgoUpdatePatch> = [
   'quantity', 'limitPrice', 'maxSpreadBps', 'label',
   'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'endAt', 'onStop', 'outOfRange',
   'ref', 'noFair', 'pauseAfter', 'pauseMs', 'leverage', 'marginMode', 'postOnly', 'low', 'high', 'spacing',
+  // A grid's take-profit and stop prices (2026-11-13), and a hedge's size and buffers (2026-11-14).
+  'takeProfitUsd', 'upper', 'lower', 'sizeUsd', 'minLiqPct', 'growLiqPct', 'sliceUsd', 'maxSlipBps',
 ];
 
 /* -------------------------------------------------------------- responses ----- */
@@ -468,7 +480,7 @@ export interface ExecutorInfo {
  * 'day-key': it accepts requests signed by a wallet-approved day key (SignedCopyRequest.delegation); the site signs
  * with the wallet itself for an executor without it (an older release refuses a 64-byte signature).
  */
-export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier', 'bot-restart', 'day-key', 'terms-doc'] as const;
+export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier', 'bot-restart', 'day-key', 'terms-doc', 'hedge'] as const;
 
 export interface SessionGrant {
   token: string;

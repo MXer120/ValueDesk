@@ -238,6 +238,21 @@ function algoPatch(raw: unknown): AlgoUpdatePatch {
     if (r.spacing !== 'linear' && r.spacing !== 'geometric') throw new ApiError(400, 'patch', 'spacing must be linear or geometric.');
     out.spacing = r.spacing;
   }
+  if (r.takeProfitUsd !== undefined) {
+    if (r.takeProfitUsd !== null && !(typeof r.takeProfitUsd === 'number' && Number.isFinite(r.takeProfitUsd) && r.takeProfitUsd > 0)) throw new ApiError(400, 'patch', 'takeProfitUsd must be a positive number or null.');
+    out.takeProfitUsd = r.takeProfitUsd as number | null;
+  }
+  for (const k of ['upper', 'lower'] as const) {
+    if (r[k] === undefined) continue;
+    const b = r[k] as { price?: unknown; then?: unknown } | null;
+    if (b !== null && (typeof b !== 'object' || Array.isArray(b) || !(typeof b.price === 'number' && Number.isFinite(b.price) && b.price > 0) || (b.then !== 'hold' && b.then !== 'stop'))) throw new ApiError(400, 'patch', `${k} must be { price, then: hold or stop } or null.`);
+    out[k] = b as AlgoUpdatePatch['upper'];
+  }
+  for (const k of ['sizeUsd', 'minLiqPct', 'growLiqPct', 'sliceUsd', 'maxSlipBps'] as const) {
+    if (r[k] === undefined) continue;
+    if (!(typeof r[k] === 'number' && Number.isFinite(r[k]) && (r[k] as number) > 0)) throw new ApiError(400, 'patch', `${k} must be a positive number.`);
+    out[k] = r[k] as number;
+  }
   return out;
 }
 
@@ -2089,6 +2104,12 @@ export class ExecutorService {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new ApiError(400, 'seed', 'seed must be a 32-bit whole number.');
     if (spec.bot) this.needNotMoved(owner);
     if (spec.kind === 'mm' || spec.kind === 'grid') await this.needOrderOverMinimum(spec.symbol, spec.orderUsd);
+    // A hedge pair (owner 2026-11-14): its two legs are two wallets' own bots, each signed by its own wallet, each naming
+    // the other - the runtime pairs only legs that name each other, so no wallet can attach itself to another's hedge.
+    if (spec.kind === 'hedge') {
+      if (spec.shape === 'pair' && spec.partner === owner) throw new ApiError(400, 'partner', 'The second leg must be another wallet: one account cannot hold both sides of a market.');
+      await this.needOrderOverMinimum(spec.symbol, Math.min(spec.sliceUsd, spec.sizeUsd));
+    }
     // A restart (feature 'bot-restart'): the bot it replaces is this wallet's own bot; a take-over keeps its market and mode.
     const r = payload.restart as { from?: unknown; how?: unknown } | undefined;
     let old: AlgoRecord | null = null;
@@ -2110,8 +2131,8 @@ export class ExecutorService {
       throw new ApiError(429, 'limit', adds > 1 ? `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here, and this basket runs ${adds} (itself and one per market). ${live.length ? 'Cancel one first, or use fewer markets.' : 'Use fewer markets.'}` : `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
     }
     // One live bot per wallet and market: two would quote against each other's orders and share one position.
-    if ((spec.kind === 'mm' || spec.kind === 'grid') && !spec.paper) {
-      const other = live.find((x) => (x.spec.kind === 'mm' || x.spec.kind === 'grid') && !x.spec.paper && x.spec.symbol === spec.symbol);
+    if ((spec.kind === 'mm' || spec.kind === 'grid' || spec.kind === 'hedge') && !spec.paper) {
+      const other = live.find((x) => (x.spec.kind === 'mm' || x.spec.kind === 'grid' || x.spec.kind === 'hedge') && !x.spec.paper && x.spec.symbol === spec.symbol);
       if (other) throw new ApiError(409, 'bot-market', `A bot of yours already trades ${spec.symbol}${other.spec.label ? ` ("${other.spec.label}")` : ''}. Stop it first, or choose another market.`, { algoId: other.id, symbol: spec.symbol });
     }
     // A real bot is always followed on SoDEX's live socket (owner 2026-11-09: "our bots always need to be connected via
@@ -2175,6 +2196,14 @@ export class ExecutorService {
     }
     // The checks it passed, for its activity (owner 2026-11-08: a status channel per bot; no server details there).
     const checks: string[] = [];
+    if (spec.kind === 'hedge') {
+      checks.push(`${spec.symbol} is trading on SoDEX, and each step is at least its minimum order.`);
+      if (spec.shape === 'pair') checks.push(`It pairs only with a ${spec.role === 'main' ? 'second' : 'main'} leg that ${shortWallet(spec.partner ?? '')} signed and that names this wallet.`);
+      if (!spec.paper) {
+        checks.push('Your trading key is approved and your SoDEX account was found.');
+        checks.push(`Nothing else of yours trades ${spec.symbol} (no other bot, position, copy or algo order).`);
+      }
+    }
     if (spec.kind === 'mm' || spec.kind === 'grid') {
       checks.push(`${spec.symbol} is trading on SoDEX, and the order size is at least its minimum order.`);
       if (!spec.paper) {

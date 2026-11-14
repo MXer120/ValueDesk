@@ -429,6 +429,8 @@ export function botReserveUsd(s: AlgoSpec, minOrderUsd?: number | null): number 
   const each = s.kind === 'mm' || s.kind === 'grid' ? Math.max(s.orderUsd, minOrderUsd ?? 0) : 0;
   if (s.kind === 'mm') return s.maxInventoryUsd + 2 * each * Math.max(1, s.levels ?? 1);
   if (s.kind === 'grid') return each * s.levels;
+  // A hedge leg holds up to its size (its liquidation buffer may hold it smaller, never larger).
+  if (s.kind === 'hedge') return s.sizeUsd;
   return 0;
 }
 

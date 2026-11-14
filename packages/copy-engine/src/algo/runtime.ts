@@ -379,10 +379,12 @@ const EXITS_MAX_REFUSALS = 5;
 /** What update() may change on a running algo. */
 const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
 /** ...and on a running bot (its market, range and levels are what it is: a different one is a new bot). */
-const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid', ReadonlySet<string>>> = {
+const BOT_UPDATABLE: Readonly<Record<'mm' | 'grid' | 'hedge', ReadonlySet<string>>> = {
   // Everything but the market, the kind and practice or real (owner 2026-11-08: every setting saves in place, no restart).
   mm: new Set(['ref', 'noFair', 'placeBps', 'calmBps', 'calmMs', 'pauseAfter', 'pauseMs', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'maxInventoryUsd', 'offsetTicks', 'chaseTicks', 'minRepriceMs', 'skewTicks', 'edgeBps', 'queueGuard', 'levels', 'moveGuard', 'refBps', 'pullBps', 'placeBps', 'calmBps', 'calmMs', 'stillBps', 'stillMs', 'restMs', 'flowGate', 'quiet', 'quietOnly', 'news', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'endAt', 'onStop']),
   grid: new Set(['low', 'high', 'levels', 'spacing', 'direction', 'leverage', 'marginMode', 'postOnly', 'label', 'maxSpreadBps', 'upper', 'lower', 'orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'endAt', 'onStop', 'outOfRange']),
+  // Its sizes, buffers and limits save in place; the shape, the pair and the side never (a new hedge).
+  hedge: new Set(['sizeUsd', 'minLiqPct', 'growLiqPct', 'sliceUsd', 'maxSlipBps', 'leverage', 'label', 'maxSpreadBps', 'upper', 'lower', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'endAt', 'onStop']),
 };
 /** How long the patient taker's prints are kept per market (the longest flowGate window). */
 const FLOW_KEEP_MS = 3_600_000;
@@ -1283,7 +1285,7 @@ export class AlgoRuntime {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) throw new Error('This algo has ended.');
     // Only these: what the algo is (its kind, market, side, practice or live, reduce-only...) was signed and checked when it started.
-    const allowed = a.spec.kind === 'mm' || a.spec.kind === 'grid' ? BOT_UPDATABLE[a.spec.kind] : UPDATABLE;
+    const allowed = a.spec.kind === 'mm' || a.spec.kind === 'grid' || a.spec.kind === 'hedge' ? BOT_UPDATABLE[a.spec.kind] : UPDATABLE;
     const other = Object.keys(patch).filter((k) => !allowed.has(k) && (patch as Record<string, unknown>)[k] !== undefined);
     if (other.length) {
       throw new Error(a.spec.kind === 'grid'
