@@ -147,6 +147,14 @@ CREATE TABLE IF NOT EXISTS days (
   micro INTEGER NOT NULL,
   PRIMARY KEY (builder, address, engine, day)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS traded (
+  builder INTEGER NOT NULL,
+  address TEXT NOT NULL,
+  engine TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  micro INTEGER NOT NULL,
+  PRIMARY KEY (builder, address, engine, day)
+) WITHOUT ROWID;
 `;
 
 /** Day counts are kept this long: longer than any volume window a file may set (config MAX_VOLUME_DAYS). */
@@ -249,6 +257,11 @@ export interface FillsCommit {
   state: EngineRow;
   /** Set when the sweep is complete: fills older than this are no longer needed for telling repeats. */
   pruneFillsBefore: number | null;
+  /**
+   * Every fill's notional by UTC day - with or without a builder fee, ours or not - for fills newer than any read
+   * before: all the wallet traded on SoDEX (the invite welcome's measure, invites/service.ts).
+   */
+  tradedByDay?: ReadonlyMap<number, number>;
 }
 
 export interface LookupCommit {
@@ -271,6 +284,8 @@ export interface LookupCommit {
 }
 
 type Row = Record<string, unknown>;
+/** A completed sweep has read every fill older than this before its end (SoDEX's trades lag a little). */
+const READ_MARGIN_MS = 60_000;
 const num = (v: unknown): number => (typeof v === 'number' ? v : typeof v === 'bigint' ? Number(v) : 0);
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -425,6 +440,34 @@ export class BuilderStore {
     return rows.map((r) => ({ key: str(r.order_key), engine: (str(r.engine) === 'spot' ? 'spot' : 'perps') as Engine, cl: typeof r.cl === 'string' ? r.cl : null, t: num(r.t), rate: num(r.rate), countedMicro: num(r.counted_micro) }));
   }
 
+  /** All a wallet traded on SoDEX from UTC day `fromDay` on, per engine (every fill the sweeps read, micro-USD). */
+  tradedMicro(builder: number, address: string, fromDay: number): { perps: number; spot: number } {
+    const rows = this.q('SELECT engine, sum(micro) AS m FROM traded WHERE builder = ? AND address = ? AND day >= ? GROUP BY engine').all(builder, address, fromDay) as Row[];
+    const out = { perps: 0, spot: 0 };
+    for (const r of rows) {
+      const m = Math.min(Number.MAX_SAFE_INTEGER, num(r.m));
+      if (str(r.engine) === 'spot') out.spot = m;
+      else out.perps = m;
+    }
+    return out;
+  }
+
+  /**
+   * Up to when every fill of the wallet has been read, per engine the later of its newest fill read and its last
+   * completed sweep (less a margin for SoDEX's own delay), the older engine's. 0 while an engine was never swept. What
+   * the executor counts its own fills after (the invite budget, invites/service.ts).
+   */
+  readThrough(builder: number, address: string): number {
+    const one = (e: Engine) => { const r = this.engine(builder, address, e); return r.sweptAt > 0 ? Math.max(r.hi, r.sweptAt - READ_MARGIN_MS) : r.hi; };
+    return Math.min(one('perps'), one('spot'));
+  }
+
+  /** The first fill of the wallet's oldest order still waiting for the explorer (null: none waits). */
+  oldestOpen(builder: number, address: string): number | null {
+    const r = this.q(`SELECT min(t) AS t FROM orders WHERE builder = ? AND address = ? AND state IN (${OrderState.pending}, ${OrderState.check})`).get(builder, address) as Row | undefined;
+    return r && r.t !== null && r.t !== undefined ? num(r.t) : null;
+  }
+
   /** How many wallets the ledger holds (one count at open; kept current by the caller). */
   walletCount(): number {
     return num((this.q('SELECT count(*) AS n FROM wallets').get() as Row).n);
@@ -549,6 +592,10 @@ export class BuilderStore {
       ).run(perps, spot, c.queued, c.noBuilder.n, c.noBuilder.at, c.found ? 1 : 0, c.builder, c.address);
       for (const o of c.rows) this.putOrder(c.builder, c.address, c.engine, o);
       this.addDays(c.builder, c.address, c.engine, c.byDay);
+      if (c.tradedByDay?.size) {
+        const add = this.q('INSERT INTO traded (builder, address, engine, day, micro) VALUES (?, ?, ?, ?, ?) ON CONFLICT (builder, address, engine, day) DO UPDATE SET micro = min(9007199254740991, micro + excluded.micro)');
+        for (const [day, micro] of c.tradedByDay) if (micro > 0) add.run(c.builder, c.address, c.engine, day, micro);
+      }
       const put = this.q('INSERT OR IGNORE INTO fills (builder, address, engine, fill_key, t) VALUES (?, ?, ?, ?, ?)');
       for (const f of c.fills) put.run(c.builder, c.address, c.engine, f.key, f.t);
       this.q(

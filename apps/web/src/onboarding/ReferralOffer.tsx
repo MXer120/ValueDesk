@@ -11,7 +11,8 @@ import { browseAccepted, lookedAround, useAcceptanceRevision } from '../legal/ac
 import { Modal } from '../components/Modal';
 import { DlgFoot } from '../components/dialogParts';
 import type { Eip1193Provider } from '../wallet';
-import { REFERRAL_CODE, REFERRAL_URL, loadReferral, useReferral } from './referral';
+import { REFERRAL_CODE, loadReferral, referralUrl, useReferral } from './referral';
+import { pendingInvite, useSodexCode } from '../invites/invites';
 import { OFFER_EVENT, WE_GET, YOU_GET, markOffered, offeredAt, shouldOffer, type Benefit } from './referralRules';
 import './onboarding.css';
 
@@ -25,20 +26,22 @@ export function ReferralOfferHost({ address, provider, hold }: {
   hold: boolean;
 }) {
   useAcceptanceRevision();
-  const own = useReferral(provider ? address : null);
+  // A wallet that came on a referral link is offered that link's code (InviteHost first, then here), never ours over it.
+  const sc = useSodexCode(provider ? address : null);
+  const own = useReferral(provider ? address : null, sc.code);
   const [open, setOpen] = useState<{ wallet: string; why?: string; asked: boolean } | null>(null);
   const termsUp = !browseAccepted() && !lookedAround();
 
   // By itself: the connected wallet, once SoDEX has said 'none', when nothing else is on screen.
   useEffect(() => {
-    if (!address || !provider || hold || termsUp || open) return;
+    if (!address || !provider || hold || termsUp || open || !sc.ready || pendingInvite()) return;
     if (!shouldOffer(own, offeredAt(address))) return;
     const t = window.setTimeout(() => {
       if (document.querySelector('[role="dialog"]')) return; // someone else's turn; asked again on the next change
       setOpen({ wallet: address.toLowerCase(), asked: false });
     }, SETTLE_MS);
     return () => window.clearTimeout(t);
-  }, [address, provider, hold, termsUp, own, open]);
+  }, [address, provider, hold, termsUp, own, open, sc.ready]);
 
   // On request, for any wallet (no rest period: the user is setting that wallet up right now).
   useEffect(() => {
@@ -57,6 +60,8 @@ export function ReferralOfferHost({ address, provider, hold }: {
   return (
     <ReferralOffer
       wallet={open.wallet}
+      code={open.asked ? REFERRAL_CODE : sc.code}
+      theirs={!open.asked && sc.theirs}
       why={open.why}
       other={!!address && open.wallet !== address.toLowerCase()}
       onClose={() => { markOffered(open.wallet); setOpen(null); }}
@@ -64,8 +69,17 @@ export function ReferralOfferHost({ address, provider, hold }: {
   );
 }
 
-export function ReferralOffer({ wallet, why, other, onClose }: { wallet: string; why?: string; other: boolean; onClose: () => void }) {
-  const state = useReferral(wallet);
+export function ReferralOffer({ wallet, code = REFERRAL_CODE, theirs = false, why, other, onClose }: {
+  wallet: string;
+  /** The code offered: ours, or the code of the referral link the wallet came with (`theirs`). */
+  code?: string;
+  theirs?: boolean;
+  why?: string;
+  other: boolean;
+  onClose: () => void;
+}) {
+  const state = useReferral(wallet, code);
+  const you = theirs ? YOU_GET.map((b) => (b.title === "ValueDesk's Squad" ? { ...b, title: "Your inviter's Squad", line: b.line.replace('our Squad', "your inviter's Squad") } : b)) : YOU_GET;
   const [opened, setOpened] = useState(false);
   const joined = state === 'bound' || state === 'pending';
   const seen = useRef(false);
@@ -73,28 +87,28 @@ export function ReferralOffer({ wallet, why, other, onClose }: { wallet: string;
     if (!seen.current) { seen.current = true; markOffered(wallet); }
   }, [wallet]);
   return (
-    <Modal open size="md" title={joined ? 'Code applied' : 'Use ValueDesk\'s SoDEX code'} className="dlg ref-offer" onClose={onClose}>
+    <Modal open size="md" title={joined ? 'Code applied' : theirs ? "Use your inviter's SoDEX code" : 'Use ValueDesk\'s SoDEX code'} className="dlg ref-offer" onClose={onClose}>
       {why && <p className="ref-offer__why">{why}</p>}
       <div className={`onb-code${joined ? ' is-on' : ''}`}>
         <i aria-hidden="true">{joined && <Check />}</i>
-        <b>{REFERRAL_CODE}</b>
+        <b>{code}</b>
       </div>
       <p className="ref-offer__note">
         {joined
           ? state === 'pending'
             ? 'Joined. SoDEX finishes it on your next visit to sodex.com after your first deposit.'
-            : `${other ? short(wallet) : 'Your wallet'} is on ${REFERRAL_CODE}.`
+            : `${other ? short(wallet) : 'Your wallet'} is on ${code}.`
           : <>Shown because SoDEX says {other ? short(wallet) : 'this wallet'} has no referral code yet. You confirm with {other ? 'that wallet' : 'your wallet'} on sodex.com; no funds move.</>}
       </p>
       <div className="ref-offer__cols">
-        <BenefitList label="What you get" items={YOU_GET} />
-        <BenefitList label="What ValueDesk gets" items={WE_GET} />
+        <BenefitList label="What you get" items={you} />
+        <BenefitList label={theirs ? 'What your inviter gets' : 'What ValueDesk gets'} items={WE_GET} />
       </div>
       <DlgFoot left={joined ? undefined : <button type="button" className="dlg-btn" onClick={onClose}>{opened ? 'Close' : 'Not now'}</button>}>
         {joined ? (
           <button type="button" className="dlg-btn is-go" onClick={onClose}>Done</button>
         ) : (
-          <a className="dlg-btn is-go ref-offer__go" href={REFERRAL_URL} target="_blank" rel="noopener noreferrer" onClick={() => setOpened(true)}>
+          <a className="dlg-btn is-go ref-offer__go" href={referralUrl(code)} target="_blank" rel="noopener noreferrer" onClick={() => setOpened(true)}>
             {opened ? 'Open SoDEX again' : 'Apply on SoDEX'}
           </a>
         )}

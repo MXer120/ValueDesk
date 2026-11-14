@@ -37,13 +37,13 @@ import { useCallback, useEffect, useState } from 'react';
  * over whatever you were already looking at. A whole route whose only job was to
  * hold a Connect button made connecting a place you had to navigate to first.
  */
-export const TABS = ['trade', 'explore', 'copy', 'leaderboard', 'portfolio', 'scan', 'bots'] as const;
+export const TABS = ['trade', 'explore', 'copy', 'leaderboard', 'portfolio', 'scan', 'bots', 'referrals'] as const;
 
 /**
  * The pages the bar lists. Leaderboard is a page like any other (its URL, its number key) but its
  * link lives under More since 2026-11-05 (owner: "move leaderboard under more"; NavMore.tsx).
  */
-export const NAV_TABS: readonly (typeof TABS)[number][] = TABS.filter((t) => t !== 'leaderboard');
+export const NAV_TABS: readonly (typeof TABS)[number][] = TABS.filter((t) => t !== 'leaderboard' && t !== 'referrals');
 
 /**
  * Pages that were removed, and where their old links now land (Account's
@@ -65,6 +65,7 @@ export const TAB_LABELS: Record<Tab, string> = {
   portfolio: 'Portfolio',
   scan: 'Scan',
   bots: 'Bots',
+  referrals: 'Referrals',
 };
 
 export const pathForTab = (tab: Tab): string => `/${tab}`;

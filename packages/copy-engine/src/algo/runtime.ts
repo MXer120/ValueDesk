@@ -261,6 +261,8 @@ export interface AlgoHost {
   sinkFor(a: AlgoRecord): AlgoSink | null;
   /** The builder fee on this algo's orders, as a fraction of the notional (for the fee estimate). */
   builderRate?(a: AlgoRecord): number;
+  /** A real fill of a live algo: its notional (USD) and when. What a budgeted lower fee is counted against. */
+  onFill?(a: AlgoRecord, notionalUsd: number, at: number): void;
   /**
    * SoDEX's maker fee for this wallet on this market, bp (its fee tier), or null when not known. Booked on every
    * resting fill instead of the market's base maker fee. Absent: the market's base rate.
@@ -4702,6 +4704,9 @@ export class AlgoRuntime {
     const tradeRate = isMaker ? (tier !== null && Number.isFinite(tier) ? tier / 10_000 : (m?.makerFee ?? (m?.takerFee ?? 0.0004) / 2)) : (m?.takerFee ?? 0.0004);
     const rate = tradeRate + (this.host.builderRate?.(a) ?? 0);
     a.fees += dv * rate;
+    if (!a.spec.paper) {
+      try { this.host.onFill?.(a, dv, Date.now()); } catch { /* the host's bookkeeping never stops a fill */ }
+    }
     if (a.spec.bot) {
       a.book ??= emptyBook();
       a.k.lastFillAt = Date.now();

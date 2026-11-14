@@ -72,6 +72,7 @@ const CopyPage = lazyPage('copy', () => import('./components/copy/CopyPage').the
 const CopyRunner = lazyChunk(() => import('./copy/CopyRunner'));
 /** Algo orders run in this browser (algo/AlgoRunner.tsx): mounted on every page, loaded after it. */
 const AlgoRunner = lazyChunk(() => import('./algo/AlgoRunner'));
+const ReferralsPage = lazyPage('referrals', () => import('./components/referrals/ReferralsPage').then((m) => m.ReferralsPage));
 const LeaderboardPage = lazyPage('leaderboard', () => import('./components/leaderboard/LeaderboardPage').then((m) => m.LeaderboardPage));
 const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/PortfolioDashboard').then((m) => m.PortfolioDashboard));
 const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
@@ -107,6 +108,7 @@ const PAGES: Record<Tab, LazyPage<any>> = {
   portfolio: PortfolioDashboard,
   scan: ScanDashboard,
   bots: BotsPage,
+  referrals: ReferralsPage,
 };
 
 /** The page the first render shows, and the one an old URL is then moved to (router.ts). */
@@ -599,7 +601,7 @@ function AppShell() {
             it pushed the account card - the only thing you can act on before
             scanning - below the fold. */}
         {/* Explore and Copy are about traders, not one market: no strip there either. */}
-        {tab !== 'trade' && tab !== 'portfolio' && tab !== 'scan' && tab !== 'leaderboard' && tab !== 'explore' && tab !== 'copy' && tab !== 'bots' && (
+        {tab !== 'trade' && tab !== 'portfolio' && tab !== 'scan' && tab !== 'leaderboard' && tab !== 'explore' && tab !== 'copy' && tab !== 'bots' && tab !== 'referrals' && (
           <div className="marketbar">
             <Guarded name="Ticker">
               <TickerBar
@@ -650,6 +652,10 @@ function AppShell() {
 
         {shown === 'bots' && (
           <Guarded name="Bots" bare><BotsPage address={address} provider={provider} /></Guarded>
+        )}
+
+        {shown === 'referrals' && (
+          <Guarded name="Referrals" bare><ReferralsPage address={address} /></Guarded>
         )}
 
 

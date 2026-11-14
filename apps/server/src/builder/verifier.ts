@@ -615,6 +615,10 @@ export class Verifier {
       // What the sweep before this one already added up: the overlap is read twice on purpose.
       use = use.filter((f) => !(f.time <= held.hi && this.store.fillSeen(builder, address, engine, f.key)));
 
+      // All the wallet traded, fills newer than any sweep read before (a page of this sweep never repeats one).
+      const tradedByDay = new Map<number, number>();
+      for (const f of use) if (f.time > held.hi && f.notionalMicro > 0) tradedByDay.set(dayOf(f.time), (tradedByDay.get(dayOf(f.time)) ?? 0) + f.notionalMicro);
+
       const history = this.store.feeHistory(builder, address);
       const defaults = this.defaults(cfg);
       const appKeys = this.store.keysOf(address).size > 0;
@@ -640,6 +644,7 @@ export class Verifier {
           ? { hi, swFrom: 0, swEnd: 0, swTop: 0, swPages: 0, sweptAt: this.now() }
           : { hi: held.hi, swFrom: from, swEnd: nextEnd, swTop: top, swPages: pages, sweptAt: held.sweptAt },
         pruneFillsBefore: done ? hi - OVERLAP_MS : null,
+        tradedByDay,
       });
       if (!ok) {
         this.jobs.delete(address);

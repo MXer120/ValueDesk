@@ -290,6 +290,23 @@ const usd = (x: number) => `$${Math.round(x).toLocaleString('en-US')}`;
 
 /** A wallet's perks (VIP, programs) unread this long are dropped: a program ended on server 1 stops counting here too. */
 const PERKS_STALE_MS = 6 * 60 * 60_000;
+/** How long the executor keeps a wallet's fills for a perk budget (a budget read older than this stops the perk). */
+const PERK_FILLS_KEEP_MS = 6 * 60 * 60_000;
+
+/** The budget of a lowered fee from the invite welcome or fee credits (server 1, invites/service.ts PerkBudget). */
+export interface PerkBudget { capUsd: number; perUsd: { copy: number; bots: number }; through: number }
+interface Perk { fee: number; until: number | null; budget?: PerkBudget }
+
+/** A budget as the API sends it, or null when any part of it is missing or not a number. */
+export function readBudget(x: unknown): PerkBudget | null {
+  const b = x as { capUsd?: unknown; perUsd?: { copy?: unknown; bots?: unknown }; through?: unknown } | null;
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const cap = n(b?.capUsd);
+  const copy = n(b?.perUsd?.copy);
+  const bots = n(b?.perUsd?.bots);
+  const through = n(b?.through);
+  return cap === null || copy === null || bots === null || through === null ? null : { capUsd: cap, perUsd: { copy, bots }, through };
+}
 /** At most this many wallets' perks, beta answers and maker fees are kept in memory (the db keeps the beta answers). */
 const WALLET_CACHE_MAX = 20_000;
 /** A wallet's own SoDEX maker fee (GET .../fee-rate, weight 2) is read again after this. */
@@ -403,7 +420,36 @@ export class ExecutorService {
    * volume (GET /api/vs/builder/volume): the fee and until when. A program's end is checked on every order, so it
    * stops counting the moment it ends, whatever the cache.
    */
-  private readonly perks = new Map<string, { vip: boolean; copy: { fee: number; until: number | null } | null; bots: { fee: number; until: number | null } | null; at: number }>();
+  private readonly perks = new Map<string, { vip: boolean; copy: Perk | null; bots: Perk | null; at: number }>();
+  /**
+   * The real fills this executor booked per wallet lately (copies and algos), what a budgeted perk is counted against:
+   * the invite welcome and fee credits come with a budget (server 1's invites/service.ts perkBudget) - what is left,
+   * what each dollar of an order uses up, and up to when the ledger had read the wallet's fills. Fills after that are
+   * counted here; at the budget the perk stops until the next read says more is left.
+   */
+  private readonly fills = new Map<string, Array<{ t: number; usd: number; p: 'copy' | 'bots' }>>();
+
+  /** Note a real fill (copy or algo) for the budget. Kept PERK_FILLS_KEEP_MS, bounded per wallet and in wallets. */
+  private noteFill(owner: string, p: 'copy' | 'bots', usd: number, at: number): void {
+    if (!(usd > 0)) return;
+    const o = owner.toLowerCase();
+    const list = this.fills.get(o) ?? [];
+    list.push({ t: at, usd, p });
+    const keep = at - PERK_FILLS_KEEP_MS;
+    while (list.length && (list[0]!.t < keep || list.length > 20_000)) list.shift();
+    this.fills.delete(o);
+    this.fills.set(o, list);
+    if (this.fills.size > 50_000) this.fills.delete(this.fills.keys().next().value!);
+  }
+
+  /** Whether a perk's budget is used up by this executor's fills since the ledger's read. */
+  private budgetSpent(owner: string, b: PerkBudget): boolean {
+    // Older than what this executor remembers: it cannot tell what was used - the perk stops (the safe side).
+    if (b.through < Date.now() - PERK_FILLS_KEEP_MS) return true;
+    let used = 0;
+    for (const f of this.fills.get(owner.toLowerCase()) ?? []) if (f.t > b.through) used += f.usd * (b.perUsd[f.p] ?? 1);
+    return used >= b.capUsd;
+  }
 
   /** The wallet's perks as last read, while that read is not older than PERKS_STALE_MS (VIP and programs end with it). */
   private freshPerks(owner: string, now = Date.now()) {
@@ -416,6 +462,7 @@ export class ExecutorService {
     const now = Date.now();
     const x = this.freshPerks(owner, now)?.[p];
     if (!x || (x.until !== null && x.until <= now)) return Infinity;
+    if (x.budget && this.budgetSpent(owner, x.budget)) return Infinity;
     return Math.max(0, x.fee);
   }
 
@@ -523,6 +570,7 @@ export class ExecutorService {
       log: deps.log,
       sinkFor: (s) => this.sinkFor(s),
       builderFor: async (s) => (cfg.builderId > 0 ? { id: cfg.builderId, fee: this.copyFee(s.owner, await this.freshVolume(s.owner)) } : null),
+      onFill: (s, usd, at) => this.noteFill(s.owner, 'copy', usd, at),
       // The stricter of the country declared when the copy started and the one in the wallet's current terms.
       policyFor: (s) => screenPolicy(this.policyNow(s.owner, s.country, s.observedCountry), s.owner, s.settings.leader.address),
       keyProblem: async (s) => this.guard.holdOf({ kind: 'copy', id: s.id, owner: s.owner }) ?? this.keyProblem(s.owner),
@@ -560,6 +608,7 @@ export class ExecutorService {
       sinkFor: (a) => this.algoSink(a),
       // Bots: the bot ladder by 14-day volume; VIP, or beta in its first 30 days, the lowest step (policy.ts botFeeFor).
       builderRate: (a) => (cfg.builderId > 0 ? (a.spec?.bot === true ? this.botFee(a.owner, this.volumeOf(a.owner)) : this.copyFee(a.owner, this.volumeOf(a.owner))) / 100_000 : 0),
+      onFill: (a, usd, at) => this.noteFill(a.owner, a.spec?.bot === true ? 'bots' : 'copy', usd, at),
       problem: async (a) => this.guard.holdOf({ kind: 'algo', id: a.id, owner: a.owner }) ?? this.algoProblem(a),
       brake: () => this.brakeText('algos'),
       // SoDEX's maintenance holds every live algo and bot; nothing counts as a refusal meanwhile.
@@ -2397,9 +2446,17 @@ export class ExecutorService {
       }
       if (!res.ok || !body?.ok || typeof body.usd !== 'number' || !Number.isFinite(body.usd)) throw new Error(`HTTP ${res.status}`);
       this.rememberVolume(owner, body.usd);
-      const perk = (x: unknown) => {
-        const o = x as { fee?: unknown; until?: unknown } | null | undefined;
-        return o && typeof o.fee === 'number' && Number.isFinite(o.fee) ? { fee: o.fee, until: typeof o.until === 'number' ? o.until : null } : null;
+      const perk = (x: unknown): Perk | null => {
+        const o = x as { fee?: unknown; until?: unknown; budget?: unknown } | null | undefined;
+        if (!o || typeof o.fee !== 'number' || !Number.isFinite(o.fee)) return null;
+        const out: Perk = { fee: o.fee, until: typeof o.until === 'number' ? o.until : null };
+        if (o.budget !== undefined) {
+          const b = readBudget(o.budget);
+          // A budget that cannot be read: no perk (never a lowered fee without its limit).
+          if (!b) return null;
+          out.budget = b;
+        }
+        return out;
       };
       remember(this.perks, owner, { vip: body.vip === true, copy: perk(body.fees?.copy), bots: perk(body.fees?.bots), at: Date.now() });
       return body.usd;

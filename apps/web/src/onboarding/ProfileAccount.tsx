@@ -10,7 +10,8 @@ import { shortAddr } from '../format';
 import { WalletError } from '../wallet';
 import { USERNAME_MAX, usernameProblem, usernameProblemText } from '@sign/profiles/claim';
 import { ProfileError, changeUsername, checkName, setFirstUsername, useUsername } from './profile';
-import { REFERRAL_CODE, REFERRAL_URL, useReferral } from './referral';
+import { referralUrl, useReferral } from './referral';
+import { useSodexCode } from '../invites/invites';
 
 export type NameCheckState = { at: 'idle' | 'checking' | 'free' | 'same' } | { at: 'no'; why: string };
 
@@ -118,7 +119,9 @@ function UsernameCard({ address }: { address: string }) {
 }
 
 function ReferralCard({ address }: { address: string }) {
-  const state = useReferral(address);
+  // The code of the referral link this wallet came with, else ours (invites.ts useSodexCode).
+  const { code, theirs } = useSodexCode(address);
+  const state = useReferral(address, code);
   if (state === 'other' || state === 'self' || state === 'unknown') return null;
   return (
     <>
@@ -127,18 +130,18 @@ function ReferralCard({ address }: { address: string }) {
         <div className="stg__row">
           <span className="stg__rowtext">
             <b>
-              {state === 'bound' ? `Joined with ${REFERRAL_CODE}` : state === 'pending' ? `One step left on ${REFERRAL_CODE}` : `Use code ${REFERRAL_CODE}`}
+              {state === 'bound' ? `Joined with ${code}` : state === 'pending' ? `One step left on ${code}` : `Use code ${code}`}
             </b>
             <small>
               {state === 'bound'
-                ? 'Your wallet is on ValueDesk\'s SoDEX referral code.'
+                ? `Your wallet is on ${theirs ? "your inviter's" : "ValueDesk's"} SoDEX referral code.`
                 : state === 'pending'
                   ? 'Open SoDEX once: it finishes the code with your wallet.'
-                  : 'ValueDesk\'s referral code on SoDEX, for wallets without one. You confirm with your wallet on SoDEX, and SoDEX rewards ValueDesk for wallets that use it. No funds move.'}
+                  : `${theirs ? "Your inviter's" : "ValueDesk's"} referral code on SoDEX, for wallets without one. You confirm with your wallet on SoDEX, and SoDEX rewards ${theirs ? 'your inviter' : 'ValueDesk'} for wallets that use it. No funds move.`}
             </small>
           </span>
           {state !== 'bound' && (
-            <a className="stg__btn stg-name__link" href={REFERRAL_URL} target="_blank" rel="noopener noreferrer">{state === 'pending' ? 'Open SoDEX' : 'Apply on SoDEX'}</a>
+            <a className="stg__btn stg-name__link" href={referralUrl(code)} target="_blank" rel="noopener noreferrer">{state === 'pending' ? 'Open SoDEX' : 'Apply on SoDEX'}</a>
           )}
         </div>
       </div>

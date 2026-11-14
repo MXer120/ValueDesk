@@ -28,6 +28,7 @@ import { EXPLORER_BASE } from './explorer.js';
 import { builderDbPath, termsKeyPath, tiersPath } from './paths.js';
 import { BuilderStore, type WalletRow } from './store.js';
 import { dayOf } from './counting.js';
+import type { PerkBudget } from '../invites/service.js';
 import { KeySource, TERMS_TTL_MS, termsMessage } from './terms.js';
 import { COPY_LADDER_DAYS, MICRO, NO_FACTS, copyLadderFee, decide, type Decision, type Flag, type NextTier, type WalletFacts } from './tiers.js';
 import {
@@ -149,6 +150,24 @@ export class BuilderService {
   /** Add a source of programs (the invites' credits and welcome), read with the dev page's on every fee decision. */
   setExtraPrograms(f: ((address: string, now: number) => FeeProgram[]) | null): void {
     this.extra = f;
+  }
+
+  /** What bounds those programs' lowered fee in the executor (invites/service.ts perkBudget). */
+  private budget: ((address: string, now: number) => PerkBudget | null) | null = null;
+
+  setPerkBudget(f: ((address: string, now: number) => PerkBudget | null) | null): void {
+    this.budget = f;
+  }
+
+  /** The executor's budget for a wallet's lowered fee from credits or the welcome (null: none, or no source). */
+  perkBudget(address: string, now = this.now()): PerkBudget | null {
+    try {
+      return this.budget ? this.budget(address.toLowerCase(), now) : null;
+    } catch (e) {
+      this.o.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'builder tiers: the credit budget could not be read');
+      // No budget known: the lowered fee is not handed to the executor at all (see routes/builder.ts).
+      return { kind: 'credits', capUsd: 0, perUsd: { copy: 1, bots: 1 }, through: now };
+    }
   }
 
   constructor(private readonly o: BuilderServiceOptions) {

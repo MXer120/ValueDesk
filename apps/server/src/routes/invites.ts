@@ -1,10 +1,10 @@
 /**
- * Invites and fee credits (invites/claim.ts has the rules):
+ * Referrals and fee credits (invites/claim.ts has the rules). A wallet's code is its SoDEX referral code: the page
+ * reads it from SoDEX itself, nothing here makes one.
  *
- *   GET  /api/vs/invites/code?address=0x…   the wallet's invite code, made the first time it is asked for. Nothing is
- *                                           signed: a code only ever earns for its own wallet.
- *   GET  /api/vs/invites/check?code=…        whether a code exists (the page keeps ?i only for a real one)
- *   GET  /api/vs/invites/me?address=0x…     the wallet's code, its join, welcome, credits and invitees (shortened)
+ *   GET  /api/vs/invites/check?code=…        whether a SoDEX code is someone's (the page keeps ?ref only for a real
+ *                                           one) and whether joining under it now comes with the welcome
+ *   GET  /api/vs/invites/me?address=0x…     the wallet's join, welcome, credits, referrals (shortened) and history
  *   POST /api/vs/invites/join {join}         a signed join (the invited wallet's own signature)
  *
  * The credit job runs on the main API only (the beta API reads the same file).
@@ -14,7 +14,7 @@ import { clientKey } from '../hosted.js';
 import { KeyedLimiter, type Limit } from '../rateLimit.js';
 import { builderService, type BuilderService } from '../builder/service.js';
 import { channelFrom } from '../beta/gate.js';
-import { CODE_RE } from '../invites/claim.js';
+import { CODE_RE, OURS_CODE, normCode, type JoinRefusal } from '../invites/claim.js';
 import { checkInviteJoin } from '../invites/check.js';
 import { InviteService } from '../invites/service.js';
 import { InviteStore } from '../invites/store.js';
@@ -25,6 +25,15 @@ export const INVITE_LIMITS: { write: Limit; read: Limit } = {
   read: { max: 120, windowMs: MINUTE },
 };
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const words: Record<JoinRefusal, string> = {
+  'unknown-code': 'SoDEX has no such referral code.',
+  ours: "This is ValueDesk's own code: join with a person's link.",
+  self: 'This is your own link.',
+  joined: 'This wallet joined with another link already.',
+  'has-volume': 'This wallet has traded on ValueDesk already: links are for new wallets.',
+  'has-referrals': 'Others joined with this wallet already, so it cannot join anyone.',
+  'sodex-silent': 'SoDEX did not answer. Try again in a minute.',
+};
 
 export interface InviteRouteOptions {
   service?: InviteService;
@@ -61,25 +70,15 @@ export async function inviteRoutes(app: FastifyInstance, opts: InviteRouteOption
     return reply.code(429).send({ ok: false, error: `too many requests - wait ${wait}s` });
   };
 
-  app.get('/api/vs/invites/code', async (req, reply) => {
-    reply.header('Cache-Control', 'no-store');
-    const address = String((req.query as { address?: unknown }).address ?? '');
-    if (!ADDRESS.test(address)) return reply.code(400).send({ ok: false, error: 'address must be a 0x address' });
-    const s = service();
-    const have = s.store.codeOf(address);
-    if (have) return { ok: true, code: have };
-    const wait = limited(req.ip, 'iw', INVITE_LIMITS.write);
-    if (wait !== null) return slow(reply, wait);
-    return { ok: true, code: s.store.ensureCode(address, now()) };
-  });
-
   app.get('/api/vs/invites/check', async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const wait = limited(req.ip, 'ir', INVITE_LIMITS.read);
     if (wait !== null) return slow(reply, wait);
-    const code = String((req.query as { code?: unknown }).code ?? '');
-    if (!CODE_RE.test(code)) return { ok: true, valid: false };
-    return { ok: true, valid: service().store.ownerOf(code) !== null };
+    const code = normCode(String((req.query as { code?: unknown }).code ?? ''));
+    if (!CODE_RE.test(code)) return { ok: true, valid: false, welcome: false };
+    const c = await service().check(code);
+    // SoDEX did not answer: the page keeps the code and the join asks again.
+    return { ok: true, valid: c.valid, welcome: c.welcome, ...(c.silent ? { unknown: true } : {}) };
   });
 
   app.get('/api/vs/invites/me', async (req, reply) => {
@@ -98,17 +97,16 @@ export async function inviteRoutes(app: FastifyInstance, opts: InviteRouteOption
     const c = checkInviteJoin((req.body as { join?: unknown } | null)?.join, now());
     if (!c.ok) return reply.code(400).send({ ok: false, error: c.error });
     const s = service();
-    const r = s.store.join(c.join, s.hasVolume(c.join.wallet), now());
+    const code = normCode(c.join.code);
+    if (code !== c.join.code || code === OURS_CODE) return reply.code(409).send({ ok: false, code: 'ours', error: words.ours });
+    const owner = await s.ownerOf(code);
+    if (owner === undefined) return reply.code(503).send({ ok: false, code: 'sodex-silent', error: words['sodex-silent'] });
+    if (owner === null) return reply.code(409).send({ ok: false, code: 'unknown-code', error: words['unknown-code'] });
+    const r = s.store.join(c.join, owner, { hasVolume: s.hasVolume(c.join.wallet), welcome: s.welcomeOpen(owner) }, now());
     if (r.ok) {
       if (r.fresh) app.log.info({ wallet: r.join.wallet, code: r.join.code }, 'invites: joined');
-      return { ok: true, at: r.join.at };
+      return { ok: true, at: r.join.at, welcome: r.join.welcome };
     }
-    const words: Record<typeof r.code, string> = {
-      'unknown-code': 'This invite code does not exist.',
-      self: 'This is your own invite.',
-      joined: 'This wallet joined with another invite already.',
-      'has-volume': 'This wallet has traded on ValueDesk already: invites are for new wallets.',
-    };
     return reply.code(409).send({ ok: false, code: r.code, error: words[r.code] });
   });
 }

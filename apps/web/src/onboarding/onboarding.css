@@ -293,3 +293,29 @@ html[data-theme='light'] .onb-go:hover { filter: brightness(1.6); }
 .ref-offer__go { display: inline-grid; place-items: center; text-decoration: none; }
 @media (max-width: 560px) { .ref-offer__cols { grid-template-columns: 1fr; } }
 .ref-offer__cols.is-one { grid-template-columns: 1fr; }
+
+/* The referral-link popup (invites/InviteHost.tsx): the code, two perks, one line for the inviter, two steps. */
+.inv-dlg .inv-code {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 14px 16px; margin: 2px 0 12px;
+  border-radius: var(--radius-tile); background: var(--bg-panel); box-shadow: var(--depth-2);
+}
+.inv-code__k { color: var(--muted); font-size: var(--fs-xs); }
+.inv-code b { font-family: var(--font-num); font-size: 20px; font-weight: 500; letter-spacing: 0.08em; }
+.inv-perks { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 0 0 10px; padding: 0; list-style: none; }
+.inv-perks li { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: rgb(var(--ink) / 0.04); }
+.inv-perks b { font-family: var(--font-num); font-size: 18px; font-weight: 500; color: var(--pos); }
+.inv-perks span { color: var(--muted); font-size: var(--fs-xs); line-height: 1.4; }
+.inv-perks a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
+.inv-they { margin: 0 0 12px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+.inv-steps { display: flex; flex-direction: column; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
+.inv-steps li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgb(var(--ink) / 0.04); }
+.inv-steps li > i {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: rgb(var(--ink) / 0.08); color: var(--text); font-style: normal; font-family: var(--font-num); font-size: 12px;
+}
+.inv-steps li.is-done > i { background: var(--pos); color: #fff; }
+.inv-steps li.is-off { opacity: 0.6; }
+.inv-steps li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.inv-steps b { font-weight: 500; font-size: var(--fs-sm, 13px); }
+.inv-steps small { color: var(--muted); font-size: var(--fs-xs); line-height: 1.4; }
+.inv-steps .dlg-btn { height: 32px; min-width: 72px; padding: 0 14px; }

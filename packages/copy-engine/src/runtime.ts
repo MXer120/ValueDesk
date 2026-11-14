@@ -134,6 +134,8 @@ export interface RuntimeHost {
   sinkFor(sub: Subscription): OrderSink | null;
   /** The builder to attach to this subscription's orders (the copy fee), or null when no builder is configured. */
   builderFor(sub: Subscription): Promise<BuilderParams | null>;
+  /** A copied order filled: its notional (USD) and when. What a budgeted lower fee is counted against. */
+  onFill?(sub: Subscription, notionalUsd: number, at: number): void;
   /** The region policy that applies to this subscription. */
   policyFor(sub: Subscription): RegionPolicy;
   /** For a live subscription: why its key cannot trade (missing, replaced, expired), or null. */
@@ -1006,6 +1008,7 @@ export class CopyRuntime {
       const m = this.markets.get(p.symbol);
       const fee = q * f.price * ((m?.takerFee ?? 0.0004) + p.builderFee / 100_000);
       this.fillBooks(s, p.symbol, p.side, q, f.price, fee, p.reduceOnly);
+      try { this.host.onFill?.(s, q * f.price, now); } catch { /* the host's bookkeeping never stops a fill */ }
       // Shown filled: no longer a reduction the follower's account could hold unseen.
       const shrink = p.reduceOnly ? this.recentShrink.get(`${s.id}|${p.symbol}`)?.find((x) => x.clOrdID === p.clOrdID) : undefined;
       if (shrink) shrink.left = Math.max(0, shrink.left - q);

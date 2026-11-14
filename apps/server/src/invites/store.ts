@@ -1,30 +1,31 @@
 /**
- * Invites and fee credits on record: `invites.db` in the server's data directory (SQLite, WAL), the main and the
+ * Referrals and fee credits on record: `invites.db` in the server's data directory (SQLite, WAL), the main and the
  * beta API alike. In the off-server backup with the other API state.
  *
- *   codes      a wallet's invite code (one each, random, never reused)
- *   joins      who joined with which code, with the signed join kept whole; the first join of a wallet stands
- *   entries    the credit ledger: every amount earned (from an invitee's fee) or spent (a fee credits paid), in
- *              micro-USD, never edited, never deleted - the balance is their sum
- *   seen       per builder-ledger order, how much of it was taken into the entries already (an order that fills
- *              further later adds only the new part). Old rows go once the builder ledger let go of the order.
- *   state      per wallet: whether credits are paying now, and since when (the ledger's own record of the switch)
+ *   codes      SoDEX referral codes and the wallet behind each, as SoDEX said (a code does not change hands)
+ *   joins      who joined with which code, with the signed join kept whole; the first join of a wallet stands.
+ *              `welcome`: whether that join came with the welcome (the inviter's cap, claim.ts WELCOME_CAP)
+ *   entries    the credit ledger: every amount earned (a share of a referral's fee, with its tier) or spent (a fee
+ *              credits paid), micro-USD, never edited, never deleted - the balance is their sum
+ *   seen       per builder-ledger order, how much of it was taken in already (an order that fills further later adds
+ *              only the new part). Old rows go once the builder ledger let go of the order.
+ *   state      per wallet: whether credits are paying now, and since when
  */
 import { DatabaseSync } from 'node:sqlite';
-import { randomInt } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { dataDir } from '../builder/paths.js';
-import { CODE_ALPHABET, CODE_LENGTH, type InviteJoin } from './claim.js';
+import { TIERS, type InviteJoin, type JoinRefusal } from './claim.js';
 
 export const invitesDbPath = (): string => process.env.VALUESCAN_INVITES_DB?.trim() || join(dataDir(), 'invites.db');
 
 const SCHEMA = `
-CREATE TABLE IF NOT EXISTS codes (
-  address TEXT PRIMARY KEY,
-  code TEXT NOT NULL UNIQUE,
-  created_at INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS sodex_codes (
+  code TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  at INTEGER NOT NULL
 ) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS sodex_codes_owner ON sodex_codes (owner);
 CREATE TABLE IF NOT EXISTS joins (
   wallet TEXT PRIMARY KEY,
   inviter TEXT NOT NULL,
@@ -34,7 +35,8 @@ CREATE TABLE IF NOT EXISTS joins (
   issued_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
   chain_id INTEGER NOT NULL,
-  signature TEXT NOT NULL
+  signature TEXT NOT NULL,
+  welcome INTEGER NOT NULL DEFAULT 1
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS joins_inviter ON joins (inviter, at);
 CREATE TABLE IF NOT EXISTS entries (
@@ -44,9 +46,11 @@ CREATE TABLE IF NOT EXISTS entries (
   micro INTEGER NOT NULL,
   source TEXT,
   order_key TEXT,
-  at INTEGER NOT NULL
+  at INTEGER NOT NULL,
+  tier INTEGER
 );
 CREATE INDEX IF NOT EXISTS entries_address ON entries (address, kind);
+CREATE INDEX IF NOT EXISTS entries_at ON entries (address, at);
 CREATE TABLE IF NOT EXISTS seen (
   address TEXT NOT NULL,
   order_key TEXT NOT NULL,
@@ -62,19 +66,13 @@ CREATE TABLE IF NOT EXISTS state (
 ) WITHOUT ROWID;
 `;
 
-export interface Join { wallet: string; inviter: string; code: string; at: number }
-export type JoinResult =
-  | { ok: true; join: Join; fresh: boolean }
-  | { ok: false; code: 'unknown-code' | 'self' | 'joined' | 'has-volume' };
+export interface Join { wallet: string; inviter: string; code: string; at: number; welcome: boolean }
+export type JoinResult = { ok: true; join: Join; fresh: boolean } | { ok: false; code: JoinRefusal };
+export interface Entry { address: string; kind: 'earn' | 'spend'; micro: number; source: string | null; tier: number | null }
 
 const isUnique = (e: unknown): boolean => /UNIQUE|constraint/i.test(String((e as Error).message));
-
-/** A new random code. */
-export function newCode(): string {
-  let s = '';
-  for (let i = 0; i < CODE_LENGTH; i++) s += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
-  return s;
-}
+const joinOfRow = (r: { wallet: string; inviter: string; code: string; at: number | bigint; welcome?: number | bigint }): Join =>
+  ({ wallet: r.wallet, inviter: r.inviter, code: r.code, at: Number(r.at), welcome: Number(r.welcome ?? 1) === 1 });
 
 export class InviteStore {
   readonly db: DatabaseSync;
@@ -84,77 +82,92 @@ export class InviteStore {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
     this.db.exec(SCHEMA);
+    // A file from before the tiers: the columns they added.
+    const has = (t: string, c: string) => (this.db.prepare(`PRAGMA table_info(${t})`).all() as Array<{ name: string }>).some((x) => x.name === c);
+    if (!has('joins', 'welcome')) this.db.exec('ALTER TABLE joins ADD COLUMN welcome INTEGER NOT NULL DEFAULT 1');
+    if (!has('entries', 'tier')) this.db.exec('ALTER TABLE entries ADD COLUMN tier INTEGER');
   }
 
   close(): void {
     this.db.close();
   }
 
-  codeOf(address: string): string | null {
-    const r = this.db.prepare('SELECT code FROM codes WHERE address = ?').get(address.toLowerCase()) as { code: string } | undefined;
-    return r?.code ?? null;
+  /* ------------------------------------------------------------------- codes ----- */
+
+  ownerOfCode(code: string): string | null {
+    const r = this.db.prepare('SELECT owner FROM sodex_codes WHERE code = ?').get(code) as { owner: string } | undefined;
+    return r?.owner ?? null;
   }
 
-  /** The wallet's code, made the first time it is asked for. */
-  ensureCode(address: string, now = Date.now(), make: () => string = newCode): string {
-    const a = address.toLowerCase();
-    const have = this.codeOf(a);
-    if (have) return have;
-    for (let i = 0; i < 8; i++) {
-      try {
-        const code = make();
-        this.db.prepare('INSERT INTO codes (address, code, created_at) VALUES (?, ?, ?)').run(a, code, now);
-        return code;
-      } catch (e) {
-        if (!isUnique(e)) throw e;
-        const again = this.codeOf(a);
-        if (again) return again; // another request made it meanwhile
-      }
-    }
-    throw new Error('no free invite code');
+  noteCode(code: string, owner: string, now: number): void {
+    this.db.prepare('INSERT INTO sodex_codes (code, owner, at) VALUES (?, ?, ?) ON CONFLICT (code) DO NOTHING').run(code, owner.toLowerCase(), now);
   }
 
-  ownerOf(code: string): string | null {
-    const r = this.db.prepare('SELECT address FROM codes WHERE code = ?').get(code) as { address: string } | undefined;
-    return r?.address ?? null;
-  }
+  /* ------------------------------------------------------------------- joins ----- */
 
   joinOf(wallet: string): Join | null {
-    const r = this.db.prepare('SELECT wallet, inviter, code, at FROM joins WHERE wallet = ?').get(wallet.toLowerCase()) as Join | undefined;
-    return r ? { wallet: r.wallet, inviter: r.inviter, code: r.code, at: Number(r.at) } : null;
+    const r = this.db.prepare('SELECT wallet, inviter, code, at, welcome FROM joins WHERE wallet = ?').get(wallet.toLowerCase()) as Parameters<typeof joinOfRow>[0] | undefined;
+    return r ? joinOfRow(r) : null;
   }
 
-  invitesOf(inviter: string): Join[] {
-    const rows = this.db.prepare('SELECT wallet, inviter, code, at FROM joins WHERE inviter = ? ORDER BY at DESC LIMIT 500').all(inviter.toLowerCase()) as unknown as Join[];
-    return rows.map((r) => ({ wallet: r.wallet, inviter: r.inviter, code: r.code, at: Number(r.at) }));
+  /** The wallet's direct referrals, newest first. */
+  referralsOf(inviter: string, limit = 2000): Join[] {
+    return (this.db.prepare('SELECT wallet, inviter, code, at, welcome FROM joins WHERE inviter = ? ORDER BY at DESC LIMIT ?').all(inviter.toLowerCase(), limit) as Array<Parameters<typeof joinOfRow>[0]>).map(joinOfRow);
+  }
+
+  hasReferrals(wallet: string): boolean {
+    return !!this.db.prepare('SELECT 1 AS x FROM joins WHERE inviter = ? LIMIT 1').get(wallet.toLowerCase());
   }
 
   /** Every join (the credit job walks them). */
   allJoins(): Join[] {
-    return (this.db.prepare('SELECT wallet, inviter, code, at FROM joins').all() as unknown as Join[]).map((r) => ({ ...r, at: Number(r.at) }));
+    return (this.db.prepare('SELECT wallet, inviter, code, at, welcome FROM joins').all() as Array<Parameters<typeof joinOfRow>[0]>).map(joinOfRow);
   }
 
   /**
-   * A signed join. `hasVolume`: whether the builder ledger counts any volume for the wallet (a wallet that already
-   * trades on ValueDesk joins nobody). The first join of a wallet stands; a repeat of it is answered as done.
+   * Who earns from a wallet's fees: its inviter (tier 1), the inviter's inviter (tier 2), the next (tier 3). A loop
+   * cannot form (a wallet with referrals never joins), and is cut short should one be on record anyway.
    */
-  join(j: InviteJoin, hasVolume: boolean, now = Date.now()): JoinResult {
+  chainOf(wallet: string): string[] {
+    const out: string[] = [];
+    let at = wallet.toLowerCase();
+    for (let i = 0; i < TIERS; i++) {
+      const j = this.joinOf(at);
+      if (!j || j.inviter === wallet.toLowerCase() || out.includes(j.inviter)) break;
+      out.push(j.inviter);
+      at = j.inviter;
+    }
+    return out;
+  }
+
+  /** Welcomes an inviter handed out since `since`. */
+  welcomesSince(inviter: string, since: number): number {
+    const r = this.db.prepare('SELECT count(*) AS n FROM joins WHERE inviter = ? AND welcome = 1 AND at >= ?').get(inviter.toLowerCase(), since) as { n: number };
+    return Number(r.n);
+  }
+
+  /**
+   * A signed join under `inviter` (the code's owner, from SoDEX). The first join of a wallet stands; a repeat of it is
+   * answered as done. `hasVolume`: the builder ledger counts volume for the wallet already.
+   */
+  join(j: InviteJoin, inviter: string, o: { hasVolume: boolean; welcome: boolean }, now = Date.now()): JoinResult {
     const wallet = j.wallet.toLowerCase();
-    const inviter = this.ownerOf(j.code);
-    if (!inviter) return { ok: false, code: 'unknown-code' };
-    if (inviter === wallet) return { ok: false, code: 'self' };
+    const by = inviter.toLowerCase();
+    if (by === wallet) return { ok: false, code: 'self' };
     const have = this.joinOf(wallet);
-    if (have) return have.code === j.code ? { ok: true, join: have, fresh: false } : { ok: false, code: 'joined' };
-    if (hasVolume) return { ok: false, code: 'has-volume' };
+    if (have) return have.inviter === by ? { ok: true, join: have, fresh: false } : { ok: false, code: 'joined' };
+    if (o.hasVolume) return { ok: false, code: 'has-volume' };
+    // No loops: a wallet others joined already joins nobody (and so a chain only ever grows downwards).
+    if (this.hasReferrals(wallet)) return { ok: false, code: 'has-referrals' };
     try {
-      this.db.prepare('INSERT INTO joins (wallet, inviter, code, at, nonce, issued_at, expires_at, chain_id, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(wallet, inviter, j.code, now, j.nonce, Number(j.issuedAt), Number(j.expiresAt), j.chainId, j.signature);
+      this.db.prepare('INSERT INTO joins (wallet, inviter, code, at, nonce, issued_at, expires_at, chain_id, signature, welcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(wallet, by, j.code, now, j.nonce, Number(j.issuedAt), Number(j.expiresAt), j.chainId, j.signature, o.welcome ? 1 : 0);
     } catch (e) {
       if (!isUnique(e)) throw e;
       const again = this.joinOf(wallet);
-      return again && again.code === j.code ? { ok: true, join: again, fresh: false } : { ok: false, code: 'joined' };
+      return again && again.inviter === by ? { ok: true, join: again, fresh: false } : { ok: false, code: 'joined' };
     }
-    return { ok: true, join: { wallet, inviter, code: j.code, at: now }, fresh: true };
+    return { ok: true, join: { wallet, inviter: by, code: j.code, at: now, welcome: o.welcome }, fresh: true };
   }
 
   /* -------------------------------------------------------------- the credit ledger ----- */
@@ -166,11 +179,11 @@ export class InviteStore {
   }
 
   /** Take in one order's new part: its entries and how far it was seen, together. */
-  take(address: string, orderKey: string, countedMicro: number, entries: ReadonlyArray<{ address: string; kind: 'earn' | 'spend'; micro: number; source: string | null }>, now: number): void {
+  take(address: string, orderKey: string, countedMicro: number, entries: ReadonlyArray<Entry>, now: number): void {
     this.db.exec('BEGIN');
     try {
-      const ins = this.db.prepare('INSERT INTO entries (address, kind, micro, source, order_key, at) VALUES (?, ?, ?, ?, ?, ?)');
-      for (const e of entries) if (e.micro > 0) ins.run(e.address, e.kind, Math.round(e.micro), e.source, orderKey, now);
+      const ins = this.db.prepare('INSERT INTO entries (address, kind, micro, source, order_key, at, tier) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      for (const e of entries) if (Math.round(e.micro) > 0) ins.run(e.address, e.kind, Math.round(e.micro), e.source, orderKey, now, e.tier);
       this.db.prepare('INSERT INTO seen (address, order_key, counted_micro, at) VALUES (?, ?, ?, ?) ON CONFLICT (address, order_key) DO UPDATE SET counted_micro = excluded.counted_micro, at = excluded.at')
         .run(address, orderKey, countedMicro, now);
       this.db.exec('COMMIT');
@@ -192,10 +205,16 @@ export class InviteStore {
     return { earned, spent, balance: earned - spent };
   }
 
-  /** Credit earned from one invitee, micro-USD. */
-  earnedFrom(inviter: string, invitee: string): number {
-    const r = this.db.prepare("SELECT sum(micro) AS m FROM entries WHERE address = ? AND kind = 'earn' AND source = ?").get(inviter.toLowerCase(), invitee.toLowerCase()) as { m: number | null };
-    return Number(r.m ?? 0);
+  /** Credit earned from each referral (any tier), micro-USD. */
+  earnedBySource(inviter: string): Map<string, number> {
+    const rows = this.db.prepare("SELECT source, sum(micro) AS m FROM entries WHERE address = ? AND kind = 'earn' GROUP BY source").all(inviter.toLowerCase()) as Array<{ source: string | null; m: number }>;
+    return new Map(rows.filter((r) => r.source).map((r) => [r.source!, Number(r.m)]));
+  }
+
+  /** The newest entries of a wallet. */
+  history(address: string, limit = 300): Array<{ at: number; kind: 'earn' | 'spend'; micro: number; tier: number | null; source: string | null }> {
+    return (this.db.prepare('SELECT at, kind, micro, tier, source FROM entries WHERE address = ? ORDER BY at DESC, id DESC LIMIT ?').all(address.toLowerCase(), limit) as Array<{ at: number; kind: string; micro: number; tier: number | null; source: string | null }>)
+      .map((r) => ({ at: Number(r.at), kind: r.kind === 'spend' ? 'spend' : 'earn', micro: Number(r.micro), tier: r.tier === null ? null : Number(r.tier), source: r.source }));
   }
 
   /** Wallets that ever had credit (the job's list of whom to spend for). */

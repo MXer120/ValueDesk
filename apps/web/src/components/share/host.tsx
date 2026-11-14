@@ -7,7 +7,7 @@ import { lazyChunk } from '../../lazyPage';
 import { REFERRAL_CODE, useReferralKnown } from '../../onboarding/referral';
 import { mayAttachCode } from '../../onboarding/referralRules';
 import type { CardData } from './card';
-import { useInviteCode, withInvite } from '../../invites/invites';
+import { useOwnCode, withInvite } from '../../invites/invites';
 import './share.css';
 
 const ShareCard = lazyChunk(() => import('./ShareCard'));
@@ -21,10 +21,11 @@ export function openShare(card: CardData): void {
 /** The connected wallet decides whether ValueDesk's code may be on the card (referralRules.mayAttachCode). */
 export function ShareHost({ address }: { address: string | null }) {
   const ref = useReferralKnown(address);
-  // Every shared card links with the sharer's invite code: a viewer who joins earns the sharer fee credits.
-  // Asked for only once someone shares (the code is made on the server the first time).
+  // Every shared card links with the sharer's own SoDEX referral code: a viewer who joins earns the sharer fee credits
+  // (and SoDEX's rebate). Read from SoDEX once someone shares.
   const [card, setCard] = useState<CardData | null>(null);
-  const invite = useInviteCode(card ? address : null);
+  const own = useOwnCode(card ? address : null);
+  const invite = own.state === 'ok' ? own.code : null;
   useEffect(() => {
     const on = (e: Event) => setCard((e as CustomEvent<CardData>).detail ?? null);
     window.addEventListener(EVENT, on);
@@ -33,7 +34,7 @@ export function ShareHost({ address }: { address: string | null }) {
   if (!card) return null;
   return (
     <Suspense fallback={null}>
-      <ShareCard card={invite ? { ...card, link: withInvite(card.link, invite) } : card} code={mayAttachCode(ref) ? REFERRAL_CODE : null} onClose={() => setCard(null)} />
+      <ShareCard card={invite ? { ...card, link: withInvite(card.link, invite) } : card} code={invite ?? (mayAttachCode(ref) ? REFERRAL_CODE : null)} onClose={() => setCard(null)} />
     </Suspense>
   );
 }

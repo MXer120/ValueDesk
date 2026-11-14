@@ -16,7 +16,9 @@
 import { useEffect, useSyncExternalStore } from 'react';
 
 export const REFERRAL_CODE = 'VALUEDESK';
-export const REFERRAL_URL = `https://sodex.com/join/${REFERRAL_CODE}`;
+/** SoDEX's join page for a code (a referral link's code, or ours). */
+export const referralUrl = (code: string): string => `https://sodex.com/join/${encodeURIComponent(code)}`;
+export const REFERRAL_URL = referralUrl(REFERRAL_CODE);
 
 const BIZ = 'https://alpha-biz.sodex.dev';
 const TIMEOUT_MS = 10_000;
@@ -60,16 +62,22 @@ async function eligibility(query: string): Promise<Eligibility | null> {
 const states = new Map<string, ReferralState>();
 const listeners = new Set<() => void>();
 
-/** Ask SoDEX again (when the tab comes back from its join page). */
-export async function loadReferral(address: string): Promise<ReferralState> {
+const keyOf = (wallet: string, code: string) => (code === REFERRAL_CODE ? wallet : `${wallet}|${code}`);
+
+/**
+ * Ask SoDEX again (when the tab comes back from its join page). `code`: the code the wallet is offered - ours, or the
+ * code of the referral link it came with ('bound' then means bound to that one).
+ */
+export async function loadReferral(address: string, code: string = REFERRAL_CODE): Promise<ReferralState> {
   const wallet = address.toLowerCase();
-  const [own, ours] = await Promise.all([
+  const [own, theirs] = await Promise.all([
     eligibility(`walletAddress=${wallet}`),
-    eligibility(`walletAddress=${wallet}&referralCode=${REFERRAL_CODE}`),
+    eligibility(`walletAddress=${wallet}&referralCode=${encodeURIComponent(code)}`),
   ]);
-  const s = referralState(wallet, own, ours);
-  if (states.get(wallet) !== s) {
-    states.set(wallet, s);
+  const s = referralState(wallet, own, theirs);
+  const k = keyOf(wallet, code);
+  if (states.get(k) !== s) {
+    states.set(k, s);
     for (const l of [...listeners]) l();
   }
   return s;
@@ -77,24 +85,24 @@ export async function loadReferral(address: string): Promise<ReferralState> {
 
 /** The wallet's state; `unknown` until SoDEX has answered. Read again whenever the tab comes back. */
 /** What is known already, asking SoDEX nothing: for a badge beside the one useReferral that does. */
-export function useReferralKnown(address: string | null): ReferralState {
+export function useReferralKnown(address: string | null, code: string = REFERRAL_CODE): ReferralState {
   const wallet = address?.toLowerCase() ?? '';
   return useSyncExternalStore(
     (l) => { listeners.add(l); return () => { listeners.delete(l); }; },
-    () => (wallet ? states.get(wallet) ?? 'unknown' : 'unknown'),
+    () => (wallet ? states.get(keyOf(wallet, code)) ?? 'unknown' : 'unknown'),
     () => 'unknown' as ReferralState,
   );
 }
 
-export function useReferral(address: string | null): ReferralState {
+export function useReferral(address: string | null, code: string = REFERRAL_CODE): ReferralState {
   const wallet = address?.toLowerCase() ?? '';
-  const s = useReferralKnown(address);
+  const s = useReferralKnown(address, code);
   useEffect(() => {
     if (!wallet) return;
-    void loadReferral(wallet);
-    const back = () => { if (document.visibilityState === 'visible') void loadReferral(wallet); };
+    void loadReferral(wallet, code);
+    const back = () => { if (document.visibilityState === 'visible') void loadReferral(wallet, code); };
     document.addEventListener('visibilitychange', back);
     return () => document.removeEventListener('visibilitychange', back);
-  }, [wallet]);
+  }, [wallet, code]);
   return s;
 }

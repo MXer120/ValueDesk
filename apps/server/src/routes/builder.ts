@@ -76,6 +76,9 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
    * request, so that secret alone would make one wallet's volume anyone's to
    * read. Without the token it is a 404, like any path that does not exist.
    */
+  /** The labels of the invites' programs (invites/service.ts programsFor): their fee goes out with a budget only. */
+  const INVITE_PERKS = new Set(['Invite welcome', 'Fee credits']);
+
   app.get('/api/vs/builder/volume', async (req, reply) => {
     reply.header('Cache-Control', 'no-store, no-transform');
     const want = opts.internalToken ?? process.env.VALUESCAN_INTERNAL_TOKEN?.trim() ?? '';
@@ -93,7 +96,14 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     if (usd === null) return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the builder ledger is not open' });
     // VIP and the dev page's programs for the executor's products (copy trading, bots): fee, until when (programs.ts).
     const lw = service.loweredFor(q.address.toLowerCase());
-    const pick = (p: 'copy' | 'bots') => (lw.fees[p] ? { fee: lw.fees[p]!.fee, until: lw.fees[p]!.until } : null);
+    // A fee lowered by the invite welcome or by fee credits comes with its budget: the executor stops at it
+    // (invites/service.ts perkBudget), so neither runs on past what pays for it.
+    const budget = INVITE_PERKS.has(lw.fees.copy?.why ?? '') || INVITE_PERKS.has(lw.fees.bots?.why ?? '') ? service.perkBudget(q.address.toLowerCase()) : null;
+    const pick = (p: 'copy' | 'bots') => {
+      const f = lw.fees[p];
+      if (!f) return null;
+      return INVITE_PERKS.has(f.why) ? (budget ? { fee: f.fee, until: f.until, budget } : null) : { fee: f.fee, until: f.until };
+    };
     return { ok: true, usd, days, vip: lw.vip, fees: { copy: pick('copy'), bots: pick('bots') } };
   });
 

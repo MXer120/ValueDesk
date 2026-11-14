@@ -105,7 +105,7 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
     shut();
     then?.();
   };
-  const here = tab === 'leaderboard' || limits || status || excluded || legalOn || sodexOn !== null;
+  const here = tab === 'leaderboard' || tab === 'referrals' || limits || status || excluded || legalOn || sodexOn !== null;
 
   /* The button sits mid-bar, so the menu steps left by what would run off the window. On a phone CSS places it. */
   useLayoutEffect(() => {
@@ -158,6 +158,13 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
               current={tab === 'leaderboard'}
               onOpen={onNavigate && close(() => onNavigate('leaderboard'))}
               icon={<Icon><path d="M7.5 17v-6.5h5V17M2.5 17v-4h5M12.5 17v-8h5v8M1.5 17h17" /><path d="M10 3.2 10.8 5l1.9.2-1.4 1.3.4 1.9-1.7-1-1.7 1 .4-1.9-1.4-1.3L9.2 5 10 3.2Z" /></Icon>}
+            />
+            <PageRow
+              href={pathForTab('referrals')}
+              label="Referrals"
+              current={tab === 'referrals'}
+              onOpen={onNavigate && close(() => onNavigate('referrals'))}
+              icon={<Icon><circle cx="10" cy="5" r="2.2" /><circle cx="4.8" cy="14.6" r="2.2" /><circle cx="15.2" cy="14.6" r="2.2" /><path d="M8.9 6.9 5.9 12.7M11.1 6.9l3 5.8M7 14.6h6" /></Icon>}
             />
             <PageRow
               href={LIMITS_PATH}

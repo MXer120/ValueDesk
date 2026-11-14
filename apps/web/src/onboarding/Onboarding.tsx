@@ -22,7 +22,8 @@ import { USERNAME_MAX } from '@sign/profiles/claim';
 import { WATCHLIST_EVENT, stepsOf, writeProgress, type Step } from './model';
 import { NameHint, useNameCheck } from './ProfileAccount';
 import { ProfileError, setFirstUsername, useUsername } from './profile';
-import { REFERRAL_CODE, REFERRAL_URL, useReferral } from './referral';
+import { referralUrl, useReferral } from './referral';
+import { useSodexCode } from '../invites/invites';
 import { markOffered } from './referralRules';
 
 /* ------------------------------------------------------------------ the frame ----- */
@@ -176,25 +177,27 @@ function UsernameStep({ address, onDone }: { address: string; onDone: () => void
 /* --------------------------------------------------------- the SoDEX referral code ----- */
 
 function ReferralStep({ address, onNext }: { address: string; onNext: () => void }) {
-  const state = useReferral(address);
+  // The code of the referral link this wallet came with, else ours (invites.ts useSodexCode).
+  const { code, theirs } = useSodexCode(address);
+  const state = useReferral(address, code);
   // The first signup's step is the offer: the popup rests for this wallet after it (referralOffer.ts).
   useEffect(() => { markOffered(address); }, [address]);
   const [opened, setOpened] = useState(false);
   const joined = state === 'bound' || state === 'pending';
   return (
     <div className="onb-narrow">
-      <Head title={joined ? 'Code applied' : 'Use our SoDEX code'} line={joined ? `Your wallet is on ${REFERRAL_CODE}.` : 'ValueDesk\'s referral code on SoDEX, for wallets without one.'} />
+      <Head title={joined ? 'Code applied' : theirs ? "Use your inviter's SoDEX code" : 'Use our SoDEX code'} line={joined ? `Your wallet is on ${code}.` : theirs ? 'The code of the link you came with, on SoDEX.' : 'ValueDesk\'s referral code on SoDEX, for wallets without one.'} />
       <div className={`onb-code${joined ? ' is-on' : ''}`}>
         <i aria-hidden="true">{joined && <CheckIcon />}</i>
-        <b>{REFERRAL_CODE}</b>
+        <b>{code}</b>
       </div>
       {joined ? (
         <button type="button" className="fx-cta fx-cta--lg" onClick={onNext} data-onb-first>Continue</button>
       ) : (
         <>
-          <a className="fx-cta fx-cta--lg onb-code__go" href={REFERRAL_URL} target="_blank" rel="noopener noreferrer" onClick={() => setOpened(true)} data-onb-first>{opened ? 'Open SoDEX again' : 'Apply on SoDEX'}</a>
+          <a className="fx-cta fx-cta--lg onb-code__go" href={referralUrl(code)} target="_blank" rel="noopener noreferrer" onClick={() => setOpened(true)} data-onb-first>{opened ? 'Open SoDEX again' : 'Apply on SoDEX'}</a>
           <button type="button" className="onb-later" onClick={onNext}>{opened ? 'Continue' : 'Not now'}</button>
-          <p className="onb-foot">{opened ? 'Confirm with your wallet in the SoDEX tab. This page updates when you come back.' : 'SoDEX opens in a new tab and you confirm with your wallet. SoDEX rewards ValueDesk for wallets that use it. No funds move.'}</p>
+          <p className="onb-foot">{opened ? 'Confirm with your wallet in the SoDEX tab. This page updates when you come back.' : `SoDEX opens in a new tab and you confirm with your wallet. SoDEX rewards ${theirs ? 'your inviter' : 'ValueDesk'} for wallets that use it. No funds move.`}</p>
         </>
       )}
     </div>
