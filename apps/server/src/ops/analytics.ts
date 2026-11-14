@@ -202,6 +202,8 @@ export interface AnalyticsSummary {
   features: Array<{ key: string; label: string; n: number; visitors: number }>;
   vitals: Array<{ name: string; n: number; p50: number; p75: number }>;
   returning: { visitors: number; returning: number };
+  /** From a visit to a first real action, in distinct visitors (2026-11-14, owner: "measure activation"). */
+  funnel: Array<{ key: string; label: string; visitors: number }>;
 }
 
 export class AnalyticsStore {
@@ -311,7 +313,30 @@ export class AnalyticsStore {
       features,
       vitals,
       returning: { visitors: num(ret.u), returning: num(ret.back) },
+      funnel: this.funnel(from, to, num(v.visitors)),
     };
+  }
+
+  /**
+   * The activation funnel for [from, to): distinct visitors who reached each step. A step counts a visitor who did it
+   * in the range, whatever they did before; "Did any of them" is a visitor with at least one of the four actions.
+   */
+  funnel(from: number, to: number, visitors: number): Array<{ key: string; label: string; visitors: number }> {
+    const did = (names: string[]) => num((this.db.prepare(
+      `SELECT COUNT(DISTINCT visitor) AS u FROM events WHERE kind = 'feature' AND at >= ? AND at < ? AND name IN (${names.map(() => '?').join(', ')})`,
+    ).get(from, to, ...names) as Row | undefined)?.u);
+    const wallet = num((this.db.prepare(
+      `SELECT COUNT(DISTINCT visitor) AS u FROM (SELECT visitor FROM visits WHERE started_at >= ? AND started_at < ? AND wallet IS NOT NULL
+         UNION SELECT visitor FROM events WHERE kind = 'feature' AND name = 'wallet.connect' AND at >= ? AND at < ?)`,
+    ).get(from, to, from, to) as Row | undefined)?.u);
+    const actions = ['order.place', 'copy.start', 'algo.start', 'bot.start'];
+    return [
+      { key: 'visit', label: 'Visited', visitors },
+      { key: 'wallet', label: 'Connected a wallet', visitors: wallet },
+      { key: 'trading', label: 'Enabled trading', visitors: did(['trading.enable']) },
+      { key: 'action', label: 'Placed an order, started a copy, an algo or a bot', visitors: did(actions) },
+      ...actions.map((n) => ({ key: n, label: FEATURES[n] ?? n, visitors: did([n]) })),
+    ];
   }
 
   /** Per wallet: visits, active time, last seen, the countries seen, the features used most. */

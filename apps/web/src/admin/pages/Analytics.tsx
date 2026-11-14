@@ -44,6 +44,29 @@ export function Analytics() {
               <Figure label="On the site now" value={int(t.liveVisits)} sub={`${int(t.wallets)} connected wallets in range`} />
             </Figures>
           </Section>
+          {!!a.funnel?.length && (
+            <Section title="From a visit to a first trade" flush>
+              <div className="dv-sheet">
+                <table className="dv-table">
+                  <thead><tr><th>Step</th><th className="right">Visitors</th><th className="right">Of all visitors</th><th className="right">Of the step before</th></tr></thead>
+                  <tbody>
+                    {a.funnel.map((s, i, all) => {
+                      const main = i < 4;
+                      const before = main ? all[i - 1] : all[3];
+                      return (
+                        <tr key={s.key}>
+                          <td>{main ? s.label : <span className="dv-quiet">{s.label}</span>}</td>
+                          <td className="right">{int(s.visitors)}</td>
+                          <td className="right">{i === 0 ? '' : all[0]!.visitors ? pct(s.visitors / all[0]!.visitors) : '–'}</td>
+                          <td className="right">{i === 0 ? '' : before && before.visitors ? pct(s.visitors / before.visitors) : '–'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+          )}
           {a.days.length > 1 && (
             <Section title="Visitors per day">
               <BarChart title="Visitors" bars={a.days.map((d) => ({ key: d.day, label: dayLabel(d.day), value: d.visitors }))} fmt={(v) => int(v)} />

@@ -50,6 +50,8 @@ export const FEATURES: Readonly<Record<string, string>> = {
   'algo.stop': 'Stopped an algo order',
   'copy.start': 'Started copying a trader',
   'copy.stop': 'Stopped copying',
+  'bot.start': 'Started a bot',
+  'bot.stop': 'Stopped a bot',
   'deposit.open': 'Opened deposit',
   'withdraw.open': 'Opened withdraw',
   'transfer.open': 'Opened transfer',

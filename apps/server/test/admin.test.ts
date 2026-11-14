@@ -411,6 +411,29 @@ test('analytics: nothing without consent; routes scrubbed, unknown features drop
   writeFileSync(join(dir, 'done'), '');
 });
 
+test('analytics funnel: distinct visitors from a visit to a wallet, trading on, and a first order, copy, algo or bot', () => {
+  const dir = join(DIR, `analytics-${caseNo++}`);
+  const store = new AnalyticsStore(join(dir, 'analytics.db'));
+  const now = Date.now();
+  const batch = (wallet: string | null, names: string[]) => {
+    const p = parseAnalytics({
+      consent: 'analytics', visitor: id(), visit: id(), ...(wallet ? { wallet } : {}),
+      events: [{ t: now, k: 'view', p: '/trade' }, ...names.map((n) => ({ t: now, k: 'feature', p: '/trade', n }))],
+    }, now);
+    assert.ok(p.ok);
+    store.add(p.batch, { country: null, region: null }, now);
+  };
+  batch(null, []);
+  batch(null, []);
+  batch('0x' + '1'.repeat(40), []);
+  batch(null, ['wallet.connect', 'trading.enable', 'order.place', 'order.place']);
+  batch('0x' + '2'.repeat(40), ['trading.enable', 'bot.start']);
+  batch('0x' + '3'.repeat(40), ['copy.start', 'bot.start', 'bot.stop']);
+  const f = Object.fromEntries(store.summary(now - 86_400_000, now + 86_400_000).funnel.map((s) => [s.key, s.visitors]));
+  assert.deepEqual(f, { visit: 6, wallet: 4, trading: 2, action: 3, 'order.place': 1, 'copy.start': 1, 'algo.start': 0, 'bot.start': 2 });
+  store.close();
+});
+
 test('a page error goes into the audit log, only with a session, cut to size', async () => {
   const s = await suite();
   assert.equal((await s.post('/api/admin/page-error', { message: 'x' })).statusCode, 401);
