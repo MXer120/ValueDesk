@@ -241,6 +241,22 @@ export const BOT_SCENARIOS: Scenario[] = [
     },
   }),
 
+  bot('bot.hedge', 'hedge', 'Hedge (spot shape) with no coin in the futures balance', 'it waits for the coin, says so, and sends nothing; a stop ends it with nothing resting (a pair needs two wallets: tools/live-test/hedge-pair is the two-wallet run)', {
+    timeoutMs: 4 * MIN,
+    slow: false,
+    cost: () => ({ takerUsd: 0, makerUsd: 0, peakUsd: 0 }),
+    async run(t) {
+      const v0 = await t.start({ kind: 'hedge', shape: 'spot', sizeUsd: 2 * t.U, minLiqPct: 3, growLiqPct: 6, sliceUsd: t.U, maxSlipBps: 20, marginUsd: 2 * t.U, maxLossUsd: 2, onStop: 'close' });
+      const v1 = await t.waitAlgo(v0.algo.id, 'it waits for the coin', (v) => v.algo.status === 'waiting' || (v.bot?.hedge?.legs[0]?.coin ?? 0) > 0, { timeoutMs: 60_000, inconclusive: true });
+      const coin = v1.bot?.hedge?.legs[0]?.coin ?? 0;
+      if (coin <= 0) t.check(v1.algo.childCount === 0, `no coin held as futures margin: nothing sent (${v1.algo.statusReason ?? v1.algo.status})`);
+      await t.exec.algoAct('cancel', v0.algo.id);
+      const v = await t.waitEnded(v0.algo.id, 2 * MIN);
+      await nothingResting(t, v.algo.id);
+      t.check(v.algo.children.every((c) => c.tif === 'ioc'), 'every order it sent was a taker (IOC): nothing ever rested');
+    },
+  }),
+
   bot('bot.kill', 'mm', 'The kill switch on a running bot', 'cancel-all ends the bot at once and pulls its quotes: no close is sent, nothing rests', {
     timeoutMs: 4 * MIN,
     slow: false,
