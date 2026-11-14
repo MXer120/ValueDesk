@@ -65,6 +65,7 @@ export const ALGO_LIMITS = {
   sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
   mm: { orderUsd: { min: 10, max: 100_000 }, maxInventoryUsd: { min: 10, max: 1_000_000 }, offsetTicks: { min: -1, max: 1_000 }, chaseTicks: { min: 1, max: 1_000 }, minRepriceMs: { min: 1_000, max: MIN }, skewTicks: { min: 0, max: 1_000 }, edgeBps: { min: 0, max: 100 }, queueGuard: { min: 0, max: 0.5 }, levels: { min: 1, max: 5 }, moveGuard: { min: 0, max: 100 }, refBps: { min: 0, max: 50 }, pullBps: { min: 0, max: 20 }, placeBps: { min: 0, max: 20 }, calmBps: { min: 0, max: 20 }, calmMs: { min: 50, max: 10_000 }, stillBps: { min: 0, max: 500 }, stillMs: { min: 1_000, max: 120_000 }, restMs: { min: 500, max: 120_000 }, flowMinUsd: { min: 1_000, max: 100_000_000 }, flowWindowMs: { min: MIN, max: HOUR }, flowShrink: { min: 0.1, max: 1 }, quietWindows: 6 },
   grid: { levels: { min: 3, max: 60 }, orderUsd: { min: 10, max: 100_000 } },
+  hedge: { sizeUsd: { min: 10, max: 5_000_000 }, minLiqPct: { min: 0.5, max: 50 }, growLiqPct: { min: 1, max: 80 }, sliceUsd: { min: 10, max: 1_000_000 }, maxSlipBps: { min: 1, max: 100 }, marginUsd: { min: 1, max: 5_000_000 } },
   bot: { volumeTargetUsd: { min: 100, max: 1e10 }, maxLossUsd: { min: 1, max: 1e8 }, takeProfitUsd: { min: 0.01, max: 1e8 } },
   exitPct: { min: 0.001, max: 10 },
   exec: { slippageBps: { min: 1, max: 500 }, offsetTicks: { min: -5, max: 10_000 }, chaseTicks: { min: 1, max: 10_000 }, makerShare: { min: 0.1, max: 0.95 } },
@@ -798,6 +799,41 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       }
       break;
     }
+    case 'hedge': {
+      const L = ALGO_LIMITS.hedge;
+      const shape = oneOf(o, 'shape', 'Hedge with', ['pair', 'spot'] as const, 'pair', e);
+      const role = oneOf(o, 'role', 'Leg', ['main', 'partner'] as const, 'main', e);
+      if (b.reduceOnly) e.reduceOnly = 'A hedge opens its legs: it cannot be reduce-only.';
+      const pairId = typeof o.pairId === 'string' && /^[0-9a-z-]{8,64}$/i.test(o.pairId) ? o.pairId.toLowerCase() : null;
+      const partner = typeof o.partner === 'string' && /^0x[0-9a-fA-F]{40}$/.test(o.partner) ? o.partner.toLowerCase() : null;
+      if (shape === 'pair') {
+        if (!pairId) e.pairId = 'A pair needs its id (the same on both legs).';
+        if (!partner) e.partner = 'A pair needs the address of the second wallet.';
+      }
+      if (shape === 'spot' && role !== 'main') e.role = 'The spot hedge has one leg.';
+      const minLiqPct = num(o, 'minLiqPct', 'Liquidation buffer', L.minLiqPct, e);
+      const growLiqPct = num(o, 'growLiqPct', 'Grow-back buffer', L.growLiqPct, e);
+      if (Number.isFinite(minLiqPct) && Number.isFinite(growLiqPct) && growLiqPct <= minLiqPct) e.growLiqPct = 'The grow-back buffer must be wider than the liquidation buffer.';
+      spec = {
+        ...b,
+        ...botLimits(o, e, b.paper),
+        kind,
+        // The spot shape is always short (the coin is the long); a partner's side is the main's other side.
+        side: shape === 'spot' ? 'sell' : b.side,
+        shape,
+        role: shape === 'spot' ? 'main' : role,
+        pairId: shape === 'pair' ? pairId : null,
+        partner: shape === 'pair' ? partner : null,
+        sizeUsd: num(o, 'sizeUsd', 'Size per leg', L.sizeUsd, e),
+        minLiqPct,
+        growLiqPct,
+        sliceUsd: num(o, 'sliceUsd', 'Step size', L.sliceUsd, e),
+        maxSlipBps: num(o, 'maxSlipBps', 'Max slippage', L.maxSlipBps, e),
+        marginUsd: num(o, 'marginUsd', 'Margin per leg', L.marginUsd, e),
+      };
+      if (b.marginMode === 'isolated') e.marginMode = 'A hedge runs on cross margin (the spot shape needs it: SoDEX counts the coin as margin in cross only).';
+      break;
+    }
     case 'bracket': {
       const entry = oneOf(o, 'entry', 'Entry', ['market', 'limit'] as const, 'market', e);
       if (!b.exits) e.exits = 'A bracket needs a take-profit, a stop-loss, or both.';
@@ -847,6 +883,7 @@ export function algoQuantity(s: AlgoSpec): number | null {
     case 'basket':
     case 'mm':
     case 'grid':
+    case 'hedge':
       return null;
     case 'twap':
       return s.closeShare !== null ? null : Number(s.quantity);
@@ -890,6 +927,7 @@ export const ALGO_NAMES: Readonly<Record<AlgoKind, string>> = {
   sweep: 'Fill fast',
   mm: 'Volume maker',
   grid: 'Grid',
+  hedge: 'Hedge',
 };
 
 /** Started from the Bots page: keeps a bot book and carries the bot builder fee (policy.ts BOT_FEE). */

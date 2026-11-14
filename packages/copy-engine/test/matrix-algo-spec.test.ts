@@ -34,6 +34,7 @@ const BASE: Record<AlgoKind, Record<string, unknown>> = {
   sweep: { kind: 'sweep', symbol: 'BTC-USD', side: 'buy', quantity: '0.01', slippageBps: 10 },
   mm: { kind: 'mm', maxLossUsd: 1_000_000, symbol: 'BTC-USD', orderUsd: 20, maxInventoryUsd: 100 },
   grid: { kind: 'grid', maxLossUsd: 1_000_000, symbol: 'BTC-USD', low: 55_000, high: 65_000, levels: 10, orderUsd: 20 },
+  hedge: { kind: 'hedge', maxLossUsd: 1_000_000, symbol: 'BTC-USD', side: 'buy', shape: 'pair', role: 'main', pairId: 'pair-0001-test', partner: '0x00000000000000000000000000000000000000b2', sizeUsd: 1_000, minLiqPct: 3, growLiqPct: 6, sliceUsd: 200, maxSlipBps: 20, marginUsd: 100 },
 };
 
 const accepted = (x: Record<string, unknown>, what: string): AlgoSpec => {
@@ -533,7 +534,7 @@ test('conflicts: what CAN go together', () => {
 });
 
 test('every kind: its menu entry exists, its base spec opens (or closes) as expected', () => {
-  const opens: Record<AlgoKind, boolean> = { twap: true, vwap: true, pov: true, iceberg: true, chase: true, scale: true, dca: true, swarm: true, conditional: true, trailing: false, basket: false, bracket: true, sweep: true, mm: true, grid: true };
+  const opens: Record<AlgoKind, boolean> = { twap: true, vwap: true, pov: true, iceberg: true, chase: true, scale: true, dca: true, swarm: true, conditional: true, trailing: false, basket: false, bracket: true, sweep: true, mm: true, grid: true, hedge: true };
   for (const k of ALGO_KINDS) assert.equal(opensPosition(accepted(BASE[k], k)), opens[k], k);
   // A bot buys and sells: it is never reduce-only (refused, its own test).
   for (const k of ALGO_KINDS.filter((x) => x !== 'bracket' && !BOT_KINDS.includes(x))) assert.equal(opensPosition(accepted({ ...BASE[k], reduceOnly: true, exits: null }, `${k} reduce-only`)), false, `${k} reduce-only opens nothing`);

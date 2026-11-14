@@ -39,12 +39,12 @@
 import type { ConsentRecord, CopyMode } from '../types.ts';
 import type { OracleVenue } from '../oracle.ts';
 
-export type AlgoKind = 'twap' | 'vwap' | 'pov' | 'iceberg' | 'chase' | 'scale' | 'dca' | 'swarm' | 'conditional' | 'trailing' | 'basket' | 'bracket' | 'sweep' | 'mm' | 'grid';
+export type AlgoKind = 'twap' | 'vwap' | 'pov' | 'iceberg' | 'chase' | 'scale' | 'dca' | 'swarm' | 'conditional' | 'trailing' | 'basket' | 'bracket' | 'sweep' | 'mm' | 'grid' | 'hedge';
 
-export const ALGO_KINDS: readonly AlgoKind[] = ['twap', 'vwap', 'pov', 'iceberg', 'chase', 'scale', 'dca', 'swarm', 'conditional', 'trailing', 'basket', 'bracket', 'sweep', 'mm', 'grid'];
+export const ALGO_KINDS: readonly AlgoKind[] = ['twap', 'vwap', 'pov', 'iceberg', 'chase', 'scale', 'dca', 'swarm', 'conditional', 'trailing', 'basket', 'bracket', 'sweep', 'mm', 'grid', 'hedge'];
 
 /** The kinds that only ever run as bots (the Bots page): open-ended, two-sided, resting only. */
-export const BOT_KINDS: readonly AlgoKind[] = ['mm', 'grid'];
+export const BOT_KINDS: readonly AlgoKind[] = ['mm', 'grid', 'hedge'];
 
 export type Side = 'buy' | 'sell';
 
@@ -635,9 +635,42 @@ export interface GridSpec extends AlgoBase, BotLimits {
   direction?: 'neutral' | 'long' | 'short';
 }
 
+/**
+ * Hedge (owner 2026-11-14, hedge.ts): open interest held market-neutral.
+ *   pair  this wallet's perp leg on `side`, and a second wallet's leg the other way (its own bot, role 'partner', the
+ *         same pairId, each naming the other). The main leg drives both: equal sizes, every liquidation kept at least
+ *         minLiqPct away by shrinking both legs, growing back to sizeUsd when the accounts have room at growLiqPct.
+ *   spot  a perp short in this account, as large as the coin this account holds in its futures balance (bought on spot
+ *         and moved there beforehand, where SoDEX counts it as margin), never larger.
+ * Its legs only ever take (IOC within maxSlipBps), so the two legs can never fill against each other.
+ */
+export interface HedgeSpec extends AlgoBase, BotLimits {
+  kind: 'hedge';
+  shape: 'pair' | 'spot';
+  /** main: drives the pair (sizes, trims, closes both legs). partner: the second wallet's leg, traded by the main. */
+  role: 'main' | 'partner';
+  /** Joins a pair's two legs (the same on both); null in the spot shape. */
+  pairId: string | null;
+  /** The other wallet of a pair, lower-case; null in the spot shape. */
+  partner: string | null;
+  /** Each leg's target, USD at the price when it starts (the OI per leg). */
+  sizeUsd: number;
+  /** Keep every leg's liquidation at least this far from the price, % (both legs shrink below it). */
+  minLiqPct: number;
+  /** Grow back only while every leg's liquidation stays at least this far, % (above minLiqPct). */
+  growLiqPct: number;
+  /** Each step's size per leg, USD. */
+  sliceUsd: number;
+  /** A taker leg's limit, bp from the mark. */
+  maxSlipBps: number;
+  /** Practice only: each leg's margin, USD (a real leg reads its account's equity from SoDEX). */
+  marginUsd: number;
+}
+
 export type AlgoSpec =
   | MmSpec
   | GridSpec
+  | HedgeSpec
   | SweepSpec
   | TwapSpec
   | VwapSpec
@@ -908,4 +941,36 @@ export interface BotView {
   closing: boolean;
   /** Who took its quotes, USD (BotBook.takers); absent until a fill is seen on the trade stream. */
   takers?: { t1002: number; t23342: number; other: number };
+  /** A hedge: both legs as last read (the main's view; the partner's shows the same pair). */
+  hedge?: HedgeView;
+}
+
+export interface HedgeLegView {
+  owner: string;
+  /** Signed position on the market. */
+  qty: number;
+  usd: number;
+  equity: number | null;
+  /** Liquidation price, and how far it is from the mark (share; null: none or unknown). */
+  liq: number | null;
+  liqDistance: number | null;
+  /** The coin it holds as futures margin (spot shape). */
+  coin?: number;
+}
+
+export interface HedgeView {
+  shape: 'pair' | 'spot';
+  role: 'main' | 'partner';
+  /** Waiting for the other wallet's leg. */
+  paired: boolean;
+  legs: HedgeLegView[];
+  /** Both legs' net PnL together, USD (the pair is what makes or loses). */
+  pairNet: number;
+  /** Both legs' volume. */
+  pairVolume: number;
+  /** What the accounts allow now at growLiqPct, base units per leg. */
+  room: number | null;
+  /** The last thing it did, in words. */
+  last: string | null;
+  at: number | null;
 }

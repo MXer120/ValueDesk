@@ -972,6 +972,7 @@ const WORKING: Record<AlgoKind, Record<string, unknown>> = {
   // Bots: they quote until stopped; 'keep' so a cancel ends one at once, as every other kind's does.
   mm: { kind: 'mm', maxLossUsd: 1_000_000, orderUsd: 30, maxInventoryUsd: 120, onStop: 'keep' },
   grid: { kind: 'grid', maxLossUsd: 1_000_000, low: 59_000, high: 61_000, levels: 6, orderUsd: 30, onStop: 'keep' },
+  hedge: { kind: 'hedge', shape: 'spot', maxLossUsd: 1_000_000, sizeUsd: 120, minLiqPct: 3, growLiqPct: 6, sliceUsd: 60, maxSlipBps: 20, marginUsd: 100, onStop: 'keep' },
 };
 
 const family = (r: Rig, id: string) => [id, ...r.rt.list().filter((x) => x.parentId === id).map((x) => x.id)];

@@ -67,7 +67,8 @@ import type { AlgoStore } from './store.ts';
 import type { AlgoUpdatePatch } from '../api.ts';
 import { bookFill, bookGross, bookInventory, bookNet, bookVolume, botQuoteUsd, costPerMillion, emptyBook, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, INFORMED_TAKER_ACCOUNT, newsAt, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
 import { FairBasis, REF_GRACE_MS, REF_MAX_AGE_MS, type ReferenceSource } from './reference.ts';
-import type { BotHealth, BotHealthCheck } from './types.ts';
+import type { BotBook, BotHealth, BotHealthCheck, HedgeLegView, HedgeSpec, HedgeView } from './types.ts';
+import { firstMmr, hedgeClose, hedgePlan, liqDistance, spotHedgeMove, type HedgeLeg, type HedgeMove } from './hedge.ts';
 import type { RefusalKind } from './refusals.ts';
 import {
   FINAL_STATUSES,
@@ -91,6 +92,40 @@ export const ALGO_TICK_MS = 500;
 /** A bot is stepped on an update at most this often (stepSoon); the tick still steps it every ALGO_TICK_MS. */
 export const BOT_EVENT_MIN_MS = 50;
 const FLUSH_MS = 2_000;
+/** A hedge leg's account is read again after this (SoDEX's perps state). */
+const HEDGE_READ_MS = 1_500;
+
+/** The part of SoDEX's perps state a hedge leg reads (sodex-core PerpsAccountState). */
+interface RawHedgeState {
+  av?: string;
+  mm?: string;
+  P?: Array<{ s: string; sz: string; lp?: string | null }> | null;
+  B?: Array<{ a: string; wb: string }> | null;
+}
+
+/** One hedge leg from SoDEX's perps state: the position on `symbol`, its liquidation price, the account, the coin held. */
+export function hedgeLegFromState(st: RawHedgeState | null, symbol: string, base: string): HedgeLeg & { coin: number } {
+  const p = (st?.P ?? []).find((x) => x.s === symbol);
+  const lp = Number(p?.lp);
+  const mmv = Number(st?.mm);
+  const coinRow = (st?.B ?? []).find((b) => String(b.a).toUpperCase() === base.toUpperCase());
+  return {
+    qty: Number(p?.sz) || 0,
+    equity: Number(st?.av) || 0,
+    maintenance: st?.mm !== undefined && Number.isFinite(mmv) ? mmv : null,
+    liq: p?.lp === undefined || p?.lp === null || p?.lp === '' ? null : Number.isFinite(lp) ? lp : null,
+    coin: Number(coinRow?.wb) || 0,
+  };
+}
+
+const shortAddr = (x: string) => (x.length > 10 ? `${x.slice(0, 6)}…${x.slice(-4)}` : x);
+
+function hedgeWords(mv: HedgeMove, base: string, shape: 'pair' | 'spot', leg: 0 | 1 = 0): string {
+  const who = shape === 'spot' ? 'The short' : leg === 0 ? 'This leg' : 'The second leg';
+  const what = mv.why === 'grow' ? 'grew' : mv.why === 'trim' ? 'got smaller (liquidation buffer)' : mv.why === 'balance' ? 'evened out' : 'closed';
+  return `${who} ${what}: ${mv.side} ${Number(mv.qty.toPrecision(6))} ${base}`;
+}
+
 /** How long after its update a booked fill still claims its public print (bookOwnPrint). */
 const PRINT_MATCH_MS = 30_000;
 const MARKETS_REFRESH_MS = 10 * 60_000;
@@ -264,6 +299,11 @@ export interface AlgoHost {
    * the account's gross exposure its opening children may reach. null = none.
    */
   policyFor?(a: AlgoRecord): RegionPolicy | null;
+  /**
+   * A hedge leg's account (default: SoDEX's perps state): equity, maintenance margin, the position and its liquidation
+   * price on `symbol`, and the coin `base` held as futures margin (the spot hedge).
+   */
+  margin?(a: AlgoRecord, symbol: string, base: string): Promise<{ qty: number; equity: number; maintenance: number | null; liq: number | null; coin: number }>;
   /** Equity and gross notional of the owner's account (default: read from SoDEX), for the leverage ceiling. */
   account?(a: AlgoRecord): Promise<{ equity: number; gross: number }>;
   /** Volume candles (default: SoDEX REST). */
@@ -451,6 +491,8 @@ export class AlgoRuntime {
   /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling); `from`: when that read left. */
   private positionsOf = new Map<string, { at: number; from?: number; data: Record<string, { size: number; entry: number; leverage?: number }>; loading: boolean }>();
   private accounts = new Map<string, { at: number; equity: number; gross: number }>();
+  /** A hedge leg's account, read at most every HEDGE_READ_MS (both legs of a pair are read every step). */
+  private readonly hedgeReads = new Map<string, { at: number; v: HedgeLeg & { coin: number } }>();
   /** Algos whose exits are being placed or resized right now. */
   private exitsBusy = new Set<string>();
   /** Algos whose final exits were asked for while a placement was out: placed again once it is back. */
@@ -971,7 +1013,7 @@ export class AlgoRuntime {
     await this.host.store.saveAlgo(a);
     this.syncWatch();
     // A bot has no side of its own: "Market maker on BTC-USD", never "Volume maker buy" (audit 2026-11-08).
-    const what = spec.kind === 'basket' ? `Basket of ${spec.legs.length} markets` : spec.kind === 'mm' ? `Market maker on ${spec.symbol}` : spec.kind === 'grid' ? `Grid on ${spec.symbol}` : `${ALGO_NAMES[spec.kind]} ${spec.side === 'buy' ? 'buy' : 'sell'} on ${spec.symbol}`;
+    const what = spec.kind === 'basket' ? `Basket of ${spec.legs.length} markets` : spec.kind === 'mm' ? `Market maker on ${spec.symbol}` : spec.kind === 'grid' ? `Grid on ${spec.symbol}` : spec.kind === 'hedge' ? `Hedge on ${spec.symbol}` : `${ALGO_NAMES[spec.kind]} ${spec.side === 'buy' ? 'buy' : 'sell'} on ${spec.symbol}`;
     await this.event(a, 'status', `${what} placed${spec.paper ? ' (paper: nothing is sent)' : ''}.`);
     for (const c of n.checks ?? []) await this.event(a, 'info', `Check passed: ${c}`);
     this.host.onChange?.(a.id);
@@ -1143,7 +1185,7 @@ export class AlgoRuntime {
     // `now` (Instant stop): the close takes at once (a capped taker) instead of resting at the touch first.
     // `keep` / `close`: this stop's choice over the bot's On stop setting (the stop menu), with no settings change
     // first - a stop never waits behind the brake, the terms or a move (audit 2026-11-09).
-    if (a.spec.bot && (o.keep || o.close) && (a.spec.kind === 'mm' || a.spec.kind === 'grid')) {
+    if (a.spec.bot && (o.keep || o.close) && (a.spec.kind === 'mm' || a.spec.kind === 'grid' || a.spec.kind === 'hedge')) {
       const want = o.keep ? 'keep' : 'close';
       if (a.spec.onStop !== want) {
         (a.spec as { onStop: string }).onStop = want;
@@ -1368,7 +1410,7 @@ export class AlgoRuntime {
     const marketVwap = a.marketQty > 0 ? a.marketValue / a.marketQty : null;
     let progress = target ? Math.min(1, a.filled / target) : 0;
     if (s.kind === 'dca') progress = Math.min(1, (Number(a.k.done ?? 0) + Number(a.k.skipped ?? 0)) / s.orders);
-    if ((s.kind === 'mm' || s.kind === 'grid') && a.book) progress = s.volumeTargetUsd ? Math.min(1, bookVolume(a.book) / s.volumeTargetUsd) : 0;
+    if ((s.kind === 'mm' || s.kind === 'grid' || s.kind === 'hedge') && a.book) progress = s.volumeTargetUsd ? Math.min(1, bookVolume(a.book) / s.volumeTargetUsd) : 0;
     // A basket's progress is its legs' filled value against what each leg is to trade.
     const legs = this.legsOf(a);
     if (s.kind === 'basket') {
@@ -1398,7 +1440,7 @@ export class AlgoRuntime {
     else if ((s.kind === 'chase' || s.kind === 'sweep') && a.startedAt !== null && s.timeoutMs) endsAt = a.startedAt + s.timeoutMs;
     else if (s.kind === 'swarm') nextAt = (a.k.waveAt as number | undefined) ?? null;
     else if (s.kind === 'conditional') endsAt = s.expiresAt;
-    else if (s.kind === 'mm' || s.kind === 'grid') endsAt = s.endAt;
+    else if (s.kind === 'mm' || s.kind === 'grid' || s.kind === 'hedge') endsAt = s.endAt;
     if (s.startAt && a.status === 'scheduled') nextAt = s.startAt;
     const live = a.children.filter((c) => LIVE.has(c.state));
     const working = live.length
@@ -1574,6 +1616,7 @@ export class AlgoRuntime {
       orders: this.live(a).filter((c) => c.tif !== 'ioc' && !c.cancelling).map((c) => ({ side: c.side, price: c.price, quantity: c.quantity - c.filled, tag: c.tag })),
       closing: !!a.k.closing,
       ...(b.takers ? { takers: { ...b.takers } } : {}),
+      ...(a.spec.kind === 'hedge' ? { hedge: this.hedgeView(a) } : {}),
     };
   }
 
@@ -1808,6 +1851,8 @@ export class AlgoRuntime {
         return this.stepMm(a, m, q, mk, now);
       case 'grid':
         return this.stepGrid(a, m, q, mk, now);
+      case 'hedge':
+        return this.stepHedge(a, m, q, mk, now);
     }
   }
 
@@ -2231,7 +2276,8 @@ export class AlgoRuntime {
       return true;
     }
     this.heldNow.delete(a.id);
-    await this.stepBotClose(a, m, q, mk, now);
+    if (a.spec.kind === 'hedge') await this.stepHedgeClose(a, m, q, mk);
+    else await this.stepBotClose(a, m, q, mk, now);
     if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
     return true;
   }
@@ -2375,6 +2421,7 @@ export class AlgoRuntime {
    */
   private async stopBot(a: AlgoRecord, status: AlgoStatus, reason: string, now = false, force = false): Promise<boolean> {
     const s = a.spec;
+    if (s.kind === 'hedge') return this.hedgeStop(a, status, reason, force);
     // `force`: the last resort (tooManyRefusals, a delisting) closes whatever On stop says.
     if (!(s.kind === 'mm' || s.kind === 'grid') || (s.onStop !== 'close' && !force) || !a.book) return false;
     const m = this.markets.get(s.symbol);
@@ -2402,8 +2449,9 @@ export class AlgoRuntime {
   /** A bot's limits, checked every step: true when it stopped (or began closing). */
   private async botLimitsHit(a: AlgoRecord, mk: number | null, now: number): Promise<boolean> {
     const s = a.spec;
-    if (s.kind !== 'mm' && s.kind !== 'grid') return false;
-    const b = (a.book ??= emptyBook());
+    if (s.kind !== 'mm' && s.kind !== 'grid' && s.kind !== 'hedge') return false;
+    if (s.kind === 'hedge' && s.role === 'partner') return false; // the main leg checks the pair's limits
+    const b = s.kind === 'hedge' ? this.hedgeBook(a) : (a.book ??= emptyBook());
     let hit: { status: AlgoStatus; reason: string } | null = null;
     if (s.volumeTargetUsd !== null && bookVolume(b) >= s.volumeTargetUsd) hit = { status: 'done', reason: `Reached its volume target of ${money(s.volumeTargetUsd)}.` };
     // The loss limit needs a price: with none (no mark, no book) it is checked on the next step that has one.
@@ -2423,6 +2471,255 @@ export class AlgoRuntime {
    * bot). A post-only close the touch moved under, a rate limit or a margin answer is no sign of that: it only
    * waits a moment (retryAt) and goes again.
    */
+  /* ---------------------------------------------------------------- hedge ----- */
+
+  /** The other leg of a pair: the partner's record for a main, the main's for a partner (null: not on this executor). */
+  private hedgeOther(a: AlgoRecord): AlgoRecord | null {
+    const s = a.spec as HedgeSpec;
+    if (s.shape !== 'pair' || !s.pairId || !s.partner) return null;
+    let best: AlgoRecord | null = null;
+    for (const r of this.algos.values()) {
+      const t = r.spec;
+      if (r.id === a.id || t.kind !== 'hedge' || t.pairId !== s.pairId || t.role === s.role || r.owner !== s.partner || t.partner !== a.owner || t.symbol !== s.symbol || t.paper !== s.paper) continue;
+      // A live leg first; else the latest one that ended (it says why the pair stopped).
+      const bestEnded = best ? FINAL_STATUSES.has(best.status) : true;
+      const ended = FINAL_STATUSES.has(r.status);
+      if (!best || (bestEnded && !ended) || (bestEnded === ended && r.createdAt > best.createdAt)) best = r;
+    }
+    return best;
+  }
+
+  /** Both legs' books as one (the pair's volume and net PnL; the spot shape: its own). */
+  private hedgeBook(a: AlgoRecord): BotBook {
+    const own = (a.book ??= emptyBook());
+    const o = this.hedgeOther(a);
+    if (!o?.book) return own;
+    const x = o.book;
+    return {
+      ...own,
+      buyQty: own.buyQty + x.buyQty,
+      buyValue: own.buyValue + x.buyValue,
+      sellQty: own.sellQty + x.sellQty,
+      sellValue: own.sellValue + x.sellValue,
+      makerValue: own.makerValue + x.makerValue,
+      takerValue: own.takerValue + x.takerValue,
+      tradeFees: own.tradeFees + x.tradeFees,
+      builderFees: own.builderFees + x.builderFees,
+      fills: own.fills + x.fills,
+      carryQty: (own.carryQty ?? 0) + (x.carryQty ?? 0),
+      carryValue: (own.carryValue ?? 0) + (x.carryValue ?? 0),
+    };
+  }
+
+  /** One leg as the plan needs it: SoDEX's account for a real leg, the bot's own book for a practice one. */
+  private async hedgeLeg(r: AlgoRecord, m: MarketInfo, mk: number): Promise<(HedgeLeg & { coin: number }) | null> {
+    const s = r.spec as HedgeSpec;
+    if (s.paper) {
+      const b = (r.book ??= emptyBook());
+      const ref = r.arrival ?? mk;
+      return { qty: bookInventory(b), equity: s.marginUsd + bookNet(b, mk), maintenance: null, liq: null, coin: s.shape === 'spot' && ref > 0 ? s.sizeUsd / ref : 0 };
+    }
+    const hit = this.hedgeReads.get(r.id);
+    if (hit && Date.now() - hit.at < HEDGE_READ_MS) return hit.v;
+    try {
+      const v = this.host.margin
+        ? await this.host.margin(r, s.symbol, m.base)
+        : hedgeLegFromState((await this.host.sodex.perpsState(r.owner)) as RawHedgeState | null, s.symbol, m.base);
+      this.hedgeReads.set(r.id, { at: Date.now(), v });
+      return v;
+    } catch (e) {
+      this.host.log.warn('algo: hedge leg read failed', { owner: r.owner, error: String(e) });
+      return null;
+    }
+  }
+
+  /** One plan move on its leg's account: a taker within the slippage limit, never into another user's bot. */
+  private async hedgeSend(r: AlgoRecord, m: MarketInfo, q: Quote, mk: number, mv: HedgeMove): Promise<boolean> {
+    const s = r.spec as HedgeSpec;
+    const qty = floorStep(mv.qty, m);
+    // Under SoDEX's minimum: nothing can be sent; it waits until the difference grows.
+    if (qty < minChildQty(m, mk) - 1e-12) return false;
+    let price = takerPrice(mv.side, q, s.maxSlipBps, m, mk, null);
+    if (price === null) return false;
+    const wall = this.otherBotWall(r, m.name, mv.side);
+    if (wall !== null) {
+      const tick = Number(m.tickSize);
+      price = mv.side === 'sell' ? Math.max(price, wall + tick) : Math.min(price, wall - tick);
+      // Nothing to take short of another user's bot: it waits for the book to move rather than rest (a resting leg
+      // could meet the other leg's taker, and the two accounts would trade with each other).
+      if (mv.side === 'sell' ? price > q.bid : price < q.ask) return false;
+    }
+    const sent = await this.send(r, m, [{ side: mv.side, price, quantity: qty, tif: 'ioc', tag: `hedge ${mv.why}`, reduceOnly: mv.reduceOnly }]);
+    return sent.length > 0;
+  }
+
+  /** The pair's state for the view, kept on the main (k.hv). */
+  private hedgeNote(a: AlgoRecord, legs: Array<{ r: AlgoRecord; l: HedgeLeg & { coin: number } }>, mk: number, mmr: number, room: number | null, last: string | null): void {
+    const s = a.spec as HedgeSpec;
+    const lv: HedgeLegView[] = legs.map(({ r, l }) => {
+      const d = liqDistance(l, mk, mmr);
+      return {
+        owner: r.owner,
+        qty: l.qty,
+        usd: l.qty * mk,
+        equity: l.equity,
+        liq: l.liq,
+        liqDistance: d === null || !Number.isFinite(d) ? null : d,
+        ...(s.shape === 'spot' ? { coin: l.coin } : {}),
+      };
+    });
+    const prev = a.k.hv as { last?: string | null; at?: number | null } | undefined;
+    a.k.hv = { legs: lv, room, last: last ?? prev?.last ?? null, at: last ? Date.now() : prev?.at ?? null };
+    this.dirty.add(a.id);
+  }
+
+  private hedgeView(a: AlgoRecord): HedgeView {
+    const s = a.spec as HedgeSpec;
+    const other = s.shape === 'pair' ? this.hedgeOther(a) : null;
+    const main = s.role === 'main' ? a : other;
+    const hv = (main?.k.hv as { legs?: HedgeLegView[]; room?: number | null; last?: string | null; at?: number | null } | undefined) ?? {};
+    const q = this.market.quote(s.symbol);
+    const mk = this.market.mark(s.symbol)?.mark ?? (q ? mid(q) : 0);
+    const book = main ? this.hedgeBook(main) : (a.book ?? emptyBook());
+    return {
+      shape: s.shape,
+      role: s.role,
+      paired: s.shape === 'spot' || (!!other && !FINAL_STATUSES.has(other.status) && !FINAL_STATUSES.has(a.status)),
+      legs: hv.legs ?? [],
+      pairNet: bookNet(book, mk),
+      pairVolume: bookVolume(book),
+      room: hv.room ?? null,
+      last: hv.last ?? null,
+      at: hv.at ?? null,
+    };
+  }
+
+  /**
+   * A hedge's step. The main leg drives: both legs read, one plan (hedge.ts), its orders sent on each leg's own account.
+   * The partner leg only watches its main; once that has stopped, the partner stops too (closing its own leg).
+   */
+  private async stepHedge(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number, now: number): Promise<void> {
+    const s = a.spec as HedgeSpec;
+    if (s.role === 'partner') {
+      const main = this.hedgeOther(a);
+      if (!main) return this.hold(a, `Waiting for the main wallet (${shortAddr(s.partner ?? '')}) to start its leg.`);
+      if (FINAL_STATUSES.has(main.status) || main.k.closing) {
+        if (!(await this.stopBot(a, 'cancelled', 'The main wallet stopped the hedge.'))) await this.end(a, 'cancelled', 'The main wallet stopped the hedge.');
+        return;
+      }
+      return this.run(a);
+    }
+    const other = s.shape === 'pair' ? this.hedgeOther(a) : null;
+    if (s.shape === 'pair') {
+      if (!other) return this.hold(a, `Waiting for the second wallet (${shortAddr(s.partner ?? '')}) to start its leg.`);
+      if (FINAL_STATUSES.has(other.status) || other.k.closing) {
+        if (!(await this.stopBot(a, 'cancelled', 'The second wallet stopped its leg.'))) await this.end(a, 'cancelled', 'The second wallet stopped its leg.');
+        return;
+      }
+    }
+    // Takers still settling on either leg: their fills move the positions the plan reads.
+    if (this.live(a).length || (other && this.live(other).length)) return;
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+    const mmr = firstMmr(null, m.marginTiers?.[0]?.maxLeverage ?? m.maxLeverage);
+    const ref = a.arrival ?? mk;
+    const cfg = { targetQty: s.sizeUsd / ref, minLiq: s.minLiqPct / 100, growLiq: s.growLiqPct / 100, sliceQty: s.sliceUsd / mk, tolQty: minChildQty(m, mk), mmr };
+    const mine = await this.hedgeLeg(a, m, mk);
+    if (!mine) return this.hold(a, 'Waiting to read the account from SoDEX.');
+    if (s.shape === 'spot') {
+      const room = Math.min(cfg.targetQty, mine.coin);
+      this.hedgeNote(a, [{ r: a, l: mine }], mk, mmr, room, null);
+      if (mine.coin <= 0 && mine.qty === 0) return this.hold(a, `Waiting for ${m.base} in this account's futures balance: buy it on spot and move it to Futures; the short follows it.`);
+      const mv = spotHedgeMove(mine.qty, mine.coin, cfg, mine, mk, mmr, cfg.minLiq);
+      if (mv && (await this.hedgeSend(a, m, q, mk, mv))) {
+        this.hedgeReads.delete(a.id);
+        this.hedgeNote(a, [{ r: a, l: mine }], mk, mmr, room, hedgeWords(mv, m.base, s.shape));
+      }
+      return this.run(a);
+    }
+    const theirs = await this.hedgeLeg(other!, m, mk);
+    if (!theirs) return this.hold(a, 'Waiting to read the second account from SoDEX.');
+    const plan = hedgePlan([mine, theirs], mk, s.side, cfg);
+    this.hedgeNote(a, [{ r: a, l: mine }, { r: other!, l: theirs }], mk, mmr, plan.room, null);
+    if (plan.wrong !== null) {
+      const who = plan.wrong === 0 ? 'This wallet' : 'The second wallet';
+      return this.end(a, 'failed', `${who} holds ${m.name} the same way as the other leg: that is not a hedge. Stopped without trading; check both accounts.`);
+    }
+    // Nothing that opens goes out while the second leg cannot trade (its key, the brake, a region): only what shrinks.
+    const partnerUp = other!.status === 'running';
+    let did: string | null = null;
+    // A trim: the leg closest to its liquidation first.
+    const dist = (leg: 0 | 1) => liqDistance(leg === 0 ? mine : theirs, mk, mmr) ?? Infinity;
+    const order = [...plan.moves].sort((x, y) => (x.reduceOnly === y.reduceOnly ? dist(x.leg) - dist(y.leg) : x.reduceOnly ? -1 : 1));
+    for (const mv of order) {
+      if (!mv.reduceOnly && !partnerUp) continue;
+      if (await this.hedgeSend(mv.leg === 0 ? a : other!, m, q, mk, mv)) did = hedgeWords(mv, m.base, s.shape, mv.leg);
+    }
+    if (did) {
+      this.hedgeReads.delete(a.id);
+      this.hedgeReads.delete(other!.id);
+      this.hedgeNote(a, [{ r: a, l: mine }, { r: other!, l: theirs }], mk, mmr, plan.room, did);
+      if (plan.moves.some((x) => x.why === 'trim') && now - Number(a.k.htrimNote ?? 0) > 60_000) {
+        a.k.htrimNote = now;
+        const d = Math.min(dist(0), dist(1));
+        await this.event(a, 'info', `A leg's liquidation came within ${(d * 100).toFixed(2)}% (buffer ${s.minLiqPct}%): both legs got smaller.`);
+      }
+    }
+    if (!partnerUp) return this.hold(a, `Held: the second wallet's leg is not trading (${other!.statusReason ?? other!.status}).`);
+    return this.run(a);
+  }
+
+  /** A hedge's stop: both legs closed together, a slice at a time (or left as they are with On stop: keep). */
+  private async hedgeStop(a: AlgoRecord, status: AlgoStatus, reason: string, force: boolean): Promise<boolean> {
+    const s = a.spec as HedgeSpec;
+    if (a.k.closing) return true;
+    if (s.onStop !== 'close' && !force) return false;
+    a.k.closing = { status, reason, at: Date.now() } satisfies BotClosing;
+    if (a.status === 'paused') {
+      delete a.k.pausedFrom;
+      a.status = 'running';
+      a.statusReason = null;
+    }
+    await this.save(a);
+    const what = s.shape === 'spot' ? 'Closing the short (the coin stays in your account).' : s.role === 'main' ? 'Closing both legs.' : 'The main wallet closes both legs.';
+    await this.event(a, 'info', `${reason} ${what}`);
+    this.host.onChange?.(a.id);
+    return true;
+  }
+
+  private async stepHedgeClose(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number): Promise<void> {
+    const s = a.spec as HedgeSpec;
+    const closing = a.k.closing as BotClosing;
+    const other = s.shape === 'pair' ? this.hedgeOther(a) : null;
+    const otherAlive = !!other && !FINAL_STATUSES.has(other.status);
+    // A partner whose main is still there: the main closes both legs (told to, if it does not know yet).
+    if (s.role === 'partner' && otherAlive) {
+      if (!other!.k.closing) await this.stopBot(other!, 'cancelled', 'The second wallet stopped its leg.', false, true);
+      return;
+    }
+    if (this.live(a).length || (otherAlive && this.live(other!).length)) return;
+    const tol = minChildQty(m, mk);
+    const slice = Math.max(s.sliceUsd / mk, tol);
+    const mine = await this.hedgeLeg(a, m, mk);
+    if (!mine) return;
+    const theirs = s.role === 'main' && otherAlive ? await this.hedgeLeg(other!, m, mk) : null;
+    let moves: HedgeMove[];
+    if (!theirs) {
+      const held = Math.abs(mine.qty);
+      moves = held >= tol - 1e-12 ? [{ leg: 0, side: mine.qty > 0 ? 'sell' : 'buy', qty: Math.min(held, slice), reduceOnly: true, why: 'close' }] : [];
+    } else moves = hedgeClose([mine, theirs], s.side, slice, tol).filter((x) => x.qty >= tol - 1e-12);
+    if (!moves.length) {
+      delete a.k.closing;
+      if (theirs && other) {
+        delete other.k.closing;
+        await this.end(other, closing.status, closing.reason);
+      }
+      return this.end(a, closing.status, closing.reason);
+    }
+    for (const mv of moves) await this.hedgeSend(mv.leg === 0 ? a : other!, m, q, mk, mv);
+    this.hedgeReads.delete(a.id);
+    if (other) this.hedgeReads.delete(other.id);
+  }
+
   private async stepBotClose(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number, now: number): Promise<void> {
     const closing = a.k.closing as BotClosing;
     const b = (a.book ??= emptyBook());
