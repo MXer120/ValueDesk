@@ -2,7 +2,8 @@
  * Each strategy's mark, drawn like the algo icons (AlgoIcon.tsx): a 20-unit glyph on a soft tile.
  *   maker  two quotes either side of a price line;
  *   lead   the same quotes, led by a second price line a step ahead;
- *   grid   levels with a price zig-zagging through them.
+ *   grid   levels with a price zig-zagging through them;
+ *   hedge  a long and a short leg mirrored about the price.
  */
 import type { ReactNode } from 'react';
 import { CoinIcon } from '../CoinIcon';
@@ -40,6 +41,15 @@ const GLYPHS: Record<Strategy, ReactNode> = {
     <>
       <path d="M3 5h14M3 10h14M3 15h14" strokeOpacity="0.45" />
       <path d="M3.5 13 7 7l3.5 6 3.5-6 2.5 4" />
+    </>
+  ),
+  // The hedge: a long and a short leg mirrored about the price line, a balance tick at the middle.
+  hedge: (
+    <>
+      <path d="M3 10h14" strokeOpacity="0.45" />
+      <path d="M4 14.5 8.5 8l2 2 5.5-4.5" />
+      <path d="M4 5.5 8.5 12l2-2 5.5 4.5" strokeOpacity="0.55" />
+      <circle cx="10" cy="10" r="1.3" />
     </>
   ),
 };

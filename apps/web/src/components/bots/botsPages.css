@@ -590,9 +590,11 @@
 .bot-av__badge { position: absolute; right: -3px; bottom: -3px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--bg-panel); box-shadow: 0 0 0 2px var(--bg-panel), inset 0 0 0 1px rgb(var(--ink) / 0.12); color: var(--text); }
 .bot-av__badge.is-market, .bot-av__badge.is-maker, .bot-av__badge.is-lead { color: var(--pos); }
 .bot-av__badge.is-grid { color: var(--warn); }
+.bot-av__badge.is-hedge { color: var(--tf-brand, var(--text)); }
 .bot-st { display: inline-flex; flex: none; align-items: center; justify-content: center; border-radius: 10px; background: linear-gradient(180deg, rgb(var(--ink) / 0.08), rgb(var(--ink) / 0.03)); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.08); color: var(--text); }
 .bot-st.is-market { color: var(--pos); }
 .bot-st.is-grid { color: var(--warn); }
+.bot-st.is-hedge { color: var(--tf-brand, var(--text)); }
 
 /* ------------------------------------------------------------- receipt ---- */
 .bots-sidecard { padding: 0; overflow: hidden; }

@@ -1,0 +1,39 @@
+/* The hedge pages (HedgeNewPage, HedgeInvites, the bot page's legs): the Bots pages' pieces, a few of their own. */
+.hg-form { display: flex; flex-direction: column; }
+.hg-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 10px 24px; align-items: center;
+  padding: 14px 0; border-top: 1px solid rgb(var(--ink) / 0.07);
+}
+.hg-row:first-child { border-top-color: transparent; padding-top: 4px; }
+.hg-row__t { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.hg-row__t b { font-weight: 500; font-size: var(--fs-sm, 13px); }
+.hg-row__t small { color: var(--muted); font-size: var(--fs-xs); line-height: 1.45; }
+.hg-row__c { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 0; }
+.hg-row__c > .bots-sizeline { width: 100%; }
+.hg-lev { min-width: 44px; text-align: right; font-family: var(--font-num); font-weight: 500; }
+.hg-addr { width: 100%; font-family: var(--font-num); }
+.hg-coin { font-family: var(--font-num); font-weight: 500; }
+.hg-coin small { color: var(--muted); font-weight: 400; }
+.hg-note { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+.hg-note svg { flex: none; margin-top: 2px; }
+.hg-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0 2px; }
+.hg-ref { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px; border-radius: 12px; background: rgb(var(--ink) / 0.04); }
+.hg-ref__k { font-size: var(--fs-xs); color: var(--dim); }
+.hg-ref small { flex-basis: 100%; color: var(--muted); font-size: var(--fs-xs); line-height: 1.45; }
+.hg-steps { margin: 14px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+.hg-steps b { color: var(--text); font-weight: 500; }
+.hg-av { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: rgb(var(--ink) / 0.05); }
+.hg-legs { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 10px; }
+.hg-leg { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; background: rgb(var(--ink) / 0.04); font-size: var(--fs-xs); }
+.hg-leg > span:nth-child(2) { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hg-leg b { font-family: var(--font-num); font-weight: 500; }
+.hg-leg__d { color: var(--muted); font-family: var(--font-num); }
+.hg-invite { display: flex; flex-direction: column; gap: 12px; }
+.hg-invite__top { display: flex; align-items: center; gap: 12px; }
+.hg-invite__top > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hg-invite__top small { color: var(--muted); font-size: var(--fs-xs); }
+.hg-invite__act { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 720px) {
+  .hg-row { grid-template-columns: 1fr; }
+  .hg-row__c { align-items: stretch; }
+}

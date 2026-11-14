@@ -123,7 +123,7 @@ type Part = Sec;
 const PART_NAMES: Record<Part, string> = SEC_NAMES;
 type Place = { step: 0 | 1 | 2 | 3 | 4; part?: Part };
 const STEPS = [
-  { title: 'Bot type', hint: 'Market maker or grid' },
+  { title: 'Bot type', hint: 'Maker, grid or hedge' },
   { title: 'Markets', hint: 'Where it trades' },
   { title: 'Preset', hint: 'A setup we tested' },
   { title: 'Settings', hint: 'Size, quoting, safeguards' },
@@ -775,6 +775,17 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                     </button>
                   );
                 })}
+                {/* The hedge has its own page (HedgeNewPage): two wallets' legs or a short against spot. */}
+                <button type="button" role="radio" aria-checked={false} aria-label="Hedge" className="bots-type" onClick={() => goBots({ page: 'new', market: picked[0] ?? d.symbol, kind: 'hedge' })}>
+                  <span className="bots-radio" aria-hidden="true" />
+                  <StrategyTile strategy="hedge" size={48} />
+                  <span className="bots-type__t">
+                    <b>Hedge</b>
+                    <span>Holds a long and a short of the same size: in two wallets, or against coin you hold.</span>
+                    <small>For open interest without a market view.</small>
+                  </span>
+                  <span className="bots-cat__n">2 shapes</span>
+                </button>
               </div>
             </Shell>
           )}

@@ -69,7 +69,7 @@ export function uiKindOf(s: AlgoSpec): UiKind {
   if (s.kind === 'scale' && s.label === 'DCA') return 'dca';
   if (s.kind === 'twap' && s.label === 'Chase TWAP') return 'chasetwap';
   // Bots never reach the Algos tab (filtered where it reads them); a scale is the nearest picture if one did.
-  if (s.kind === 'mm' || s.kind === 'grid') return 'scale';
+  if (s.kind === 'mm' || s.kind === 'grid' || s.kind === 'hedge') return 'scale';
   return s.kind;
 }
 

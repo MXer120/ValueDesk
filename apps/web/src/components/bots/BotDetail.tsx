@@ -10,6 +10,7 @@
  * instead, and nothing restarts. A stopped bot runs again, and a practice bot runs with real orders, from New bot
  * filled with its settings. Pause, resume, stop and delete stay in the header.
  */
+import { HedgeLegs, HedgeSettings } from './HedgeDetail';
 import { useEffect, useMemo, useState } from 'react';
 import { FINAL_STATUSES, regionPolicy, type AlgoEvent, type AlgoView } from '@copy-engine';
 import { DASH, fmtDateTime, fmtQty, fmtUsd } from '../../format';
@@ -373,6 +374,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
             <MarketConditions symbol={v.algo.spec.symbol} initialWindow={runWindow} marks={runMarks} title={`Market conditions on ${v.algo.spec.symbol.replace(/-USD$/i, '')}`} subtitle="Who took makers' quotes and how volatile it was while this bot ran" />
           </div>
           <aside className="bots-dgrid__side">
+            {v.algo.spec.kind === 'hedge' && <HedgeLegs v={v} me={ctx.address} />}
             {!ended && <Watchdog v={v} />}
             <LatencyCard ctx={ctx} bot={v.algo.id} practice={v.algo.spec.paper} compact marks={v.algo.startedAt ? [{ t: v.algo.startedAt, label: 'Started' }] : []} />
             {!ended && (
@@ -412,7 +414,7 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
           </div>
         </div>
       )}
-      {tab === 'settings' && <SettingsTab v={v} ctx={ctx} />}
+      {tab === 'settings' && (v.algo.spec.kind === 'hedge' ? <HedgeSettings v={v} ctx={ctx} /> : <SettingsTab v={v} ctx={ctx} />)}
       {tab !== 'overview' && tab !== 'settings' && tab !== 'analysis' && (
         <Shell className="bots-detailcard">
           <Panel className="bots-tabpanel" role="tabpanel">

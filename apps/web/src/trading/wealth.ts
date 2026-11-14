@@ -20,6 +20,8 @@
  *
  * Every amount from the API is a decimal string; money sent on-chain is integer base units.
  */
+import { loadReferral } from '../onboarding/referral';
+import { mayAttachCode } from '../onboarding/referralRules';
 import { readGateway } from './gateway';
 import { logger } from '../log';
 import { TradingError } from './session';
@@ -372,11 +374,15 @@ export function referralWord(code: string): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('').padEnd(64, '0');
 }
 
-/** No builder fee (bytes32(0)); the referral is ValueDesk's. RFQ calls take no referral. */
-export const requestDepositData = (assets: bigint, receiver: string): string =>
-  `${SELECTOR.requestDeposit}${uintWord(assets)}${addrWord(receiver)}${ZERO32}${referralWord(WEALTH_REFERRAL_CODE)}`;
-export const requestRedeemData = (shares: bigint, receiver: string): string =>
-  `${SELECTOR.requestRedeem}${uintWord(shares)}${addrWord(receiver)}${ZERO32}${referralWord(WEALTH_REFERRAL_CODE)}`;
+/**
+ * No builder fee (bytes32(0)). The referral is ValueDesk's only for a wallet SoDEX says has no other inviter, or is on
+ * ours already (owner 2026-11-14: "ONLY if we verified that wallet doesnt already have a ref code"): `ours` is
+ * referralRules.mayAttachCode(state). Otherwise bytes32(0). RFQ calls take no referral.
+ */
+export const requestDepositData = (assets: bigint, receiver: string, ours: boolean): string =>
+  `${SELECTOR.requestDeposit}${uintWord(assets)}${addrWord(receiver)}${ZERO32}${ours ? referralWord(WEALTH_REFERRAL_CODE) : ZERO32}`;
+export const requestRedeemData = (shares: bigint, receiver: string, ours: boolean): string =>
+  `${SELECTOR.requestRedeem}${uintWord(shares)}${addrWord(receiver)}${ZERO32}${ours ? referralWord(WEALTH_REFERRAL_CODE) : ZERO32}`;
 
 /** buy / sell(address vault, uint256 pay, uint256 receive, uint256 deadline, bytes signature). */
 export function rfqData(side: 'buy' | 'sell', vault: string, pay: bigint, receive: bigint, deadline: bigint, signature: string): string {
@@ -507,7 +513,9 @@ export async function requestVault(o: {
     await send(o.provider, o.owner, chainId, facts.asset, approveData(vault, o.amount), 'approval');
   }
   ask('confirm');
-  const data = o.side === 'buy' ? requestDepositData(o.amount, o.owner) : requestRedeemData(o.amount, o.owner);
+  // ValueDesk's code rides on the request only for a wallet SoDEX says has no other inviter (or is on ours already).
+  const ours = mayAttachCode(await loadReferral(o.owner));
+  const data = o.side === 'buy' ? requestDepositData(o.amount, o.owner, ours) : requestRedeemData(o.amount, o.owner, ours);
   const hash = await send(o.provider, o.owner, chainId, vault, data, o.side === 'buy' ? 'deposit request' : 'redemption request');
   log.info('vault request', { fundId: o.fundId, side: o.side });
   return hash;

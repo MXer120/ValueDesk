@@ -278,3 +278,17 @@ html[data-theme='light'] .onb-go:hover { filter: brightness(1.6); }
 /* The Settings icon's green dot: something waits in Profile. */
 .settings__dot.settings__dot--go { background: var(--pos); box-shadow: 0 0 0 2px var(--bg); }
 .stg__choices.is-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* The VALUEDESK popup for connected wallets with no inviter (ReferralOffer.tsx). */
+.ref-offer .onb-code { margin: 4px 0 10px; }
+.ref-offer__why { margin: 0 0 12px; color: var(--text); font-size: var(--fs-sm, 13px); }
+.ref-offer__note { margin: 0 0 4px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+.ref-offer__cols { display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; }
+.ref-offer__list ul { display: flex; flex-direction: column; gap: 12px; margin: 8px 0 4px; padding: 0; list-style: none; }
+.ref-offer__list li { display: flex; flex-direction: column; gap: 3px; }
+.ref-offer__list b { font-weight: 500; font-size: var(--fs-sm, 13px); }
+.ref-offer__list small { color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+.ref-offer__list a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
+.ref-offer__list a:hover { color: var(--text); }
+.ref-offer__go { display: inline-grid; place-items: center; text-decoration: none; }
+@media (max-width: 560px) { .ref-offer__cols { grid-template-columns: 1fr; } }

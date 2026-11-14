@@ -23,6 +23,7 @@ import { WATCHLIST_EVENT, stepsOf, writeProgress, type Step } from './model';
 import { NameHint, useNameCheck } from './ProfileAccount';
 import { ProfileError, setFirstUsername, useUsername } from './profile';
 import { REFERRAL_CODE, REFERRAL_URL, useReferral } from './referral';
+import { markOffered } from './referralRules';
 
 /* ------------------------------------------------------------------ the frame ----- */
 
@@ -176,6 +177,8 @@ function UsernameStep({ address, onDone }: { address: string; onDone: () => void
 
 function ReferralStep({ address, onNext }: { address: string; onNext: () => void }) {
   const state = useReferral(address);
+  // The first signup's step is the offer: the popup rests for this wallet after it (referralOffer.ts).
+  useEffect(() => { markOffered(address); }, [address]);
   const [opened, setOpened] = useState(false);
   const joined = state === 'bound' || state === 'pending';
   return (

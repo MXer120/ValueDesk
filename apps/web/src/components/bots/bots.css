@@ -105,6 +105,7 @@
 .bot-ic.is-maker { --bot-hue: #7aa7ff; }
 .bot-ic.is-lead { --bot-hue: #5fd1c1; }
 .bot-ic.is-grid { --bot-hue: #c79bff; }
+.bot-ic.is-hedge { --bot-hue: #6fb4ff; }
 
 /* State: a pill with a dot (running pulses, as the algo status does). */
 .bots-state {

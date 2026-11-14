@@ -24,6 +24,7 @@ import { AccountController } from './components/account/AccountController';
 import { UnlockDialog } from './components/account/UnlockDialog';
 import { AccountSetup } from './setup/AccountSetup';
 import { OnboardingHost, useOnboardingGate } from './onboarding/OnboardingHost';
+import { ReferralOfferHost } from './onboarding/ReferralOffer';
 import { IndexPrompt } from './components/IndexPrompt';
 import { HistoryNote } from './components/HistoryNote';
 import { useWalletBridge } from './components/account/useWallet';
@@ -692,6 +693,7 @@ function AppShell() {
         <Guarded name="Account setup">
           <AccountSetup address={address} hold={onboarding.holdSetup} />
           <OnboardingHost gate={onboarding} address={address} provider={provider} onFinish={() => { setTab('trade'); }} />
+          <ReferralOfferHost address={address} provider={provider} hold={onboarding.holdSetup || !!onboarding.open} />
         </Guarded>
         <Guarded name="Indexing">
           <IndexPrompt address={address} />

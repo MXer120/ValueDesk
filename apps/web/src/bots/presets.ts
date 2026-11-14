@@ -17,14 +17,14 @@
 import type { AlgoSpec, MarketInfo } from '@copy-engine';
 import { botMarginUsd, checkSizes, gridPrices, gridStepPct, minChildQty, parseAlgoSpec } from '@copy-engine';
 
-export type Strategy = 'market' | 'maker' | 'lead' | 'grid';
+export type Strategy = 'market' | 'maker' | 'lead' | 'grid' | 'hedge';
 /**
  * What a new bot can be (owner, 2026-11-07): the market maker (R10, the live-tested setting) and the grid. The
  * volume maker and the Binance-led maker before it still run and show, they are no longer offered.
  */
 export const STRATEGIES: readonly Strategy[] = ['market', 'grid'];
 /** The volume makers (kind 'mm'): the same sizes, cap and guards; `lead` adds its Binance distances. */
-export const isMaker = (s: Strategy): boolean => s !== 'grid';
+export const isMaker = (s: Strategy): boolean => s !== 'grid' && s !== 'hedge';
 
 export type PresetId = 'steady' | 'balanced' | 'active';
 export const PRESETS: readonly PresetId[] = ['steady', 'balanced', 'active'];
@@ -84,6 +84,18 @@ export const STRATEGY_INFO: Record<Strategy, { name: string; kind: AlgoSpec['kin
     ],
     risk: 'If the price leaves the range it holds the position it built on the way. Set it to stop, or keep it waiting.',
     best: 'A market moving sideways in a known range.',
+  },
+  hedge: {
+    name: 'Hedge',
+    kind: 'hedge',
+    line: 'Holds open interest market-neutral: a long and a short of the same size, in two wallets or against spot.',
+    how: [
+      'Two wallets: a long in one, the same short in the other. Spot: a short as large as the coin you hold as futures margin.',
+      'Keeps both legs equal. When a price move brings a leg near its liquidation, both legs get smaller; they grow back when there is room.',
+      'Only takes (IOC): its two legs never trade with each other.',
+    ],
+    risk: 'Every open and close pays the taker fee on both legs. A move faster than it can trim may still liquidate a leg; the other is then closed. SoDEX cannot move margin between two wallets.',
+    best: 'Liquid markets, where a taker costs little: BTC, ETH, SOL.',
   },
 };
 
@@ -216,6 +228,7 @@ export const PRESET_VALUES: Record<Strategy, Record<PresetId, Partial<BotDraft>>
     balanced: { orderUsd: 50, maxInventoryUsd: 200, skewTicks: 4, chaseTicks: 2, minRepriceMs: 3_000, maxLossUsd: 10, refBps: 0, pullBps: 0.5 },
     active: { orderUsd: 150, maxInventoryUsd: 600, skewTicks: 6, chaseTicks: 1, minRepriceMs: 2_000, maxLossUsd: 30, refBps: 0, pullBps: 0.25 },
   },
+  hedge: { steady: {}, balanced: {}, active: {} },
   grid: {
     steady: { rangePct: 0.03, levels: 10, orderUsd: 15, maxLossUsd: 5 },
     balanced: { rangePct: 0.02, levels: 16, orderUsd: 25, maxLossUsd: 15 },
@@ -318,6 +331,7 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
     const lead = d.strategy === 'lead' ? { ref: 'binance', ...(d.refBps > 0 ? { refBps: d.refBps } : {}), ...(d.pullBps > 0 ? { pullBps: d.pullBps } : {}) } : {};
     return { ...base, ...limits, ...lead, ...safeguards(d), ...(d.maxSpreadBps !== null ? { maxSpreadBps: d.maxSpreadBps } : {}), kind: 'mm', offsetTicks: d.offsetTicks, orderUsd: d.orderUsd, maxInventoryUsd: d.maxInventoryUsd, skewTicks: d.skewTicks, chaseTicks: d.chaseTicks, minRepriceMs: d.minRepriceMs, ...(d.edgeBps > 0 ? { edgeBps: d.edgeBps } : {}), ...(d.queueGuard > 0 ? { queueGuard: d.queueGuard } : {}), ...(d.ladder > 1 ? { levels: d.ladder } : {}), ...(d.moveGuard > 0 ? { moveGuard: d.moveGuard } : {}) };
   }
+  if (d.strategy === 'hedge') throw new Error('A hedge is set up on its own page (HedgeNewPage).');
   // A grid takes the spread limit and the end time (spec base / botLimits); the flow gate, trading hours and news gate
   // are the volume maker's only (spec.ts parses them for 'mm'), so a grid never carries them.
   const r = gridRange(d, mark);
@@ -401,6 +415,10 @@ export function draftOfSpec(s: AlgoSpec, now = Date.now()): BotDraft {
   if (s.kind === 'grid') {
     return { ...draftFor('grid', 'balanced', s.symbol), gridK: null, label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, leverageAuto: false, postOnly: (s as { postOnly?: false }).postOnly !== false, low: s.low, high: s.high, levels: s.levels, spacing: s.spacing === 'linear' ? 'linear' : 'geometric', gridDir: s.direction ?? 'neutral', triggerPrice: s.triggerPrice ?? null, stopAbove: s.upper?.then === 'stop' ? s.upper.price : null, stopBelow: s.lower?.then === 'stop' ? s.lower.price : null, takeProfitUsd: s.takeProfitUsd ?? null, orderUsd: s.orderUsd, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, onStop: s.onStop, outOfRange: s.outOfRange, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now), endAt: runHoursLeft(s.endAt, now) !== null ? s.endAt : null, runHoursAt: runHoursLeft(s.endAt, now) };
   }
+  if (s.kind === 'hedge') {
+    // Its limits only: its size and buffers have their own settings (HedgeSettings).
+    return { ...draftFor('hedge', 'balanced', s.symbol), label: s.label ?? '', paper: s.paper, leverage: s.leverage ?? null, leverageAuto: false, volumeTargetUsd: s.volumeTargetUsd, maxLossUsd: s.maxLossUsd, takeProfitUsd: s.takeProfitUsd ?? null, onStop: s.onStop, maxSpreadBps: s.maxSpreadBps, runHours: runHoursLeft(s.endAt, now), endAt: runHoursLeft(s.endAt, now) !== null ? s.endAt : null, runHoursAt: runHoursLeft(s.endAt, now) };
+  }
   return draftFor('maker', 'balanced', s.symbol);
 }
 
@@ -421,6 +439,7 @@ export function patchOf(before: BotDraft, after: BotDraft): Record<string, unkno
   const keys: Array<keyof BotDraft> =
     after.strategy === 'maker' ? ['offsetTicks', 'orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'edgeBps', 'queueGuard', 'ladder', 'moveGuard', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'onStop', 'maxSpreadBps']
     : after.strategy === 'lead' ? ['orderUsd', 'maxInventoryUsd', 'skewTicks', 'chaseTicks', 'minRepriceMs', 'refBps', 'pullBps', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'onStop', 'maxSpreadBps']
+    : after.strategy === 'hedge' ? ['volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'onStop', 'maxSpreadBps']
     : ['orderUsd', 'volumeTargetUsd', 'maxLossUsd', 'takeProfitUsd', 'onStop', 'outOfRange', 'maxSpreadBps'];
   const out: Record<string, unknown> = {};
   for (const k of keys) if (before[k] !== after[k]) out[k === 'ladder' ? 'levels' : k] = after[k];
@@ -436,7 +455,7 @@ export function patchOf(before: BotDraft, after: BotDraft): Record<string, unkno
 /** The strategy a running algo is (null: not one of the page's bots - a bot DCA from before 2026-11-02 included). */
 export function strategyOf(s: AlgoSpec): Strategy | null {
   if (!s.bot) return null;
-  return s.kind === 'mm' ? (s.ref && s.restMs ? 'market' : s.ref ? 'lead' : 'maker') : s.kind === 'grid' ? 'grid' : null;
+  return s.kind === 'mm' ? (s.ref && s.restMs ? 'market' : s.ref ? 'lead' : 'maker') : s.kind === 'grid' ? 'grid' : s.kind === 'hedge' ? 'hedge' : null;
 }
 
 /* ------------------------------------------------------ trading hours chart ----- */

@@ -35,6 +35,8 @@ import { BotSetupSheet, botReady } from './BotSetupSheet';
 import { botName } from './botWords';
 import { BotsOverview } from './BotsOverview';
 import { BotNewPage } from './BotNewPage';
+import { HedgeNewPage } from './HedgeNewPage';
+import { HedgeInvites } from './HedgeInvites';
 import { BotDetail } from './BotDetail';
 import { BotsExplore } from './BotsExplore';
 import { BotsSavings } from './BotsSavings';
@@ -323,7 +325,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       const s0 = v.algo.spec;
       const want = how === 'clean' ? 'close' : 'keep';
       if (!FINAL_STATUSES.has(v.algo.status)) {
-        if ((s0.kind === 'mm' || s0.kind === 'grid') && s0.onStop !== want) await update(v.algo.id, { onStop: want }, { terms: false });
+        if ((s0.kind === 'mm' || s0.kind === 'grid' || s0.kind === 'hedge') && s0.onStop !== want) await update(v.algo.id, { onStop: want }, { terms: false });
         await act('cancel', v.algo.id);
       }
       notify('info', how === 'clean' ? 'Closing the old bot. The new one starts when it has: keep this page open.' : 'Stopping the old bot…');
@@ -364,7 +366,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       let way: StopHow;
       if (how !== 'ask') way = how;
       else {
-        const close = (s.kind === 'mm' || s.kind === 'grid') && s.onStop === 'close';
+        const close = (s.kind === 'mm' || s.kind === 'grid' || s.kind === 'hedge') && s.onStop === 'close';
         const ok = await confirm({
           title: `Stop ${botName(v)}?`,
           body: close && holding
@@ -416,6 +418,8 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       }, how === 'keep' ? 'Every bot stopped.' : how === 'instant' ? 'Every bot is stopping and closing what it holds now.' : 'Every bot is stopping and closing what it holds.');
     },
     runAgain: (v, real) => {
+      // A hedge is set up again on its own page (its second wallet signs again).
+      if (v.algo.spec.kind === 'hedge') { goBots({ page: 'new', market: v.algo.spec.symbol, kind: 'hedge' }); return; }
       // An ended bot ran for its whole time: Run again keeps that run time (audit 2026-11-09: it came back unlimited).
       const was = v.algo.spec as { endAt?: number | null };
       const start = v.algo.startedAt ?? v.algo.createdAt;
@@ -524,7 +528,8 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     : null;
 
   let page: ReactNode;
-  if (view.page === 'new') page = <BotNewPage ctx={c} view={view} />;
+  if (view.page === 'new' && view.kind === 'hedge') page = <HedgeNewPage ctx={c} view={view} />;
+  else if (view.page === 'new') page = <BotNewPage ctx={c} view={view} />;
   else if (view.page === 'explore') page = <BotsExplore ctx={c} view={view} />;
   else if (view.page === 'savings') page = <BotsSavings ctx={c} view={view} />;
   else if (view.page === 'bot') page = <BotDetail ctx={c} view={view} id={view.id} />;
@@ -537,6 +542,8 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
             when another page is opened, and the Overview one per panel. */}
         {notice && <BotsNoticeBar n={notice} onClose={() => setNotice(null)} />}
         {keyWarn && <BotsNoticeBar n={keyWarn} />}
+        {/* A hedge's second wallet, connected now: its leg to sign (bots/hedge.ts pendingFor). */}
+        <ErrorBoundary name="Hedge invitation" bare><HedgeInvites ctx={c} /></ErrorBoundary>
         <ErrorBoundary key={view.page} name="This page" bare>{settling && view.page !== 'explore' ? <BotsSettling /> : page}</ErrorBoundary>
       </div>
       {BOTS_ON && <ErrorBoundary name="VIP" bare><BotsVip ctx={c} stage /></ErrorBoundary>}

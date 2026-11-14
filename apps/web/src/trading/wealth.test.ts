@@ -40,18 +40,24 @@ test('the referral word is the code as UTF-8, right-padded, as the docs encode i
   assert.throws(() => referralWord('x'.repeat(33)), /32 bytes/);
 });
 
-test('a deposit request: assets, receiver, no builder fee, ValueDesk referral', () => {
+test('a deposit request: assets, receiver, no builder fee, ValueDesk referral only where the wallet may take it', () => {
   assert.equal(
-    requestDepositData(1_000_000n, OWNER),
+    requestDepositData(1_000_000n, OWNER, true),
     `${SELECTOR.requestDeposit}${word('f4240')}${addr(OWNER)}${'0'.repeat(64)}${VALUEDESK}`,
+  );
+  assert.equal(
+    requestDepositData(1_000_000n, OWNER, false),
+    `${SELECTOR.requestDeposit}${word('f4240')}${addr(OWNER)}${'0'.repeat(64)}${'0'.repeat(64)}`,
+    'a wallet with another inviter (or none known) carries no code',
   );
 });
 
-test('a redemption request: shares, receiver, no builder fee, ValueDesk referral', () => {
+test('a redemption request: shares, receiver, no builder fee, ValueDesk referral only where the wallet may take it', () => {
   assert.equal(
-    requestRedeemData(5n * 10n ** 17n, OWNER),
+    requestRedeemData(5n * 10n ** 17n, OWNER, true),
     `${SELECTOR.requestRedeem}${word('6f05b59d3b20000')}${addr(OWNER)}${'0'.repeat(64)}${VALUEDESK}`,
   );
+  assert.equal(requestRedeemData(5n * 10n ** 17n, OWNER, false).slice(-64), '0'.repeat(64));
 });
 
 test('approve and allowance', () => {
