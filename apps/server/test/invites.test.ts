@@ -221,7 +221,7 @@ test("three tiers: 25% / 10% / 5% of the fees each referral pays, for as long as
   // a's page: three referrals, one per tier, shortened; history with the tier.
   const me = svc.me(a.address);
   assert.deepEqual(me.stats.referred, [1, 1, 1]);
-  assert.deepEqual(me.referrals.map((r) => [r.tier, r.rate]), [[1, 0.2], [2, 0.075], [3, 0.025]]);
+  assert.deepEqual(me.referrals.map((r) => [r.tier, r.rate]), [[1, 0.2], [2, 0.075], [3, 0.02]]);
   assert.match(me.referrals[0]!.wallet, /^0x[0-9a-f]{4}…[0-9a-f]{4}$/);
   assert.ok(me.history.length > 0 && me.history.every((h) => h.kind === 'earn' && h.tier === 3));
   // c joined b, so c has its own welcome first: fee 0, nothing spent. Once it is used up, c's credits pay.

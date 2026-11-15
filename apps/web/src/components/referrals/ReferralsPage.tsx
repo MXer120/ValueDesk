@@ -348,8 +348,8 @@ function TierArt() {
       </g>
       <circle className="rf-art__you" cx="110" cy="22" r="13" />
       <text className="rf-art__lbl" x="110" y="26">You</text>
-      {[[60, 62], [160, 62]].map(([x, y]) => <g key={`a${x}`}><circle className="rf-art__t1" cx={x} cy={y} r="11" /><text className="rf-art__pct" x={x} y={y! + 3.5}>25%</text></g>)}
-      {[[34, 98], [86, 98], [134, 98], [186, 98]].map(([x, y]) => <g key={`b${x}`}><circle className="rf-art__t2" cx={x} cy={y} r="9" /><text className="rf-art__pct is-sm" x={x} y={y! + 3}>10%</text></g>)}
+      {[[60, 62], [160, 62]].map(([x, y]) => <g key={`a${x}`}><circle className="rf-art__t1" cx={x} cy={y} r="11" /><text className="rf-art__pct" x={x} y={y! + 3.5}>{pct(TIER_SHARES[0])}</text></g>)}
+      {[[34, 98], [86, 98], [134, 98], [186, 98]].map(([x, y]) => <g key={`b${x}`}><circle className="rf-art__t2" cx={x} cy={y} r="9" /><text className="rf-art__pct is-sm" x={x} y={y! + 3}>{pct(TIER_SHARES[1])}</text></g>)}
     </svg>
   );
 }

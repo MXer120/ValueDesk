@@ -19,7 +19,7 @@
  */
 
 /** Of the ValueDesk fees a wallet pays: its inviter's credit, the inviter's inviter's, the next one's. */
-export const TIER_SHARES = [0.2, 0.075, 0.025] as const; // owner 2026-11-15 (was 25 / 10 / 5%)
+export const TIER_SHARES = [0.2, 0.075, 0.02] as const; // owner 2026-11-15: 20 / 7.5 / 2% (was 25 / 10 / 5%, then 2.5% on tier 3)
 export const TIERS = TIER_SHARES.length;
 /**
  * The builder fee while credits pay: 1 tenth of a bp. Not 0: the builder ledger sees an order only when it paid a

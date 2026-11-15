@@ -25,9 +25,9 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   join day count, wherever it traded, so trading elsewhere cannot stretch the welcome. The builder verifier's sweep now
   also adds every fill's notional to a `traded` table.
 - **Three tiers, forever.** Of the ValueDesk builder fees a wallet really pays (the builder ledger's counted orders):
-  - **25%** go to its inviter;
-  - **10%** go to the inviter's inviter;
-  - **5%** go to the next one up.
+  - **20%** go to its inviter;
+  - **7.5%** go to the inviter's inviter;
+  - **2%** go to the next one up (owner 2026-11-15; was 25 / 10 / 5%).
 
   This lasts as long as the wallet trades.
 - **Credits** pay only the wallet's own ValueDesk builder fee. While they last, its fee is 0.1 bp on every product,
@@ -78,7 +78,7 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
 - **Where it can't be enforced:** a page can always be bypassed, just as anyone can trade on sodex.com and pay no
   ValueDesk fee. The fee is enforced exactly where ValueDesk places the orders (copy trading, bots).
 
-What remains possible: one person can invite their own fresh wallets. That earns them at most 25/10/5% of fees they
+What remains possible: one person can invite their own fresh wallets. That earns them at most 20/7.5/2% of fees they
 pay themselves, plus one capped welcome per wallet. The terms line below lets ValueDesk withhold credits for that.
 
 ## Cost (builder ledger on server 1, read-only, 2026-11-14)
