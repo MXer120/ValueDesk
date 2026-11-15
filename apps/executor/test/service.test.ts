@@ -65,7 +65,7 @@ const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onope
 
 function make(env: Record<string, string>, fake: FakeSodex = { keys: {} }) {
   const dir = mkdtempSync(join(tmpdir(), 'vd-exec-'));
-  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', ...env });
+  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', ...env });
   const db = new ExecutorDb(':memory:');
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(fake), factory: noWs, log: silent });
   return { cfg, db, svc, dir, cleanup: async () => { await svc.stop(); db.close(); rmSync(dir, { recursive: true, force: true }); } };

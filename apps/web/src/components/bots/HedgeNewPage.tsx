@@ -14,7 +14,7 @@ import { useConfirm } from '../Modal';
 import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
-import { refusalOf } from '../../bots/presets';
+import { PRACTICE_BOTS, refusalOf } from '../../bots/presets';
 import { HEDGE_DEFAULT, hedgeNumbers, hedgeProblems, hedgeSpecs, isAddress, newPairId, savePending, type HedgeDraft } from '../../bots/hedge';
 import { useReferral } from '../../onboarding/referral';
 import { HEDGE_PAIRS_LIVE } from '../../bots/hedgeRules';
@@ -54,7 +54,7 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
   // Two-wallet hedges run as practice until the terms allow real ones (hedgeRules.ts HEDGE_PAIRS_LIVE; the executor
   // refuses them too).
   const pairPractice = d.shape === 'pair' && !HEDGE_PAIRS_LIVE;
-  const paper = !ctx.liveAllowed || d.paper || pairPractice;
+  const paper = PRACTICE_BOTS && (!ctx.liveAllowed || d.paper || pairPractice);
   // The market's maximum leverage by default (owner: "even at max leverage"): the least margin locked per leg.
   useEffect(() => { if (sym?.maxLeverage && d.leverage > sym.maxLeverage) set({ leverage: sym.maxLeverage }); }, [sym?.maxLeverage]); // eslint-disable-line react-hooks/exhaustive-deps
   const n = hedgeNumbers({ ...d, paper }, mark ?? 0, maxLev, takerBps, ctx.feeTenths / 10);
@@ -67,6 +67,8 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
   const stepErr = at === 2 ? problems.size ?? problems.buffer ?? problems.loss ?? null : at === 3 && d.shape === 'pair' ? problems.partner ?? null : null;
   const whyNot =
     !ctx.address ? 'Connect your wallet to start a bot.'
+    : !PRACTICE_BOTS && !ctx.liveAllowed ? 'Real bots are not open for this wallet yet.'
+    : pairPractice && !PRACTICE_BOTS ? 'Two-wallet hedges open once the terms allow real ones. A hedge against spot runs now.'
     : ctx.setupWhy(paper) ? ctx.setupWhy(paper)
     : !ctx.ready ? 'The ValueDesk executor is not ready yet.'
     : !ctx.live.hosted.info?.features?.includes('hedge') ? 'The executor does not run hedges yet.'
@@ -207,7 +209,7 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
                 <Row title="On stop" line={d.onStop === 'close' ? 'Closes both legs, a step at a time, evenly.' : 'Leaves both positions open, unmanaged: a move can then liquidate one.'}>
                   <Segmented label="On stop" value={d.onStop} onChange={(v) => set({ onStop: v })} options={[{ value: 'close', label: 'Close both' }, { value: 'keep', label: 'Keep' }]} />
                 </Row>
-                {ctx.liveAllowed && (
+                {PRACTICE_BOTS && ctx.liveAllowed && (
                   <Row title="Practice" line={pairPractice ? 'Two-wallet hedges run as practice for now. A hedge against spot runs with real orders.' : 'Runs against the live market and sends nothing.'}>
                     <Switch checked={paper} disabled={pairPractice} onChange={(v) => set({ paper: v })} label="Practice" hideLabel />
                   </Row>

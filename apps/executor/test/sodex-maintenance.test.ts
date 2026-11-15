@@ -205,7 +205,7 @@ test('service: in maintenance /info and /health say so, health stays ok (SoDEX\'
     return { status: 404, ok: false, text: async () => '{"code":404}' };
   };
   const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onopen: null, onmessage: null, onclose: null, onerror: null });
-  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none' });
+  const cfg = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none' });
   const db = new ExecutorDb(':memory:');
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch, factory: noWs, log: silent });
   assert.deepEqual(svc.info({ viewerCountry: null }).venue, { state: 'normal', since: null, expectedEnd: null });

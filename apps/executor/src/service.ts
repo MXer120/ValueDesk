@@ -284,7 +284,7 @@ export class ApiError extends Error {
  *   vip-moving       a VIP move runs for the wallet    -> wait
  *   moved            the wallet's bots run on VIP      -> open the VIP servers
  */
-export type BotRefusalCode = 'key' | 'account' | 'beta' | 'limit' | 'bot-capacity' | 'margin' | 'margin-unknown' | 'bot-market' | 'market-copy' | 'market-algo' | 'market-position' | 'vip-moving' | 'moved';
+export type BotRefusalCode = 'key' | 'account' | 'beta' | 'limit' | 'bot-capacity' | 'margin' | 'margin-unknown' | 'bot-market' | 'market-copy' | 'market-algo' | 'market-position' | 'vip-moving' | 'moved' | 'practice-off';
 
 const usd = (x: number) => `$${Math.round(x).toLocaleString('en-US')}`;
 
@@ -2185,6 +2185,9 @@ export class ExecutorService {
       if (spec.bot) throw new ApiError(429, 'limit', `You already run ${live.length} bots and orders here; ${this.cfg.maxAlgosPerOwner} is the most at once. Stop one first.`);
       throw new ApiError(429, 'limit', adds > 1 ? `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here, and this basket runs ${adds} (itself and one per market). ${live.length ? 'Cancel one first, or use fewer markets.' : 'Use fewer markets.'}` : `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
     }
+    // Practice bots are off (owner 2026-11-15): no new one starts unless EXECUTOR_PRACTICE_BOTS=1. Practice bots that
+    // already run keep running until they are stopped.
+    if (spec.bot && spec.paper && !this.cfg.practiceBots) throw new ApiError(403, 'practice-off', 'Practice bots are off. Start it with real orders instead.');
     // One live bot per wallet and market: two would quote against each other's orders and share one position.
     if ((spec.kind === 'mm' || spec.kind === 'grid' || spec.kind === 'hedge') && !spec.paper) {
       const other = live.find((x) => (x.spec.kind === 'mm' || x.spec.kind === 'grid' || x.spec.kind === 'hedge') && !x.spec.paper && x.spec.symbol === spec.symbol);
@@ -2197,16 +2200,16 @@ export class ExecutorService {
       const botWallets = new Set(this.algos.list().filter((x) => x.spec?.bot === true && !x.spec.paper && !FINAL_STATUSES.has(x.status)).map((x) => x.owner));
       if (!botWallets.has(owner) && botWallets.size + 1 > this.algos.accountCapacity()) {
         this.deps.alerts?.raise('bot-health', 'slots', `A real bot of ${shortWallet(owner)} was refused: all ${this.algos.accountCapacity()} live socket places are taken by bot wallets. Add an address to EXECUTOR_WS_ADDRESSES.`);
-        throw new ApiError(503, 'bot-capacity', 'Every live connection for real bots on this server is in use right now. Try again in a little while, or start a practice bot.');
+        throw new ApiError(503, 'bot-capacity', 'Every live connection for real bots on this server is in use right now. Try again in a little while.');
       }
     }
     // Real BOTS: the wallets real algos are on for (the test follower), else a wallet on the beta list (either site).
     if (spec.bot && !spec.paper && !(await this.liveBotFor(owner, ctx))) {
-      throw new ApiError(403, 'beta', 'Real bots are for beta testers for now: ask on Discord to join. Practice runs the same bot against the live market.');
+      throw new ApiError(403, 'beta', 'Real bots are for beta testers for now: ask on Discord to join.');
     }
     // A7: this executor's hard cap on real bots (every wallet together): past it they would starve each other's fills.
     if (spec.bot && !spec.paper && this.liveBotCount(old?.id) >= this.cfg.maxLiveBots) {
-      throw new ApiError(429, 'bot-capacity', `This server already runs as many real bots as it can take (${this.cfg.maxLiveBots}). Try again later, or run this one as Practice.`);
+      throw new ApiError(429, 'bot-capacity', `This server already runs as many real bots as it can take (${this.cfg.maxLiveBots}). Try again later.`);
     }
     // Real orders are off unless this executor is set to take them from every wallet (EXECUTOR_LIVE_ALGOS=1)
     // or from this one (EXECUTOR_LIVE_ALGOS_WALLETS) - for the algo itself and for one a conditional would start.

@@ -69,7 +69,7 @@ const settings = (over: Record<string, unknown> = {}) => canonicalSettings(parse
 
 function make(f: Fake, env: Record<string, string> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'vd-stale-'));
-  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', ...env });
+  const cfg = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', ...env });
   const db = new ExecutorDb(':memory:');
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(f), factory: noWs, log: silent, readGapMs: 0 });
   return { db, svc, cleanup: async () => { await svc.stop(); db.close(); rmSync(dir, { recursive: true, force: true }); } };

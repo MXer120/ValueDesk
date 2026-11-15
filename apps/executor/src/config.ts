@@ -74,6 +74,8 @@ export interface ExecutorConfig {
   maxAlgosPerOwner: number;
   /** Real bots running on this executor, every wallet together (EXECUTOR_MAX_LIVE_BOTS, default 10). */
   maxLiveBots: number;
+  /** New practice (paper) bots are taken only when EXECUTOR_PRACTICE_BOTS=1 (off since 2026-11-15). */
+  practiceBots: boolean;
   builderDb: string | null;
   /** The API's builder volume route and its internal token (the ledger on another server). */
   builderUrl: string | null;
@@ -279,6 +281,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
     // 20 live bots per server (owner 2026-11-08): up to 10 wallets get their fills pushed on the account socket, the
     // others are read by REST, a wallet first when a public print names it (runtime.ts onPrint).
+    practiceBots: env.EXECUTOR_PRACTICE_BOTS === '1',
     maxLiveBots: Math.max(1, Math.min(1000, Math.floor(Number(env.EXECUTOR_MAX_LIVE_BOTS ?? 20)) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),

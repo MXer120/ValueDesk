@@ -643,6 +643,13 @@ export function planMarkets(
   });
 }
 
+/**
+ * Practice (paper) bots are off (owner 2026-11-15): New bot, Run again, hedges and the setup start real bots only.
+ * The executor refuses a new practice bot as well (EXECUTOR_PRACTICE_BOTS). Practice bots that already run are still
+ * shown and can be stopped.
+ */
+export const PRACTICE_BOTS = false;
+
 /* ---------------------------------------------------------------- refusals ----- */
 
 export type RefusalAction = 'setup' | 'deposit' | 'stop-other' | 'discord' | 'size' | 'practice' | null;
@@ -656,13 +663,14 @@ export function refusalOf(code: string | null | undefined, message: string, many
     case 'key': return { text: 'Real orders need a trading key on SoDEX first. Set it up once, then start again.', action: 'setup', label: 'Set up real orders' };
     case 'account': return { text: 'Your wallet has no SoDEX account yet. Deposit USDC first, then start again.', action: 'deposit', label: 'Deposit' };
     case 'paper-only':
-    case 'beta': return { text: 'Real bots are open to beta testers only for now. Run it as practice, or ask on Discord to be added.', action: 'discord', label: 'Ask on Discord' };
+    case 'beta': return { text: 'Real bots are open to beta testers only for now. Ask on Discord to be added.', action: 'discord', label: 'Ask on Discord' };
     case 'limit': return { text: 'You already run the most bots and algo orders allowed at once. Stop one first.', action: 'stop-other', label: 'See my bots' };
     case 'margin': return { text: `Your futures account does not have enough free margin for ${it}. Lower the order size or max holding, deposit more, or stop another bot or copy.`, action: 'deposit', label: 'Deposit' };
     case 'bot-market': return { text: 'You already run a real bot on this market. Stop it first, or pick another market.', action: 'stop-other', label: 'Stop the other bot' };
     // The executor's own codes (apps/executor service.ts BotRefusalCode), each with its one thing to do (audit 2026-11-09).
     case 'bot-capacity':
-    case 'live-cap': return { text: 'Real bots are full on our servers right now. Run it as practice, or try again later.', action: 'practice', label: 'Run as practice' };
+    case 'live-cap': return { text: 'Real bots are full on our servers right now. Try again later.', action: null, label: null };
+    case 'practice-off': return { text: 'Practice bots are off. Start it with real orders instead.', action: null, label: null };
     case 'margin-unknown': return { text: 'SoDEX did not tell your account balance just now, so the margin could not be checked. Try again in a moment.', action: null, label: null };
     case 'market-position': return { text: `${message} A bot starts only on a market where you hold nothing: close it in Trade first, or pick another market.`, action: null, label: null };
     case 'market-copy': return { text: `${message} Stop that copy in Copy trading, or pick another market.`, action: null, label: null };

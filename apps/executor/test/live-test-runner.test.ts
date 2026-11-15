@@ -912,7 +912,7 @@ test('fee stub: the executor\'s own volume read passes every check, over loopbac
   const dir = mkdtempSync(join(tmpdir(), 'vd-live-stub-'));
   const db = new ExecutorDb(':memory:');
   try {
-    const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'self', EXECUTOR_OWNER: FOLLOWER, EXECUTOR_BUILDER_ID: '234812', EXECUTOR_BUILDER_URL: stub.url, EXECUTOR_BUILDER_TOKEN: stub.token });
+    const cfg = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'self', EXECUTOR_OWNER: FOLLOWER, EXECUTOR_BUILDER_ID: '234812', EXECUTOR_BUILDER_URL: stub.url, EXECUTOR_BUILDER_TOKEN: stub.token });
     const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fetch as unknown as FetchLike, factory: noWs, log: silent });
     const fresh = (o: string) => (svc as unknown as { freshVolume(o: string): Promise<number | null> }).freshVolume(o);
     stub.answer = { usd: 2_000_000 };

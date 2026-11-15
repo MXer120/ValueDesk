@@ -78,7 +78,7 @@ const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onope
 
 function make(env: Record<string, string>, fake: FakeSodex = { keys: {} }, o: { dbPath?: string; dir?: string; log?: typeof silent } = {}) {
   const dir = o.dir ?? mkdtempSync(join(tmpdir(), 'vd-audit-'));
-  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', ...env });
+  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', ...env });
   const db = new ExecutorDb(o.dbPath ?? ':memory:');
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(fake), factory: noWs, log: o.log ?? silent });
   return {

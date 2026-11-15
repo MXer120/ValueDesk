@@ -606,7 +606,7 @@ test('service: a live copy SoDEX refuses for margin is held (blocked, with the r
     return { status: 404, ok: false, text: async () => '{"code":404,"message":"not found"}' };
   };
   const dir = mkdtempSync(join(tmpdir(), 'vd-limits-'));
-  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', EXECUTOR_KIND: 'hosted', EXECUTOR_BRAKE_FILE: 'none' });
+  const cfg = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', EXECUTOR_KIND: 'hosted', EXECUTOR_BRAKE_FILE: 'none' });
   const db = new ExecutorDb(':memory:');
   const raised: string[] = [];
   const alerts = new Alerts({ sender: async (t) => (raised.push(t), true), label: 't' });

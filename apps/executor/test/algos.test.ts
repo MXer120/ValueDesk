@@ -45,7 +45,7 @@ const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onope
 
 function make(env: Record<string, string> = {}, market: { rows?: unknown[]; marks?: unknown[] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'vd-algo-'));
-  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', ...env });
+  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', ...env });
   const db = new ExecutorDb(':memory:');
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(market.rows, market.marks), factory: noWs, log: silent });
   return { cfg, db, svc, cleanup: async () => { await svc.stop(); db.close(); rmSync(dir, { recursive: true, force: true }); } };
@@ -159,7 +159,7 @@ test('end to end, in paper: a signed TWAP with exits runs on the executor agains
   let clock = Date.now();
   Date.now = () => clock;
   const dir = mkdtempSync(join(tmpdir(), 'vd-algo-e2e-'));
-  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none' });
+  const cfg = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none' });
   const path = join(dir, 'executor.db');
   const settle = async () => {
     for (let i = 0; i < 3; i++) {

@@ -59,7 +59,7 @@ function fakeFetch(w: World): FetchLike {
 
 async function service(w: World, env: Record<string, string> = {}, alerts?: Alerts) {
   const dir = mkdtempSync(join(tmpdir(), 'vd-edge-'));
-  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', EXECUTOR_KIND: 'hosted', EXECUTOR_BRAKE_FILE: 'none', ...env });
+  const cfg = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', EXECUTOR_KIND: 'hosted', EXECUTOR_BRAKE_FILE: 'none', ...env });
   const db = new ExecutorDb(':memory:');
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(w), factory: noWs, log: silent, alerts });
   const done = async () => {

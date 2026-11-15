@@ -98,7 +98,7 @@ const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onope
 function make(env: Record<string, string> = {}, world: Partial<World> = {}, shared?: { db?: ExecutorDb; dir?: string }) {
   const dir = shared?.dir ?? mkdtempSync(join(tmpdir(), 'vd-launch-'));
   const w: World = { keys: {}, equity: {}, positions: {}, beta: [], volume: null, ...world };
-  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', EXECUTOR_BRAKE_FILE: 'none', EXECUTOR_ID: 'valuedesk-test', ...env });
+  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', EXECUTOR_BRAKE_FILE: 'none', EXECUTOR_ID: 'valuedesk-test', ...env });
   const db = shared?.db ?? new ExecutorDb(':memory:');
   const alerts: string[] = [];
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(w), factory: noWs, log: silent, readGapMs: 0, alerts: { raise: (kind: string) => void alerts.push(kind) } as never });
@@ -218,6 +218,17 @@ test('A3 market: a real bot is refused where the wallet holds a position, runs a
   assert.equal(b.detail?.copyId, c.subscription.id);
   await h.svc.act(w.sign(h.svc.executorId, 'stop', { id: c.subscription.id, close: false }), ctx);
   assert.equal(await code(start(h, w, MM, 8)), 'ok', 'with the copy stopped it starts');
+  await h.cleanup();
+});
+
+test('practice bots are off by default (owner 2026-11-15): a new one is refused, real ones still start', async () => {
+  const a = new Wallet();
+  const h = make({ EXECUTOR_PRACTICE_BOTS: '0', EXECUTOR_LIVE_ALGOS_WALLETS: a.address });
+  assert.equal(loadConfig({ EXECUTOR_EDGE: 'none' }).practiceBots, false, 'off unless EXECUTOR_PRACTICE_BOTS=1');
+  await ready(h, a);
+  const e = await refusal(start(h, a, { ...MM, paper: true }));
+  assert.equal(`${e.status}:${e.code}`, '403:practice-off');
+  assert.equal(await code(start(h, a, MM, 2)), 'ok');
   await h.cleanup();
 });
 

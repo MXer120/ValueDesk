@@ -26,7 +26,7 @@ import { useHistory } from '../algo/liveData';
 import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, bpToPerMillion, type BotMarket } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
-import { STRATEGY_INFO, autoLeverage, clampLeverage, draftOfSpec, costPerMillion, gridRange, leverageCap, planMarkets, refusalOf, suggestedSpreadBps, type BotDraft, type RefusalAction, type Strategy } from '../../bots/presets';
+import { PRACTICE_BOTS, STRATEGY_INFO, autoLeverage, clampLeverage, draftOfSpec, costPerMillion, gridRange, leverageCap, planMarkets, refusalOf, suggestedSpreadBps, type BotDraft, type RefusalAction, type Strategy } from '../../bots/presets';
 import { CATEGORIES, RECIPE, draftOfRecipe, recipeOfDraft, recipesOf, type Category, type Recipe, type RecipeId } from '../../bots/recipes';
 import { bestOf, estimate, feeAdjOf, ownRuns, type BotEstimate, type EstLine, type OwnRun } from '../../bots/estimate';
 import { GRID_PRESETS, draftStepBps, gridEstimate, gridHalfRange, presetRangePct, useHourlyVol, type GridEstimate, type GridPresetId } from '../../bots/gridPresets';
@@ -180,7 +180,7 @@ function MarketStep({ picked, toggle, markets, costOf, running, real }: {
     const locked = real && busy && !on;
     const flip = () => { if (!locked) toggle(symbol); };
     return (
-      <tr key={symbol} role="checkbox" aria-checked={on} aria-disabled={locked || undefined} aria-label={symbol} tabIndex={0} title={busy ? (real ? 'You already run a real bot here. Stop it first, or run this one as practice.' : 'You already run a real bot here.') : undefined} className={`bots-row${on ? ' is-picked' : ''}${locked ? ' is-blocked' : ''}`} onClick={flip} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } }}>
+      <tr key={symbol} role="checkbox" aria-checked={on} aria-disabled={locked || undefined} aria-label={symbol} tabIndex={0} title={busy ? (real ? 'You already run a real bot here. Stop it first.' : 'You already run a real bot here.') : undefined} className={`bots-row${on ? ' is-picked' : ''}${locked ? ' is-blocked' : ''}`} onClick={flip} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } }}>
         <td className="bots-mt__pick"><span className={`bots-tick${on ? ' is-on' : ''}`} aria-hidden="true">{on && <Icon name="check" size={11} />}</span></td>
         <td>
           <span className="bots-mt__name">
@@ -536,7 +536,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   }, [grid, d.gridK, d.levels, d.low, d.high, d.rangePct, vol]);
   const range = grid ? gridRange(d, mark) : null;
   const markets = useBotMarkets('24h');
-  const paper = !ctx.liveAllowed || d.paper;
+  const paper = PRACTICE_BOTS && (!ctx.liveAllowed || d.paper);
 
   // Leverage: under every picked market's maximum, nothing else (owner 2026-11-08); none offered while a maximum is
   // unknown. Auto (the default) follows the sizing: the lowest leverage at which the margin fits (autoLeverage below).
@@ -624,6 +624,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const clash = paper ? [] : picked.filter((x) => runningReal.has(x));
   const whyNot: string | null =
     !ctx.address ? 'Connect your wallet to start a bot.'
+    : !PRACTICE_BOTS && !ctx.liveAllowed ? 'Real bots are not open for this wallet yet.'
     : why ? why
     : !ctx.ready ? 'The ValueDesk executor is not ready yet.'
     : !picked.length ? 'Pick at least one market.'
@@ -631,7 +632,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     : gridErr ? gridErr
     : allErrors.length ? 'Fix the order size first (see Review).'
     : !paper && d.leverage === null ? "Reading the market's leverage and your account…"
-    : clash.length ? `You already run a real bot on ${clash.map((x) => x.replace(/-USD$/, '')).join(', ')}. Stop it, untick it, or turn on Practice.`
+    : clash.length ? `You already run a real bot on ${clash.map((x) => x.replace(/-USD$/, '')).join(', ')}. Stop it or untick it.`
     : short > 0 ? `Needs ${fmtUsd(needAll, 0)} of margin, ${fmtUsd(free ?? 0, 0)} is free.`
     : null;
   const can = whyNot === null;

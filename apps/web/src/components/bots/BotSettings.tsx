@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Term } from './Term';
 import { fmtUsd } from '../../format';
-import { FLOW_DEFAULT, GATE_DEFAULT, NEWS_DEFAULT, QUIET_PRESETS, R10, botNeedUsd, type BotDraft } from '../../bots/presets';
+import { PRACTICE_BOTS, FLOW_DEFAULT, GATE_DEFAULT, NEWS_DEFAULT, QUIET_PRESETS, R10, botNeedUsd, type BotDraft } from '../../bots/presets';
 import type { AlgoSpec } from '@copy-engine';
 import { HoursGate } from './HoursGate';
 import { RECIPE, recipeOfDraft } from '../../bots/recipes';
@@ -445,7 +445,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
         </div>
       )}
 
-      {!hidePractice && (
+      {PRACTICE_BOTS && !hidePractice && (
         <div className="bots-practice">
           <div>
             <p className="bots-practice__t">Practice</p>

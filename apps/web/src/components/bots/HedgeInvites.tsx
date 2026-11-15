@@ -11,7 +11,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { fmtUsd } from '../../format';
 import { CoinIcon } from '../CoinIcon';
 import { goBots } from '../../bots/routes';
-import { refusalOf } from '../../bots/presets';
+import { PRACTICE_BOTS, refusalOf } from '../../bots/presets';
 import { PENDING_EVENT, dropPending, pendingFor, type PendingPair } from '../../bots/hedge';
 import { mustTakeCode } from '../../bots/hedgeRules';
 import { REFERRAL_CODE, REFERRAL_URL, useReferral } from '../../onboarding/referral';
@@ -61,7 +61,8 @@ function Invite({ p, ctx }: { p: PendingPair; ctx: BotsCtx }) {
   }, [ref, wallet, hasAccount]);
   const needCode = mustTakeCode(ref, hasAccount);
   const why = ctx.setupWhy(paper);
-  const block = needCode ? `A new wallet starts on ValueDesk's code: apply ${REFERRAL_CODE} on SoDEX first (then deposit).`
+  const block = paper && !PRACTICE_BOTS ? 'Practice bots are off, so this practice pair cannot start its second leg. Start a new hedge instead.'
+    : needCode ? `A new wallet starts on ValueDesk's code: apply ${REFERRAL_CODE} on SoDEX first (then deposit).`
     : !paper && hasAccount === false ? 'This wallet has no SoDEX account yet: deposit first.'
     : why ?? (!ctx.ready ? 'The ValueDesk executor is not ready yet.' : null);
   const start = async () => {
