@@ -30,15 +30,16 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   - **2%** go to the next one up (owner 2026-11-15; was 25 / 10 / 5%).
 
   This lasts as long as the wallet trades.
-- **Credits** pay only the wallet's own ValueDesk builder fee. While they last, its fee is 0.1 bp on every product,
-  and the rest of what it would have paid comes off the balance. They are never paid out and never moved.
-- **VIP credit** (owner: "give vips a $10 Fee credit balance just bc their vips"): every wallet that is VIP as the app
-  shows it gets $10 of credit, once:
+- **Credits** pay only the wallet's own ValueDesk builder fee. While they last, its fee is 0.1 bp on every product
+  (futures and spot on the site, copy trading, bots: owner 2026-11-15 "apply for all builder fees not only bots"), and
+  the rest of what it would have paid comes off the balance. Bots > Savings has a card for them and the link. They are never paid out and never moved.
+- **VIP credit** (owner: "give vips a $10 Fee credit balance just bc their vips"; $5 since 2026-11-15): every wallet that
+  is VIP as the app shows it gets $5 of credit, once:
   - who counts: VIP by volume, the kept list (`VALUEDESK_VIP_KEEP`), or a running VIP program (the dev page's, and the
     beta's 30 days from listing);
   - when: the job sweeps every 10 minutes, and a VIP opening the Referrals page gets it at once;
   - once: a `grants` row and its entry are written together, so a sweep, the page or a restart never give it twice;
-  - it shows like any credit (balance, Savings "Fee credits"), marked "Includes your $10 VIP credit", and as "VIP credit"
+  - it shows like any credit (balance, Savings "Fee credits"), marked "Includes your $5 VIP credit", and as "VIP credit"
     in the history.
 
   Production today (read-only, 2026-11-14): 11 beta wallets inside their 30 days, none by volume, none kept, so at most
@@ -61,8 +62,8 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   - a second join (the first one stands).
 - **Same browser:** codes of wallets this browser has connected are never kept or offered, which blocks casual
   self-invites.
-- **Credits come only out of fees really received:** together at most 40% (25 + 10 + 5) of a referral's fees. So
-  ValueDesk always keeps at least 60%, and no wallet can earn more than it brings in.
+- **Credits come only out of fees really received:** together at most 29.5% (20 + 7.5 + 2) of a referral's fees. So
+  ValueDesk always keeps at least 70%, and no wallet can earn more than it brings in.
 - **No runaway lowered fee:**
   - The 0 bp welcome and the 0.1 bp credit fee are handed out 3 minutes at a time: the signed terms end with them,
     and the executor asks again within that time.
@@ -153,7 +154,7 @@ while it answers.
   - welcome cap; three tiers forever; spend; the cover rule; overrun;
   - on the real BuilderService: a joined wallet signs 0 bp in short terms, and the executor's read carries the
     welcome budget; after $100k of traded volume it is back on its tier;
-  - the VIP $10, given once (sweep, page, restart), lowers the signed fee to 0.1 bp and comes with a credits budget;
+  - the VIP $5, given once (sweep, page, restart), lowers the signed fee to 0.1 bp and comes with a credits budget;
   - fills without a builder fee are counted into `traded` once, across overlapping sweeps.
 - **Executor** (`test/volume.test.ts`, `test/perk-budget.test.ts`): the lowered fee holds until its own fills after
   the ledger's read use the budget up, for both welcome and credits; an unreadable budget gives no lowered fee.

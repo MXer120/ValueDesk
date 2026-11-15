@@ -9,7 +9,8 @@
  *   Markets      a bot on a market where makers our size pay more than on another (Explore's estimates)
  *   Market gate  a market maker without the gate, where the gate's estimate is lower
  *
- * Fee credits and referrals have their own page (Referrals); the Fee credits figure here links to it.
+ * Fee credits and referrals have their own page (Referrals); the card here (SavingsReferral) shows the link, the rates and
+ * the balance, and links to it.
  *
  * Every figure is the user's own (their tier and staking from SoDEX, their bots' volume) times the published tables
  * or Explore's estimates; nothing is promised.
@@ -35,6 +36,7 @@ import { refreshTerms, subscribeTerms, termsRevision, termsView } from '../../tr
 import { useInviteMe } from '../../invites/invites';
 import { pathForTab } from '../../router';
 import { SavingsFees } from './SavingsFees';
+import { SavingsReferral } from './SavingsReferral';
 
 const DAY = 86_400_000;
 
@@ -194,6 +196,8 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
               credit={credit}
             />
           </Shell>
+
+          <SavingsReferral address={ctx.address} me={me} onOpen={openReferrals} />
 
           <BotsVip ctx={ctx} />
 

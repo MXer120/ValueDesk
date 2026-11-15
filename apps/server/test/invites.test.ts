@@ -197,7 +197,7 @@ test('the welcome: fee 0 until the wallet traded $100k on SoDEX since its join -
   assert.equal(me.joined?.code, 'INVITER1');
 });
 
-test("three tiers: 25% / 10% / 5% of the fees each referral pays, for as long as it trades; credits then pay the inviter's own fee", async () => {
+test("three tiers: 20% / 7.5% / 2% of the fees each referral pays, for as long as it trades; credits then pay the inviter's own fee", async () => {
   const [a, b, c, d] = [wallet(), wallet(), wallet(), wallet()];
   const { L, s, svc, join, clock } = setup({ AAAA1111: a.address, BBBB1111: b.address, CCCC1111: c.address });
   assert.ok((await join(b, 'AAAA1111')).ok);
@@ -229,6 +229,8 @@ test("three tiers: 25% / 10% / 5% of the fees each referral pays, for as long as
   L.traded(c.address, clock.now, WELCOME_USD);
   // c's credits pay its own fee: CREDIT_FEE everywhere, spent at the 1.4 bp it would have paid more.
   assert.deepEqual(L.extra(c.address, clock.now).map((x) => [x.fee, x.label]), [[CREDIT_FEE, 'Fee credits']]);
+  // Every builder fee, not only bots (owner 2026-11-15): futures and spot on the site, copy trading and bots.
+  assert.deepEqual([...L.extra(c.address, clock.now)[0]!.products].sort(), ['bots', 'copy', 'perps', 'spot']);
   clock.now += 1_000;
   L.trade(c.address, 'c1', clock.now, CREDIT_FEE, 10_000);
   svc.tick();

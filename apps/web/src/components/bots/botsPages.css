@@ -1777,3 +1777,27 @@ html[data-theme='light'] .sv-ladder__rows li.is-vip .sv-ladder__fee { background
 @media (max-width: 720px) { .sv-fees { grid-template-columns: 1fr; } .sv-fees > :last-child { grid-column: auto; } }
 .sv-reflink { padding: 0; border: 0; background: none; color: var(--tf-brand); font: inherit; font-size: 12px; cursor: pointer; }
 .sv-reflink:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Bots > Savings: referrals and fee credits (SavingsReferral, owner 2026-11-15). */
+.sv-ref { display: flex; flex-direction: column; gap: 12px; }
+.sv-ref__link { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.sv-ref__k { font-size: 11px; color: var(--dim); }
+.sv-ref__link code { flex: 1 1 220px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 7px 10px; border-radius: 8px; background: rgb(var(--ink) / 0.04); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; }
+.sv-ref__act { display: inline-flex; gap: 8px; }
+.sv-ref__rates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.sv-ref__rate { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px; background: rgb(var(--ink) / 0.035); min-width: 0; }
+.sv-ref__rate b { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sv-ref__rate small { font-size: 11px; color: var(--dim); }
+.sv-ref__tier { align-self: flex-start; padding: 1px 6px; border-radius: 6px; font-size: 10px; font-weight: 600; }
+.sv-ref__tier.is-1 { background: color-mix(in srgb, var(--pos) 18%, transparent); color: var(--pos); }
+.sv-ref__tier.is-2 { background: color-mix(in srgb, var(--tf-brand) 16%, transparent); color: var(--tf-brand); }
+.sv-ref__tier.is-3 { background: rgb(var(--ink) / 0.08); color: var(--muted); }
+.sv-ref__tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.sv-ref__welcome { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+.sv-ref__fine { margin: 0; font-size: 11px; color: var(--dim); }
+.sv-ref .vip-pill { align-self: flex-start; }
+@media (max-width: 640px) {
+  .sv-ref__tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sv-ref__rates { grid-template-columns: 1fr; }
+  .sv-ref__rate { flex-direction: row; align-items: baseline; gap: 8px; }
+}
