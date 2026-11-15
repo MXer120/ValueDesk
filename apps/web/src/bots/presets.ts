@@ -670,6 +670,7 @@ export function refusalOf(code: string | null | undefined, message: string, many
     // The executor's own codes (apps/executor service.ts BotRefusalCode), each with its one thing to do (audit 2026-11-09).
     case 'bot-capacity':
     case 'live-cap': return { text: 'Real bots are full on our servers right now. Try again later.', action: null, label: null };
+    case 'hedge-beta': return { text: 'Hedges are in early access: a wallet of the hedge must be on the beta list. Ask on Discord to be added.', action: 'discord', label: 'Ask on Discord' };
     case 'practice-off': return { text: 'Practice bots are off. Start it with real orders instead.', action: null, label: null };
     case 'margin-unknown': return { text: 'SoDEX did not tell your account balance just now, so the margin could not be checked. Try again in a moment.', action: null, label: null };
     case 'market-position': return { text: `${message} A bot starts only on a market where you hold nothing: close it in Trade first, or pick another market.`, action: null, label: null };

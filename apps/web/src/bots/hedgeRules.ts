@@ -3,8 +3,7 @@
 export const mustTakeCode = (ref: string, hasAccount: boolean | null): boolean => ref === 'none' && hasAccount === false;
 
 /**
- * Whether a two-wallet hedge may run with real orders. Off (owner 2026-11-14 has not decided; the bot terms forbid
- * trading with accounts you control): pairs run as practice, a hedge against spot runs real. The executor refuses real
- * pairs too (EXECUTOR_HEDGE_PAIRS); both switch on together once the terms allow it.
+ * Two-wallet hedges run with real orders (owner 2026-11-15: "yes if 1 of the wallets is on beta"): hedges are early
+ * access, and a pair needs one of its two wallets on the beta list (the executor's hedgeAccess decides).
  */
-export const HEDGE_PAIRS_LIVE = false;
+export const HEDGE_PAIRS_LIVE = true;

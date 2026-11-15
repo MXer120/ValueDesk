@@ -53,6 +53,7 @@ import {
   minChildQty,
   sodexNamesFor,
   type AlgoSpec,
+  type HedgeSpec,
   type MarketInfo,
   normaliseCountry,
   parseAlgoSpec,
@@ -1915,6 +1916,8 @@ export class ExecutorService {
    * hold every real bot. null: never answered (and unreadable now).
    */
   private betaCache = new Map<string, { at: number; listed: boolean }>();
+  /** The list itself (`listed`), whatever VALUEDESK_BOTS_OPEN says: hedges are early access (owner 2026-11-15). Memory only. */
+  private listedCache = new Map<string, { at: number; listed: boolean }>();
   private async betaAnswer(owner: string): Promise<boolean | null> {
     const o = owner.toLowerCase();
     const hit = this.betaCache.get(o);
@@ -1934,6 +1937,7 @@ export class ExecutorService {
       const listed = typeof body.bots === 'boolean' ? body.bots : body.listed;
       const now = Date.now();
       remember(this.betaCache, o, { at: now, listed });
+      remember(this.listedCache, o, { at: now, listed: body.listed === true });
       const kept = this.db.betaAnswer(o);
       // Written when it changes, else every 10 minutes (the time the last answer was confirmed).
       if (!kept || kept.listed !== listed || now - kept.at >= 10 * 60_000) this.db.setBetaAnswer(o, listed, now);
@@ -1943,6 +1947,52 @@ export class ExecutorService {
       const last = hit ?? this.db.betaAnswer(o);
       return last ? last.listed : null;
     }
+  }
+
+  /**
+   * On the beta list itself (not just bots open for all): the live-algo wallets, else server 1's `listed`, kept a minute.
+   * A read that fails answers the last known one; null: never answered.
+   */
+  private async listedAnswer(wallet: string): Promise<boolean | null> {
+    const o = wallet.toLowerCase();
+    if (liveAlgosFor(this.cfg, o)) return true;
+    const hit = this.listedCache.get(o);
+    if (hit && Date.now() - hit.at < BETA_TTL_MS) return hit.listed;
+    this.betaCache.delete(o);
+    await this.betaAnswer(o);
+    return this.listedCache.get(o)?.listed ?? null;
+  }
+
+  /**
+   * Hedges are early access (owner 2026-11-15: "make the hedge only access to whitelisted early access"): a real hedge
+   * needs its wallet on the beta list - a pair one of its two wallets ("yes if 1 of the wallets is on beta"). true: may
+   * run; false: neither is listed (both answered); null: not known (a list that does not answer).
+   */
+  private async hedgeAccess(owner: string, spec: HedgeSpec): Promise<boolean | null> {
+    const a = await this.listedAnswer(owner);
+    if (a === true || spec.shape !== 'pair' || !spec.partner) return a;
+    const b = await this.listedAnswer(spec.partner);
+    if (b === true) return true;
+    return a === false && b === false ? false : null;
+  }
+
+  /**
+   * The pairs waiting for this wallet's leg (owner 2026-11-15, "make hedge as easy as possible"): a main leg another
+   * wallet started that names this one and that no leg of this wallet answers yet - so the second wallet can start its
+   * leg from any browser or phone, not only the one the main used. `spec` is the leg to sign: the main's, mirrored.
+   */
+  hedgeInvites(owner: string): Array<{ pairId: string; main: string; symbol: string; at: number; spec: Record<string, unknown> }> {
+    const o = owner.toLowerCase();
+    const answered = new Set(this.algos.list(o).filter((a) => a.spec?.kind === 'hedge' && !FINAL_STATUSES.has(a.status)).map((a) => (a.spec as HedgeSpec).pairId));
+    return this.algos
+      .list()
+      .filter((a) => a.owner !== o && a.spec?.kind === 'hedge' && !FINAL_STATUSES.has(a.status))
+      .filter((a) => { const h = a.spec as HedgeSpec; return h.shape === 'pair' && h.role === 'main' && h.partner === o && !!h.pairId && !answered.has(h.pairId); })
+      .map((a) => {
+        const { side, label, ...rest } = a.spec as HedgeSpec & { side: 'buy' | 'sell'; label?: string | null };
+        const spec: Record<string, unknown> = { ...rest, side: side === 'buy' ? 'sell' : 'buy', role: 'partner', partner: a.owner, label: label ? `${label} (2nd leg)` : null };
+        return { pairId: (a.spec as HedgeSpec).pairId!, main: a.owner, symbol: a.spec.symbol, at: a.createdAt, spec };
+      });
   }
 
   /** For a new real bot: listed now, or last known listed when the list does not answer (never answered: refused). */
@@ -1980,7 +2030,11 @@ export class ExecutorService {
     if (key) return key;
     // A real bot runs while its wallet may run one: taken off the beta list, it is held (its quotes pulled) until it is back.
     // Only an explicit "not listed" holds it: a list that does not answer keeps the last known answer (A2).
-    if (a.spec?.bot === true && !a.spec.paper && !liveAlgosFor(this.cfg, a.owner) && (await this.betaAnswer(a.owner)) === false) return 'Held: real bots are for beta testers only, and this wallet is no longer on the beta list.';
+    if (a.spec?.bot === true && !a.spec.paper && !liveAlgosFor(this.cfg, a.owner)) {
+      if (a.spec.kind === 'hedge') {
+        if ((await this.hedgeAccess(a.owner, a.spec)) === false) return 'Held: hedges are early access, and neither wallet of it is on the beta list any more.';
+      } else if ((await this.betaAnswer(a.owner)) === false) return 'Held: real bots are for beta testers only, and this wallet is no longer on the beta list.';
+    }
     if (this.cfg.builderId > 0) {
       const fee = await this.algoFee(a);
       const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
@@ -2157,11 +2211,10 @@ export class ExecutorService {
     // the other - the runtime pairs only legs that name each other, so no wallet can attach itself to another's hedge.
     if (spec.kind === 'hedge') {
       if (spec.shape === 'pair' && spec.partner === owner) throw new ApiError(400, 'partner', 'The second leg must be another wallet: one account cannot hold both sides of a market.');
-      // Real two-wallet pairs wait for the owner's terms decision (the bot terms forbid trading with accounts you
-      // control): practice only, but for the live test's own wallets. A hedge against spot is one wallet: real is fine.
-      const tester = Array.isArray(this.cfg.liveAlgoWallets) && this.cfg.liveAlgoWallets.includes(owner.toLowerCase());
-      if (spec.shape === 'pair' && !spec.paper && !this.cfg.hedgePairsLive && !tester) {
-        throw new ApiError(403, 'hedge-pair', 'Two-wallet hedges run as practice for now. A hedge against spot runs with real orders.');
+      // Early access: a real hedge needs the beta list - its own wallet, or for a pair one of the two (hedgeAccess). This
+      // opens real two-wallet pairs too (owner 2026-11-15); both legs only take from the book, never from each other.
+      if (!spec.paper && (await this.hedgeAccess(owner, spec)) !== true) {
+        throw new ApiError(403, 'hedge-beta', spec.shape === 'pair' ? 'Hedges are in early access: one of the two wallets must be on the beta list. Ask on Discord to join.' : 'Hedges are in early access: this wallet must be on the beta list. Ask on Discord to join.');
       }
       await this.needOrderOverMinimum(spec.symbol, Math.min(spec.sliceUsd, spec.sizeUsd));
     }
@@ -2204,7 +2257,7 @@ export class ExecutorService {
       }
     }
     // Real BOTS: the wallets real algos are on for (the test follower), else a wallet on the beta list (either site).
-    if (spec.bot && !spec.paper && !(await this.liveBotFor(owner, ctx))) {
+    if (spec.bot && !spec.paper && spec.kind !== 'hedge' && !(await this.liveBotFor(owner, ctx))) {
       throw new ApiError(403, 'beta', 'Real bots are for beta testers for now: ask on Discord to join.');
     }
     // A7: this executor's hard cap on real bots (every wallet together): past it they would starve each other's fills.

@@ -22,6 +22,7 @@ import { PRACTICE_BOTS, refusalOf } from '../../bots/presets';
 import { HEDGE_DEFAULT, SAFETY_USED, buffersFor, hedgeNumbers, hedgeProblems, hedgeSpecs, isAddress, newPairId, savePending, type HedgeDraft } from '../../bots/hedge';
 import { useReferral } from '../../onboarding/referral';
 import { HEDGE_PAIRS_LIVE } from '../../bots/hedgeRules';
+import { applyForBeta, useBetaAccessState } from '../../beta/access';
 import { requestDeposit, requestTransfer } from '../account/actions';
 import { notify } from '../../toast';
 import { StrategyTile } from './BotIcon';
@@ -111,6 +112,11 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
   }, [bufs.minLiqPct, bufs.growLiqPct, needUsd]); // eslint-disable-line react-hooks/exhaustive-deps
   const n = hedgeNumbers({ ...d, paper }, mark ?? 0, maxLev, takerBps, ctx.feeTenths / 10);
   const problems = hedgeProblems({ ...d, paper }, ctx.address);
+  // Early access (owner 2026-11-15): a real hedge needs the beta list - this wallet, or for a pair either of the two
+  // (the executor's hedgeAccess decides; this is only what the page offers).
+  const meAccess = useBetaAccessState(ctx.address);
+  const partnerAccess = useBetaAccessState(d.shape === 'pair' && isAddress(d.partner) ? d.partner.trim() : null);
+  const early = meAccess === 'open' || (d.shape === 'pair' && partnerAccess === 'open');
   const partnerRef = useReferral(d.shape === 'pair' && isAddress(d.partner) ? d.partner.trim() : null);
   const coin = useFuturesCoin(d.shape === 'spot' ? ctx.address : null, sym?.baseCoin ?? d.symbol.replace(/-USD$/, ''));
   const coinUsd = coin !== null && mark ? coin * mark : null;
@@ -119,6 +125,7 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
   const stepErr = at === 2 ? problems.size ?? problems.buffer ?? problems.loss ?? null : at === 3 && d.shape === 'pair' ? problems.partner ?? null : null;
   const whyNot =
     !ctx.address ? 'Connect your wallet to start a bot.'
+    : !early ? (meAccess === 'checking' ? 'Checking the beta list…' : d.shape === 'pair' ? 'Hedges are in early access: one of the two wallets must be on the beta list.' : 'Hedges are in early access: this wallet must be on the beta list.')
     : !PRACTICE_BOTS && !ctx.liveAllowed ? 'Real bots are not open for this wallet yet.'
     : pairPractice && !PRACTICE_BOTS ? 'Two-wallet hedges open once the terms allow real ones. A hedge against spot runs now.'
     : ctx.setupWhy(paper) ? ctx.setupWhy(paper)
@@ -142,7 +149,7 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
       const v = await ctx.start(specs.main);
       if (specs.partner) {
         savePending({ pairId, main: ctx.address.toLowerCase(), partner: d.partner.trim().toLowerCase(), symbol: d.symbol, spec: specs.partner, at: Date.now() });
-        notify('ok', `Leg 1 started. Switch your wallet to ${short(d.partner.trim())} and open Bots: it asks to start leg 2.`);
+        notify('ok', `Leg 1 started. Open Bots as ${short(d.partner.trim())}, here or on any device, and press Start leg 2.`);
       }
       goBots({ page: 'bot', id: v.algo.id });
     } catch (e) {
@@ -168,6 +175,13 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
         </Modal>
       )}
       <BotsHead view={view} title="New hedge" sub="Open interest held market-neutral: a long and a short of the same size." lead={<Button variant="quiet" icon="arrowLeft" onClick={() => goBots({ page: 'new', market: d.symbol, kind: null })}>Bot types</Button>} />
+      {ctx.address && meAccess === 'closed' && (
+        <div className="hg-early" role="note">
+          <StatusPill size="sm" tone="brand" icon="star">Early access</StatusPill>
+          <span>Hedges are open to wallets on the beta list. A two-wallet hedge runs when either of its wallets is listed.</span>
+          <Button variant="secondary" size="sm" onClick={applyForBeta}>Get access</Button>
+        </div>
+      )}
       <nav className="bots-wsteps" aria-label="Steps">
         <ol>
           {STEPS.map((st, i) => (
@@ -327,8 +341,8 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
                   <b>How the two legs start</b>
                   <ol>
                     <li><span>1</span><div><b>Start leg 1 here</b><small>{ctx.address ? short(ctx.address) : 'This wallet'} signs. It holds nothing yet: it waits for leg 2.</small></div></li>
-                    <li><span>2</span><div><b>Open this page as the second wallet</b><small>In this browser: switch your wallet app to {isAddress(d.partner) ? short(d.partner.trim()) : 'it'} (ValueDesk follows the switch), or Connect wallet with the phone wallet that holds it.</small></div></li>
-                    <li><span>3</span><div><b>Start leg 2 on Bots</b><small>A card asks it to sign (the first time also the terms and its trading key). Both legs then open together.</small></div></li>
+                    <li><span>2</span><div><b>Open Bots as the second wallet, anywhere</b><small>Here (switch your wallet app to {isAddress(d.partner) ? short(d.partner.trim()) : 'it'}), or on your phone: leg 1's page shows a QR that opens ValueDesk in the wallet app's browser.</small></div></li>
+                    <li><span>3</span><div><b>Press Start leg 2</b><small>Its leg is already waiting there. The first time it also accepts the terms and adds its trading key. Both legs then open together.</small></div></li>
                   </ol>
                 </div>
               </Panel>
@@ -410,7 +424,7 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
                   ? <Button variant="primary" size="md" className="bots-stepper__next" disabled={!!stepErr} title={stepErr ?? undefined} onClick={() => setAt((x) => Math.min(last, x + 1))}>Next<Icon name="arrowRight" size={14} /></Button>
                   : <Button variant="go" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!!whyNot || busy} title={whyNot ?? undefined} onClick={() => void start()}>{busy && signing ? 'Waiting for your wallet…' : busy ? 'Starting…' : paper ? 'Start practice hedge' : d.shape === 'pair' ? 'Start leg 1' : 'Start hedge'}</Button>}
               </div>
-              {at === last && whyNot && !busy && <p className="bots-fine" role="status">{whyNot}{ctx.address && ctx.setupWhy(paper) ? <> <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></> : null}</p>}
+              {at === last && whyNot && !busy && <p className="bots-fine" role="status">{whyNot}{ctx.address && !early && meAccess !== 'checking' ? <> <button type="button" className="bots-link" onClick={applyForBeta}>Get access</button></> : null}{ctx.address && early && ctx.setupWhy(paper) ? <> <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></> : null}</p>}
               {stepErr && at < last && <p className="bots-fine" role="status">{stepErr}</p>}
             </div>
           </Shell>

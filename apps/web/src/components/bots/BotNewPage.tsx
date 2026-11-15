@@ -16,7 +16,7 @@ import { onWalletPrompting, walletPrompting } from '../../wallet';
 import { GLOSSARY } from '../../bots/glossary';
 import { FINAL_STATUSES, parseAlgoSpec, regionPolicy, type MarketInfo } from '@copy-engine';
 import { requestDeposit } from '../account/actions';
-import { BETA_APPLY_URL } from '../../beta/access';
+import { BETA_APPLY_URL, useBetaAccessState } from '../../beta/access';
 import { useBotLeverage } from '../../bots/leverage';
 import { DASH, fmtUsd } from '../../format';
 import { useSymbols } from '../../hooks';
@@ -512,6 +512,8 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const [cat, setCat] = useState<Category>(RECIPE[startRecipe].category);
   // The Hedge tile only selects (owner 2026-11-15: it jumped straight into the hedge's own page); Next opens it.
   const [hedge, setHedge] = useState(false);
+  // Hedges are early access (owner 2026-11-15): the tile says so to a wallet not on the beta list; its page explains more.
+  const hedgeAccess = useBetaAccessState(ctx.address);
   const [picked, setPicked] = useState<string[]>(() => [view.market ?? 'BTC-USD']);
   const grid = d.strategy === 'grid';
   const places = placesFor(grid);
@@ -787,7 +789,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                     <span>Holds a long and a short of the same size: in two wallets, or against coin you hold.</span>
                     <small>For open interest without a market view.</small>
                   </span>
-                  <span className="bots-cat__n">2 shapes</span>
+                  {hedgeAccess === 'open' ? <span className="bots-cat__n">2 shapes</span> : <StatusPill size="sm" tone="brand" icon="star">Early access</StatusPill>}
                 </button>
               </div>
             </Shell>
