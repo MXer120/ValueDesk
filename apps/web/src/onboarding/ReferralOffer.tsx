@@ -79,7 +79,7 @@ export function ReferralOffer({ wallet, code = REFERRAL_CODE, theirs = false, wh
   onClose: () => void;
 }) {
   const state = useReferral(wallet, code);
-  const you = theirs ? YOU_GET.map((b) => (b.title === "ValueDesk's Squad" ? { ...b, title: "Your inviter's Squad", line: b.line.replace('our Squad', "your inviter's Squad") } : b)) : YOU_GET;
+  const you = theirs ? YOU_GET.map((b) => (b.id === 'squad' ? { ...b, line: b.line.replace('our Squad', "your inviter's Squad") } : b)) : YOU_GET;
   const [opened, setOpened] = useState(false);
   const joined = state === 'bound' || state === 'pending';
   const seen = useRef(false);
@@ -98,11 +98,11 @@ export function ReferralOffer({ wallet, code = REFERRAL_CODE, theirs = false, wh
           ? state === 'pending'
             ? 'Joined. SoDEX finishes it on your next visit to sodex.com after your first deposit.'
             : `${other ? short(wallet) : 'Your wallet'} is on ${code}.`
-          : <>Shown because SoDEX says {other ? short(wallet) : 'this wallet'} has no referral code yet. You confirm with {other ? 'that wallet' : 'your wallet'} on sodex.com; no funds move.</>}
+          : <>{other ? short(wallet) : 'This wallet'} has no referral code yet (SoDEX). You confirm on sodex.com; no funds move.</>}
       </p>
       <div className="ref-offer__cols">
-        <BenefitList label="What you get" items={you} />
-        <BenefitList label={theirs ? 'What your inviter gets' : 'What ValueDesk gets'} items={WE_GET} />
+        <BenefitList label="You get" items={you} />
+        <BenefitList label={theirs ? 'Your inviter gets, from SoDEX' : 'ValueDesk gets, from SoDEX'} items={WE_GET} />
       </div>
       <DlgFoot left={joined ? undefined : <button type="button" className="dlg-btn" onClick={onClose}>{opened ? 'Close' : 'Not now'}</button>}>
         {joined ? (
@@ -126,15 +126,20 @@ function BenefitList({ label, items }: { label: string; items: readonly Benefit[
       <div className="dlg-label"><span>{label}</span></div>
       <ul>
         {items.map((b) => (
-          <li key={b.title}>
+          <li key={b.id} title={b.line}>
             <b>{b.title}</b>
-            <small>{b.line} <a href={b.source.url} target="_blank" rel="noopener noreferrer">{b.source.label}</a></small>
+            <span className="ref-offer__sr">{b.line}</span>
+            <a href={b.source.url} target="_blank" rel="noopener noreferrer" aria-label={`Source: ${b.source.label}`} title={b.source.label}><Out /></a>
           </li>
         ))}
       </ul>
     </section>
   );
 }
+
+const Out = () => (
+  <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6.5 3.5h-3v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg>
+);
 
 const Check = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" /></svg>

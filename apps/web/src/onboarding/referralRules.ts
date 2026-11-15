@@ -42,7 +42,10 @@ export function shouldOffer(state: ReferralState, lastOffered: number | null, no
 }
 
 export interface Benefit {
+  id: string;
+  /** What the popup shows: a few words (owner 2026-11-16: "benefits are way way way too much text"). */
   title: string;
+  /** The full sentence, shown on hover and read by screen readers. */
   line: string;
   source: { label: string; url: string };
 }
@@ -55,9 +58,10 @@ const PROGRAMME = {
 
 /** What the wallet gets. */
 export const YOU_GET: readonly Benefit[] = [
-  { title: '+5% SoPoints', line: 'Invitees get an extra 5% points boost on the points they earn.', source: SEASON },
+  { id: 'points', title: '+5% SoPoints', line: 'Invitees get an extra 5% points boost on the points they earn.', source: SEASON },
   {
-    title: 'ValueDesk\'s Squad',
+    id: 'squad',
+    title: 'Squad boost, up to +25%',
     line: 'You join our Squad. A Squad\'s boost is +5% to +25%, set by its members\' trading volume in the season\'s 4-week window.',
     source: SEASON,
   },
@@ -65,8 +69,8 @@ export const YOU_GET: readonly Benefit[] = [
 
 /** What ValueDesk gets, said as plainly. */
 export const WE_GET: readonly Benefit[] = [
-  { title: '25% points rebate', line: 'SoDEX gives the inviter a rebate of 25% of the points its invitees generate.', source: SEASON },
-  { title: '10% fee rebate', line: 'SoDEX gives the inviter 10% of its invitees\' trading fees.', source: PROGRAMME },
+  { id: 'points-rebate', title: '25% points rebate', line: 'SoDEX gives the inviter a rebate of 25% of the points its invitees generate.', source: SEASON },
+  { id: 'fee-rebate', title: '10% fee rebate', line: 'SoDEX gives the inviter 10% of its invitees\' trading fees.', source: PROGRAMME },
 ];
 
 /**

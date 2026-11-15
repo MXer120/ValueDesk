@@ -291,13 +291,13 @@ html[data-theme='light'] .onb-go:hover { filter: brightness(1.6); }
 .ref-offer__why { margin: 0 0 12px; color: var(--text); font-size: var(--fs-sm, 13px); }
 .ref-offer__note { margin: 0 0 4px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
 .ref-offer__cols { display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; }
-.ref-offer__list ul { display: flex; flex-direction: column; gap: 12px; margin: 8px 0 4px; padding: 0; list-style: none; }
-.ref-offer__list li { display: flex; flex-direction: column; gap: 3px; }
+.ref-offer__list ul { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; padding: 0; list-style: none; }
+.ref-offer__list li { display: flex; align-items: center; gap: 6px; }
 .ref-offer__list b { font-weight: 500; font-size: var(--fs-sm, 13px); }
-.ref-offer__list small { color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
-.ref-offer__list a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
-.ref-offer__list a:hover { color: var(--text); }
+.ref-offer__list a { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--dim); }
+.ref-offer__list a:hover { color: var(--text); background: rgb(var(--ink) / 0.06); }
 .ref-offer__go { display: inline-grid; place-items: center; text-decoration: none; }
+.ref-offer__sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (max-width: 560px) { .ref-offer__cols { grid-template-columns: 1fr; } }
 .ref-offer__cols.is-one { grid-template-columns: 1fr; }
 
