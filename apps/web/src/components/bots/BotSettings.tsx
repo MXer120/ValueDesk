@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Term } from './Term';
 import { fmtUsd } from '../../format';
-import { FLOW_DEFAULT, GATE_DEFAULT, NEWS_DEFAULT, QUIET_PRESETS, R10, botNeedUsd, type BotDraft } from '../../bots/presets';
+import { PRACTICE_BOTS, FLOW_DEFAULT, GATE_DEFAULT, NEWS_DEFAULT, QUIET_PRESETS, R10, botNeedUsd, type BotDraft } from '../../bots/presets';
 import type { AlgoSpec } from '@copy-engine';
 import { HoursGate } from './HoursGate';
 import { RECIPE, recipeOfDraft } from '../../bots/recipes';
@@ -28,7 +28,7 @@ const tgtKey = (v: number | null): string => (v === null ? 'none' : TARGETS.incl
 export type Sec = 'size' | 'quote' | 'guard';
 export const SEC_NAMES: Record<Sec, string> = { size: 'Size & risk', quote: 'Quoting', guard: 'Safeguards' };
 
-function Row({ label, hint, children, wide, tag }: { label: ReactNode; hint?: ReactNode; children: ReactNode; wide?: boolean; tag?: ReactNode }) {
+export function Row({ label, hint, children, wide, tag }: { label: ReactNode; hint?: ReactNode; children: ReactNode; wide?: boolean; tag?: ReactNode }) {
   return (
     <div className={`bots-f${wide ? ' is-wide' : ''}`}>
       <div className="bots-f__l"><span>{label}</span>{tag}</div>
@@ -445,7 +445,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
         </div>
       )}
 
-      {!hidePractice && (
+      {PRACTICE_BOTS && !hidePractice && (
         <div className="bots-practice">
           <div>
             <p className="bots-practice__t">Practice</p>

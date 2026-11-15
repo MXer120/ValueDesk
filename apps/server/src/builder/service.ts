@@ -154,6 +154,39 @@ export class BuilderService {
     this.extra = f;
   }
 
+  /**
+   * The least volume a wallet's fee is read at (USD; invites/service.ts: a wallet that joined through a referral starts
+   * at REFERRED_START_USD). Its site tier and its copy and bot ladder steps use the higher of this and its own volume.
+   */
+  private floor: ((address: string) => number) | null = null;
+
+  setVolumeFloor(f: ((address: string) => number) | null): void {
+    this.floor = f;
+  }
+
+  private floorUsd(address: string): number {
+    if (!this.floor) return 0;
+    try {
+      const v = this.floor(address.toLowerCase());
+      return Number.isFinite(v) && v > 0 ? v : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** Facts with the volume raised to the wallet's floor (the difference is added to perps; only the total is tiered). */
+  private floored(address: string, f: WalletFacts): WalletFacts {
+    const min = Math.round(this.floorUsd(address) * MICRO);
+    const total = f.perpsMicro + f.spotMicro;
+    return total >= min ? f : { ...f, perpsMicro: f.perpsMicro + (min - total) };
+  }
+
+  /** The volume a wallet's copy and bot ladder step is read at: its own, or its floor when that is higher (USD). */
+  ladderVolumeUsd(builder: number, address: string, days: number): number | null {
+    const v = this.volumeUsd(builder, address, days);
+    return v === null ? null : Math.max(v, this.floorUsd(address));
+  }
+
   /** What bounds those programs' lowered fee in the executor (invites/service.ts perkBudget). */
   private budget: ((address: string, now: number) => PerkBudget | null) | null = null;
 
@@ -306,7 +339,7 @@ export class BuilderService {
    * history gets no row: owing the default is what having no row means.
    */
   private settle(cfg: TiersConfig, store: BuilderStore | null, address: string, w: WalletRow | null, now: number, counted = countedOf(cfg, store, w, now)): Decision {
-    const d0 = decide(cfg, address, factsOf(w, counted), now);
+    const d0 = decide(cfg, address, this.floored(address, factsOf(w, counted)), now);
     // VIP and the dev page's programs: the lower of them and the tier, per engine (programs.ts).
     const lw = this.loweredFor(address, now);
     const perps = Math.min(d0.fee.perps, lw.fees.perps?.fee ?? Infinity);
@@ -375,9 +408,9 @@ export class BuilderService {
     try {
       if (product === 'perps' || product === 'spot') {
         const w = rt.store.wallet(cfg.builderId, a);
-        base = decide(cfg, a, factsOf(w, countedOf(cfg, rt.store, w, now)), now).fee[product];
+        base = decide(cfg, a, this.floored(a, factsOf(w, countedOf(cfg, rt.store, w, now))), now).fee[product];
       } else {
-        const v = this.volumeUsd(cfg.builderId, a, COPY_LADDER_DAYS) ?? 0;
+        const v = this.ladderVolumeUsd(cfg.builderId, a, COPY_LADDER_DAYS) ?? 0;
         base = product === 'copy' ? copyLadderFee(v) : botLadderFee(v);
       }
     } catch {

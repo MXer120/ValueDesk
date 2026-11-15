@@ -16,7 +16,7 @@ import { onWalletPrompting, walletPrompting } from '../../wallet';
 import { GLOSSARY } from '../../bots/glossary';
 import { FINAL_STATUSES, parseAlgoSpec, regionPolicy, type MarketInfo } from '@copy-engine';
 import { requestDeposit } from '../account/actions';
-import { BETA_APPLY_URL } from '../../beta/access';
+import { BETA_APPLY_URL, useBetaAccessState } from '../../beta/access';
 import { useBotLeverage } from '../../bots/leverage';
 import { DASH, fmtUsd } from '../../format';
 import { useSymbols } from '../../hooks';
@@ -26,7 +26,7 @@ import { useHistory } from '../algo/liveData';
 import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, bpToPerMillion, type BotMarket } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
-import { STRATEGY_INFO, autoLeverage, clampLeverage, draftOfSpec, costPerMillion, gridRange, leverageCap, planMarkets, refusalOf, suggestedSpreadBps, type BotDraft, type RefusalAction, type Strategy } from '../../bots/presets';
+import { PRACTICE_BOTS, STRATEGY_INFO, autoLeverage, clampLeverage, draftOfSpec, costPerMillion, gridRange, leverageCap, planMarkets, refusalOf, suggestedSpreadBps, type BotDraft, type RefusalAction, type Strategy } from '../../bots/presets';
 import { CATEGORIES, RECIPE, draftOfRecipe, recipeOfDraft, recipesOf, type Category, type Recipe, type RecipeId } from '../../bots/recipes';
 import { bestOf, estimate, feeAdjOf, ownRuns, type BotEstimate, type EstLine, type OwnRun } from '../../bots/estimate';
 import { GRID_PRESETS, draftStepBps, gridEstimate, gridHalfRange, presetRangePct, useHourlyVol, type GridEstimate, type GridPresetId } from '../../bots/gridPresets';
@@ -180,7 +180,7 @@ function MarketStep({ picked, toggle, markets, costOf, running, real }: {
     const locked = real && busy && !on;
     const flip = () => { if (!locked) toggle(symbol); };
     return (
-      <tr key={symbol} role="checkbox" aria-checked={on} aria-disabled={locked || undefined} aria-label={symbol} tabIndex={0} title={busy ? (real ? 'You already run a real bot here. Stop it first, or run this one as practice.' : 'You already run a real bot here.') : undefined} className={`bots-row${on ? ' is-picked' : ''}${locked ? ' is-blocked' : ''}`} onClick={flip} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } }}>
+      <tr key={symbol} role="checkbox" aria-checked={on} aria-disabled={locked || undefined} aria-label={symbol} tabIndex={0} title={busy ? (real ? 'You already run a real bot here. Stop it first.' : 'You already run a real bot here.') : undefined} className={`bots-row${on ? ' is-picked' : ''}${locked ? ' is-blocked' : ''}`} onClick={flip} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } }}>
         <td className="bots-mt__pick"><span className={`bots-tick${on ? ' is-on' : ''}`} aria-hidden="true">{on && <Icon name="check" size={11} />}</span></td>
         <td>
           <span className="bots-mt__name">
@@ -510,6 +510,10 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   // "Run again" / "Run with real orders" (BotsPage runAgain): the stopped bot's settings, kept 10 minutes, read once.
   const [d, setD] = useState<BotDraft>(() => prefillDraft(view.market) ?? fromRecipe(startRecipe, view.market ?? 'BTC-USD'));
   const [cat, setCat] = useState<Category>(RECIPE[startRecipe].category);
+  // The Hedge tile only selects (owner 2026-11-15: it jumped straight into the hedge's own page); Next opens it.
+  const [hedge, setHedge] = useState(false);
+  // Hedges are early access (owner 2026-11-15): the tile says so to a wallet not on the beta list; its page explains more.
+  const hedgeAccess = useBetaAccessState(ctx.address);
   const [picked, setPicked] = useState<string[]>(() => [view.market ?? 'BTC-USD']);
   const grid = d.strategy === 'grid';
   const places = placesFor(grid);
@@ -536,7 +540,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   }, [grid, d.gridK, d.levels, d.low, d.high, d.rangePct, vol]);
   const range = grid ? gridRange(d, mark) : null;
   const markets = useBotMarkets('24h');
-  const paper = !ctx.liveAllowed || d.paper;
+  const paper = PRACTICE_BOTS && (!ctx.liveAllowed || d.paper);
 
   // Leverage: under every picked market's maximum, nothing else (owner 2026-11-08); none offered while a maximum is
   // unknown. Auto (the default) follows the sizing: the lowest leverage at which the margin fits (autoLeverage below).
@@ -624,6 +628,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const clash = paper ? [] : picked.filter((x) => runningReal.has(x));
   const whyNot: string | null =
     !ctx.address ? 'Connect your wallet to start a bot.'
+    : !PRACTICE_BOTS && !ctx.liveAllowed ? 'Real bots are not open for this wallet yet.'
     : why ? why
     : !ctx.ready ? 'The ValueDesk executor is not ready yet.'
     : !picked.length ? 'Pick at least one market.'
@@ -631,7 +636,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     : gridErr ? gridErr
     : allErrors.length ? 'Fix the order size first (see Review).'
     : !paper && d.leverage === null ? "Reading the market's leverage and your account…"
-    : clash.length ? `You already run a real bot on ${clash.map((x) => x.replace(/-USD$/, '')).join(', ')}. Stop it, untick it, or turn on Practice.`
+    : clash.length ? `You already run a real bot on ${clash.map((x) => x.replace(/-USD$/, '')).join(', ')}. Stop it or untick it.`
     : short > 0 ? `Needs ${fmtUsd(needAll, 0)} of margin, ${fmtUsd(free ?? 0, 0)} is free.`
     : null;
   const can = whyNot === null;
@@ -760,10 +765,10 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
               <ShellHeader icon="layers" title="Bot type" subtitle="What should your bot do?" />
               <div className="bots-types" role="radiogroup" aria-label="Bot type">
                 {CATEGORIES.map((c) => {
-                  const on = cat === c.id;
+                  const on = !hedge && cat === c.id;
                   const n = recipesOf(c.id).length;
                   return (
-                    <button key={c.id} type="button" role="radio" aria-checked={on} aria-label={c.name} className={`bots-type${on ? ' is-on' : ''}`} onClick={() => { setCat(c.id); if (RECIPE[rid].category !== c.id) pickRecipe((recipesOf(c.id).find((r) => r.tag === 'Recommended') ?? recipesOf(c.id)[0]!).id); }}>
+                    <button key={c.id} type="button" role="radio" aria-checked={on} aria-label={c.name} className={`bots-type${on ? ' is-on' : ''}`} onClick={() => { setHedge(false); setCat(c.id); if (RECIPE[rid].category !== c.id) pickRecipe((recipesOf(c.id).find((r) => r.tag === 'Recommended') ?? recipesOf(c.id)[0]!).id); }}>
                       <span className={`bots-radio${on ? ' is-on' : ''}`} aria-hidden="true" />
                       <StrategyTile strategy={c.id === 'grid' ? 'grid' : 'market'} size={48} />
                       <span className="bots-type__t">
@@ -776,15 +781,15 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                   );
                 })}
                 {/* The hedge has its own page (HedgeNewPage): two wallets' legs or a short against spot. */}
-                <button type="button" role="radio" aria-checked={false} aria-label="Hedge" className="bots-type" onClick={() => goBots({ page: 'new', market: picked[0] ?? d.symbol, kind: 'hedge' })}>
-                  <span className="bots-radio" aria-hidden="true" />
+                <button type="button" role="radio" aria-checked={hedge} aria-label="Hedge" className={`bots-type${hedge ? ' is-on' : ''}`} onClick={() => setHedge(true)}>
+                  <span className={`bots-radio${hedge ? ' is-on' : ''}`} aria-hidden="true" />
                   <StrategyTile strategy="hedge" size={48} />
                   <span className="bots-type__t">
                     <b>Hedge</b>
                     <span>Holds a long and a short of the same size: in two wallets, or against coin you hold.</span>
                     <small>For open interest without a market view.</small>
                   </span>
-                  <span className="bots-cat__n">2 shapes</span>
+                  {hedgeAccess === 'open' ? <span className="bots-cat__n">2 shapes</span> : <StatusPill size="sm" tone="brand" icon="star">Early access</StatusPill>}
                 </button>
               </div>
             </Shell>
@@ -852,7 +857,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
               <div className="bots-sidepanel__act">
                 {at > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
                 {at < last
-                  ? <Button variant="primary" size="md" className="bots-stepper__next" disabled={place.step === 3 && place.part === 'size' && sizeProblems.length > 0} title={place.step === 3 && sizeProblems.length ? sizeProblems[0] : undefined} onClick={next}>{nextLabel}<Icon name="arrowRight" size={14} /></Button>
+                  ? <Button variant="primary" size="md" className="bots-stepper__next" disabled={place.step === 3 && place.part === 'size' && sizeProblems.length > 0} title={place.step === 3 && sizeProblems.length ? sizeProblems[0] : undefined} onClick={place.step === 0 && hedge ? () => goBots({ page: 'new', market: picked[0] ?? d.symbol, kind: 'hedge' }) : next}>{nextLabel}<Icon name="arrowRight" size={14} /></Button>
                   : <Button variant="go" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!can || busy} title={whyNot ?? undefined} onClick={() => void start()}>{startLabel}</Button>}
               </div>
               {at === last && whyNot && !busy && <p className="bots-fine" role="status">{whyNot}{why && ctx.address ? <> <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></> : null}</p>}

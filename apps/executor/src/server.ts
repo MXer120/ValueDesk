@@ -387,6 +387,9 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
         res.on('error', close);
         return;
       }
+      if (req.method === 'GET' && route === '/algos/invites') {
+        return send(res, 200, { invites: svc.hedgeInvites(svc.authenticate(bearer(req))) });
+      }
       if (req.method === 'GET' && route === '/algos') {
         const algos = svc.algoList(svc.authenticate(bearer(req)));
         // The Bots page reads every 5 s, and a bot's series is up to 1,500 points: 6 MB a read at 100 bots.

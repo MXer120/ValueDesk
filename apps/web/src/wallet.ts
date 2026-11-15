@@ -333,6 +333,9 @@ async function walletAccounts(provider: Eip1193Provider): Promise<string[]> {
   }
 }
 
+/** The accounts this site may use in the wallet, lower case (never opens the wallet). */
+export const walletAccountList = (provider: Eip1193Provider): Promise<string[]> => walletAccounts(provider);
+
 async function otherActiveAccount(provider: Eip1193Provider, address: string, accounts?: string[]): Promise<string | null> {
   const list = accounts ?? (await walletAccounts(provider));
   if (!list.length || list.includes(address.toLowerCase())) return null;

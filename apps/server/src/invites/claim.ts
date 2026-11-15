@@ -19,7 +19,7 @@
  */
 
 /** Of the ValueDesk fees a wallet pays: its inviter's credit, the inviter's inviter's, the next one's. */
-export const TIER_SHARES = [0.25, 0.1, 0.05] as const;
+export const TIER_SHARES = [0.2, 0.075, 0.02] as const; // owner 2026-11-15: 20 / 7.5 / 2% (was 25 / 10 / 5%, then 2.5% on tier 3)
 export const TIERS = TIER_SHARES.length;
 /**
  * The builder fee while credits pay: 1 tenth of a bp. Not 0: the builder ledger sees an order only when it paid a
@@ -49,7 +49,14 @@ export const PERK_HORIZON_MS = 3 * 60_000;
  * Every VIP wallet gets this much fee credit once (owner 2026-11-14: "give vips a $10 Fee credit balance just bc
  * their vips"): VIP as the app shows it - by volume, kept, or by a VIP program (the beta's 30 days too).
  */
-export const VIP_CREDIT_USD = 10;
+export const VIP_CREDIT_USD = 5; // $5 since owner 2026-11-15 (was $10)
+
+/**
+ * A wallet that joined through a referral starts at the fee tier of this much volume (owner 2026-11-15: "referred
+ * traders start at tier 1, so >100k"): its site tier and its copy and bot ladder steps read at least this volume.
+ * Its own volume counts once it is higher.
+ */
+export const REFERRED_START_USD = 100_000;
 
 /** ValueDesk's own SoDEX code: it refers nobody on ValueDesk (its fees are ValueDesk's). */
 export const OURS_CODE = 'VALUEDESK';

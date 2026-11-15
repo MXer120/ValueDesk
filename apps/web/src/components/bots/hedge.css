@@ -37,3 +37,63 @@
   .hg-row { grid-template-columns: 1fr; }
   .hg-row__c { align-items: stretch; }
 }
+/* Other leg: this wallet, the accounts the wallet app shares, and "add one" - cards, no one-side edges. */
+.hg-wallets { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.hg-wcard {
+  display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px 14px; border: 0; border-radius: 12px;
+  background: rgb(var(--ink) / 0.04); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.06); color: var(--text); font: inherit; text-align: left;
+}
+button.hg-wcard { cursor: pointer; }
+button.hg-wcard:hover:not(:disabled) { background: rgb(var(--ink) / 0.07); }
+.hg-wcard.is-on { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 60%, transparent); background: color-mix(in srgb, var(--pos) 8%, transparent); }
+.hg-wcard.is-me { background: rgb(var(--ink) / 0.025); }
+.hg-wcard.is-add { color: var(--muted); }
+.hg-wcard:disabled { opacity: 0.55; cursor: default; }
+.hg-wcard__t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hg-wcard__t b { font-family: var(--font-num); font-weight: 500; font-size: var(--fs-sm, 13px); }
+.hg-wcard.is-add .hg-wcard__t b { font-family: inherit; }
+.hg-wcard__t small { color: var(--muted); font-size: var(--fs-xs); line-height: 1.4; }
+.hg-paste { display: flex; flex-direction: column; gap: 8px; padding: 12px 0 0; align-items: flex-start; }
+.hg-paste .hg-addr { max-width: 460px; }
+.hg-note .tf-pill, .hg-note [class*="pill"] { flex: none; }
+.hg-leg2 { display: flex; flex-direction: column; gap: 12px; }
+.hg-leg2 .hg-paste { padding: 0; }
+.hg-leg2 .hg-note { margin: 0; align-items: center; }
+.hg-paste__k { font-size: var(--fs-xs); color: var(--muted); }
+.hg-how { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 12px; background: rgb(var(--ink) / 0.03); }
+.hg-how > b { font-size: var(--fs-sm, 13px); font-weight: 500; }
+.hg-how ol { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.hg-how li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; }
+.hg-how li > span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--pos) 18%, transparent); color: var(--pos); font-family: var(--font-num); font-size: 11px; font-weight: 600; }
+.hg-how li div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hg-how li b { font-size: var(--fs-xs); font-weight: 500; color: var(--text); }
+.hg-how li small { color: var(--muted); font-size: var(--fs-xs); line-height: 1.45; }
+/* A leg low on margin: a tinted card with a pill for its state (no one-side edge). */
+.hg-warn { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn, #f5a524) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn, #f5a524) 30%, transparent); }
+.hg-warn.is-urgent { background: color-mix(in srgb, var(--neg) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--neg) 35%, transparent); }
+.hg-warn__h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hg-warn__h b { font-weight: 500; font-size: var(--fs-sm, 13px); }
+.hg-warn p { margin: 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+.hg-warn__act { display: flex; flex-wrap: wrap; gap: 8px; }
+.hg-pick { display: flex; flex-direction: column; gap: 8px; }
+.hg-pick__row { display: flex; flex-wrap: wrap; gap: 8px; }
+.hg-exts { display: flex; flex-wrap: wrap; gap: 8px; }
+.hg-ext { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border: 0; border-radius: 10px; background: rgb(var(--ink) / 0.05); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.08); color: var(--text); font: inherit; font-size: var(--fs-sm, 13px); cursor: pointer; }
+.hg-ext:hover { background: rgb(var(--ink) / 0.08); }
+.hg-ext img { border-radius: 5px; }
+.hg-qr { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.hg-qr img { border-radius: 12px; background: #fff; padding: 8px; }
+.hg-qr__skel { width: 240px; height: 240px; border-radius: 12px; }
+.hg-qr p { margin: 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; max-width: 300px; }
+@media (max-width: 720px) { .hg-pick__row > * { flex: 1 1 100%; } }
+
+/* Early access note on New hedge (owner 2026-11-15). */
+.hg-early { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 14px; padding: 10px 14px; border-radius: 12px; background: rgb(var(--ink) / 0.04); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.08); font-size: var(--fs-sm, 13px); color: var(--muted); }
+.hg-early > span:nth-child(2) { flex: 1 1 260px; }
+/* Leg 2 on another device: QR + link on leg 1's page. */
+.hg-elsewhere { display: grid; grid-template-columns: auto 1fr; gap: 12px 14px; align-items: center; margin-bottom: 10px; padding: 12px 14px; border-radius: 12px; background: rgb(var(--ink) / 0.04); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.08); }
+.hg-elsewhere img { width: 112px; height: 112px; border-radius: 8px; background: #fff; padding: 4px; }
+.hg-elsewhere__t { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.hg-elsewhere__t b { font-weight: 500; font-size: var(--fs-sm, 13px); }
+.hg-elsewhere__t p { margin: 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; }
+@media (max-width: 520px) { .hg-elsewhere { grid-template-columns: 1fr; justify-items: center; text-align: center; } }

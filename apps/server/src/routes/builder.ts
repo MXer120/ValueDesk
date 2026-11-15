@@ -90,7 +90,8 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     if (!Number.isSafeInteger(builder) || builder <= 0) return bad('builder must be a SoDEX account id');
     const days = Number(q.days ?? 14);
     if (!Number.isSafeInteger(days) || days < 1 || days > 90) return bad('days must be a whole number from 1 to 90');
-    const usd = service.volumeUsd(builder, q.address.toLowerCase(), days);
+    // The ladder's volume: a wallet that joined through a referral reads at least REFERRED_START_USD (invites).
+    const usd = service.ladderVolumeUsd(builder, q.address.toLowerCase(), days);
     // The executor trades for this wallet: have the ledger verify it (a follower with no tab open is otherwise never counted).
     service.hint(q.address.toLowerCase(), 'executor');
     if (usd === null) return reply.code(503).send({ ok: false, code: 'unavailable', error: 'the builder ledger is not open' });

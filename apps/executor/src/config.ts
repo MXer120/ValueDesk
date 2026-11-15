@@ -22,9 +22,6 @@
  *   EXECUTOR_LIVE_ALGOS_WALLETS  while EXECUTOR_LIVE_ALGOS is off, the wallets real algo orders may start for:
  *                            comma-separated 0x addresses, or * for every wallet; unset: none (e.g. the
  *                            owner's live test, apps/executor/tools/live-test --target hosted, for its follower)
- *   EXECUTOR_HEDGE_PAIRS     1 = a hedge of two wallets may run with real orders; default off: pairs run as practice
- *                            (the bot terms forbid trading with accounts you control - owner and counsel decide first,
- *                            2026-11-14), except for the wallets EXECUTOR_LIVE_ALGOS_WALLETS names (the live test)
  *   EXECUTOR_BRAKE_FILE      the operator's emergency brake (brake.ts; default: hosted
  *                            /var/lib/valuescan/brake.json, self <data dir>/brake.json; 'none' = no brake)
  *   EXECUTOR_TRUST_EDGE      hosted: 1 = read the viewer's address and country from the edge's headers
@@ -74,6 +71,8 @@ export interface ExecutorConfig {
   maxAlgosPerOwner: number;
   /** Real bots running on this executor, every wallet together (EXECUTOR_MAX_LIVE_BOTS, default 10). */
   maxLiveBots: number;
+  /** New practice (paper) bots are taken only when EXECUTOR_PRACTICE_BOTS=1 (off since 2026-11-15). */
+  practiceBots: boolean;
   builderDb: string | null;
   /** The API's builder volume route and its internal token (the ledger on another server). */
   builderUrl: string | null;
@@ -127,8 +126,6 @@ export interface ExecutorConfig {
   liveAlgos: boolean;
   /** Besides: the wallets (lowercase) real algo orders may start for, or '*' for every wallet (EXECUTOR_LIVE_ALGOS_WALLETS). */
   liveAlgoWallets: readonly string[] | '*';
-  /** A two-wallet hedge may run with real orders (EXECUTOR_HEDGE_PAIRS=1); off: practice only, but for the live test's wallets. */
-  hedgePairsLive: boolean;
   /** The emergency brake's file (brake.ts); null: none. */
   brakeFile: string | null;
   /** Self-hosted: Host header names allowed besides loopback names and IP literals. */
@@ -279,6 +276,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
     // 20 live bots per server (owner 2026-11-08): up to 10 wallets get their fills pushed on the account socket, the
     // others are read by REST, a wallet first when a public print names it (runtime.ts onPrint).
+    practiceBots: env.EXECUTOR_PRACTICE_BOTS === '1',
     maxLiveBots: Math.max(1, Math.min(1000, Math.floor(Number(env.EXECUTOR_MAX_LIVE_BOTS ?? 20)) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
@@ -301,7 +299,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     executorId,
     liveAlgos: env.EXECUTOR_LIVE_ALGOS === '1',
     liveAlgoWallets: liveAlgoWalletsFrom(env.EXECUTOR_LIVE_ALGOS_WALLETS),
-    hedgePairsLive: env.EXECUTOR_HEDGE_PAIRS === '1',
     brakeFile: brake === 'none' ? null : brake ? resolve(brake) : kind === 'hosted' ? '/var/lib/valuescan/brake.json' : join(dataDir, 'brake.json'),
     allowedHosts: env.EXECUTOR_ALLOWED_HOSTS?.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) ?? [],
     alertTelegramToken: env.ALERT_TELEGRAM_TOKEN?.trim() || null,

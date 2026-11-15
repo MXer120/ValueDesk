@@ -20,7 +20,7 @@ one stored before that keeps its spec and the bot fee.
 
 Not offered: anything that takes. A taker bot pays SoDEX 4.0 bp + the bot fee + half the spread: $450+ per $1M.
 Delta-neutral across two accounts: the hedge bot (2026-11-14, below) holds it with takers only, so its legs never trade
-with each other; whether real pairs may be offered is open (terms, SoDEX's anti-farming rule: see Hedge bot).
+with each other; real pairs are early access (one wallet on the beta list, owner 2026-11-15: see Hedge bot).
 
 SoDEX tiers (docs/research/10-pooled-fee-account.md): maker 1.2 / 1.0 / 0.6 / 0.2 / 0 bp from $5M / $25M / $100M /
 $500M 14-day volume. A user who reaches tier 1 through bots pays $150 per $1M; tier 3, $70.
@@ -185,16 +185,20 @@ ValueDesk gets, sourced); a NEW one (no SoDEX account yet) starts on it before i
 one SoDEX could not answer for, is never held. The same popup runs for every connected wallet without a code
 (onboarding/ReferralOffer.tsx, referralRules.ts), and Wealth vault requests carry the code only for such wallets.
 
-**Before real hedges go live (open, owner):**
-1. Terms. The bot terms in force (copy-2026-11-10, "No wash trading. A bot must not be used to trade with yourself or
-   with accounts you control, or to create the appearance of trading activity") and this file's earlier line
-   ("Delta-neutral across two accounts is not offered ... wash trading") rule the pair shape out. The legs never trade
-   with each other, but two accounts of one person holding offsetting OI for points is what SoDEX's "zero tolerance for
-   wash trading or any form of manipulative farming" (Layer 1 Season) may flag: points can be deducted. Needs the
-   owner's word (and counsel) and a new terms version before the pair shape is offered for real.
-2. Ship engine + executor + web together (feature `hedge`; the web hides the start until the executor advertises it).
-3. Live test on two test wallets (the follower 0x04Fb…277d and a second one), small size; the spot shape needs coin
-   moved to Futures first (live-test scenario `bot.hedge` covers the no-coin wait).
+**Early access (owner 2026-11-15).** "make the hedge only access to whitelisted early access": a real hedge needs the
+beta list itself (server 1's `listed`, not `bots`, so VALUEDESK_BOTS_OPEN does not open it). Real two-wallet pairs are
+on, with one of the two wallets on the list ("yes if 1 of the wallets is on beta"; asked against the terms line below,
+2026-11-15). Executor: `hedgeAccess` at the start (refusal `hedge-beta`) and while running (held only when both answers
+are an explicit no). The live test's wallets need no listing. EXECUTOR_HEDGE_PAIRS is gone.
+- Terms line in force (copy-2026-11-10): "A bot must not be used to trade with yourself or with accounts you control".
+  The legs only take from the book and never fill against each other; SoDEX's Layer 1 Season anti-farming rule may
+  still deduct points from one person's offsetting accounts. Unchanged terms on the owner's answer.
+
+**Leg 2 from anywhere.** The executor lists the pairs that wait for a wallet's leg (`GET /algos/invites`: running main
+legs naming it that no leg of it answers yet, the main's spec mirrored), so the second wallet starts its leg from any
+browser or phone. Leg 1's page shows a QR and a link to /bots for the phone wallet's browser; the main's browser keeps
+its own copy (vd.hedge.pending) for an older executor. The New hedge page picks the second wallet's address by phone
+QR (a separate WalletConnect pairing, address only), another extension in the browser, or a paste.
 
 ## Tests
 

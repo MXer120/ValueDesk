@@ -39,6 +39,8 @@ export interface HedgeDraft {
   takeProfitUsd: number | null;
   runHours: number | null;
   onStop: 'close' | 'keep';
+  /** How much of the way to the liquidation the price may use before both legs shrink (sets minLiqPct, growLiqPct). */
+  safety: HedgeSafety;
   paper: boolean;
   label: string;
 }
@@ -58,9 +60,40 @@ export const HEDGE_DEFAULT: Omit<HedgeDraft, 'symbol'> = {
   takeProfitUsd: null,
   runHours: null,
   onStop: 'close',
+  safety: 'balanced',
   paper: false,
   label: '',
 };
+
+/**
+ * Safety, as a share of the way to the liquidation (owner 2026-11-15: "safety needs to be within liquidation, not
+ * price; for high leverage it would trigger instantly"): both legs shrink once the price has used up this share of
+ * the distance a leg starts with at its leverage, and grow back only while 90% of that distance is free again.
+ */
+export type HedgeSafety = 'early' | 'balanced' | 'late';
+export const SAFETY_USED: Record<HedgeSafety, number> = { early: 0.4, balanced: 0.6, late: 0.8 };
+/** The engine's floors (copy-engine algo/spec.ts LIMITS.hedge): a buffer under these is refused. */
+const MIN_LIQ_FLOOR = 0.5;
+const GROW_LIQ_FLOOR = 1;
+
+/**
+ * How far a leg's liquidation starts (share of the price) at `leverage`: its account holds the size / leverage as
+ * margin; the short's side is the closer one, (1/L - m) / (1 + m).
+ */
+export function startDistance(leverage: number, maxLeverage: number): number {
+  const L = Math.max(1, Math.min(leverage, maxLeverage));
+  const m = mmrOf(maxLeverage);
+  return Math.max(0, (1 / L - m) / (1 + m));
+}
+
+/** The engine's two buffers (% of the price) for a leverage and a safety, kept above the engine's floors. */
+export function buffersFor(leverage: number, maxLeverage: number, safety: HedgeSafety): { minLiqPct: number; growLiqPct: number; startPct: number } {
+  const d0 = startDistance(leverage, maxLeverage) * 100;
+  const r = (x: number) => Math.round(x * 100) / 100;
+  const minLiqPct = r(Math.max(MIN_LIQ_FLOOR, d0 * (1 - SAFETY_USED[safety])));
+  const growLiqPct = r(Math.max(GROW_LIQ_FLOOR, minLiqPct + 0.25, d0 * 0.9));
+  return { minLiqPct, growLiqPct, startPct: d0 };
+}
 
 export const isAddress = (x: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(x.trim());
 
@@ -156,6 +189,37 @@ export function hedgeNumbers(d: HedgeDraft, mark: number, maxLeverage: number, t
   // A move m against the short: its equity falls by q*m*P; the buffer is reached when its distance is minLiq.
   const trimMove = q > 0 ? Math.max(0, (d.marginUsd - (q * mark) * (mmr + (d.minLiqPct / 100) * (1 + mmr))) / (q * mark)) : null;
   return { maxLegUsd, legUsd, oiUsd: legUsd * 2, liqDistance: dist, trimMove, initialUsd: initial(legUsd), roundTripFeesUsd: fees(legUsd) };
+}
+
+/* --------------------------------------------------- a leg low on margin ----- */
+
+/** One leg as the bot page reads it (copy-engine HedgeLegView). */
+export interface LegRead { owner: string; equity: number | null; liqDistance: number | null }
+
+export interface MarginWarning {
+  /** The leg low on margin, and the one with margin to spare. */
+  low: string;
+  rich: string;
+  /** About how much to move from `rich` to `low` to even them out, USD. */
+  moveUsd: number;
+  /** Its liquidation is inside the shrink buffer's 1.5x: it is shrinking both legs now, or about to. */
+  urgent: boolean;
+}
+
+/**
+ * A pair's leg low on margin (owner 2026-11-15: "add a warning if 1 leg is low on margin that the user should
+ * transfer"). Every move makes one wallet richer and the other poorer, and SoDEX moves no margin between two wallets:
+ * the poorer one keeps both legs small. Warned once its liquidation is closer than the grow-back buffer (it holds the
+ * size back) and the other wallet has at least $1 more equity; the move evens the two out.
+ */
+export function marginWarning(legs: readonly LegRead[], minLiqPct: number, growLiqPct: number): MarginWarning | null {
+  if (legs.length !== 2) return null;
+  const [a, b] = legs as [LegRead, LegRead];
+  if (a.equity === null || b.equity === null) return null;
+  const [low, rich] = a.equity <= b.equity ? [a, b] : [b, a];
+  const gap = rich.equity! - low.equity!;
+  if (!(gap >= 1) || low.liqDistance === null || !(low.liqDistance < growLiqPct / 100)) return null;
+  return { low: low.owner, rich: rich.owner, moveUsd: Math.floor(gap / 2), urgent: low.liqDistance < (minLiqPct / 100) * 1.5 };
 }
 
 /* --------------------------------------------------- the second wallet's invitation ----- */

@@ -58,7 +58,7 @@ const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onope
 
 function make(env: Record<string, string> = {}, market: { rows?: unknown[]; marks?: unknown[] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'vd-algo-'));
-  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', ...env });
+  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', ...env });
   const db = new ExecutorDb(':memory:');
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(market.rows, market.marks), factory: noWs, log: silent });
   return { cfg, db, svc, cleanup: async () => { await svc.stop(); db.close(); rmSync(dir, { recursive: true, force: true }); } };
@@ -200,24 +200,57 @@ test('hedge: two wallets each start their own leg of a pair; a wallet cannot pai
   const HEDGE = { kind: 'hedge', symbol: 'BTC-USD', shape: 'pair', pairId: 'pair-exec-0001', sizeUsd: 1_000, minLiqPct: 3, growLiqPct: 6, sliceUsd: 200, maxSlipBps: 20, marginUsd: 200, leverage: 40, paper: true };
   assert.equal(await code(svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: { ...HEDGE, side: 'buy', role: 'main', partner: a.address }, seed: 1 }), ctx)), '400:partner');
   const main = await svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: { ...HEDGE, side: 'buy', role: 'main', partner: b.address }, seed: 1 }), ctx);
-  const leg = await svc.algoStart(b.sign(svc.executorId, 'algo-start', { spec: { ...HEDGE, side: 'sell', role: 'partner', partner: a.address }, seed: 2 }), ctx);
+  // The second wallet finds its leg waiting on the executor (any browser, any device): the main's spec, mirrored.
+  const inv = svc.hedgeInvites(b.address);
+  assert.equal(inv.length, 1);
+  assert.equal(inv[0]!.main, a.address);
+  assert.equal(inv[0]!.spec.side, 'sell');
+  assert.equal(inv[0]!.spec.role, 'partner');
+  assert.equal(inv[0]!.spec.partner, a.address);
+  assert.deepEqual(svc.hedgeInvites(a.address), [], 'the main is invited to nothing');
+  const leg = await svc.algoStart(b.sign(svc.executorId, 'algo-start', { spec: inv[0]!.spec, seed: 2 }), ctx);
+  assert.deepEqual(svc.hedgeInvites(b.address), [], 'answered: no longer waiting');
   assert.equal(main.algo.spec.kind, 'hedge');
   assert.equal(leg.algo.owner, b.address);
   assert.ok(main.bot?.hedge, 'the view carries the pair');
-  // A real two-wallet pair waits for the terms (owner 2026-11-14): refused, whatever else the wallet may do.
-  const real = { ...HEDGE, pairId: 'pair-exec-0002', side: 'buy', role: 'main', partner: b.address, maxLossUsd: 50, paper: false };
-  assert.equal(await code(svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: real, seed: 3 }), ctx)), '403:hedge-pair');
   await cleanup();
-  // Switched on (EXECUTOR_HEDGE_PAIRS=1): a real leg is then refused off the beta list like every real bot.
-  const on = make({ EXECUTOR_HEDGE_PAIRS: '1' });
-  on.svc.acceptTerms(a.sign(on.svc.executorId, 'accept-terms', TERMS), ctx);
-  assert.equal(await code(on.svc.algoStart(a.sign(on.svc.executorId, 'algo-start', { spec: real, seed: 3 }), ctx)), '403:beta');
-  await on.cleanup();
-  // The live test's own wallet (EXECUTOR_LIVE_ALGOS_WALLETS) is not held by the pair switch.
-  const tester = make({ EXECUTOR_LIVE_ALGOS_WALLETS: a.address });
+});
+
+test('hedge is early access (owner 2026-11-15): a real hedge needs the beta list itself - a pair one of its two wallets - even with bots open for all', async () => {
+  const URL = { EXECUTOR_BUILDER_URL: 'http://127.0.0.1:9/api/vs/builder/volume', EXECUTOR_BUILDER_TOKEN: 't' };
+  const a = new Wallet();
+  const b = new Wallet();
+  const ctx = { viewerCountry: 'SG', channel: 'main' as const };
+  const HEDGE = { kind: 'hedge', symbol: 'BTC-USD', sizeUsd: 1_000, minLiqPct: 3, growLiqPct: 6, sliceUsd: 200, maxSlipBps: 20, marginUsd: 200, leverage: 40, maxLossUsd: 50, paper: false };
+  const pair = (pairId: string) => ({ ...HEDGE, shape: 'pair', pairId, side: 'buy', role: 'main', partner: b.address });
+  const leg2 = (pairId: string) => ({ ...HEDGE, shape: 'pair', pairId, side: 'sell', role: 'partner', partner: a.address });
+  const spot = { ...HEDGE, shape: 'spot', side: 'sell', pairId: null, partner: null };
+  BETA = [];
+  BOTS_OPEN = true;
+  const { svc, cleanup } = make(URL);
+  for (const w of [a, b]) svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+  // Bots are open for all, but neither wallet is listed: no real hedge, of either shape.
+  assert.equal(await code(svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: pair('pair-beta-0001'), seed: 1 }), ctx)), '403:hedge-beta');
+  assert.equal(await code(svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: spot, seed: 2 }), ctx)), '403:hedge-beta');
+  await cleanup();
+  // Only the second wallet is listed: both legs of the pair pass the gate (they stop at the key not registered yet).
+  BETA = [b.address];
+  BOTS_OPEN = false;
+  const two = make(URL);
+  for (const w of [a, b]) two.svc.acceptTerms(w.sign(two.svc.executorId, 'accept-terms', TERMS), ctx);
+  assert.equal(await code(two.svc.algoStart(a.sign(two.svc.executorId, 'algo-start', { spec: pair('pair-beta-0002'), seed: 3 }), ctx)), '412:key');
+  assert.equal(await code(two.svc.algoStart(b.sign(two.svc.executorId, 'algo-start', { spec: leg2('pair-beta-0002'), seed: 4 }), ctx)), '412:key');
+  // A spot hedge is one wallet: the unlisted one is refused, the listed one passes.
+  assert.equal(await code(two.svc.algoStart(a.sign(two.svc.executorId, 'algo-start', { spec: spot, seed: 5 }), ctx)), '403:hedge-beta');
+  assert.equal(await code(two.svc.algoStart(b.sign(two.svc.executorId, 'algo-start', { spec: spot, seed: 6 }), ctx)), '412:key');
+  await two.cleanup();
+  // The live test's own wallet needs no listing.
+  BETA = [];
+  const tester = make({ ...URL, EXECUTOR_LIVE_ALGOS_WALLETS: a.address });
   tester.svc.acceptTerms(a.sign(tester.svc.executorId, 'accept-terms', TERMS), ctx);
-  assert.notEqual(await code(tester.svc.algoStart(a.sign(tester.svc.executorId, 'algo-start', { spec: real, seed: 3 }), ctx)), '403:hedge-pair');
+  assert.notEqual(await code(tester.svc.algoStart(a.sign(tester.svc.executorId, 'algo-start', { spec: pair('pair-beta-0003'), seed: 7 }), ctx)), '403:hedge-beta');
   await tester.cleanup();
+  BOTS_OPEN = undefined;
 });
 
 test('bots: a running grid takes its take-profit and stop prices in place (2026-11-13), and a hedge its size and buffers', async () => {

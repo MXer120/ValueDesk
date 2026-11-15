@@ -67,7 +67,7 @@ test('a copied position liquidated by SoDEX: the copy\'s error notice ("closed o
   };
   await db.saveSubscription(sub);
   await db.saveState({ ...freshState(sub.id, 1000), leaderPos: { 'BTC-USD': 1 }, leaderEquity: 100_000, owned: { 'BTC-USD': { size: 0.01, entry: 80_000, openedAt: 1 } } });
-  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', EXECUTOR_KIND: 'hosted', EXECUTOR_BRAKE_FILE: 'none' });
+  const cfg = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', EXECUTOR_KIND: 'hosted', EXECUTOR_BRAKE_FILE: 'none' });
   const silent = { debug() {}, info() {}, warn() {}, error() {} };
   const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onopen: null, onmessage: null, onclose: null, onerror: null });
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: sodex(w), factory: noWs, log: silent });

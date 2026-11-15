@@ -17,7 +17,7 @@ import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
 import { cleanUsd, fleetSeries, fleetTotals, fleetWindow, foldRuns, realBots, type FleetSeries } from '../../bots/fleet';
 import { useStored } from '../../hooks';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { STRATEGIES, STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf, type Strategy } from '../../bots/presets';
+import { PRACTICE_BOTS, STRATEGIES, STRATEGY_INFO, botFeeWords, costPerMillion, draftFor, strategyOf, type Strategy } from '../../bots/presets';
 import { useBotLatency } from '../../bots/data';
 import { hostedExecutor } from '../../copy/executor';
 import { goBots, type BotsView } from '../../bots/routes';
@@ -249,13 +249,13 @@ function Setup({ ctx }: { ctx: BotsCtx }) {
     ? { line: 'Bots trade around the clock in your own SoDEX account, from the ValueDesk executor. Connect the wallet whose account they trade in.', act: <Button variant="primary" icon="wallet" onClick={() => void openConnectDialog()}>Connect wallet</Button> }
     : !ctx.supported
       ? { line: 'The ValueDesk executor does not run bots yet. They arrive with its next update.', act: null }
-      : { line: `Accept the terms to start a practice bot: it runs against the real book and sends nothing. Real orders add the ${botFeeWords(ctx.feeTenths)} fee and a trading key.`, act: <Button variant="primary" onClick={() => ctx.setup(true)}>Set up</Button> };
+      : { line: PRACTICE_BOTS ? `Accept the terms to start a practice bot: it runs against the real book and sends nothing. Real orders add the ${botFeeWords(ctx.feeTenths)} fee and a trading key.` : `Accept the terms, approve the ${botFeeWords(ctx.feeTenths)} fee and a trading key, then start a bot with real orders.`, act: <Button variant="primary" onClick={() => ctx.setup(PRACTICE_BOTS)}>Set up</Button> };
   return (
     <Shell className="bots-setupcard">
       <ShellHeader icon="bolt" title="Start here" subtitle={ctx.address ? 'Two short steps, one signature each' : 'No wallet connected'} />
       <Panel className="bots-setup">
         <p className="bots-setup__line">{body.line}</p>
-        {ctx.address && ctx.supported && <div className="bots-setup__steps"><SetupProgress live={ctx.live} mode="hosted" paper bots /></div>}
+        {ctx.address && ctx.supported && <div className="bots-setup__steps"><SetupProgress live={ctx.live} mode="hosted" paper={PRACTICE_BOTS} bots /></div>}
         {body.act}
       </Panel>
     </Shell>

@@ -24,7 +24,7 @@ import type { BuilderService } from '../builder/service.js';
 import { dayOf } from '../builder/counting.js';
 import { MICRO } from '../builder/tiers.js';
 import {
-  CREDIT_COVER_MIN, CREDIT_FEE, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIER_SHARES, TIERS, VIP_CREDIT_USD, WELCOME_CAP,
+  CREDIT_COVER_MIN, CREDIT_FEE, REFERRED_START_USD, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIER_SHARES, TIERS, VIP_CREDIT_USD, WELCOME_CAP,
   WELCOME_CAP_DAYS, WELCOME_FEE, WELCOME_USD, type InviteMe, type InviteReferral,
 } from './claim.js';
 import { sodexOwnerOf } from './sodex.js';
@@ -97,6 +97,8 @@ export class InviteService {
     for (const w of store.creditWallets()) if (store.stateOf(w)?.paying) this.paying.add(w);
     builder.setExtraPrograms((address, at) => this.programsFor(address, at));
     builder.setPerkBudget((address, at) => this.perkBudget(address, at));
+    // A wallet that joined through a referral starts at the fee tier of REFERRED_START_USD (owner 2026-11-15).
+    builder.setVolumeFloor?.((address) => (this.store.joinOf(address) ? REFERRED_START_USD : 0));
   }
 
   private now(): number {

@@ -80,7 +80,7 @@ test('brake file: missing or both off is off; anything else - a typo, garbage, "
 test('brake on the executor: new live copies, algos, resumes and size changes are refused; paper and stopping still go; info and health say so; the audit log has it', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'vd-brake-svc-'));
   const file = join(dir, 'brake.json');
-  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', EXECUTOR_LIVE_ALGOS: '1', EXECUTOR_BRAKE_FILE: file });
+  const cfg = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', EXECUTOR_LIVE_ALGOS: '1', EXECUTOR_BRAKE_FILE: file });
   const db = new ExecutorDb(':memory:');
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(), factory: noWs, log: silent });
   const w = new Wallet();
@@ -107,7 +107,7 @@ test('brake on the executor: new live copies, algos, resumes and size changes ar
 test('brake alerts: an operator brake is told on Telegram (on and off); a maintenance brake only in the audit log', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'vd-brake-tg-'));
   const file = join(dir, 'brake.json');
-  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', EXECUTOR_BRAKE_FILE: file });
+  const cfg = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', EXECUTOR_BRAKE_FILE: file });
   const db = new ExecutorDb(':memory:');
   const alerts = new Alerts({ sender: async () => true, label: 'test executor', dedupeMs: 0 });
   // Already on at start (ship.sh: the new process comes up under the brake): no alert for planned work.

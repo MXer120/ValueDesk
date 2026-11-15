@@ -251,8 +251,11 @@ test('an executor refusal reads as a sentence with the one thing to do', () => {
   assert.equal(refusalOf('bot-market', 'x').label, 'Stop the other bot');
   assert.equal(refusalOf('paper-only', 'x').label, 'Ask on Discord');
   assert.equal(refusalOf('beta', 'x').label, 'Ask on Discord');
-  assert.equal(refusalOf('live-cap', 'x').action, 'practice');
-  assert.equal(refusalOf('bot-capacity', 'x').action, 'practice');
+  // Practice bots are off (owner 2026-11-15): a full server offers no practice run.
+  assert.equal(refusalOf('live-cap', 'x').action, null);
+  assert.equal(refusalOf('bot-capacity', 'x').action, null);
+  assert.doesNotMatch(refusalOf('bot-capacity', 'x').text, /practice/i);
+  assert.match(refusalOf('practice-off', 'x').text, /Practice bots are off/);
   assert.equal(refusalOf('vip-moving', 'x').action, null);
   assert.equal(refusalOf('limit', 'x').action, 'stop-other');
   assert.equal(refusalOf('move', 'x').action, null);

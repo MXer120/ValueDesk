@@ -30,7 +30,7 @@ import { signInWords } from '../../bots/signIn';
 import { useConfirm } from '../Modal';
 import { useBots } from '../../bots/useBots';
 import { BOTS_ON, goBots, useBotsView, type BotsView } from '../../bots/routes';
-import { specOf, draftOfSpec, strategyOf } from '../../bots/presets';
+import { PRACTICE_BOTS, specOf, draftOfSpec, strategyOf } from '../../bots/presets';
 import { BotSetupSheet, botReady } from './BotSetupSheet';
 import { botName } from './botWords';
 import { BotsOverview } from './BotsOverview';
@@ -138,7 +138,7 @@ export function refusalOf(e: unknown, act: { setup: () => void; deposit: () => v
     case 'session': return n('session', said, { label: 'Sign in', run: act.signIn });
     case 'key': return n('key', 'Your trading key is missing or has expired, so real orders cannot be sent. Approve a new one in the bot setup.', { label: 'Open setup', run: act.setup });
     case 'account': return n('account', 'This wallet has no SoDEX account yet. Deposit first: the first deposit opens it.', { label: 'Deposit', run: act.deposit });
-    case 'beta': return n('beta', 'Bots with real orders are for wallets on the beta list for now. Practice bots work for everyone.', { label: 'Get access', run: act.beta });
+    case 'beta': return n('beta', 'Bots with real orders are for wallets on the beta list for now.', { label: 'Get access', run: act.beta });
     case 'limit': return n('limit', 'This wallet runs as many bots and algo orders as it may. Stop one to start another.');
     case 'margin': return n('margin', `${said} Lower its size or holding cap, stop another bot, or add funds.`, { label: 'Deposit', run: act.deposit });
     case 'margin-unknown': return n('margin-unknown', 'SoDEX did not tell your account balance just now, so the margin could not be checked. Try again in a moment.');
@@ -147,7 +147,8 @@ export function refusalOf(e: unknown, act: { setup: () => void; deposit: () => v
     case 'market-algo': return n('market-algo', `${said} Cancel it in Trade, or pick another market.`);
     case 'market-position': return n('market-position', `${said} Close it in Trade, or pick another market.`);
     case 'bot-capacity':
-    case 'live-cap': return n('bot-capacity', 'The servers run as many bots with real orders as they safely can right now. Try again later, or start it as practice.');
+    case 'live-cap': return n('bot-capacity', 'The servers run as many bots with real orders as they safely can right now. Try again later.');
+    case 'practice-off': return n('practice-off', 'Practice bots are off. Start it with real orders instead.');
     case 'vip-moving':
     case 'move': return n('vip-moving', 'Your bots are moving to the VIP servers. Try again in a minute, once the move is done.');
     case 'moved': return n('moved', /standard/i.test(said) ? 'Your bots moved back to the standard servers (VIP ended). Reload to manage them there.' : 'Your bots run on the VIP servers now. Reload to talk to them there.', { label: 'Reload', run: act.vip });
@@ -261,7 +262,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
     if (!outdated || !address) return;
     const k = `vd.bots.termsPopup:${address.toLowerCase()}:${activeCopyTerms().termsVersion}`;
     try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, '1'); } catch { /* private mode */ }
-    setSetup({ paper: true });
+    setSetup({ paper: PRACTICE_BOTS });
   }, [outdated, address]);
 
   // A refusal the executor gave a code (contract 2026-11-08): a sentence and a button above the page.
@@ -425,7 +426,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
       const start = v.algo.startedAt ?? v.algo.createdAt;
       const ranH = typeof was.endAt === 'number' && was.endAt > start ? Math.max(1, Math.round((was.endAt - start) / 3_600_000)) : null;
       const base = draftOfSpec(v.algo.spec);
-      const d = { ...base, paper: real ? false : v.algo.spec.paper, ...(base.runHours === null && ranH !== null ? { runHours: ranH, endAt: null, runHoursAt: null } : {}) };
+      const d = { ...base, paper: real || !PRACTICE_BOTS ? false : v.algo.spec.paper, ...(base.runHours === null && ranH !== null ? { runHours: ranH, endAt: null, runHoursAt: null } : {}) };
       const spec = { ...specOf(d, null), bot: true };
       try { sessionStorage.setItem(BOTS_PREFILL_KEY, JSON.stringify({ from: v.algo.id, at: Date.now(), spec })); } catch { /* private mode: New bot opens on the market and kind */ }
       goBots({ page: 'new', market: v.algo.spec.symbol, kind: strategyOf(v.algo.spec) ?? null });
@@ -547,7 +548,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
         <ErrorBoundary key={view.page} name="This page" bare>{settling && view.page !== 'explore' ? <BotsSettling /> : page}</ErrorBoundary>
       </div>
       {BOTS_ON && <ErrorBoundary name="VIP" bare><BotsVip ctx={c} stage /></ErrorBoundary>}
-      <BotSetupSheet open={!!setup} onClose={() => setSetup(null)} live={live} paper={setup?.paper ?? true} />
+      <BotSetupSheet open={!!setup} onClose={() => setSetup(null)} live={live} paper={setup?.paper ?? PRACTICE_BOTS} />
       {dialog}
     </div>
   );

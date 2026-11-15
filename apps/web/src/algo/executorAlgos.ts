@@ -181,6 +181,23 @@ export async function listBotsOn(mode: ExecutorMode, series: boolean): Promise<{
   return { algos: r.algos, noSeries: r.noSeries === true };
 }
 
+/** A pair waiting for this wallet's leg, as the executor keeps it (GET /algos/invites): the main's spec, mirrored. */
+export interface HedgeInviteRead { pairId: string; main: string; symbol: string; at: number; spec: Record<string, unknown> }
+
+/** The pairs waiting for this wallet's leg on the hosted executor; none when not signed in or an older executor. */
+export async function hedgeInvitesOn(mode: ExecutorMode): Promise<HedgeInviteRead[]> {
+  const owner = getLiveCopy().owner;
+  const client = clientFor(mode);
+  const token = owner && client ? client.token(owner) : null;
+  if (!client || !token) return [];
+  try {
+    const r = await call<{ invites?: HedgeInviteRead[] }>(client, 'GET', '/algos/invites', { token });
+    return Array.isArray(r.invites) ? r.invites : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function eventsOn(mode: ExecutorMode, id: string, limit = 200, o: { before?: number; after?: number } = {}): Promise<AlgoEvent[]> {
   const { client, token } = readToken(mode);
   const q = `limit=${limit}${o.after !== undefined ? `&after=${o.after}` : o.before !== undefined ? `&before=${o.before}` : ''}`;

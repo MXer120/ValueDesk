@@ -75,7 +75,7 @@ const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onope
 
 function make(env: Record<string, string> = {}, fake: Fake = { keys: {}, builders: 'ok', writes: [] }, path = ':memory:', dirIn?: string) {
   const dir = dirIn ?? mkdtempSync(join(tmpdir(), 'vd-algo2-'));
-  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', ...env });
+  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_PRACTICE_BOTS: '1', EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', ...env });
   const db = new ExecutorDb(path === ':memory:' ? path : join(dir, path));
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(fake), factory: noWs, log: silent });
   return {
