@@ -75,3 +75,17 @@ test('safety is a share of the way to the liquidation, so a high leverage never 
   assert.equal(tenX.minLiqPct, Math.round(tenX.startPct * 0.4 * 100) / 100);
   assert.ok(buffersFor(10, 40, 'early').minLiqPct > buffersFor(10, 40, 'late').minLiqPct, 'early shrinks sooner');
 });
+
+test('a leg low on margin: warned with the amount to move from the richer wallet, urgent near the shrink buffer', async () => {
+  const { marginWarning } = await import('./hedge.ts');
+  const A = '0xaaa', B = '0xbbb';
+  // Balanced: nothing.
+  assert.equal(marginWarning([{ owner: A, equity: 100, liqDistance: 0.02 }, { owner: B, equity: 100, liqDistance: 0.02 }], 0.5, 1.1), null);
+  // B lost: its liquidation is inside the grow-back buffer, A has $60 more.
+  const w = marginWarning([{ owner: A, equity: 130, liqDistance: 0.03 }, { owner: B, equity: 70, liqDistance: 0.009 }], 0.5, 1.1);
+  assert.deepEqual(w, { low: B, rich: A, moveUsd: 30, urgent: false });
+  assert.equal(marginWarning([{ owner: A, equity: 130, liqDistance: 0.03 }, { owner: B, equity: 70, liqDistance: 0.006 }], 0.5, 1.1)?.urgent, true);
+  // Unknown equity or one leg: nothing.
+  assert.equal(marginWarning([{ owner: A, equity: null, liqDistance: 0.03 }, { owner: B, equity: 70, liqDistance: 0.006 }], 0.5, 1.1), null);
+  assert.equal(marginWarning([{ owner: A, equity: 130, liqDistance: 0.03 }], 0.5, 1.1), null);
+});

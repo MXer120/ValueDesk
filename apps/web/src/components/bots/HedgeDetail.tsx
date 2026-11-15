@@ -7,7 +7,9 @@ import type { AlgoView, HedgeView } from '@copy-engine';
 import { DASH, fmtUsd } from '../../format';
 import { notify } from '../../toast';
 import type { BotsCtx } from './BotsPage';
-import { NumberField, Panel, Segmented, Shell, ShellHeader, StatusPill, Button } from './kit/kit';
+import { NumberField, Panel, Segmented, Shell, ShellHeader, StatusPill, Button, Icon } from './kit/kit';
+import { marginWarning } from '../../bots/hedge';
+import { requestDeposit, requestWithdraw } from '../account/actions';
 import './hedge.css';
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -16,12 +18,27 @@ const pct = (x: number | null | undefined) => (x === null || x === undefined || 
 export function HedgeLegs({ v, me }: { v: AlgoView; me: string | null }) {
   const h: HedgeView | undefined = v.bot?.hedge;
   if (!h) return null;
-  const s = v.algo.spec as { minLiqPct?: number; partner?: string | null };
+  const s = v.algo.spec as { minLiqPct?: number; growLiqPct?: number; partner?: string | null };
   const buffer = (s.minLiqPct ?? 0) / 100;
+  const warn = h.shape === 'pair' && h.paired ? marginWarning(h.legs, s.minLiqPct ?? 0, s.growLiqPct ?? 0) : null;
+  const mine = (a: string) => !!me && a === me.toLowerCase();
+  const who = (a: string) => (mine(a) ? 'this wallet' : short(a));
+  const copy = (a: string) => { void navigator.clipboard?.writeText(a).then(() => notify('ok', `Copied ${short(a)}.`), () => notify('error', 'Could not copy.')); };
   return (
     <Shell className="bots-sidecard is-plain">
       <ShellHeader icon="layers" title="Legs" subtitle={h.shape === 'pair' ? (h.paired ? 'Both wallets, as last read from SoDEX' : `Waiting for ${s.partner ? short(s.partner) : 'the second wallet'} to start its leg`) : 'The short and the coin that backs it'} />
       <Panel className="bots-sidepanel">
+        {warn && (
+          <div className={`hg-warn${warn.urgent ? ' is-urgent' : ''}`} role="alert">
+            <div className="hg-warn__h"><Icon name="warning" size={14} /><b>{who(warn.low) === 'this wallet' ? 'This wallet' : short(warn.low)} is low on margin</b><StatusPill size="sm" tone={warn.urgent ? 'negative' : 'warning'} dot>{warn.urgent ? 'Shrinking both legs' : 'Holding size back'}</StatusPill></div>
+            <p>Move about {fmtUsd(warn.moveUsd, 0)} USDC from {who(warn.rich)} to {who(warn.low)}: withdraw it from SoDEX in {who(warn.rich)}, send it to {short(warn.low)}, and deposit it there. SoDEX cannot move margin between two wallets, so the bot cannot do it for you.</p>
+            <div className="hg-warn__act">
+              {mine(warn.rich) && <Button variant="primary" size="sm" onClick={() => requestWithdraw({ from: 'perps', coin: 'USDC' })}>Withdraw</Button>}
+              {mine(warn.low) && <Button variant="primary" size="sm" onClick={() => requestDeposit()}>Deposit</Button>}
+              <Button variant="secondary" size="sm" onClick={() => copy(warn.low)}>Copy {short(warn.low)}</Button>
+            </div>
+          </div>
+        )}
         <div className="hg-legs">
           {h.legs.length === 0 && <p className="bots-fine">Read on its next step.</p>}
           {h.legs.map((l) => {

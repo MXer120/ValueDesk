@@ -191,6 +191,37 @@ export function hedgeNumbers(d: HedgeDraft, mark: number, maxLeverage: number, t
   return { maxLegUsd, legUsd, oiUsd: legUsd * 2, liqDistance: dist, trimMove, initialUsd: initial(legUsd), roundTripFeesUsd: fees(legUsd) };
 }
 
+/* --------------------------------------------------- a leg low on margin ----- */
+
+/** One leg as the bot page reads it (copy-engine HedgeLegView). */
+export interface LegRead { owner: string; equity: number | null; liqDistance: number | null }
+
+export interface MarginWarning {
+  /** The leg low on margin, and the one with margin to spare. */
+  low: string;
+  rich: string;
+  /** About how much to move from `rich` to `low` to even them out, USD. */
+  moveUsd: number;
+  /** Its liquidation is inside the shrink buffer's 1.5x: it is shrinking both legs now, or about to. */
+  urgent: boolean;
+}
+
+/**
+ * A pair's leg low on margin (owner 2026-11-15: "add a warning if 1 leg is low on margin that the user should
+ * transfer"). Every move makes one wallet richer and the other poorer, and SoDEX moves no margin between two wallets:
+ * the poorer one keeps both legs small. Warned once its liquidation is closer than the grow-back buffer (it holds the
+ * size back) and the other wallet has at least $1 more equity; the move evens the two out.
+ */
+export function marginWarning(legs: readonly LegRead[], minLiqPct: number, growLiqPct: number): MarginWarning | null {
+  if (legs.length !== 2) return null;
+  const [a, b] = legs as [LegRead, LegRead];
+  if (a.equity === null || b.equity === null) return null;
+  const [low, rich] = a.equity <= b.equity ? [a, b] : [b, a];
+  const gap = rich.equity! - low.equity!;
+  if (!(gap >= 1) || low.liqDistance === null || !(low.liqDistance < growLiqPct / 100)) return null;
+  return { low: low.owner, rich: rich.owner, moveUsd: Math.floor(gap / 2), urgent: low.liqDistance < (minLiqPct / 100) * 1.5 };
+}
+
 /* --------------------------------------------------- the second wallet's invitation ----- */
 
 /** A pair the main started in this browser, waiting for its second wallet to sign its leg. */

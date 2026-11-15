@@ -336,20 +336,6 @@ async function walletAccounts(provider: Eip1193Provider): Promise<string[]> {
 /** The accounts this site may use in the wallet, lower case (never opens the wallet). */
 export const walletAccountList = (provider: Eip1193Provider): Promise<string[]> => walletAccounts(provider);
 
-/**
- * Let the person share more accounts of the same wallet with the site (EIP-2255 wallet_requestPermissions), without
- * disconnecting the one in use; then the accounts it shares. A wallet without the method answers with what it has.
- */
-export async function shareMoreAccounts(provider: Eip1193Provider): Promise<{ accounts: string[]; asked: boolean; refused: boolean }> {
-  try {
-    await provider.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
-    return { accounts: await walletAccounts(provider), asked: true, refused: false };
-  } catch (e) {
-    // Refused by the person, or a wallet without the method (WalletConnect wallets, many mobile ones).
-    return { accounts: await walletAccounts(provider), asked: isUserRejection(e), refused: isUserRejection(e) };
-  }
-}
-
 async function otherActiveAccount(provider: Eip1193Provider, address: string, accounts?: string[]): Promise<string | null> {
   const list = accounts ?? (await walletAccounts(provider));
   if (!list.length || list.includes(address.toLowerCase())) return null;

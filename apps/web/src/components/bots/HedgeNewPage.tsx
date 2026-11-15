@@ -7,12 +7,14 @@
  * browser; when the second wallet is connected, the Bots page shows "Start leg 2" (HedgeInvites).
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { onWalletPrompting, shareMoreAccounts, walletAccountList, walletPrompting } from '../../wallet';
+import { onWalletPrompting, walletAccountList, walletPrompting, type WalletInfo } from '../../wallet';
+import { toQrDataUrl } from '../../walletconnect';
+import { accountFrom, browserWallets, canPairByQr, pairByQr } from '../../bots/partnerWallet';
 import { useWalletSnapshot } from '../account/useWallet';
 import { Row as SettingRow } from './BotSettings';
 import { DASH, fmtUsd } from '../../format';
 import { useSymbols } from '../../hooks';
-import { useConfirm } from '../Modal';
+import { Modal, useConfirm } from '../Modal';
 import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets } from '../../bots/data';
 import { goBots, type BotsView } from '../../bots/routes';
@@ -54,29 +56,37 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
   const set = (p: Partial<HedgeDraft>) => setD((x) => ({ ...x, ...p }));
   const [at, setAt] = useState(0);
   const [adv, setAdv] = useState(false);
-  const [addNote, setAddNote] = useState<string | null>(null);
-  // The second wallet from the same wallet app: the accounts it shares with the site, never disconnecting this one.
+  const [pickNote, setPickNote] = useState<string | null>(null);
+  // The second wallet without touching this one: accounts the wallet already shares, a phone wallet by QR, or another
+  // extension in this browser (bots/partnerWallet.ts).
   const { provider } = useWalletSnapshot();
   const [accounts, setAccounts] = useState<string[]>([]);
-  const [adding, setAdding] = useState(false);
   useEffect(() => { if (provider && at === 3) void walletAccountList(provider).then(setAccounts); }, [provider, at]);
   const me = ctx.address?.toLowerCase() ?? null;
   const others = accounts.filter((a) => a !== me);
-  const addAccount = async () => {
-    if (!provider) return;
-    setAdding(true);
+  const [qr, setQr] = useState<{ img: string | null; uri: string | null; cancel: (() => void) | null } | null>(null);
+  const [exts, setExts] = useState<WalletInfo[] | null>(null);
+  const take = (a: string | null, from: string) => {
+    if (!a) { setPickNote(null); return; }
+    if (a === me) { setPickNote(`${from} gave ${short(a)}, the wallet this page uses. Pick a different account there and try again.`); return; }
+    setPickNote(null);
+    set({ partner: a });
+  };
+  const scan = async () => {
+    setPickNote(null);
+    setQr({ img: null, uri: null, cancel: null });
     try {
-      setAddNote(null);
-      const r = await shareMoreAccounts(provider);
-      setAccounts(r.accounts);
-      const fresh = r.accounts.find((a) => a !== me && a !== d.partner.trim().toLowerCase()) ?? r.accounts.find((a) => a !== me);
-      if (fresh) set({ partner: fresh });
-      else if (r.refused) setAddNote(null);
-      else setAddNote(r.asked ? 'Your wallet shared no other account. Tick a second account in its list, or paste the address below.' : 'This wallet cannot share a second account with a site. Copy the address of your second account from the wallet app and paste it below.');
-    } finally {
-      setAdding(false);
+      const pairing = await pairByQr((uri) => { setQr((q) => (q ? { ...q, uri } : q)); void toQrDataUrl(uri).then((img) => setQr((q) => (q ? { ...q, img } : q))); });
+      setQr((q) => (q ? { ...q, cancel: pairing.cancel } : q));
+      const a = await pairing.address;
+      setQr(null);
+      take(a, 'Your phone wallet');
+    } catch {
+      setQr(null);
+      setPickNote('The QR could not start. Paste the address instead.');
     }
   };
+  const fromExt = async (w: WalletInfo) => { take(await accountFrom(w), w.name); };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { byName } = useSymbols('perps');
@@ -148,6 +158,15 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
   return (
     <>
       {dialog}
+      {qr && (
+        <Modal open size="sm" title="Scan with your second wallet" className="dlg" onClose={() => { qr.cancel?.(); setQr(null); }}>
+          <div className="hg-qr">
+            {qr.img ? <img src={qr.img} alt="WalletConnect QR code" width={240} height={240} /> : <Skeleton className="hg-qr__skel" />}
+            <p>Open the wallet app that holds the second account, scan, and approve. Only its address is read: nothing is signed, and this wallet stays connected.</p>
+            {qr.uri && <Button variant="quiet" size="sm" onClick={() => { void navigator.clipboard?.writeText(qr.uri!).then(() => notify('ok', 'Link copied.')); }}>Copy link</Button>}
+          </div>
+        </Modal>
+      )}
       <BotsHead view={view} title="New hedge" sub="Open interest held market-neutral: a long and a short of the same size." lead={<Button variant="quiet" icon="arrowLeft" onClick={() => goBots({ page: 'new', market: d.symbol, kind: null })}>Bot types</Button>} />
       <nav className="bots-wsteps" aria-label="Steps">
         <ol>
@@ -276,14 +295,26 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
                       </button>
                     );
                   })}
-                  {provider && (
-                    <button type="button" className="hg-wcard is-add" onClick={() => void addAccount()} disabled={adding}>
-                      <Icon name="plus" size={14} />
-                      <span className="hg-wcard__t"><b>{adding ? 'Check your wallet…' : 'Choose another account'}</b><small>Your wallet asks which accounts ValueDesk may see.</small></span>
-                    </button>
+                  {isAddress(d.partner) && !others.includes(d.partner.trim().toLowerCase()) && (
+                    <div className="hg-wcard is-on">
+                      <StatusPill size="sm" tone={d.side === 'buy' ? 'negative' : 'positive'}>{d.side === 'buy' ? 'Short' : 'Long'}</StatusPill>
+                      <span className="hg-wcard__t"><b>{short(d.partner.trim())}</b><small>Leg 2 · second wallet</small></span>
+                    </div>
                   )}
                 </div>
-                {addNote && <p className="hg-note" role="status"><Icon name="warning" size={13} />{addNote}</p>}
+                <div className="hg-pick">
+                  <span className="hg-paste__k">{isAddress(d.partner) ? 'Change the second wallet' : 'Add the second wallet'}</span>
+                  <div className="hg-pick__row">
+                    {canPairByQr() && <Button variant="secondary" size="md" icon="wallet" onClick={() => void scan()}>Scan with a phone wallet</Button>}
+                    <Button variant="secondary" size="md" icon="layers" onClick={() => setExts(browserWallets())}>Another wallet in this browser</Button>
+                  </div>
+                  {exts !== null && (
+                    exts.length
+                      ? <div className="hg-exts">{exts.map((w) => <button key={w.uuid} type="button" className="hg-ext" onClick={() => void fromExt(w)}><img src={w.icon} alt="" width={20} height={20} /><span>{w.name}</span></button>)}</div>
+                      : <p className="bots-fine">No other wallet extension found in this browser.</p>
+                  )}
+                </div>
+                {pickNote && <p className="hg-note" role="status"><Icon name="warning" size={13} />{pickNote}</p>}
                 <div className="hg-paste">
                   <span className="hg-paste__k">Or paste its address</span>
                   <TextInput aria-label="Second wallet address" placeholder="0x…" value={d.partner} onChange={(e) => set({ partner: e.target.value })} spellCheck={false} className="hg-addr" />
@@ -296,7 +327,7 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
                   <b>How the two legs start</b>
                   <ol>
                     <li><span>1</span><div><b>Start leg 1 here</b><small>{ctx.address ? short(ctx.address) : 'This wallet'} signs. It holds nothing yet: it waits for leg 2.</small></div></li>
-                    <li><span>2</span><div><b>Switch account in your wallet app</b><small>To {isAddress(d.partner) ? short(d.partner.trim()) : 'the second wallet'}, with this page open. ValueDesk follows the switch: nothing to disconnect.</small></div></li>
+                    <li><span>2</span><div><b>Open this page as the second wallet</b><small>In this browser: switch your wallet app to {isAddress(d.partner) ? short(d.partner.trim()) : 'it'} (ValueDesk follows the switch), or Connect wallet with the phone wallet that holds it.</small></div></li>
                     <li><span>3</span><div><b>Start leg 2 on Bots</b><small>A card asks it to sign (the first time also the terms and its trading key). Both legs then open together.</small></div></li>
                   </ol>
                 </div>
