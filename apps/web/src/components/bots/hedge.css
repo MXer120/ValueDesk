@@ -59,3 +59,12 @@ button.hg-wcard:hover:not(:disabled) { background: rgb(var(--ink) / 0.07); }
 .hg-leg2 { display: flex; flex-direction: column; gap: 12px; }
 .hg-leg2 .hg-paste { padding: 0; }
 .hg-leg2 .hg-note { margin: 0; align-items: center; }
+.hg-paste__k { font-size: var(--fs-xs); color: var(--muted); }
+.hg-how { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 12px; background: rgb(var(--ink) / 0.03); }
+.hg-how > b { font-size: var(--fs-sm, 13px); font-weight: 500; }
+.hg-how ol { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.hg-how li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; }
+.hg-how li > span { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--pos) 18%, transparent); color: var(--pos); font-family: var(--font-num); font-size: 11px; font-weight: 600; }
+.hg-how li div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hg-how li b { font-size: var(--fs-xs); font-weight: 500; color: var(--text); }
+.hg-how li small { color: var(--muted); font-size: var(--fs-xs); line-height: 1.45; }

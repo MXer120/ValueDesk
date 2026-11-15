@@ -58,3 +58,20 @@ test('a new second wallet without an inviter takes the code before its leg; one 
   assert.equal(mustTakeCode('other', false), false);
   assert.equal(mustTakeCode('unknown', false), false);
 });
+
+test('safety is a share of the way to the liquidation, so a high leverage never trims at once (owner 2026-11-15)', async () => {
+  const { buffersFor, startDistance } = await import('./hedge.ts');
+  // BTC 40x: a leg starts about 1.23% from its liquidation.
+  assert.ok(Math.abs(startDistance(40, 40) - 0.0125 / 1.0125) < 1e-9);
+  for (const lev of [2, 5, 10, 20, 40]) {
+    for (const s of ['early', 'balanced', 'late'] as const) {
+      const b = buffersFor(lev, 40, s);
+      assert.ok(b.minLiqPct >= 0.5 && b.growLiqPct > b.minLiqPct, `${lev}x ${s}: ${JSON.stringify(b)}`);
+      // Never trims at the start: the buffer is inside the distance a leg starts with (or the engine's floor).
+      assert.ok(b.minLiqPct < b.startPct || b.minLiqPct === 0.5, `${lev}x ${s}: trims at once`);
+    }
+  }
+  const tenX = buffersFor(10, 40, 'balanced');
+  assert.equal(tenX.minLiqPct, Math.round(tenX.startPct * 0.4 * 100) / 100);
+  assert.ok(buffersFor(10, 40, 'early').minLiqPct > buffersFor(10, 40, 'late').minLiqPct, 'early shrinks sooner');
+});

@@ -340,13 +340,14 @@ export const walletAccountList = (provider: Eip1193Provider): Promise<string[]> 
  * Let the person share more accounts of the same wallet with the site (EIP-2255 wallet_requestPermissions), without
  * disconnecting the one in use; then the accounts it shares. A wallet without the method answers with what it has.
  */
-export async function shareMoreAccounts(provider: Eip1193Provider): Promise<string[]> {
+export async function shareMoreAccounts(provider: Eip1193Provider): Promise<{ accounts: string[]; asked: boolean; refused: boolean }> {
   try {
     await provider.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
-  } catch {
-    /* refused, or not supported: what it already shares */
+    return { accounts: await walletAccounts(provider), asked: true, refused: false };
+  } catch (e) {
+    // Refused by the person, or a wallet without the method (WalletConnect wallets, many mobile ones).
+    return { accounts: await walletAccounts(provider), asked: isUserRejection(e), refused: isUserRejection(e) };
   }
-  return walletAccounts(provider);
 }
 
 async function otherActiveAccount(provider: Eip1193Provider, address: string, accounts?: string[]): Promise<string | null> {
