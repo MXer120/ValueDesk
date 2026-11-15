@@ -8,7 +8,7 @@
  * Segmented, the bots table and pager) like the rest of the app's pages.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { CREDIT_FEE, TIER_SHARES, VIP_CREDIT_USD, WELCOME_CAP, WELCOME_CAP_DAYS, WELCOME_USD, type InviteMe, type InviteReferral } from '@sign/invites/claim';
+import { CREDIT_FEE, REFERRED_START_USD, TIER_SHARES, VIP_CREDIT_USD, WELCOME_CAP, WELCOME_CAP_DAYS, WELCOME_USD, type InviteMe, type InviteReferral } from '@sign/invites/claim';
 import { DASH, fmtUsd } from '../../format';
 import { track } from '../../analytics/usage';
 import { notify } from '../../toast';
@@ -22,7 +22,7 @@ import './referrals.css';
 
 const PAGE = 10;
 const SEEN = (a: string) => `vd.credits.seen.${a.toLowerCase()}`;
-const pct = (x: number) => `${Math.round(x * 100)}%`;
+const pct = (x: number) => `${Number((x * 100).toFixed(1))}%`;
 const usd2 = (n: number) => `${n < 0 ? '−' : ''}$${Math.abs(n).toFixed(2)}`;
 /** +$396.32 for something earned, $0.00 for nothing (no plus on zero). */
 const signedUsd = (n: number) => (n > 0 ? `+${usd2(n)}` : usd2(n));
@@ -323,7 +323,7 @@ function HowItWorks({ onClose }: { onClose: () => void }) {
   const usd = (n: number) => `$${n.toLocaleString('en-US')}`;
   const steps: Array<{ t: string; l: string; vip?: boolean }> = [
     { t: 'Share your link', l: 'It is your SoDEX referral code: one link for ValueDesk and SoDEX.' },
-    { t: 'They join', l: `One free signature. No ValueDesk fee on their first ${usd(WELCOME_USD)} (${WELCOME_CAP} welcomes per link in ${WELCOME_CAP_DAYS} days).` },
+    { t: 'They join', l: `One free signature. No ValueDesk fee on their first ${usd(WELCOME_USD)} (${WELCOME_CAP} welcomes per link in ${WELCOME_CAP_DAYS} days), and they start at the ${usd(REFERRED_START_USD)} fee tier.` },
     { t: 'You earn, three tiers deep', l: `${TIER_SHARES.map(pct).join(' / ')} of the ValueDesk fees paid by your referrals, theirs, and the next. For as long as they trade.` },
     { t: 'Credits pay your fees', l: `While you have credits your ValueDesk fee is ${(CREDIT_FEE / 10).toFixed(1)} bp and credits pay the rest. Never cash, never moved.` },
     { t: 'VIP credit', l: `Every VIP wallet gets ${usd(VIP_CREDIT_USD)} of fee credit, once.`, vip: true },
@@ -335,7 +335,6 @@ function HowItWorks({ onClose }: { onClose: () => void }) {
           <li key={s.t} className={s.vip ? 'is-vip' : undefined}><i aria-hidden="true">{i + 1}</i><div><b className={s.vip ? 'vip-text' : undefined}>{s.t}</b><small>{s.l}</small></div></li>
         ))}
       </ol>
-      <p className="rf-how__foot">These are the current values; they may change for future fees. A wallet joins once, before its first trade on ValueDesk. No one joins their own link, and a wallet with referrals joins no one.</p>
     </Modal>
   );
 }

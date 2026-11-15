@@ -18,11 +18,12 @@ import { testTiers } from '../src/builder/config.js';
 import { BuilderService } from '../src/builder/service.js';
 import { writeNewKeyFile } from '../src/builder/terms.js';
 import { dayOf } from '../src/builder/counting.js';
-import { VIP_PROGRAM_FEE } from '../src/builder/programs.js';
+import { VIP_PROGRAM_FEE, botLadderFee } from '../src/builder/programs.js';
+import { copyLadderFee } from '../src/builder/tiers.js';
 import type { FeeProgram } from '../src/admin/store.js';
 import { builderRoutes } from '../src/routes/builder.js';
 import { inviteRoutes } from '../src/routes/invites.js';
-import { CREDIT_FEE, INVITE_STATEMENT, PERK_HORIZON_MS, VIP_CREDIT_USD, WELCOME_FEE, WELCOME_USD } from '../src/invites/claim.js';
+import { CREDIT_FEE, INVITE_STATEMENT, REFERRED_START_USD, PERK_HORIZON_MS, VIP_CREDIT_USD, WELCOME_FEE, WELCOME_USD } from '../src/invites/claim.js';
 import { inviteJoinDigest } from '../src/invites/check.js';
 import { InviteService } from '../src/invites/service.js';
 import { InviteStore } from '../src/invites/store.js';
@@ -102,16 +103,22 @@ test('the welcome: a joined wallet signs 0 on site trading in short slices, the 
   assert.equal((await volume(fresh.address)).fees.bots.budget.capUsd, 40_000);
   // $40k more: used up - the signed fee and the executor's are the tier's again.
   add.run(BUILDER, fresh.address, 'spot', dayOf(clock.now()), 40_000 * 1e6);
+  // Back on a tier - the one of REFERRED_START_USD, not the first (owner 2026-11-15: referred traders start at tier 1).
   const back = terms(fresh.address);
-  assert.deepEqual([back.fee.perps, back.fee.spot], [before.fee.perps, before.fee.spot]);
+  assert.deepEqual([before.fee.perps, before.fee.spot], [20, 20], 'not joined: the first tier');
+  assert.deepEqual([back.fee.perps, back.fee.spot], [15, 20], 'joined: the tier of $100k');
   const after100k = await volume(fresh.address);
   assert.deepEqual(after100k.fees, { copy: null, bots: null });
+  assert.ok(after100k.usd >= REFERRED_START_USD, `the executor's ladder reads at least $100k: ${after100k.usd}`);
+  assert.equal(svc.standardFee(fresh.address, 'copy'), copyLadderFee(REFERRED_START_USD));
+  assert.equal(svc.standardFee(fresh.address, 'bots'), botLadderFee(REFERRED_START_USD));
+  assert.equal(svc.standardFee(inviter.address, 'bots'), botLadderFee(0), 'a wallet that joined no one: its own volume');
   const me = (await app.inject({ method: 'GET', url: `/api/vs/invites/me?address=${fresh.address}` })).json();
   assert.deepEqual(me.welcome, { active: false, usedUsd: WELCOME_USD, leftUsd: 0, limitUsd: WELCOME_USD });
   assert.equal(me.joined.code, 'INVITER1');
 });
 
-test('VIP: every VIP wallet gets $10 of credit once - sweep, page, restart - and the credit lowers its ValueDesk fee', async () => {
+test('VIP: every VIP wallet gets $5 of credit once - sweep, page, restart - and the credit lowers its ValueDesk fee', async () => {
   const vip = wallet().address;
   const plain = wallet().address;
   const dbFile = join(tempDir('vs-invvip-'), 'invites.db');

@@ -84,7 +84,7 @@
 .rf-type { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-num); font-size: 12px; color: var(--tf-muted); }
 
 /* how it works */
-.rf-how { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.rf-how { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .rf-how li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 10px 12px; border-radius: 12px; background: rgb(var(--ink) / 0.04); }
 .rf-how i { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: color-mix(in srgb, var(--pos) 20%, transparent); color: var(--pos); font-style: normal; font-family: var(--font-num); font-size: 12px; font-weight: 600; }
 .rf-how div { display: flex; flex-direction: column; gap: 2px; }
@@ -106,7 +106,6 @@
   .rf-side { display: flex; }
 }
 /* the dialog sits outside the page (a portal): plain tokens there */
-.rf-how__foot { margin: 0; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 17px; }
 
 /* Stats & referrals: the tiles, then the table or a state under them, one gap apart (owner 2026-11-14: the state sat
    flush against the tiles). */
