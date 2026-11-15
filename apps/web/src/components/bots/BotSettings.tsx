@@ -28,7 +28,7 @@ const tgtKey = (v: number | null): string => (v === null ? 'none' : TARGETS.incl
 export type Sec = 'size' | 'quote' | 'guard';
 export const SEC_NAMES: Record<Sec, string> = { size: 'Size & risk', quote: 'Quoting', guard: 'Safeguards' };
 
-function Row({ label, hint, children, wide, tag }: { label: ReactNode; hint?: ReactNode; children: ReactNode; wide?: boolean; tag?: ReactNode }) {
+export function Row({ label, hint, children, wide, tag }: { label: ReactNode; hint?: ReactNode; children: ReactNode; wide?: boolean; tag?: ReactNode }) {
   return (
     <div className={`bots-f${wide ? ' is-wide' : ''}`}>
       <div className="bots-f__l"><span>{label}</span>{tag}</div>

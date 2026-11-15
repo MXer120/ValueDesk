@@ -7,7 +7,9 @@
  * browser; when the second wallet is connected, the Bots page shows "Start leg 2" (HedgeInvites).
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { onWalletPrompting, walletPrompting } from '../../wallet';
+import { onWalletPrompting, shareMoreAccounts, walletAccountList, walletPrompting } from '../../wallet';
+import { useWalletSnapshot } from '../account/useWallet';
+import { Row as SettingRow } from './BotSettings';
 import { DASH, fmtUsd } from '../../format';
 import { useSymbols } from '../../hooks';
 import { useConfirm } from '../Modal';
@@ -23,7 +25,7 @@ import { notify } from '../../toast';
 import { StrategyTile } from './BotIcon';
 import { BotsHead, type BotsCtx } from './BotsPage';
 import { useFuturesCoin } from './hedgeData';
-import { Button, Icon, NumberField, Panel, SearchField, Segmented, Shell, ShellHeader, Skeleton, Slider, StatusPill, Switch, TextInput } from './kit/kit';
+import { Button, Icon, NumberField, Panel, SearchField, Segmented, Shell, ShellHeader, Skeleton, Slider, StatusPill, TextInput } from './kit/kit';
 import './hedge.css';
 
 const STEPS = [
@@ -34,7 +36,10 @@ const STEPS = [
   { title: 'Review', hint: 'Name and start' },
 ] as const;
 
-const BUFFERS = [2, 3, 5, 8];
+/** Safety: how close a liquidation may come before both legs shrink; they grow back at twice that. */
+const SAFETY = [{ id: 'tight', label: 'Tight', min: 3 }, { id: 'balanced', label: 'Balanced', min: 5 }, { id: 'safe', label: 'Safe', min: 8 }] as const;
+const safetyKey = (min: number): string => SAFETY.find((o) => o.min === min)?.id ?? 'own';
+const RUN_FOR: readonly number[] = [24, 168];
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const pct = (x: number | null, d = 1) => (x === null || !Number.isFinite(x) ? DASH : `${(x * 100).toFixed(d)}%`);
 
@@ -42,6 +47,28 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
   const [d, setD] = useState<HedgeDraft>(() => ({ ...HEDGE_DEFAULT, symbol: view.market ?? 'BTC-USD' }));
   const set = (p: Partial<HedgeDraft>) => setD((x) => ({ ...x, ...p }));
   const [at, setAt] = useState(0);
+  const [adv, setAdv] = useState(false);
+  const [paste, setPaste] = useState(false);
+  // The second wallet from the same wallet app: the accounts it shares with the site, never disconnecting this one.
+  const { provider } = useWalletSnapshot();
+  const [accounts, setAccounts] = useState<string[]>([]);
+  const [adding, setAdding] = useState(false);
+  useEffect(() => { if (provider && at === 3) void walletAccountList(provider).then(setAccounts); }, [provider, at]);
+  const me = ctx.address?.toLowerCase() ?? null;
+  const others = accounts.filter((a) => a !== me);
+  const addAccount = async () => {
+    if (!provider) return;
+    setAdding(true);
+    try {
+      const list = await shareMoreAccounts(provider);
+      setAccounts(list);
+      const fresh = list.find((a) => a !== me);
+      if (fresh && !isAddress(d.partner)) set({ partner: fresh });
+      if (!fresh) setPaste(true);
+    } finally {
+      setAdding(false);
+    }
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { byName } = useSymbols('perps');
@@ -82,7 +109,7 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
     const body = d.shape === 'pair'
       ? `${d.side === 'buy' ? 'Long' : 'Short'} up to ${fmtUsd(d.sizeUsd, 0)} of ${d.symbol} here, and the other side in ${short(d.partner.trim())} once that wallet starts its leg. Both legs shrink when a liquidation comes within ${d.minLiqPct}%.`
       : `Short ${d.symbol} as large as the ${sym?.baseCoin ?? 'coin'} in your futures balance, up to ${fmtUsd(d.sizeUsd, 0)}.`;
-    const ok = await confirm({ title: `Start this hedge?`, body: `${body} ${paper ? 'Practice: no orders are sent.' : 'Real orders: every leg takes (IOC) and pays the taker fee.'}`, confirmLabel: paper ? 'Start practice hedge' : 'Start hedge' });
+    const ok = await confirm({ title: `Start this hedge?`, body: `${body} ${paper ? 'Practice: no orders are sent.' : 'Real orders at the taker fee.'}`, confirmLabel: paper ? 'Start practice hedge' : 'Start hedge' });
     if (!ok) return;
     setBusy(true);
     setError(null);
@@ -144,7 +171,6 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
                   );
                 })}
               </div>
-              <p className="hg-note"><Icon name="warning" size={13} />Both legs only take (IOC), so they never trade with each other. SoDEX rules out wash trading and manipulative farming; a hedge holds real positions on both sides, at the taker fee every time it opens or closes.</p>
             </Shell>
           )}
 
@@ -157,89 +183,109 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
 
           {at === 2 && (
             <Shell>
-              <ShellHeader icon="gear" title="Size & safety" subtitle="Sized by how far the liquidation stays, not by the leverage." />
-              <Panel className="hg-form">
-                {d.shape === 'pair' && (
-                  <Row title="This wallet" line="The second wallet takes the other side.">
-                    <Segmented label="This wallet's side" value={d.side} onChange={(v) => set({ side: v })} options={[{ value: 'buy', label: 'Long' }, { value: 'sell', label: 'Short' }]} />
-                  </Row>
-                )}
-                <Row title="Size per leg" line={d.shape === 'pair' ? `Open interest: ${fmtUsd(n.oiUsd, 0)} across both legs.` : 'Up to this much short; never more than the coin you hold.'} error={problems.size}>
-                  <div className="bots-sizeline">
-                    <Slider label="Size slider" value={Math.min(50_000, d.sizeUsd)} min={50} max={50_000} step={50} onChange={(v) => set({ sizeUsd: Math.round(v) })} minLabel="$50" maxLabel="$50k" />
-                    <NumberField label="Size per leg" hideLabel value={d.sizeUsd} onChange={(v) => v !== null && set({ sizeUsd: v })} unit="USD" className="bots-sizeline__n" />
+              <ShellHeader icon="gear" title="Size & safety" subtitle={d.shape === 'pair' ? 'How big each leg is, and how far its liquidation stays.' : 'How big the short may grow.'} />
+              <Panel className="bots-sizepanel">
+                <div className="bots-settings">
+                  <div className="bots-fgrid">
+                    {d.shape === 'pair' && (
+                      <SettingRow label="This wallet" hint={`The second wallet takes the ${d.side === 'buy' ? 'short' : 'long'}.`}>
+                        <Segmented label="This wallet's side" value={d.side} onChange={(v) => set({ side: v })} options={[{ value: 'buy', label: 'Long' }, { value: 'sell', label: 'Short' }]} />
+                      </SettingRow>
+                    )}
+                    <SettingRow label="Size per leg" wide={d.shape !== 'pair'} hint={d.shape === 'pair' ? `${fmtUsd(n.oiUsd, 0)} open interest across both legs.` : 'Never more than the coin you hold.'}>
+                      <div className="bots-sizeline">
+                        <Slider label="Size slider" value={Math.min(50_000, d.sizeUsd)} min={50} max={50_000} step={50} onChange={(v) => set({ sizeUsd: Math.round(v) })} minLabel="$50" maxLabel="$50k" />
+                        <NumberField label="Size per leg" hideLabel value={d.sizeUsd} onChange={(v) => v !== null && set({ sizeUsd: v })} error={problems.size ?? null} unit="USD" className="bots-sizeline__n" />
+                      </div>
+                    </SettingRow>
+                    {d.shape === 'pair' && (
+                      <SettingRow label="Margin per leg" hint={n.legUsd < d.sizeUsd - 0.5 ? `Allows ${fmtUsd(n.legUsd, 0)} a leg at this safety.` : "In each wallet's futures account."}>
+                        <NumberField label="Margin per leg" hideLabel value={d.marginUsd} onChange={(v) => v !== null && set({ marginUsd: v })} unit="USD" />
+                      </SettingRow>
+                    )}
+                    {d.shape === 'pair' && (
+                      <SettingRow label="Safety" wide hint={`Both legs shrink when a liquidation comes within ${d.minLiqPct}% of the price: at this size, a ${pct(n.trimMove)} move.`}>
+                        <Segmented label="Safety" value={safetyKey(d.minLiqPct)} onChange={(v) => { const x = SAFETY.find((o) => o.id === v); if (x) set({ minLiqPct: x.min, growLiqPct: x.min * 2 }); }} options={[...SAFETY.map((o) => ({ value: o.id, label: `${o.label} · ${o.min}%` })), ...(safetyKey(d.minLiqPct) === 'own' ? [{ value: 'own', label: `Own · ${d.minLiqPct}%` }] : [])]} />
+                      </SettingRow>
+                    )}
+                    <SettingRow label="Stop if it loses" hint="Both legs together, after every fee. Then it closes both.">
+                      <NumberField label="Loss" hideLabel value={d.maxLossUsd} optional onChange={(v) => set({ maxLossUsd: v })} error={problems.loss ?? null} unit="USD" />
+                    </SettingRow>
+                    <SettingRow label="Run for" wide={d.shape !== 'pair'} hint="Stops by itself after this long.">
+                      <Segmented label="Run for" value={d.runHours === null ? 'open' : RUN_FOR.includes(d.runHours) ? String(d.runHours) : 'x'} onChange={(v) => v !== 'x' && set({ runHours: v === 'open' ? null : Number(v) })} options={[{ value: 'open', label: 'Until stopped' }, { value: '24', label: '24h' }, { value: '168', label: '7d' }, ...(d.runHours === null || RUN_FOR.includes(d.runHours) ? [] : [{ value: 'x', label: `${d.runHours}h` }])]} />
+                    </SettingRow>
                   </div>
-                </Row>
-                {d.shape === 'pair' && (
-                  <Row title="Margin per leg" line="What each wallet's futures account holds for it. The losing leg's account decides how large both can be.">
-                    <NumberField label="Margin per leg" value={d.marginUsd} onChange={(v) => v !== null && set({ marginUsd: v })} unit="USD" />
-                  </Row>
-                )}
-                <Row title="Leverage" line={`Set on SoDEX before the first order: the maximum (${maxLev}x) locks the least margin. The buffer below sets the size, so a higher leverage does not mean a closer liquidation.`}>
-                  <div className="bots-sizeline">
-                    <Slider label="Leverage slider" value={Math.min(maxLev, d.leverage)} min={1} max={maxLev} step={1} onChange={(v) => set({ leverage: Math.round(v) })} minLabel="1x" maxLabel={`${maxLev}x`} />
-                    <b className="hg-lev">{Math.min(maxLev, d.leverage)}x</b>
-                  </div>
-                </Row>
-                {d.shape === 'pair' && (
-                  <>
-                    <Row title="Liquidation buffer" line={`When a leg's liquidation comes within this much of the price, both legs get smaller. At this size: a ${pct(n.trimMove)} move does it.`} error={problems.buffer}>
-                      <Segmented label="Liquidation buffer" value={String(d.minLiqPct)} onChange={(v) => { const x = Number(v); set({ minLiqPct: x, growLiqPct: Math.max(d.growLiqPct, x * 2) }); }} options={[...BUFFERS.map((b) => ({ value: String(b), label: `${b}%` })), ...(BUFFERS.includes(d.minLiqPct) ? [] : [{ value: String(d.minLiqPct), label: `${d.minLiqPct}%` }])]} />
-                    </Row>
-                    <Row title="Grow back at" line="Both legs grow back towards the size only while every liquidation stays this far away.">
-                      <NumberField label="Grow back at" value={d.growLiqPct} onChange={(v) => v !== null && set({ growLiqPct: v })} unit="%" />
-                    </Row>
-                  </>
-                )}
-                <Row title="Step" line="Each order per leg. Smaller steps keep the legs closer together while they open.">
-                  <NumberField label="Step" value={d.sliceUsd} onChange={(v) => v !== null && set({ sliceUsd: v })} unit="USD" />
-                </Row>
-                <Row title="Max slippage" line="A taker goes no further than this from the mark.">
-                  <NumberField label="Max slippage" value={d.maxSlipBps} onChange={(v) => v !== null && set({ maxSlipBps: v })} unit="bp" />
-                </Row>
-                <Row title="Stop if it loses" line="Both legs together, after every fee. Then it closes both." error={problems.loss}>
-                  <NumberField label="Loss" value={d.maxLossUsd} optional onChange={(v) => set({ maxLossUsd: v })} unit="USD" />
-                </Row>
-                <Row title="Take profit" line="Optional: stops once the pair's net PnL reaches this.">
-                  <NumberField label="Profit" value={d.takeProfitUsd} optional onChange={(v) => set({ takeProfitUsd: v !== null && v > 0 ? v : null })} unit="USD" />
-                </Row>
-                <Row title="Run for" line="Empty: until you stop it.">
-                  <NumberField label="Hours" value={d.runHours} optional onChange={(v) => set({ runHours: v !== null && v > 0 ? v : null })} unit="h" />
-                </Row>
-                <Row title="On stop" line={d.onStop === 'close' ? 'Closes both legs, a step at a time, evenly.' : 'Leaves both positions open, unmanaged: a move can then liquidate one.'}>
-                  <Segmented label="On stop" value={d.onStop} onChange={(v) => set({ onStop: v })} options={[{ value: 'close', label: 'Close both' }, { value: 'keep', label: 'Keep' }]} />
-                </Row>
-                {PRACTICE_BOTS && ctx.liveAllowed && (
-                  <Row title="Practice" line={pairPractice ? 'Two-wallet hedges run as practice for now. A hedge against spot runs with real orders.' : 'Runs against the live market and sends nothing.'}>
-                    <Switch checked={paper} disabled={pairPractice} onChange={(v) => set({ paper: v })} label="Practice" hideLabel />
-                  </Row>
-                )}
+                  <button type="button" className={`bots-adv${adv ? ' is-open' : ''}`} aria-expanded={adv} onClick={() => setAdv((x) => !x)}>
+                    <Icon name="gear" size={14} />
+                    <b>Advanced settings</b>
+                    <span className="bots-adv__sp" />
+                    <Icon name="down" size={14} />
+                  </button>
+                  {adv && (
+                    <div className="bots-fgrid bots-adv__body">
+                      <SettingRow label="Leverage" wide hint={`The maximum (${maxLev}x) locks the least margin. Safety sets the size, so more leverage does not bring the liquidation closer.`}>
+                        <div className="bots-sizeline">
+                          <Slider label="Leverage slider" value={Math.min(maxLev, d.leverage)} min={1} max={maxLev} step={1} onChange={(v) => set({ leverage: Math.round(v) })} minLabel="1x" maxLabel={`${maxLev}x`} />
+                          <NumberField label="Leverage" hideLabel value={Math.min(maxLev, d.leverage)} onChange={(v) => v !== null && set({ leverage: Math.max(1, Math.min(maxLev, Math.round(v))) })} unit="x" className="bots-sizeline__n" />
+                        </div>
+                      </SettingRow>
+                      {d.shape === 'pair' && (
+                        <SettingRow label="Grow back at" hint="Legs grow back only while every liquidation is this far away.">
+                          <NumberField label="Grow back at" hideLabel value={d.growLiqPct} onChange={(v) => v !== null && set({ growLiqPct: v })} error={problems.buffer ?? null} unit="%" />
+                        </SettingRow>
+                      )}
+                      <SettingRow label="Step" hint="Each order per leg.">
+                        <NumberField label="Step" hideLabel value={d.sliceUsd} onChange={(v) => v !== null && set({ sliceUsd: v })} unit="USD" />
+                      </SettingRow>
+                      <SettingRow label="Max slippage" hint="From the mark.">
+                        <NumberField label="Max slippage" hideLabel value={d.maxSlipBps} onChange={(v) => v !== null && set({ maxSlipBps: v })} unit="bp" />
+                      </SettingRow>
+                      <SettingRow label="Take profit" hint="Optional: stops at this net PnL.">
+                        <NumberField label="Profit" hideLabel value={d.takeProfitUsd} optional onChange={(v) => set({ takeProfitUsd: v !== null && v > 0 ? v : null })} unit="USD" />
+                      </SettingRow>
+                      <SettingRow label="On stop" hint={d.onStop === 'close' ? 'Closes both legs, evenly.' : 'Leaves both open, unmanaged.'}>
+                        <Segmented label="On stop" value={d.onStop} onChange={(v) => set({ onStop: v })} options={[{ value: 'close', label: 'Close both' }, { value: 'keep', label: 'Keep' }]} />
+                      </SettingRow>
+                    </div>
+                  )}
+                </div>
               </Panel>
             </Shell>
           )}
 
           {at === 3 && d.shape === 'pair' && (
             <Shell>
-              <ShellHeader icon="robot" title="Second wallet" subtitle="It signs its own leg: you switch your wallet to it once, after this one starts." />
-              <Panel className="hg-form">
-                <Row title="Address" line="The wallet that holds the other side. It needs its own SoDEX account and trading key; the page walks it through." error={problems.partner}>
-                  <TextInput aria-label="Second wallet address" placeholder="0x…" value={d.partner} onChange={(e) => set({ partner: e.target.value })} spellCheck={false} className="hg-addr" />
-                </Row>
-                {isAddress(d.partner) && (
-                  <div className="hg-ref">
-                    <span className="hg-ref__k">SoDEX referral of {short(d.partner.trim())}</span>
-                    {partnerRef === 'none' && <StatusPill size="sm" tone="warning" dot>No code yet</StatusPill>}
-                    {(partnerRef === 'bound' || partnerRef === 'pending') && <StatusPill size="sm" tone="positive" dot>On VALUEDESK</StatusPill>}
-                    {partnerRef === 'other' && <StatusPill size="sm" dot>Has a code</StatusPill>}
-                    {partnerRef === 'unknown' && <StatusPill size="sm">Checking…</StatusPill>}
-                    <small>{partnerRef === 'none' ? 'When it connects, it is offered ValueDesk\'s code VALUEDESK with what it gives (a new wallet uses it before its first leg).' : partnerRef === 'other' ? 'It keeps its own code: we only offer ours to wallets without one.' : ''}</small>
+              <ShellHeader icon="robot" title="Other leg" subtitle="One wallet each side. Pick the second from your wallet: this one stays connected." />
+              <Panel className="bots-sizepanel hg-leg2">
+                <div className="hg-wallets" role="radiogroup" aria-label="Second wallet">
+                  <div className="hg-wcard is-me">
+                    <StatusPill size="sm" tone={d.side === 'buy' ? 'positive' : 'negative'}>{d.side === 'buy' ? 'Long' : 'Short'}</StatusPill>
+                    <span className="hg-wcard__t"><b>{ctx.address ? short(ctx.address) : 'Not connected'}</b><small>{ctx.address ? 'Connected · leg 1' : 'Connect your wallet: leg 1'}</small></span>
                   </div>
+                  {others.map((a) => {
+                    const on = d.partner.trim().toLowerCase() === a;
+                    return (
+                      <button key={a} type="button" role="radio" aria-checked={on} className={`hg-wcard${on ? ' is-on' : ''}`} onClick={() => set({ partner: a })}>
+                        <span className={`bots-radio${on ? ' is-on' : ''}`} aria-hidden="true" />
+                        <span className="hg-wcard__t"><b>{short(a)}</b><small>In your wallet · leg 2, {d.side === 'buy' ? 'short' : 'long'}</small></span>
+                      </button>
+                    );
+                  })}
+                  <button type="button" className="hg-wcard is-add" onClick={() => void addAccount()} disabled={!provider || adding}>
+                    <Icon name="plus" size={14} />
+                    <span className="hg-wcard__t"><b>{adding ? 'Waiting for your wallet…' : 'Add an account from your wallet'}</b><small>Shares another account with ValueDesk. Nothing is disconnected.</small></span>
+                  </button>
+                </div>
+                <div className="hg-paste">
+                  {!paste
+                    ? <button type="button" className="bots-link" onClick={() => setPaste(true)}>Or paste an address</button>
+                    : <TextInput aria-label="Second wallet address" placeholder="0x…" value={d.partner} onChange={(e) => set({ partner: e.target.value })} spellCheck={false} className="hg-addr" />}
+                  {problems.partner && isAddress(d.partner) && <p className="bots-err" role="alert">{problems.partner}</p>}
+                </div>
+                {isAddress(d.partner) && partnerRef === 'none' && (
+                  <p className="hg-note"><StatusPill size="sm" tone="warning" dot>No SoDEX code yet</StatusPill>When {short(d.partner.trim())} signs its leg, it is offered the code VALUEDESK first.</p>
                 )}
-                <ol className="hg-steps">
-                  <li><b>This wallet starts leg 1.</b> It waits, holding nothing, until leg 2 is there.</li>
-                  <li><b>Switch your wallet app to {isAddress(d.partner) ? short(d.partner.trim()) : 'the second wallet'}</b> and open Bots here: it shows the invitation.</li>
-                  <li><b>That wallet signs leg 2</b> (its terms and trading key the first time). Both legs then open together.</li>
-                </ol>
+                <p className="hg-note"><Icon name="wallet" size={13} />Leg 2 is signed by {isAddress(d.partner) ? short(d.partner.trim()) : 'that account'} itself: after leg 1 starts, pick it in your wallet and Bots shows Start leg 2. Both legs then open together.</p>
               </Panel>
             </Shell>
           )}
