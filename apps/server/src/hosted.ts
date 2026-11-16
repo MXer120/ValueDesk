@@ -108,6 +108,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // Wealth's maintenance flag: same reason, same route file, read once every 30 s.
   { method: 'GET', url: '/api/vs/sodex/wealth/maintenance', cls: 'read' },
   { method: 'GET', url: '/api/vs/sodex/oi-excluded', cls: 'read' },
+  // SoPoints difficulty: the big accounts' daily volume and OI (valuedesk/sodex/mmDaily.ts), cached an hour.
+  { method: 'GET', url: '/api/vs/sodex/mm-daily', cls: 'upstream' },
   { method: 'GET', url: '/api/vs/cohorts/focus', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/wallets', cls: 'read' },
   // The liquidation heatmap (indexer/liqRead.ts): the cohort books, priced; the venues' market

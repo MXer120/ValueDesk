@@ -3667,6 +3667,14 @@ export class IndexStore {
   }
 
   /** Accounts with at least `minTrades` stream trades since the start, most volume first. */
+  /** Volume per UTC day of named accounts, from `fromDay` on (SoPoints difficulty: valuedesk/sodex/mmDaily.ts). */
+  accountDays(venue: Venue, accts: readonly string[], fromDay: number): Array<{ acct: string; day: number; volume: number }> {
+    if (!accts.length) return [];
+    const marks = accts.map(() => '?').join(',');
+    return (this.q(`SELECT acct, day, volume FROM activity_day WHERE venue = ? AND acct IN (${marks}) AND day >= ?`).all(venue, ...accts, fromDay) as Array<{ acct: string; day: number; volume: number }>)
+      .map((r) => ({ acct: String(r.acct), day: Number(r.day), volume: Number(r.volume) }));
+  }
+
   activeAccounts(
     venue: Venue,
     from: { hour: number } | { day: number },

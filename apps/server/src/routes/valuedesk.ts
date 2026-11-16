@@ -51,6 +51,7 @@ import {
 } from '../valuedesk/types.js';
 import { sodexProvider } from '../valuedesk/sodex/index.js';
 import { sodexOiExcluded } from '../valuedesk/sodex/oiExcluded.js';
+import { mmDaily } from '../valuedesk/sodex/mmDaily.js';
 import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuedesk/hyperliquid/index.js';
 import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
@@ -947,6 +948,21 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   app.get('/api/vs/sodex/oi-excluded', async (_req, reply) => {
     try {
       return { ok: true, ...(await sodexOiExcluded()) };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * SoPoints difficulty: per UTC day, the volume of SoDEX accounts 1002 + 23342 and the open interest of SoDEX's internal
+   * pair (valuedesk/sodex/mmDaily.ts), to take out of the platform's figures. `from` = ms; at most 400 days back.
+   */
+  app.get('/api/vs/sodex/mm-daily', async (req, reply) => {
+    const q = req.query as { from?: string };
+    const from = Math.max(Date.now() - 400 * 86_400_000, Number(q.from) || Date.now() - 90 * 86_400_000);
+    try {
+      reply.header('Cache-Control', 'public, max-age=600');
+      return { ok: true, ...(await mmDaily(from)) };
     } catch (e) {
       return fail(reply, e);
     }

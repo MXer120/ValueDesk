@@ -25,7 +25,7 @@ test('squad steps follow SoDEX\'s ladder; the next step names what is missing', 
 test('the wallet\'s boost: joined + built + early bird; SoDEX\'s own week total wins when there is one', () => {
   const bonus: S2TeamBonus = { eligible: true, teamMemberCount: 3, activeTeamCount: 1, isEarlyBird: true, windowRounds: 4, uplineTeamVolume: '450000', downlineTeamVolume: '120000', asOfTsMs: 0 };
   const q = squadBreakdown(bonus, CFG, null);
-  assert.deepEqual([q.joined.pct, q.built.pct, q.earlyBird, q.total, q.fromSodex], [10, 5, 20, 35, false]);
+  assert.deepEqual([q.joined.pct, q.built.pct, q.earlyBird, q.total, q.fromSodex], [10, 5, 20, 15, false]);
   assert.equal(squadBreakdown(bonus, CFG, week({ isLive: true, totalBonusPct: 30 })).total, 30);
 });
 

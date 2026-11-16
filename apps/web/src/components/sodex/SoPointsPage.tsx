@@ -16,7 +16,7 @@ import { RULES } from '../../points';
 import { SODEX_POINTS_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
 import type { Eip1193Provider } from '../../wallet';
 import { PointsEstimate } from './PointsEstimate';
-import { EarnMore, MySquadBoost, SeasonCard, SoPointsCard, SquadEnergy, ThisWeek, WeekTable, WeeklyPoints } from './SoPointsMine';
+import { Difficulty, EarnMore, MySquadBoost, SeasonCard, SoPointsCard, ThisWeek, WeekTable, WeeklyPoints } from './SoPointsMine';
 import { useSoPointsV2 } from './soPointsV2';
 import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
 
@@ -53,7 +53,7 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
         <>
           <div className="spm-top">
             <SoPointsCard s={v2} />
-            <SeasonCard week={w} code={c.referral?.referralCode || null} />
+            <SeasonCard week={w} code={c.referral?.referralCode || null} settled={c.publicSettled} />
           </div>
           {v2.error && <p className="pf-note" role="alert">Some of your SoPoints could not be read: {v2.error}</p>}
           <div className="sdx-duo spm-charts">
@@ -63,14 +63,14 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
           <EarnMore s={v2} cfg={c.boost} weights={c.weights} pool={w?.weekPoolPoints ?? null} />
           <div className="sdx-duo spm-charts">
             <WeeklyPoints s={v2} />
-            <SquadEnergy s={v2} cfg={c.boost} />
+            <Difficulty s={v2} pool={w?.weekPoolPoints ?? null} />
           </div>
           <WeekTable s={v2} />
           <BoostedMarkets c={c} />
         </>
       ) : (
         <>
-          <SeasonCard week={w} code={c.referral?.referralCode || null} />
+          <SeasonCard week={w} code={c.referral?.referralCode || null} settled={c.publicSettled} />
           <div className="sdx-duo">
             <BoostedMarkets c={c} />
             <SquadBoost c={c} />
@@ -79,27 +79,6 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
           <PointsEstimate c={c} />
         </>
       )}
-
-      <section className="sdx-section" aria-label="How to earn SoPoints">
-        <h2 className="sdx-section__title">How to earn</h2>
-        <div className="sdx-earn">
-          <article className="sdx-earn__tile">
-            <h3>Trade</h3>
-            <p>More spot and futures volume and open interest, more points.</p>
-            <a className="pf-btn" href="/trade">Trade</a>
-          </article>
-          <article className="sdx-earn__tile">
-            <h3>Hold Wealth and SLP</h3>
-            <p>Wealth holdings, SLP Vault deposits and assets kept on SoDEX all count. The bigger the holding, the more points.</p>
-            <a className="pf-btn" href="/wealth">See Wealth</a>
-          </article>
-          <article className="sdx-earn__tile">
-            <h3>Invite</h3>
-            <p>A {RULES.referralBonusPct}% rebate on the points your invitees earn, and +{RULES.inviteeBoostPct}% for them.</p>
-            <a className="pf-btn" href={SODEX_SITE.points} target="_blank" rel="noopener noreferrer">Invite on SoDEX</a>
-          </article>
-        </div>
-      </section>
 
       <div className="sdx-trio">
         {panel('tiers', c)}

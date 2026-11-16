@@ -292,6 +292,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/screener read',
       'GET /api/vs/sodex/lottery/feed read',
       'GET /api/vs/sodex/lottery/meta read',
+      'GET /api/vs/sodex/mm-daily upstream',
       'GET /api/vs/sodex/oi-excluded read',
       'GET /api/vs/sodex/wealth/maintenance read',
       'GET /api/vs/status read',

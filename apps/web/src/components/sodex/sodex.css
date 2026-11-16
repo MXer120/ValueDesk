@@ -440,3 +440,29 @@ html[data-theme='light'] .sdx .coin-ic[src*='sodex' i] { background: #141414; }
   .spm-sq__step small { display: none; }
   .spm-bars__plot { gap: 1px; }
 }
+
+/* This week so far: held behind a veil until there is enough data (owner 2026-11-16). */
+.spm-soon .pf-card__body { position: relative; }
+.spm-soon__veil { filter: blur(6px); opacity: 0.55; pointer-events: none; user-select: none; }
+.spm-soon__badge { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; padding: 16px; }
+.spm-soon__badge b { padding: 6px 14px; border-radius: 999px; background: var(--bg-elevated); box-shadow: 0 6px 20px rgb(0 0 0 / 0.3); font-size: 14px; font-weight: 700; color: var(--text); }
+.spm-soon__badge span { font-size: 12px; color: var(--muted); }
+
+/* Difficulty: three figures on top, you against the platform per week below. */
+.spm-diff { display: flex; flex-direction: column; gap: 10px; }
+.spm-diff__head { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.spm-diff__head div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px; background: rgb(var(--ink) / 0.035); min-width: 0; }
+.spm-diff__head span { font-size: 11px; color: var(--dim); }
+.spm-diff__head b { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.spm-diff__head b.is-pos { color: var(--pos); }
+.spm-diff__head b.is-neg { color: var(--neg); }
+.spm-diff__head small { font-size: 11px; color: var(--muted); }
+.spm-col__pair { display: flex; align-items: flex-end; gap: 1px; width: 100%; height: 100%; }
+.spm-col__pair i { flex: 1 1 0; border-radius: 2px 2px 0 0; }
+.spm-col__pair i.is-own, .spm-tt__row i.is-own { background: var(--accent); }
+.spm-col__pair i.is-field, .spm-tt__row i.is-field, .spm-legend i.is-field { background: rgb(var(--ink) / 0.3); }
+@media (max-width: 640px) { .spm-diff__head { grid-template-columns: 1fr; } }
+
+/* Loading: the tier card's size, the page's own pulse. */
+.spm-card--skel { outline: none; min-height: 236px; padding: 0; }
+.spm-season .sdx-skel { margin-bottom: 6px; }

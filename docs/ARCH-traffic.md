@@ -393,6 +393,7 @@ Against this inventory, HOSTED_ROUTES should be:
 - **Add**: `GET /api/vs/invites/check?code=`, `GET /api/vs/invites/me?address=` (cls `read`)
   and `POST /api/vs/invites/join` (cls `write`, 4 KB, 12 a minute per client): invite codes, a signed join, a wallet's fee
   credits (routes/invites.ts, `invites.db`). Upstream: one SoDEX `checkEligibility` read per code never seen before (whose code it is, kept); the credits come from the builder ledger on this server.
+- **Add**: `GET /api/vs/sodex/mm-daily?from=` (cls `upstream`, cached an hour): per UTC day, SoDEX accounts 1002 + 23342's volume (from 2026-11-06, our index) and SoDEX's internal pair's open interest (its sizes now x each day's mark close), for the SoPoints difficulty (valuedesk/sodex/mmDaily.ts). Upstream: one mark-candle read per market the pair holds (>= 0.2% of its USD) and one positions read, per hour.
 - **Add**: `POST /api/vs/sodex-auth/nonce` and `POST /api/vs/sodex-auth/verify` (cls `auth`: the site Origin exactly,
   capped per client and overall): the SoPoints sign-in relay (routes/pointsAuth.ts, owner 2026-11-16). SoDEX's two
   sign-in calls only, its own sign-in text only, `type` sign_in and `autoSign` false fixed, no forged headers, nothing
