@@ -340,6 +340,8 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/vs/inbox/add write',
       'POST /api/vs/inbox/list write',
       'POST /api/vs/invites/join write',
+      'POST /api/vs/sodex-auth/nonce auth',
+      'POST /api/vs/sodex-auth/verify auth',
       'POST /api/vs/username write',
       'POST /api/vs/username/change write',
     ],
@@ -367,6 +369,8 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
     else if (r.url.startsWith('/api/admin/')) assert.ok(r.method === 'POST' && r.cls === 'admin', r.url);
     // The beta channel's sign-in (routes/beta.ts, beta API only): a wallet's free signature, cls auth.
     else if (r.url === '/api/beta/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
+    // The SoPoints sign-in relay (routes/pointsAuth.ts): SoDEX's sign-in text only, cls auth.
+    else if (r.url.startsWith('/api/vs/sodex-auth/')) assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
     else assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
   }
   // HEAD follows GET; nothing else is implied.

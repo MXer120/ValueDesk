@@ -24,7 +24,7 @@ import {
   type ReferralMode, type SeasonStats, type Standing, type VenueWeek, type VolumeWeights, type WeekInfo,
   type Window, type YourShare,
 } from '../points';
-import { SODEX_SIGNIN_LIVE } from '../sodexProgrammes';
+import { SODEX_POINTS_SIGNIN_LIVE } from '../sodexProgrammes';
 import { Card, Group, Meter, Row, PeriodSeg, fmtCompactUsd } from './Portfolio';
 import { DASH, fmt, fmtUsd } from '../format';
 import { useMask } from '../privacy';
@@ -131,7 +131,7 @@ export function usePointsContext(
    * changing their mind in the wallet - so it clears the state and says nothing.
    */
   const signIn = useCallback(async () => {
-    if (!SODEX_SIGNIN_LIVE || !address || !provider) return;
+    if (!SODEX_POINTS_SIGNIN_LIVE || !address || !provider) return;
     setSigningIn(true);
     setSignInError(null);
     try {

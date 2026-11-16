@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SODEX_SIGNIN_LIVE, SodexSigninOff, assertSigninLive } from './sodexProgrammes';
+import { SODEX_POINTS_SIGNIN_LIVE, SODEX_SIGNIN_LIVE, SodexSigninOff, assertPointsSigninLive, assertSigninLive } from './sodexProgrammes';
 import { fetchSignInMessage, signInToPoints, verifySignature } from './pointsAuth';
 import { NeedsPointsToken, fetchBoostConfig, fetchMyPoints, fetchMyWeeks, fetchVolumeWeights, fetchWeek } from './points';
 import type { Eip1193Provider } from './wallet';
@@ -28,41 +28,43 @@ function capture(answer: (url: string) => unknown): string[] {
 const PROVIDER = { request: async () => { throw new Error('no wallet in a test'); } } as unknown as Eip1193Provider;
 const ADDR = '0x1111111111111111111111111111111111111111';
 
-test('the switch is off on this branch', () => {
+test('SoPoints sign-in is on (relay, owner 2026-11-16); the Blind Box sign-in stays off', () => {
+  assert.equal(SODEX_POINTS_SIGNIN_LIVE, true);
+  assert.doesNotThrow(() => assertPointsSigninLive());
   assert.equal(SODEX_SIGNIN_LIVE, false);
   assert.throws(() => assertSigninLive(), SodexSigninOff);
   assert.doesNotThrow(() => assertSigninLive(true));
 });
 
-test('while off, nothing calls sodex.com/auth: sign-in refuses before the network', async () => {
+test('switched off, sign-in refuses before the network', async () => {
   const urls = capture(() => ({}));
-  await assert.rejects(signInToPoints(PROVIDER, ADDR), SodexSigninOff);
-  await assert.rejects(fetchSignInMessage(ADDR), SodexSigninOff);
-  await assert.rejects(verifySignature(ADDR, 'm', '0xs'), SodexSigninOff);
+  await assert.rejects(signInToPoints(PROVIDER, ADDR, { live: false }), SodexSigninOff);
+  await assert.rejects(fetchSignInMessage(ADDR, { live: false }), SodexSigninOff);
+  await assert.rejects(verifySignature(ADDR, 'm', '0xs', { live: false }), SodexSigninOff);
   assert.deepEqual(urls, []);
 });
 
-test('while off, the token reads refuse before the network as well', async () => {
+test('with no token, the token reads refuse before the network', async () => {
   const urls = capture(() => ({}));
   await assert.rejects(fetchMyPoints(ADDR), NeedsPointsToken);
   await assert.rejects(fetchMyWeeks(ADDR), NeedsPointsToken);
   assert.deepEqual(urls, []);
 });
 
-test('with the switch on (mock), sign-in goes straight to SoDEX, with no proxy of ours', async () => {
+test('sign-in goes through our relay (two calls), with no Origin set by hand', async () => {
   const calls: Array<{ url: string; body: unknown; origin: string | null }> = [];
   const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), body: JSON.parse(String(init?.body)), origin: new Headers(init?.headers).get('origin') });
-    return new Response(JSON.stringify({ code: 0, data: String(url).endsWith('/nonce') ? { message: 'sign this' } : { accessToken: 'jwt' } }), { status: 200 });
+    return new Response(JSON.stringify(String(url).endsWith('/nonce') ? { ok: true, message: 'sign this' } : { ok: true, accessToken: 'jwt' }), { status: 200 });
   }) as typeof fetch;
-  const token = await signInToPoints(PROVIDER, ADDR, { live: true, fetchImpl, sign: async () => '0xs' });
+  const token = await signInToPoints(PROVIDER, ADDR, { fetchImpl, sign: async () => '0xs' });
   assert.equal(token, 'jwt');
-  assert.deepEqual(calls.map((c) => c.url), ['https://sodex.com/auth/v2/nonce', 'https://sodex.com/auth/v2/verify']);
-  assert.deepEqual(calls[1]!.body, { address: ADDR, message: 'sign this', signature: '0xs', type: 'sign_in' });
+  assert.deepEqual(calls.map((c) => c.url), ['/api/vs/sodex-auth/nonce', '/api/vs/sodex-auth/verify']);
+  assert.deepEqual(calls[1]!.body, { address: ADDR, message: 'sign this', signature: '0xs' });
   assert.ok(calls.every((c) => c.origin === null), 'never an Origin set by hand');
 });
 
-test('no source file reaches sodex.com/auth except the one guarded module', () => {
+test('no source file calls sodex.com/auth directly: the relay does', () => {
   const hits: string[] = [];
   const walk = (dir: string) => {
     for (const name of readdirSync(dir)) {
@@ -72,7 +74,7 @@ test('no source file reaches sodex.com/auth except the one guarded module', () =
     }
   };
   walk(SRC);
-  assert.deepEqual(hits, ['pointsAuth.ts']);
+  assert.deepEqual(hits, []);
 });
 
 test('the old relay path is gone from the web', () => {

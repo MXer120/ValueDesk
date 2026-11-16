@@ -13,7 +13,7 @@ import { Card, Group } from '../portfolio/parts';
 import { Fact, POINTS_PANELS, usePointsContext, type PointsContext } from '../Points';
 import { DASH, fmt } from '../../format';
 import { RULES } from '../../points';
-import { SODEX_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
+import { SODEX_POINTS_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
 import type { Eip1193Provider } from '../../wallet';
 import { PointsEstimate } from './PointsEstimate';
 import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
@@ -61,16 +61,18 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
         <SquadBoost c={c} />
       </div>
 
-      {SODEX_SIGNIN_LIVE ? (
+      {SODEX_POINTS_SIGNIN_LIVE && !c.tokenPresent ? (
+        <PointsSignIn c={c} />
+      ) : SODEX_POINTS_SIGNIN_LIVE ? (
         <div className="sdx-trio sdx-trio--mine">
           {panel('mine', c)}
           {panel('economics', c)}
           {panel('difficulty', c)}
           <div className="sdx-span">{panel('weeks', c)}</div>
         </div>
-      ) : (
-        <PointsEstimate c={c} />
-      )}
+      ) : null}
+
+      <PointsEstimate c={c} />
 
       <section className="sdx-section" aria-label="How to earn SoPoints">
         <h2 className="sdx-section__title">How to earn</h2>
@@ -151,5 +153,46 @@ function SquadBoost({ c }: { c: PointsContext }) {
         </>
       )}
     </Card>
+  );
+}
+
+const KEY = (
+  <svg viewBox="0 0 20 20" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="7" cy="12" r="3.5" />
+    <path d="m9.5 9.5 6-6M13 6l2 2M11.5 7.500l1.500 1.500" />
+  </svg>
+);
+
+/**
+ * Signed out: one card instead of four empty panels. What the signature is (SoDEX's own text, free, no transaction),
+ * what it shows, and the one button. The relay and why it cannot move funds: server routes/pointsAuth.ts.
+ */
+function PointsSignIn({ c }: { c: PointsContext }) {
+  const label = c.signingIn ? 'Check your wallet…' : c.signInError ? 'Try again' : 'Show my SoPoints';
+  return (
+    <section className="sdx-locked sdx-signin" aria-label="Your SoPoints">
+      <span className="sdx-locked__icon">{KEY}</span>
+      <div className="sdx-locked__text">
+        <h2 className="sdx-locked__title">Your real SoPoints</h2>
+        <p className="sdx-locked__line">
+          {!c.address
+            ? 'Connect a wallet, then sign once to read your SoPoints from SoDEX.'
+            : "Sign SoDEX's own sign-in message once. It is free: no transaction, no gas, no funds move."}
+        </p>
+        <ul className="sdx-locked__items">
+          {['Balance and tier', 'Points week by week', 'Your squads and their boost', 'Your cost per point'].map((i) => <li key={i}>{i}</li>)}
+        </ul>
+        {c.signInError && <p className="sdx-signin__err" role="alert">{c.signInError}</p>}
+      </div>
+      <button
+        type="button"
+        className="pf-btn pf-btn--primary sdx-locked__go"
+        disabled={!c.address || !c.provider || c.signingIn}
+        title={c.address && !c.provider ? 'Reconnect your wallet to sign.' : undefined}
+        onClick={() => { void c.signIn(); }}
+      >
+        {label}
+      </button>
+    </section>
   );
 }

@@ -16,6 +16,14 @@
  */
 export const SODEX_SIGNIN_LIVE: boolean = false;
 
+/**
+ * The SoPoints sign-in, ON (owner 2026-11-16: "do server relay if that works without putting user funds at risk at
+ * all"). The two sign-in calls go through our server's relay (server routes/pointsAuth.ts: SoDEX's own sign-in text
+ * only, no forged headers, nothing kept); the points are then read with the token straight from alpha-biz.sodex.dev,
+ * which allows this site. The Blind Box stays behind SODEX_SIGNIN_LIVE: its host still refuses this site.
+ */
+export const SODEX_POINTS_SIGNIN_LIVE: boolean = true;
+
 /** SoDEX's own pages, where a locked section can actually be used today. */
 export const SODEX_SITE = {
   points: 'https://sodex.com/points',
@@ -33,5 +41,10 @@ export class SodexSigninOff extends Error {
 
 /** The guard every token call goes through. `live` is a test seam; no app code passes it. */
 export function assertSigninLive(live: boolean = SODEX_SIGNIN_LIVE): void {
+  if (!live) throw new SodexSigninOff();
+}
+
+/** The same guard for the SoPoints sign-in (SODEX_POINTS_SIGNIN_LIVE). */
+export function assertPointsSigninLive(live: boolean = SODEX_POINTS_SIGNIN_LIVE): void {
   if (!live) throw new SodexSigninOff();
 }

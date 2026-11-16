@@ -16,7 +16,7 @@
  * through our own backend would add a hop and a rate limit for nothing.
  */
 
-import { SODEX_SIGNIN_LIVE } from './sodexProgrammes';
+import { SODEX_POINTS_SIGNIN_LIVE } from './sodexProgrammes';
 
 const BIZ = 'https://alpha-biz.sodex.dev';
 const DATA = 'https://mainnet-data.sodex.dev';
@@ -477,7 +477,7 @@ export class NeedsPointsToken extends Error {
 }
 
 async function authed<T>(url: string, address: string): Promise<T> {
-  if (!SODEX_SIGNIN_LIVE) throw new NeedsPointsToken();
+  if (!SODEX_POINTS_SIGNIN_LIVE) throw new NeedsPointsToken();
   const token = getPointsToken(address);
   if (!token) throw new NeedsPointsToken();
   const r = await fetch(url, {

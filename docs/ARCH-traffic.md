@@ -393,6 +393,10 @@ Against this inventory, HOSTED_ROUTES should be:
 - **Add**: `GET /api/vs/invites/check?code=`, `GET /api/vs/invites/me?address=` (cls `read`)
   and `POST /api/vs/invites/join` (cls `write`, 4 KB, 12 a minute per client): invite codes, a signed join, a wallet's fee
   credits (routes/invites.ts, `invites.db`). Upstream: one SoDEX `checkEligibility` read per code never seen before (whose code it is, kept); the credits come from the builder ledger on this server.
+- **Add**: `POST /api/vs/sodex-auth/nonce` and `POST /api/vs/sodex-auth/verify` (cls `auth`: the site Origin exactly,
+  capped per client and overall): the SoPoints sign-in relay (routes/pointsAuth.ts, owner 2026-11-16). SoDEX's two
+  sign-in calls only, its own sign-in text only, `type` sign_in and `autoSign` false fixed, no forged headers, nothing
+  stored or logged, the token alone back. Upstream: one sodex.com/auth/v2 call per request.
 - **Add**: `POST /api/vs/a` (cls `write`, 16 KB, `application/json` or `text/plain`): the app's own
   analytics, sent only after the visitor allowed analytics (ops/analyticsModel.ts says what one batch
   holds; routes/analytics.ts). The Vercel function lets POST + `Content-Type` through on this path and adds

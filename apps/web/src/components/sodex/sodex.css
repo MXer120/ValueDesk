@@ -271,3 +271,8 @@ html[data-theme='light'] .sdx .coin-ic[src*='sodex' i] { background: #141414; }
   .sdx-est__calc { grid-template-columns: 1fr; }
   .sdx-est__out { align-items: flex-start; text-align: left; }
 }
+.sdx-signin__err { margin: 8px 0 0; color: var(--neg); font-size: 12px; }
+@media (max-width: 640px) {
+  .sdx-signin { grid-template-columns: auto minmax(0, 1fr); }
+  .sdx-signin .sdx-locked__go { grid-column: 1 / -1; justify-self: stretch; }
+}

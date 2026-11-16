@@ -259,12 +259,9 @@ await app.register(statsRoutes);
 // Backend for the ported static Scan page (web/public/scan/) - see that
 // file's own header comment for the full /api/scan/* contract this serves.
 await app.register(scanRoutes);
-// SoPoints login (routes/pointsAuth.ts) is NOT registered: it relays SoDEX's private
-// sign-in API under a forged `Origin: https://sodex.com` to get past the allowlist SoDEX
-// chose, which SoDEX's terms forbid (s. 5.6). The SoPoints page shows SoDEX's public reads only
-// and keeps the signed-in part behind SODEX_SIGNIN_LIVE (web/src/sodexProgrammes.ts). This relay
-// does not come back: with SoDEX's written OK the browser calls SoDEX directly, no forged headers.
-void pointsAuthRoutes;
+// SoPoints sign-in relay (routes/pointsAuth.ts, owner 2026-11-16): SoDEX's two sign-in calls only, its own sign-in
+// text only, no forged headers, nothing kept. The points themselves are read by the browser straight from SoDEX.
+await app.register(pointsAuthRoutes());
 // ValueDesk: multi-venue traders (SoDEX + Hyperliquid) for Explore,
 // Leaderboard, Scan and Copy. Read-only - see routes/valuedesk.ts.
 await app.register(valuedeskRoutes);
