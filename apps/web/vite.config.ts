@@ -268,6 +268,32 @@ function devInvites(): Plugin {
   };
 }
 
+/**
+ * Dev only: POST /api/vs/sodex-auth/nonce|verify answered here by the server's own relay code
+ * (apps/server/tools/pointsAuth-dev.ts -> src/routes/pointsAuth.ts), so the SoPoints sign-in works on localhost before
+ * the relay is released; production's API answered 405 (owner 2026-11-16). Never in a build.
+ */
+function devSodexAuth(): Plugin {
+  return {
+    name: 'vs-dev-sodex-auth',
+    apply: 'serve',
+    configureServer(server) {
+      const file = fileURLToPath(new URL('../server/tools/pointsAuth-dev.ts', import.meta.url));
+      server.middlewares.use((req, res, next) => {
+        if (req.method !== 'POST' || !req.url || !/^\/api\/vs\/sodex-auth\/(nonce|verify)$/.test(req.url)) return next();
+        let body = '';
+        req.on('data', (c: Buffer) => { body += c; if (body.length > 16_384) req.destroy(); });
+        req.on('end', () => {
+          void server.ssrLoadModule(file)
+            .then((m) => (m as { handle: (u: string, b: string, ip: string) => Promise<{ status: number; body: string }> }).handle(req.url!, body, req.socket.remoteAddress ?? '127.0.0.1'))
+            .then((r) => { res.statusCode = r.status; res.setHeader('Content-Type', 'application/json'); res.setHeader('x-vs-dev-sodex-auth', 'local'); res.end(r.body); })
+            .catch((e: Error) => { res.statusCode = 502; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: false, error: `local relay: ${e.message}` })); });
+        });
+      });
+    },
+  };
+}
+
 function botsFixtures(): Plugin {
   const dir = process.env.VS_BOTS_FIXTURES?.trim();
   return {
@@ -313,7 +339,7 @@ function botsFixtures(): Plugin {
 
 export default defineConfig({
   customLogger: logger,
-  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences(), devTestExecutor(), devInvites(), botsFixtures()],
+  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), botsFixtures()],
   define: { __VS_BUILD__: JSON.stringify(buildId()) },
   /*
    * The EIP-712 signing layer is SHARED with the backend, not copied.
