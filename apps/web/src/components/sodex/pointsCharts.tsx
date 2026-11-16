@@ -183,7 +183,7 @@ export function DifficultyChart({ s, pool }: { s: S2State; pool: number | null }
   const [kind, setKind] = useState<DKind>('line');
   const [span, setSpan] = useState<Span>('all');
   const mm = useMemo(() => mmByWeek(s.weeks, s.mmDays), [s.weeks, s.mmDays]);
-  const all = useMemo(() => difficultyRows(allWeeks(s.s1, s.weeks).filter((r) => r.split.week.pointsStatus === 'CONFIRMED'), venueVolumeByWeek(s.weeks, s.venueDaily), venueOiByWeek(s.weeks, s.venueOiDaily), mm, pool, s.takersOiNow), [s.s1, s.weeks, s.venueDaily, s.venueOiDaily, mm, pool, s.takersOiNow]);
+  const all = useMemo(() => difficultyRows(allWeeks(s.s1, s.weeks).filter((r) => r.split.week.pointsStatus === 'CONFIRMED'), venueVolumeByWeek(s.weeks, s.venueDaily), venueOiByWeek(s.weeks, s.venueOiDaily), mm, pool), [s.s1, s.weeks, s.venueDaily, s.venueOiDaily, mm, pool]);
   const rows = cut(all, span);
   const you = (r: DifficultyRow) => (basis === 'vol' ? r.youVol : r.youOi);
   const plat = (r: DifficultyRow) => (basis === 'vol' ? r.platVol : r.platOi);
@@ -223,7 +223,7 @@ export function DifficultyChart({ s, pool }: { s: S2State; pool: number | null }
               <Row dot="is-own" k="You, by open interest" v={r.youOi ? usd(r.youOi) : '—'} />
               <Row dot="is-field" k="Platform, by volume" v={r.platVol ? usd(r.platVol) : '—'} />
               <Row dot="is-field" k="Platform, by open interest" v={r.platOi ? usd(r.platOi) : '—'} />
-              {r.season === 'L1' ? <Row k="Big accounts" v={`${r.oiOut ? 'OI out' : 'OI in'} · ${r.volOut === 'measured' ? 'volume out' : r.volOut === 'estimated' ? 'volume out (estimated)' : 'volume in'}`} /> : <Row k="Platform" v="Season 1 pool not published" />}
+              {r.season === 'L1' ? <Row k="Big accounts" v={`${r.oiOut ? 'internal pair OI out' : 'OI in'} · ${r.volOut ? '1002/23342 volume out' : 'volume in'}`} /> : <Row k="Platform" v="Season 1 pool not published" />}
             </>);
           }}
         />
