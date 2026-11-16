@@ -64,7 +64,7 @@ export function SoPointsCard({ s }: { s: S2State }) {
     else void copy(`${text} ${url}`, 'Text');
   };
   return (
-    <section className={`spm-card${iron ? ' is-iron' : ''}`} style={{ background: st.bg, outlineColor: st.border, boxShadow: `0 25px 50px -12px ${st.shadow}` }} aria-label="Your SoPoints">
+    <section className={`spm-card${iron ? ' is-iron' : ''}${tier === 'Gold' || tier === 'Diamond' || epic ? ' is-glare' : ''}`} style={{ background: st.bg, outlineColor: st.border, boxShadow: `0 25px 50px -12px ${st.shadow}` }} aria-label="Your SoPoints">
       <div className="spm-card__top">
         <span className="spm-card__tier">{tier.toUpperCase()}</span>
         <button type="button" className="spm-card__share" onClick={share} disabled={total === null}>
@@ -294,7 +294,7 @@ export function WeekTable({ s }: { s: S2State }) {
       <div className="spm-tbl__wrap">
         <table className="spm-tbl">
           <thead>
-            <tr><th>Week</th><th>Points</th><th>Trading</th><th>Referrals</th><th>Squad</th><th>Volume</th><th>Open interest</th><th>Holdings</th><th>Rank</th></tr>
+            <tr><th>Week</th><th>Volume</th><th>Open interest</th><th>Holdings</th><th>Rank</th><th>Squad</th><th>Trading</th><th>Referrals</th><th>Points</th></tr>
           </thead>
           <tbody>
             {shown.map((r, i) => {
@@ -307,14 +307,14 @@ export function WeekTable({ s }: { s: S2State }) {
                   {seasonHead && <tr className="spm-tbl__season"><td colSpan={9}>{r.season === 'L1' ? 'Layer 1 Season' : 'Season 1'}</td></tr>}
                   <tr className={w.isLive ? 'is-live' : ''}>
                     <td><b>{w.weekName}</b>{w.isLive && <span className="spm-tbl__live">Live</span>}<small>{dateRange(w.weekStartTime, w.weekEndTime)}</small></td>
-                    <td className="is-num is-strong">{tbd ? 'TBD' : fmt(w.points, 0)}</td>
-                    <td className="is-num">{tbd ? '—' : fmt(r.split.own, 0)}</td>
-                    <td className="is-num">{tbd ? '—' : fmt(r.split.referral, 0)}</td>
-                    <td className="is-num">{r.season === 'L1' ? <span className={w.totalBonusPct ? 'is-pos' : ''}>+{w.totalBonusPct ?? 0}%</span> : '—'}</td>
                     <td className="is-num">{r.split.volume ? usd(r.split.volume) : '—'}</td>
                     <td className="is-num">{w.oi ? usd(w.oi) : '—'}</td>
                     <td className="is-num">{holdings >= 1 ? usd(holdings) : '—'}</td>
                     <td className="is-num">{w.rank ? fmt(w.rank, 0) : '—'}</td>
+                    <td className="is-num">{r.season === 'L1' ? <span className={w.totalBonusPct ? 'is-pos' : ''}>+{w.totalBonusPct ?? 0}%</span> : '—'}</td>
+                    <td className="is-num">{tbd ? '—' : fmt(r.split.own, 0)}</td>
+                    <td className="is-num">{tbd ? '—' : fmt(r.split.referral, 0)}</td>
+                    <td className="is-num is-strong">{tbd ? 'TBD' : fmt(w.points, 0)}</td>
                   </tr>
                 </Fragment>
               );

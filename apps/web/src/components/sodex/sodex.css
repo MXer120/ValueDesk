@@ -504,7 +504,7 @@ html[data-theme='light'] .sdx .coin-ic[src*='sodex' i] { background: #141414; }
 .spc__band { position: absolute; left: 0; right: 0; }
 .spc__band em { position: absolute; right: 6px; top: 2px; font-size: 10px; font-style: normal; color: rgb(var(--ink) / 0.55); }
 .spc__band.is-iron { background: rgb(113 113 122 / 0.10); } .spc__band.is-bronze { background: rgb(154 103 84 / 0.16); } .spc__band.is-silver { background: rgb(148 163 184 / 0.14); }
-.spc__band.is-gold { background: rgb(221 167 0 / 0.14); } .spc__band.is-diamond { background: rgb(129 140 248 / 0.16); } .spc__band.is-epic { background: rgb(167 139 250 / 0.16); }
+.spc__band.is-gold { background: rgb(221 167 0 / 0.14); } .spc__band.is-diamond { background: rgb(129 140 248 / 0.16); } .spc__band.is-epic { background: linear-gradient(90deg, rgb(229 229 229 / 0.04), rgb(229 229 229 / 0.13)); }
 .spc__svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .spc__line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .spc__line.is-own { stroke: var(--accent); } .spc__line.is-field { stroke: rgb(var(--ink) / 0.4); }
@@ -545,3 +545,9 @@ html .pf.sdx .pfx-slide { position: relative; border-radius: 8px; }
 
 .spm-season__row b.is-muted { font-size: 14px; font-weight: 500; color: var(--muted); }
 .spc__mark { z-index: 3; }
+
+/* A glare across the Gold, Diamond and Epic cards: on arrival, on hover, then every few seconds (still for reduced motion). */
+.spm-card.is-glare::after { content: ''; position: absolute; top: -20%; bottom: -20%; left: -40%; width: 35%; transform: skewX(-18deg) translateX(0); background: linear-gradient(90deg, transparent, rgb(var(--ink) / 0.10) 35%, rgb(var(--ink) / 0.28) 50%, rgb(var(--ink) / 0.10) 65%, transparent); pointer-events: none; animation: spm-glare 7s ease-in-out 0.4s infinite; }
+.spm-card.is-glare:hover::after { animation-duration: 1.4s; }
+@keyframes spm-glare { 0% { transform: skewX(-18deg) translateX(0); } 22%, 100% { transform: skewX(-18deg) translateX(520%); } }
+@media (prefers-reduced-motion: reduce) { .spm-card.is-glare::after { animation: none; display: none; } }

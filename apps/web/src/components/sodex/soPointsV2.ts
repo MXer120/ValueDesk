@@ -245,11 +245,11 @@ export interface MmWeek { volume: number | null; oi: number | null }
 export interface MmDay { date: string; volume: number | null; internalOi: number | null }
 
 /** Server 1's /api/vs/sodex/mm-daily (valuedesk/sodex/mmDaily.ts). Null on any failure: the platform then includes them. */
-export async function fetchMmDaily(fromMs: number): Promise<MmDay[] | null> {
+export async function fetchMmDaily(fromMs: number): Promise<{ days: MmDay[]; takersOiNow: number | null } | null> {
   try {
     const r = await fetch(`/api/vs/sodex/mm-daily?from=${fromMs}`, { headers: { Accept: 'application/json' } });
-    const j = (await r.json()) as { ok?: boolean; days?: MmDay[] };
-    return r.ok && j.ok && Array.isArray(j.days) ? j.days : null;
+    const j = (await r.json()) as { ok?: boolean; days?: MmDay[]; takersOiNow?: number | null };
+    return r.ok && j.ok && Array.isArray(j.days) ? { days: j.days, takersOiNow: typeof j.takersOiNow === 'number' ? j.takersOiNow : null } : null;
   } catch {
     return null;
   }
@@ -275,40 +275,57 @@ export function mmByWeek(weeks: S2Week[], days: MmDay[] | null): Map<number, MmW
 }
 
 /**
- * Difficulty, week by week: dollars per point. Yours by volume (your volume / your trading points) and by open interest
- * (your mean OI / your trading points); the platform's (the venue's volume or mean OI, less the two big market makers,
- * over the week's pool). Lower is easier.
+ * Difficulty, week by week, both seasons: dollars per point. Yours by volume (your volume / your trading points) and by
+ * open interest (your mean OI / your trading points). The platform's (the venue's volume or mean OI, less the big
+ * accounts, over the week's pool) for Layer 1 weeks only: Season 1's weekly pool is not published. Lower is easier.
+ *
+ * The big accounts (owner 2026-11-16: "the 2-4 mm accounts need to be excluded for platform difficulty"):
+ *  - SoDEX's internal pair: its open interest every week (its sizes priced each day).
+ *  - 1002 + 23342: their volume as measured from 2026-11-06; before that, their measured share of the venue's volume
+ *    applied to the week (marked estimated); their open interest now taken off every week (marked estimated).
  */
 export interface DifficultyRow {
-  weekNo: number;
+  key: string;
+  short: string;
   name: string;
-  live: boolean;
+  season: 'S1' | 'L1';
   youVol: number | null;
   youOi: number | null;
   platVol: number | null;
   platOi: number | null;
-  /** Whether 1002 + 23342's volume was taken out of platVol. */
-  volOut: boolean;
-  /** Whether the internal pair's open interest was taken out of platOi. */
+  /** How 1002 + 23342's volume was taken out: measured, estimated from their share, or not at all. */
+  volOut: 'measured' | 'estimated' | null;
+  /** Whether the big accounts' open interest was taken out (the takers' part is an estimate). */
   oiOut: boolean;
 }
 
-export function difficultyRows(weeks: S2Week[], venueVol: Map<number, number>, venueOi: Map<number, number>, mm: Map<number, MmWeek> | null, pool: number | null): DifficultyRow[] {
-  return [...weeks].sort((a, b) => a.weekNo - b.weekNo).filter((w) => !w.isLive).map((w) => {
-    const sp = splitWeek(w);
-    const m = mm?.get(w.weekNo) ?? null;
-    const v = venueVol.get(w.weekNo);
-    const o = venueOi.get(w.weekNo);
+export function difficultyRows(all: AnyWeek[], venueVol: Map<number, number>, venueOi: Map<number, number>, mm: Map<number, MmWeek> | null, pool: number | null, takersOi: number | null): DifficultyRow[] {
+  // 1002 + 23342's share of the venue's volume over the weeks it was measured.
+  let mv = 0;
+  let vv = 0;
+  for (const [n, m] of mm ?? []) { const v = venueVol.get(n); if (m.volume !== null && v) { mv += m.volume; vv += v; } }
+  const share = vv > 0 ? Math.min(1, mv / vv) : null;
+  return all.filter((r) => !r.split.week.isLive).map((r) => {
+    const sp = r.split;
+    const w = sp.week;
+    const l1 = r.season === 'L1';
+    const m = l1 ? mm?.get(w.weekNo) ?? null : null;
+    const v = l1 ? venueVol.get(w.weekNo) : undefined;
+    const o = l1 ? venueOi.get(w.weekNo) : undefined;
+    const mmVol = m?.volume ?? (v && share !== null ? v * share : null);
+    const volOut: DifficultyRow['volOut'] = m?.volume != null ? 'measured' : mmVol !== null ? 'estimated' : null;
+    const mmOi = m?.oi != null ? m.oi + (takersOi ?? 0) : null;
     return {
-      weekNo: w.weekNo,
-      name: w.weekName,
-      live: w.isLive,
+      key: r.key,
+      short: r.short,
+      name: r.name,
+      season: r.season,
       youVol: sp.own >= 1 && sp.volume >= 1000 ? sp.volume / sp.own : null,
       youOi: sp.own >= 1 && (w.oi ?? 0) >= 1 ? (w.oi as number) / sp.own : null,
-      platVol: v && pool ? Math.max(0, v - (m?.volume ?? 0)) / pool : null,
-      platOi: o && pool ? Math.max(0, o - (m?.oi ?? 0)) / pool : null,
-      volOut: m?.volume != null,
-      oiOut: m?.oi != null,
+      platVol: v && pool ? Math.max(0, v - (mmVol ?? 0)) / pool : null,
+      platOi: o && pool ? Math.max(0, o - (mmOi ?? 0)) / pool : null,
+      volOut,
+      oiOut: mmOi !== null,
     };
   });
 }
@@ -425,6 +442,7 @@ export interface S2State {
   s1: S1Week[];
   venueOiDaily: DailyPoint[];
   mmDays: MmDay[] | null;
+  takersOiNow: number | null;
   bonus: S2TeamBonus | null;
   venueDaily: DailyPoint[];
   loading: boolean;
@@ -433,9 +451,9 @@ export interface S2State {
 
 export function useSoPointsV2(address: string | null, signedIn: boolean): S2State {
   // Loading from the first render when the wallet is signed in, so nothing shows a default before the reads start.
-  const [s, set] = useState<S2State>({ summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, bonus: null, venueDaily: [], loading: !!address && signedIn, error: null });
+  const [s, set] = useState<S2State>({ summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, takersOiNow: null, bonus: null, venueDaily: [], loading: !!address && signedIn, error: null });
   useEffect(() => {
-    if (!address || !signedIn) { set({ summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, bonus: null, venueDaily: [], loading: false, error: null }); return; }
+    if (!address || !signedIn) { set({ summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, takersOiNow: null, bonus: null, venueDaily: [], loading: false, error: null }); return; }
     let live = true;
     set((x) => ({ ...x, loading: true, error: null }));
     void Promise.allSettled([fetchS2Summary(address), fetchS2Weeks(address), fetchS2TeamBonus(address), fetchVenueDaily('volume', 90), fetchS1Weeks(address), fetchVenueDaily('open-interest', 90), fetchMmDaily(Date.now() - 90 * 86_400_000)]).then(([a, b, c, d, e, g, h]) => {
@@ -452,7 +470,8 @@ export function useSoPointsV2(address: string | null, signedIn: boolean): S2Stat
         weeks: b.status === 'fulfilled' ? b.value : [],
         s1: e.status === 'fulfilled' ? e.value : [],
         venueOiDaily: g.status === 'fulfilled' ? g.value : [],
-        mmDays: h.status === 'fulfilled' ? h.value : null,
+        mmDays: h.status === 'fulfilled' ? h.value?.days ?? null : null,
+        takersOiNow: h.status === 'fulfilled' ? h.value?.takersOiNow ?? null : null,
         bonus: c.status === 'fulfilled' ? c.value : null,
         venueDaily: d.status === 'fulfilled' ? d.value : [],
         loading: false,

@@ -12,6 +12,8 @@
  *    page, so it can take out more than their share but never more than the venue traded.
  */
 import { reader } from '../../indexer/reader.js';
+import { gwGet } from './gateway.js';
+import { resolveIds } from './resolver.js';
 import { priceKlines } from '../../sodex/priceKlines.js';
 import { sodexOiExcluded } from './oiExcluded.js';
 
@@ -30,9 +32,46 @@ export interface MmDay {
   internalOi: number | null;
 }
 
-let cache: { at: number; key: string; value: Promise<{ days: MmDay[]; volumeFrom: string }> } | null = null;
+export interface MmDaily {
+  days: MmDay[];
+  volumeFrom: string;
+  /**
+   * 1002 + 23342's open interest now, USD (their positions x mark price), or null when SoDEX did not answer. We hold no
+   * history of their positions, so the page takes this one figure off every week and marks it an estimate.
+   */
+  takersOiNow: number | null;
+}
 
-export function mmDaily(fromMs: number, now = Date.now()): Promise<{ days: MmDay[]; volumeFrom: string }> {
+let cache: { at: number; key: string; value: Promise<MmDaily> } | null = null;
+
+/** The two accounts' open interest now: |size| x the market's latest mark close, both accounts summed. */
+async function takersOiNow(): Promise<number | null> {
+  try {
+    const ids = await resolveIds(MM_ACCOUNTS.map(Number));
+    const addrs = MM_ACCOUNTS.map((a) => ids.get(Number(a))).filter((x): x is string => !!x);
+    if (addrs.length !== MM_ACCOUNTS.length) return null;
+    const sizes: Record<string, number> = {};
+    for (const a of addrs) {
+      const body = await gwGet<{ positions?: Array<{ symbol?: string; size?: string }> }>(`/api/v1/perps/accounts/${a}/positions`);
+      if (!Array.isArray(body?.positions)) return null;
+      for (const p of body.positions) {
+        const size = Number(p.size);
+        if (p.symbol && Number.isFinite(size) && size !== 0) sizes[p.symbol] = (sizes[p.symbol] ?? 0) + Math.abs(size);
+      }
+    }
+    let usd = 0;
+    for (const [sym, size] of Object.entries(sizes)) {
+      const last = await priceKlines({ symbol: sym, source: 'mark', interval: '1d', limit: 1 }).catch(() => []);
+      const c = Number((last[0] as { c?: string } | undefined)?.c);
+      if (Number.isFinite(c)) usd += size * c;
+    }
+    return usd;
+  } catch {
+    return null;
+  }
+}
+
+export function mmDaily(fromMs: number, now = Date.now()): Promise<MmDaily> {
   const from = Math.floor(fromMs / DAY);
   const key = String(from);
   if (cache && cache.key === key && now - cache.at < 3_600_000) return cache.value;
@@ -42,7 +81,7 @@ export function mmDaily(fromMs: number, now = Date.now()): Promise<{ days: MmDay
   return value;
 }
 
-async function build(fromDay: number, toDay: number): Promise<{ days: MmDay[]; volumeFrom: string }> {
+async function build(fromDay: number, toDay: number): Promise<MmDaily> {
   const iso = (d: number) => new Date(d * DAY).toISOString().slice(0, 10);
   const volFrom = Math.floor(Date.parse(`${MM_VOLUME_FROM}T00:00:00Z`) / DAY);
 
@@ -82,5 +121,7 @@ async function build(fromDay: number, toDay: number): Promise<{ days: MmDay[]; v
     }
     out.push({ date: iso(d), volume: d >= volFrom && store ? vol.get(d) ?? 0 : null, internalOi: ok ? oi : null });
   }
-  return { days: out, volumeFrom: MM_VOLUME_FROM };
+  // At most 10 s for the two accounts' positions: the route never waits on a slow lookup; null then (no estimate).
+  const takers = await Promise.race([takersOiNow(), new Promise<null>((r) => setTimeout(() => r(null), 10_000))]);
+  return { days: out, volumeFrom: MM_VOLUME_FROM, takersOiNow: takers };
 }

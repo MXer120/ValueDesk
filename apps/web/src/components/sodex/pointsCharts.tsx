@@ -183,7 +183,7 @@ export function DifficultyChart({ s, pool }: { s: S2State; pool: number | null }
   const [kind, setKind] = useState<DKind>('line');
   const [span, setSpan] = useState<Span>('all');
   const mm = useMemo(() => mmByWeek(s.weeks, s.mmDays), [s.weeks, s.mmDays]);
-  const all = useMemo(() => difficultyRows(s.weeks, venueVolumeByWeek(s.weeks, s.venueDaily), venueOiByWeek(s.weeks, s.venueOiDaily), mm, pool), [s.weeks, s.venueDaily, s.venueOiDaily, mm, pool]);
+  const all = useMemo(() => difficultyRows(allWeeks(s.s1, s.weeks).filter((r) => r.split.week.pointsStatus === 'CONFIRMED'), venueVolumeByWeek(s.weeks, s.venueDaily), venueOiByWeek(s.weeks, s.venueOiDaily), mm, pool, s.takersOiNow), [s.s1, s.weeks, s.venueDaily, s.venueOiDaily, mm, pool, s.takersOiNow]);
   const rows = cut(all, span);
   const you = (r: DifficultyRow) => (basis === 'vol' ? r.youVol : r.youOi);
   const plat = (r: DifficultyRow) => (basis === 'vol' ? r.platVol : r.platOi);
@@ -205,8 +205,9 @@ export function DifficultyChart({ s, pool }: { s: S2State; pool: number | null }
         </div>
         <Frame
           n={rows.length}
-          labels={rows.map((r) => `L${r.weekNo}`)}
+          labels={rows.map((r) => r.short)}
           kind={kind}
+          mark={(() => { const k = rows.findIndex((r) => r.season === 'L1'); return k > 0 ? { index: k, label: 'Layer 1' } : null; })()}
           series={[
             { key: 'you', cls: 'is-own', value: (i) => you(rows[i]!) },
             { key: 'plat', cls: 'is-field', value: (i) => plat(rows[i]!) },
@@ -217,12 +218,12 @@ export function DifficultyChart({ s, pool }: { s: S2State; pool: number | null }
           tip={(i) => {
             const r = rows[i]!;
             return (<>
-              <b className="spm-tt__h">Layer 1 · {r.name}</b>
+              <b className="spm-tt__h">{r.name}</b>
               <Row dot="is-own" k="You, by volume" v={r.youVol ? usd(r.youVol) : '—'} />
               <Row dot="is-own" k="You, by open interest" v={r.youOi ? usd(r.youOi) : '—'} />
               <Row dot="is-field" k="Platform, by volume" v={r.platVol ? usd(r.platVol) : '—'} />
               <Row dot="is-field" k="Platform, by open interest" v={r.platOi ? usd(r.platOi) : '—'} />
-              <Row k="Big accounts" v={r.volOut && r.oiOut ? 'taken out' : r.oiOut ? 'OI taken out' : r.volOut ? 'volume taken out' : 'included'} />
+              {r.season === 'L1' ? <Row k="Big accounts" v={`${r.oiOut ? 'OI out' : 'OI in'} · ${r.volOut === 'measured' ? 'volume out' : r.volOut === 'estimated' ? 'volume out (estimated)' : 'volume in'}`} /> : <Row k="Platform" v="Season 1 pool not published" />}
             </>);
           }}
         />
@@ -306,14 +307,31 @@ export function RankByWeek({ s }: { s: S2State }) {
 
 /* --- where the points come from ----------------------------------------------------------------------------------- */
 
+type MixSpan = 's1' | 'l1' | 'all';
+const MIX_SPANS: ReadonlyArray<readonly [MixSpan, string]> = [['s1', 'Season 1'], ['l1', 'Layer 1'], ['all', 'All']];
+
 export function PointsMix({ s }: { s: S2State }) {
-  const rows = useMemo(() => allWeeks(s.s1, s.weeks).filter((r) => r.split.week.pointsStatus === 'CONFIRMED'), [s.s1, s.weeks]);
+  const [span, setSpan] = useState<MixSpan>('all');
+  // Season 1 straight from SoDEX's rows, Closed Alpha included (allWeeks leaves it out of the week charts): without it
+  // the total fell short of the balance SoDEX shows. Season 1 had no squad boost.
+  const s1 = useMemo(() => {
+    let own = 0;
+    let ref = 0;
+    for (const w of s.s1) { if (w.pointsStatus !== 'CONFIRMED') continue; own += Math.max(0, w.points - w.referralPoints); ref += w.referralPoints; }
+    return { own, ref, boost: 0, n: s.s1.length };
+  }, [s.s1]);
+  const l1 = useMemo(() => {
+    const rows = allWeeks([], s.weeks).filter((r) => r.split.week.pointsStatus === 'CONFIRMED');
+    return { own: rows.reduce((a, r) => a + r.split.own, 0), ref: rows.reduce((a, r) => a + r.split.referral, 0), boost: rows.reduce((a, r) => a + r.split.boost, 0), n: rows.length };
+  }, [s.weeks]);
+  const pick = span === 's1' ? s1 : span === 'l1' ? l1 : { own: s1.own + l1.own, ref: s1.ref + l1.ref, boost: l1.boost, n: s1.n + l1.n };
   const parts = [
-    { v: rows.reduce((a, r) => a + r.split.own, 0), cls: 'is-own', label: 'Trading' },
-    { v: rows.reduce((a, r) => a + r.split.referral, 0), cls: 'is-ref', label: 'Referrals' },
-    { v: rows.reduce((a, r) => a + r.split.boost, 0), cls: 'is-boost', label: 'Squad boost' },
+    { v: pick.own, cls: 'is-own', label: 'Trading' },
+    { v: pick.ref, cls: 'is-ref', label: 'Referrals' },
+    { v: pick.boost, cls: 'is-boost', label: 'Squad boost' },
   ];
   const total = parts.reduce((a, p) => a + p.v, 0);
+  const rows = { length: pick.n };
   let a0 = -Math.PI / 2;
   const R = 52;
   const arcs = parts.map((p) => {
@@ -323,7 +341,7 @@ export function PointsMix({ s }: { s: S2State }) {
     return { ...p, d };
   });
   return (
-    <Card title="Where your points come from">
+    <Card title="Where your points come from" action={<ViewSeg value={span} options={MIX_SPANS} onChange={setSpan} label="Season" />}>
       {!rows.length ? (s.loading ? <SkelRows rows={1} height={160} /> : <p className="pf-note">No weeks yet.</p>) : (
         <div className="spc-mix">
           <svg viewBox="0 0 140 140" width="150" height="150" aria-hidden="true">
