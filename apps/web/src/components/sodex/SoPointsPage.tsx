@@ -4,8 +4,8 @@
  * tier ladder, the wallet's standing and the rules.
  *
  * The wallet's balance, weeks and squad need SoDEX's token, so they sit behind SODEX_SIGNIN_LIVE. The
- * panels themselves (components/Points.tsx) are the ones built for that; with the switch off a locked
- * section stands in for them. Every figure is the API's: the pool is the API's 1,000,000, not the
+ * panels themselves (components/Points.tsx) are the ones built for that; with the switch off the wallet's
+ * estimate from public data (PointsEstimate.tsx) stands in for them. Every figure is the API's: the pool is the API's 1,000,000, not the
  * 900,000 in SoDEX's page text.
  */
 import { CoinIcon } from '../CoinIcon';
@@ -15,7 +15,8 @@ import { DASH, fmt } from '../../format';
 import { RULES } from '../../points';
 import { SODEX_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
 import type { Eip1193Provider } from '../../wallet';
-import { LockedSection, Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
+import { PointsEstimate } from './PointsEstimate';
+import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
 
 /** The panels of components/Points.tsx, on the page instead of in a movable grid. */
 const panel = (id: string, c: PointsContext) => {
@@ -68,12 +69,7 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
           <div className="sdx-span">{panel('weeks', c)}</div>
         </div>
       ) : (
-        <LockedSection
-          title="Your SoPoints"
-          items={['Balance and tier', 'Points week by week', 'Your squads and their boost']}
-          href={SODEX_SITE.points}
-          hrefLabel="Open on SoDEX"
-        />
+        <PointsEstimate c={c} />
       )}
 
       <section className="sdx-section" aria-label="How to earn SoPoints">

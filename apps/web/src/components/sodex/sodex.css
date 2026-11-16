@@ -254,3 +254,20 @@
 /* SoDEX's mark is white: on the light theme it sits on a dark chip, wherever it stands in for a logo. */
 html[data-theme='light'] .sdx-hero__mark { padding: 5px; border-radius: 10px; background: #141414; }
 html[data-theme='light'] .sdx .coin-ic[src*='sodex' i] { background: #141414; }
+
+/* SoPoints: the wallet's estimate from public data and the "what volume earns" calculator (PointsEstimate.tsx). */
+.sdx-est .pf-card__body { display: flex; flex-direction: column; gap: var(--sp-3, 12px); }
+.sdx-est .sdx-tiles { margin: 0; }
+.sdx-est__calc { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px 16px; padding: 12px 14px; border-radius: var(--radius-tile, 10px); background: rgb(var(--ink) / 0.035); }
+.sdx-est__k { color: var(--muted); font-size: 12px; }
+.sdx-est__ctl { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.sdx-est__out { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; }
+.sdx-est__out b { font-family: var(--font-num); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+.sdx-est__out span { color: var(--muted); font-size: 12px; }
+.sdx-est__out small { color: var(--dim); font-size: 11px; }
+.sdx-est__fine { margin: 0; color: var(--dim); font-size: 11px; line-height: 1.5; }
+.sdx-est__fine a { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 720px) {
+  .sdx-est__calc { grid-template-columns: 1fr; }
+  .sdx-est__out { align-items: flex-start; text-align: left; }
+}
