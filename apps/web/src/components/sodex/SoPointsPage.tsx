@@ -16,6 +16,8 @@ import { RULES } from '../../points';
 import { SODEX_POINTS_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
 import type { Eip1193Provider } from '../../wallet';
 import { PointsEstimate } from './PointsEstimate';
+import { CostPerPoint, EarnMore, MySquadBoost, SoPointsCard, WeeklyPoints } from './SoPointsMine';
+import { useSoPointsV2 } from './soPointsV2';
 import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
 
 /** The panels of components/Points.tsx, on the page instead of in a movable grid. */
@@ -36,6 +38,8 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
   const w = c.week;
   const ends = w ? w.nextWeekStartTime * 1000 : null;
   const pays = w ? w.distributionTime * 1000 : null;
+  const mine = SODEX_POINTS_SIGNIN_LIVE && c.tokenPresent && !!address;
+  const v2 = useSoPointsV2(address, mine);
 
   return (
     <ProgrammePage label="SoPoints">
@@ -56,23 +60,30 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
         />
       </Tiles>
 
-      <div className="sdx-duo">
-        <BoostedMarkets c={c} />
-        <SquadBoost c={c} />
-      </div>
-
-      {SODEX_POINTS_SIGNIN_LIVE && !c.tokenPresent ? (
-        <PointsSignIn c={c} />
-      ) : SODEX_POINTS_SIGNIN_LIVE ? (
-        <div className="sdx-trio sdx-trio--mine">
-          {panel('mine', c)}
-          {panel('economics', c)}
-          {panel('difficulty', c)}
-          <div className="sdx-span">{panel('weeks', c)}</div>
-        </div>
-      ) : null}
-
-      <PointsEstimate c={c} />
+      {mine ? (
+        <>
+          <div className="sdx-duo spm-duo">
+            <SoPointsCard s={v2} />
+            <MySquadBoost s={v2} cfg={c.boost} />
+          </div>
+          {v2.error && <p className="pf-note" role="alert">Some of your SoPoints could not be read: {v2.error}</p>}
+          <EarnMore s={v2} cfg={c.boost} weights={c.weights} pool={w?.weekPoolPoints ?? null} />
+          <div className="sdx-duo">
+            <WeeklyPoints s={v2} />
+            <CostPerPoint s={v2} pool={w?.weekPoolPoints ?? null} />
+          </div>
+          <BoostedMarkets c={c} />
+        </>
+      ) : (
+        <>
+          <div className="sdx-duo">
+            <BoostedMarkets c={c} />
+            <SquadBoost c={c} />
+          </div>
+          {SODEX_POINTS_SIGNIN_LIVE && <PointsSignIn c={c} />}
+          <PointsEstimate c={c} />
+        </>
+      )}
 
       <section className="sdx-section" aria-label="How to earn SoPoints">
         <h2 className="sdx-section__title">How to earn</h2>

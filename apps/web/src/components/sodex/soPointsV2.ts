@@ -1,0 +1,263 @@
+/**
+ * SoPoints, Layer 1 Season: the signed-in wallet's own figures as SoDEX's points page reads them (their bundle,
+ * 2026-11-16: biz/sopoints/v2/summary, /week/list, /team/bonus behind the sign-in token; /team/boost/config public),
+ * and the arithmetic the page builds on them (owner 2026-11-16: "squad boost needs to show the users squad boost",
+ * "more actually useful analytics which explain traders how to earn more sopoints while keeping them simple").
+ *
+ * What is SoDEX's and what is ours:
+ *  - Every field below is SoDEX's, read as is.
+ *  - points = round((own + referral) x (1 + squad %)) is fitted from 19 of the owner's wallets (all referral-only weeks
+ *    within 1 point); the split of a week into own / referral / boost uses it.
+ *  - "Twice the volume earns about 1.6x the points" is fitted (exponent ~0.62-0.71 on volume share) and is labelled
+ *    an estimate wherever it is shown.
+ */
+import { useEffect, useState } from 'react';
+import { authed, fetchVenueDaily, type BoostConfig, type DailyPoint, type VolumeWeights } from '../../points';
+
+const BIZ = 'https://alpha-biz.sodex.dev';
+
+export interface S2Summary {
+  totalPoints: number;
+  basePoints?: number;
+  boostPoints?: number;
+  referralPoints?: number;
+  currentTier: string;
+  nextTier?: string | null;
+  nextTierPoints?: number | null;
+  rank?: number;
+  totalUser?: number;
+}
+
+export interface S2WeightDetail { marketType: string; symbol: string; coefficient: string; rawVolumeU: string; weightedVolumeU: string }
+
+export interface S2Week {
+  weekNo: number;
+  weekName: string;
+  status: string;
+  weekStartTime: number;
+  weekEndTime: number;
+  distributionTime: number;
+  isLive: boolean;
+  spotVolume: number;
+  futuresVolume: number;
+  futuresVolumeWeightDetails?: S2WeightDetail[];
+  vaultHolding: number | null;
+  wealthTvl: number | null;
+  oi: number | null;
+  accountValue: number | null;
+  teamWeekVolume: number;
+  teamWindowVolume: number;
+  totalBonusPct: number | null;
+  points: number;
+  referralPoints: number;
+  pointsStatus: string;
+  rank: number;
+  totalUser: number;
+  rankPercentile: string;
+}
+
+export interface S2TeamBonus {
+  eligible: boolean;
+  teamMemberCount: number;
+  activeTeamCount: number;
+  isEarlyBird: boolean;
+  windowRounds: number;
+  /** The squad the wallet joined (its inviter's), USD over the window. */
+  uplineTeamVolume: string | number;
+  /** The squad the wallet built (its invitees), USD over the window. */
+  downlineTeamVolume: string | number;
+  asOfTsMs: number;
+}
+
+export const fetchS2Summary = (a: string) => authed<S2Summary>(`${BIZ}/biz/sopoints/v2/summary`, a);
+export const fetchS2Weeks = (a: string) => authed<S2Week[]>(`${BIZ}/biz/sopoints/v2/week/list`, a).then((r) => r ?? []);
+export const fetchS2TeamBonus = (a: string) => authed<S2TeamBonus>(`${BIZ}/biz/sopoints/v2/team/bonus`, a);
+
+/* --- squad boost ------------------------------------------------------------------------------------------------ */
+
+/** The +% one squad's window volume reaches on SoDEX's ladder (0 below the first step). */
+export function stepPct(volume: number, cfg: BoostConfig): number {
+  let pct = 0;
+  for (const t of [...cfg.tiers].sort((a, b) => Number(a.threshold) - Number(b.threshold))) if (volume >= Number(t.threshold)) pct = t.bonusPct;
+  return pct;
+}
+
+/** The next step above `volume`: its threshold, its +% and how much volume is missing. Null at the top. */
+export function nextStep(volume: number, cfg: BoostConfig): { threshold: number; pct: number; missing: number } | null {
+  const t = [...cfg.tiers].sort((a, b) => Number(a.threshold) - Number(b.threshold)).find((x) => volume < Number(x.threshold));
+  return t ? { threshold: Number(t.threshold), pct: t.bonusPct, missing: Number(t.threshold) - volume } : null;
+}
+
+export interface SquadBreakdown {
+  joined: { volume: number; pct: number; next: ReturnType<typeof nextStep> };
+  built: { volume: number; pct: number; next: ReturnType<typeof nextStep>; members: number; active: number };
+  earlyBird: number;
+  /** SoDEX's own total for the week in progress when it has one, else the sum of the parts. */
+  total: number;
+  fromSodex: boolean;
+}
+
+export function squadBreakdown(bonus: S2TeamBonus, cfg: BoostConfig, liveWeek: S2Week | null): SquadBreakdown {
+  const jv = Number(bonus.uplineTeamVolume) || 0;
+  const bv = Number(bonus.downlineTeamVolume) || 0;
+  const joined = { volume: jv, pct: stepPct(jv, cfg), next: nextStep(jv, cfg) };
+  const built = { volume: bv, pct: stepPct(bv, cfg), next: nextStep(bv, cfg), members: bonus.teamMemberCount, active: bonus.activeTeamCount };
+  const earlyBird = bonus.isEarlyBird ? cfg.earlyBirdBonusPct : 0;
+  const sodex = liveWeek?.totalBonusPct;
+  const sum = joined.pct + built.pct + earlyBird;
+  return { joined, built, earlyBird, total: typeof sodex === 'number' ? sodex : sum, fromSodex: typeof sodex === 'number' };
+}
+
+/* --- a week, split ----------------------------------------------------------------------------------------------- */
+
+export interface WeekSplit {
+  week: S2Week;
+  own: number;
+  referral: number;
+  boost: number;
+  volume: number;
+  /** USD of the wallet's own volume per own point; null without both. */
+  dollarsPerPoint: number | null;
+}
+
+/** points = (own + referral) x (1 + squad %): the boost is what the multiplier added. Unscored weeks split to nothing. */
+export function splitWeek(w: S2Week): WeekSplit {
+  const volume = (w.spotVolume || 0) + (w.futuresVolume || 0);
+  if (w.pointsStatus !== 'CONFIRMED') return { week: w, own: 0, referral: 0, boost: 0, volume, dollarsPerPoint: null };
+  const mult = 1 + (w.totalBonusPct ?? 0) / 100;
+  const before = w.points / mult;
+  const referral = Math.min(w.referralPoints || 0, before);
+  // A residue under 1% of the week is rounding in SoDEX's referral figure, not trading.
+  const rawOwn = Math.max(0, before - referral);
+  const own = rawOwn < w.points * 0.01 ? 0 : rawOwn;
+  const boost = Math.max(0, w.points - before);
+  return { week: w, own, referral, boost, volume, dollarsPerPoint: own >= 1 && volume >= 1000 ? volume / own : null };
+}
+
+/* --- the field ---------------------------------------------------------------------------------------------------- */
+
+/** The venue's traded volume inside each week, from the daily series (half-open [start, start + 7 d)). */
+export function venueVolumeByWeek(weeks: S2Week[], daily: DailyPoint[]): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const w of weeks) {
+    const from = w.weekStartTime * 1000;
+    const to = from + 7 * 86_400_000;
+    const rows = daily.filter((p) => p.ts >= from - 12 * 3_600_000 && p.ts < to - 12 * 3_600_000);
+    if (rows.length >= 6) out.set(w.weekNo, rows.reduce((s, p) => s + p.value, 0));
+  }
+  return out;
+}
+
+/* --- how to earn more -------------------------------------------------------------------------------------------- */
+
+export interface Tip {
+  id: 'squad' | 'boosted' | 'pace' | 'steady' | 'hold' | 'invite';
+  title: string;
+  /** The one figure that matters, already formatted. */
+  value: string;
+  line: string;
+  /** "estimate" when the line rests on our fit rather than on SoDEX's own numbers. */
+  kind: 'fact' | 'estimate';
+}
+
+const usd = (n: number) => (n >= 1e6 ? `$${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}M` : n >= 1e4 ? `$${Math.round(n / 1e3)}K` : `$${Math.round(n).toLocaleString('en-US')}`);
+
+export function earnTips(input: {
+  weeks: S2Week[];
+  squad: SquadBreakdown | null;
+  cfg: BoostConfig | null;
+  weights: VolumeWeights | null;
+  pool: number | null;
+  venue: Map<number, number>;
+}): Tip[] {
+  const tips: Tip[] = [];
+  const scored = input.weeks.filter((w) => w.pointsStatus === 'CONFIRMED').sort((a, b) => b.weekNo - a.weekNo);
+  const last = scored[0] ?? null;
+  const s = input.squad;
+
+  // 1. The squad: the cheapest next step.
+  if (s && input.cfg) {
+    const steps = [
+      s.built.next && { who: 'your squad', ...s.built.next },
+      s.joined.next && s.joined.volume > 0 && { who: 'the squad you joined', ...s.joined.next },
+    ].filter(Boolean) as Array<{ who: string; threshold: number; pct: number; missing: number }>;
+    const best = steps.sort((a, b) => a.missing - b.missing)[0];
+    if (best) {
+      const gain = best.pct - (best.who === 'your squad' ? s.built.pct : s.joined.pct);
+      tips.push({ id: 'squad', kind: 'fact', title: 'Next squad step', value: `+${gain}%`,
+        line: `${usd(best.missing)} more volume in ${best.who} over the ${input.cfg.windowRounds}-week window lifts every point you earn by ${gain}% more (to +${best.pct}%).` });
+    } else if (s.built.volume === 0 && s.joined.volume === 0) {
+      tips.push({ id: 'squad', kind: 'fact', title: 'Join a squad', value: `up to +${input.cfg.maxTotalBonusPct}%`,
+        line: 'You are in no squad. A squad multiplies every point you earn, referral points included.' });
+    }
+  }
+
+  // 2. Boosted markets.
+  const boosted = input.weights?.weights ?? [];
+  if (boosted.length) {
+    const coef = Math.max(...boosted.map((b) => Number(b.coefficient) || 1));
+    const lastBoosted = last?.futuresVolumeWeightDetails?.reduce((n, d) => n + (Number(d.rawVolumeU) || 0), 0) ?? 0;
+    const share = last && last.futuresVolume > 0 ? lastBoosted / last.futuresVolume : 0;
+    tips.push({ id: 'boosted', kind: 'fact', title: 'Boosted markets', value: `×${coef}`,
+      line: `${boosted.slice(0, 4).map((b) => b.symbol.replace('-USD', '')).join(', ')}${boosted.length > 4 ? ` and ${boosted.length - 4} more` : ''} count ×${coef} this round.${last && last.futuresVolume > 0 ? ` ${Math.round(share * 100)}% of your futures volume last week was in boosted markets.` : ''}` });
+  }
+
+  // 3. Your pace against the field: dollars of volume per point.
+  const traded = scored.map(splitWeek).find((x) => x.dollarsPerPoint !== null);
+  if (traded && input.pool) {
+    const v = input.venue.get(traded.week.weekNo);
+    const field = v ? v / input.pool : null;
+    tips.push({ id: 'pace', kind: 'fact', title: 'Your cost per point', value: `${usd(traded.dollarsPerPoint!)}`,
+      line: `${traded.week.weekName}: ${usd(traded.dollarsPerPoint!)} of your volume per point${field ? `, against ${usd(field)} for the whole venue (its volume over the ${Math.round(input.pool / 1000)}K pool)` : ''}.` });
+  }
+
+  // 4. Steady beats one big week (our fit).
+  tips.push({ id: 'steady', kind: 'estimate', title: 'Steady beats big', value: '2× → ~1.6×',
+    line: 'Points grow slower than volume: twice the volume earned about 1.6× the points in the weeks we measured. Trading every week earns more than the same volume in one week.' });
+
+  // 5. Holdings and open positions.
+  const holds = scored.slice(0, 4).some((w) => (w.wealthTvl ?? 0) > 1 || (w.vaultHolding ?? 0) > 1);
+  tips.push({ id: 'hold', kind: 'fact', title: 'Holdings count too', value: holds ? 'Earning' : 'Not used',
+    line: holds ? 'Your Wealth or SLP Vault balance is earning points. Larger holdings earn more.' : 'Wealth products, the SLP Vault and open positions earn points without trading. You hold none of these.' });
+
+  // 6. Referrals.
+  const ref = last?.referralPoints ?? 0;
+  tips.push({ id: 'invite', kind: 'fact', title: 'Invites', value: ref > 0 ? `+${ref.toLocaleString('en-US')}` : '25%',
+    line: ref > 0 ? `Your invitees earned you ${ref.toLocaleString('en-US')} referral points last week (25% of their points), before your squad boost.` : 'You get 25% of the points your invitees earn, and they get +5%.' });
+
+  return tips;
+}
+
+/* --- the hook ---------------------------------------------------------------------------------------------------- */
+
+export interface S2State {
+  summary: S2Summary | null;
+  weeks: S2Week[];
+  bonus: S2TeamBonus | null;
+  venueDaily: DailyPoint[];
+  loading: boolean;
+  error: string | null;
+}
+
+export function useSoPointsV2(address: string | null, signedIn: boolean): S2State {
+  const [s, set] = useState<S2State>({ summary: null, weeks: [], bonus: null, venueDaily: [], loading: false, error: null });
+  useEffect(() => {
+    if (!address || !signedIn) { set({ summary: null, weeks: [], bonus: null, venueDaily: [], loading: false, error: null }); return; }
+    let live = true;
+    set((x) => ({ ...x, loading: true, error: null }));
+    void Promise.allSettled([fetchS2Summary(address), fetchS2Weeks(address), fetchS2TeamBonus(address), fetchVenueDaily('volume', 90)]).then(([a, b, c, d]) => {
+      if (!live) return;
+      const err = [a, b, c].find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+      set({
+        summary: a.status === 'fulfilled' ? a.value : null,
+        weeks: b.status === 'fulfilled' ? b.value : [],
+        bonus: c.status === 'fulfilled' ? c.value : null,
+        venueDaily: d.status === 'fulfilled' ? d.value : [],
+        loading: false,
+        error: err ? String((err.reason as Error)?.message ?? err.reason) : null,
+      });
+    });
+    return () => { live = false; };
+  }, [address, signedIn]);
+  return s;
+}

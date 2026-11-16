@@ -476,7 +476,7 @@ export class NeedsPointsToken extends Error {
   }
 }
 
-async function authed<T>(url: string, address: string): Promise<T> {
+export async function authed<T>(url: string, address: string): Promise<T> {
   if (!SODEX_POINTS_SIGNIN_LIVE) throw new NeedsPointsToken();
   const token = getPointsToken(address);
   if (!token) throw new NeedsPointsToken();
