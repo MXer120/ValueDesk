@@ -16,7 +16,7 @@ import { RULES } from '../../points';
 import { SODEX_POINTS_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
 import type { Eip1193Provider } from '../../wallet';
 import { PointsEstimate } from './PointsEstimate';
-import { CostPerPoint, EarnMore, MySquadBoost, SeasonCard, SoPointsCard, WeeklyPoints } from './SoPointsMine';
+import { EarnMore, MySquadBoost, SeasonCard, SoPointsCard, SquadEnergy, ThisWeek, WeekTable, WeeklyPoints } from './SoPointsMine';
 import { useSoPointsV2 } from './soPointsV2';
 import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
 
@@ -56,13 +56,16 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
             <SeasonCard week={w} code={c.referral?.referralCode || null} />
           </div>
           {v2.error && <p className="pf-note" role="alert">Some of your SoPoints could not be read: {v2.error}</p>}
-          <MySquadBoost s={v2} cfg={c.boost} />
+          <div className="sdx-duo spm-charts">
+            <ThisWeek s={v2} week={w} />
+            <MySquadBoost s={v2} cfg={c.boost} />
+          </div>
           <EarnMore s={v2} cfg={c.boost} weights={c.weights} pool={w?.weekPoolPoints ?? null} />
           <div className="sdx-duo spm-charts">
             <WeeklyPoints s={v2} />
-            <CostPerPoint s={v2} pool={w?.weekPoolPoints ?? null} />
+            <SquadEnergy s={v2} cfg={c.boost} />
           </div>
-          <div className="spm-table">{panel('weeks', c)}</div>
+          <WeekTable s={v2} />
           <BoostedMarkets c={c} />
         </>
       ) : (

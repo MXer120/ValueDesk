@@ -176,6 +176,39 @@ export function splitWeek(w: S2Week): WeekSplit {
   return { week: w, own, referral, boost, volume, dollarsPerPoint: own >= 1 && volume >= 1000 ? volume / own : null };
 }
 
+/* --- this week so far ------------------------------------------------------------------------------------------ */
+
+/** Our fitted exponent on volume share (Season 1: 0.71, Layer 1: ~0.62): points grow slower than volume. */
+export const VOLUME_EXPONENT = 0.65;
+
+export interface WeekForecast {
+  live: S2Week;
+  volume: number;
+  /** The wallet's own dollars of volume per point, median of its last scored trading weeks; null when it has none. */
+  dpp: number | null;
+  /** Points from trading so far, before the squad boost (estimate). */
+  own: number | null;
+  /** The same with this week's squad boost on top (estimate). */
+  boosted: number | null;
+  /** What the next $10K of volume adds, boost included (estimate; concave). */
+  per10k: number | null;
+}
+
+export function forecastWeek(weeks: S2Week[]): WeekForecast | null {
+  const live = weeks.find((w) => w.isLive);
+  if (!live) return null;
+  const volume = (live.spotVolume || 0) + (live.futuresVolume || 0);
+  const past = weeks.filter((w) => !w.isLive && w.pointsStatus === 'CONFIRMED').sort((a, b) => b.weekNo - a.weekNo).map(splitWeek)
+    .map((x) => x.dollarsPerPoint).filter((x): x is number => x !== null).slice(0, 4).sort((a, b) => a - b);
+  const dpp = past.length ? past[Math.floor(past.length / 2)]! : null;
+  const mult = 1 + (live.totalBonusPct ?? 0) / 100;
+  const own = dpp && volume > 0 ? volume / dpp : dpp ? 0 : null;
+  const boosted = own !== null ? own * mult : null;
+  // Marginal points of the next $10K: d(points)/d(volume) = k * points / volume on a power law; from zero, the plain rate.
+  const per10k = dpp ? (volume > 0 && own ? VOLUME_EXPONENT * (own / volume) * 10_000 : 10_000 / dpp) * mult : null;
+  return { live, volume, dpp, own, boosted, per10k };
+}
+
 /* --- the field ---------------------------------------------------------------------------------------------------- */
 
 /** The venue's traded volume inside each week, from the daily series (half-open [start, start + 7 d)). */

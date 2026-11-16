@@ -5,13 +5,13 @@
  * and link). The squad card shows the wallet's own boost; the charts show every week of both seasons at once; the
  * tips explain how to earn more, simply. Data and arithmetic: soPointsV2.ts.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { Card } from '../portfolio/parts';
 import { DASH, fmt } from '../../format';
 import { notify } from '../../toast';
 import type { BoostConfig, VolumeWeights, WeekInfo } from '../../points';
 import { Pill, useNow } from './parts';
-import { allWeeks, earnTips, squadBreakdown, venueVolumeByWeek, type AnyWeek, type S2State, type SquadBreakdown, type Tip } from './soPointsV2';
+import { allWeeks, earnTips, forecastWeek, squadBreakdown, venueVolumeByWeek, type S2State, type SquadBreakdown, type Tip } from './soPointsV2';
 
 /* SoDEX's own tier styles, as their points page draws its card (bundle 2026-11-16). */
 const TIER_STYLE: Record<string, { bg: string; border: string; shadow: string; bar: string; chip: string }> = {
@@ -144,115 +144,132 @@ const CopyBtn = ({ onClick, label }: { onClick: () => void; label: string }) => 
   </button>
 );
 
-/* --- the wallet's squad boost ------------------------------------------------------------------------------------ */
+/* --- the wallet's squad boost: one track per squad ----------------------------------------------------------------- */
 
 export function MySquadBoost({ s, cfg }: { s: S2State; cfg: BoostConfig | null }) {
   const live = s.weeks.find((w) => w.isLive) ?? null;
   const q: SquadBreakdown | null = s.bonus && cfg ? squadBreakdown(s.bonus, cfg, live) : null;
-  const tiers = cfg ? [...cfg.tiers].sort((a, b) => Number(a.threshold) - Number(b.threshold)) : [];
+  const steps = cfg ? [...cfg.tiers].sort((a, b) => Number(a.threshold) - Number(b.threshold)) : [];
   return (
-    <Card title="Your squad boost" action={cfg ? <span className="pf-unit">up to +{cfg.maxTotalBonusPct}%</span> : undefined}>
-      {!q ? <p className="pf-note">{s.loading ? 'Reading your squad…' : DASH}</p> : (
-        <div className="spm-squad">
-          <div className="spm-squad__head">
-            <b>+{q.total}%</b>
-            <span>on every point you earn this week</span>
+    <Card title="Your squad boost" action={q ? <span className="spm-sq__total">+{q.total}%</span> : undefined}>
+      {!q || !cfg ? <p className="pf-note">{s.loading ? 'Reading your squad…' : DASH}</p> : (
+        <div className="spm-sq">
+          <p className="spm-sq__sum">
+            Squad you joined <b>+{q.joined.pct}%</b> <i>+</i> squad you built <b>+{q.built.pct}%</b> <i>+</i> early bird <b>{q.earlyBird ? `+${q.earlyBird}%` : '0%'}</b>
+          </p>
+          <SquadTrack label="Squad you joined" pct={q.joined.pct} volume={q.joined.volume} steps={steps} next={q.joined.next} meta={q.joined.volume > 0 ? `${usd(q.joined.volume)} in the last ${cfg.windowRounds} weeks` : 'You joined no squad'} />
+          <SquadTrack label="Squad you built" pct={q.built.pct} volume={q.built.volume} steps={steps} next={q.built.next} meta={`${usd(q.built.volume)} in the last ${cfg.windowRounds} weeks · ${q.built.members} members, ${q.built.active} active`} />
+          <div className="spm-sq__eb">
+            <span>Early bird</span>
+            <b className={q.earlyBird ? 'is-on' : ''}>{q.earlyBird ? `+${q.earlyBird}% locked in` : 'Not locked in'}</b>
           </div>
-          <div className="spm-squad__parts">
-            <Part label="Squad you joined" pct={q.joined.pct} vol={q.joined.volume} next={q.joined.next} />
-            <Part label="Squad you built" pct={q.built.pct} vol={q.built.volume} next={q.built.next} sub={`${q.built.members} members · ${q.built.active} active`} />
-            <div className="spm-part">
-              <span className="spm-part__k">Early bird</span>
-              <b>{q.earlyBird ? `+${q.earlyBird}%` : '—'}</b>
-              <small>{q.earlyBird ? `locked in during the first ${cfg?.earlyBirdRounds ?? 4} weeks` : 'not locked in'}</small>
-            </div>
-          </div>
-          <ol className="spm-ladder" aria-label="Squad steps">
-            {tiers.map((t) => {
-              const on = q.built.volume >= Number(t.threshold) || q.joined.volume >= Number(t.threshold);
-              return <li key={t.threshold} className={on ? 'is-on' : ''}><b>+{t.bonusPct}%</b><span>{usd(Number(t.threshold))}</span></li>;
-            })}
-          </ol>
         </div>
       )}
     </Card>
   );
 }
 
-function Part({ label, pct, vol, next, sub }: { label: string; pct: number; vol: number; next: { threshold: number; pct: number; missing: number } | null; sub?: string }) {
-  const prog = next ? Math.min(100, (vol / next.threshold) * 100) : 100;
+/** One squad: its +% and a track over SoDEX's five steps (equal spacing; the fill runs inside the step it is in). */
+function SquadTrack({ label, pct, volume, steps, next, meta }: {
+  label: string; pct: number; volume: number; steps: Array<{ threshold: string; bonusPct: number }>;
+  next: { threshold: number; pct: number; missing: number } | null; meta: string;
+}) {
+  const t = steps.map((x) => Number(x.threshold));
+  let reached = 0;
+  for (const x of t) if (volume >= x) reached += 1;
+  const lo = reached === 0 ? 0 : t[reached - 1]!;
+  const hi = t[reached] ?? lo;
+  const inside = reached >= t.length ? 0 : (volume - lo) / Math.max(1, hi - lo);
+  const fill = Math.min(100, ((reached + Math.max(0, Math.min(1, inside))) / t.length) * 100);
   return (
-    <div className="spm-part">
-      <span className="spm-part__k">{label}</span>
-      <b>{pct ? `+${pct}%` : '—'}</b>
-      <small>{usd(vol)} {next ? `· ${usd(next.missing)} to +${next.pct}%` : '· top step'}</small>
-      <div className="spm-part__bar"><i style={{ width: `${prog}%` }} /></div>
-      {sub && <small>{sub}</small>}
+    <div className="spm-sq__row">
+      <div className="spm-sq__head">
+        <span className="spm-sq__label">{label}</span>
+        <b className={pct ? 'is-on' : ''}>{pct ? `+${pct}%` : '0%'}</b>
+        <span className="spm-sq__next">{next ? <>{usd(next.missing)} more to <b>+{next.pct}%</b></> : 'Top step reached'}</span>
+      </div>
+      <div className="spm-sq__track" role="img" aria-label={`${label}: ${usd(volume)}, ${pct ? `+${pct}%` : 'no boost'}`}>
+        <i className="spm-sq__fill" style={{ width: `${fill}%` }} />
+        {steps.map((x, i) => (
+          <span key={x.threshold} className={`spm-sq__step${i < reached ? ' is-on' : ''}`} style={{ left: `${((i + 1) / steps.length) * 100}%` }}>
+            <em>+{x.bonusPct}%</em><small>{usd(Number(x.threshold))}</small>
+          </span>
+        ))}
+      </div>
+      <span className="spm-sq__meta">{meta}</span>
     </div>
   );
 }
 
-/* --- all weeks, both charts --------------------------------------------------------------------------------------- */
+/* --- a bar chart frame with a hover tooltip ------------------------------------------------------------------------ */
 
-function useAllWeeks(s: S2State) {
-  return useMemo(() => allWeeks(s.s1, s.weeks), [s.s1, s.weeks]);
-}
-
-/** One frame for both charts: a fixed height, every week of both seasons, the season start marked, a hover readout. */
-function WeekBars({ rows, render, readout, label }: {
-  rows: AnyWeek[];
-  render: (r: AnyWeek) => ReactNode;
-  readout: (r: AnyWeek) => ReactNode;
-  label: (r: AnyWeek) => string;
+function Bars<T extends { key: string }>({ rows, render, tip, axis, mark, height = 200 }: {
+  rows: T[];
+  render: (r: T) => ReactNode;
+  tip: (r: T) => ReactNode;
+  axis: [string, string];
+  mark?: { index: number; label: string } | null;
+  height?: number;
 }) {
   const [hover, setHover] = useState<number | null>(null);
-  const firstL1 = rows.findIndex((r) => r.season === 'L1');
-  const shown = hover !== null ? rows[hover] : [...rows].reverse().find((r) => r.split.week.pointsStatus === 'CONFIRMED') ?? null;
+  const left = hover === null ? 0 : ((hover + 0.5) / rows.length) * 100;
   return (
-    <div className="spm-weeks">
-      <div className="spm-weeks__plot" onMouseLeave={() => setHover(null)}>
+    <div className="spm-bars">
+      <div className="spm-bars__plot" style={{ height }} onMouseLeave={() => setHover(null)}>
         {rows.map((r, i) => (
-          <button
-            key={r.key}
-            type="button"
-            className={`spm-col${hover === i ? ' is-hover' : ''}${i === firstL1 && i > 0 ? ' is-season' : ''}`}
-            onMouseEnter={() => setHover(i)}
-            onFocus={() => setHover(i)}
-            aria-label={label(r)}
-          >
+          <button key={r.key} type="button" className={`spm-col${hover === i ? ' is-hover' : ''}${mark && i === mark.index && i > 0 ? ' is-season' : ''}`} onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} onBlur={() => setHover(null)}>
             <span className="spm-col__stack">{render(r)}</span>
           </button>
         ))}
+        {hover !== null && rows[hover] && (
+          <div className={`spm-tt${left > 60 ? ' is-left' : ''}`} style={{ left: `${left}%` }} role="tooltip">{tip(rows[hover]!)}</div>
+        )}
       </div>
-      <div className="spm-weeks__axis">
-        <span>{rows[0]?.short}</span>
-        {firstL1 > 0 && <span className="spm-weeks__mark" style={{ left: `${(firstL1 / rows.length) * 100}%` }}>Layer 1</span>}
-        <span>{rows.at(-1)?.short}</span>
+      <div className="spm-bars__axis">
+        <span>{axis[0]}</span>
+        {mark && mark.index > 0 && <span className="spm-bars__mark" style={{ left: `${(mark.index / rows.length) * 100}%` }}>{mark.label}</span>}
+        <span>{axis[1]}</span>
       </div>
-      {shown && <p className="spm-readout">{readout(shown)}</p>}
     </div>
   );
 }
 
+const TipRow = ({ k, v, dot }: { k: string; v: ReactNode; dot?: string }) => (
+  <span className="spm-tt__row">{dot && <i className={dot} />}<span>{k}</span><b>{v}</b></span>
+);
+
+/* --- points by week, every week of both seasons ------------------------------------------------------------------ */
+
 export function WeeklyPoints({ s }: { s: S2State }) {
-  const rows = useAllWeeks(s);
+  const rows = useMemo(() => allWeeks(s.s1, s.weeks), [s.s1, s.weeks]);
   const max = Math.max(1, ...rows.map((r) => r.split.week.points));
   const h = (v: number) => `${(v / max) * 100}%`;
+  const firstL1 = rows.findIndex((r) => r.season === 'L1');
   return (
     <Card title="Points by week" action={<span className="spm-legend"><i className="is-own" />Trading<i className="is-ref" />Referrals<i className="is-boost" />Squad boost</span>}>
       {!rows.length ? <p className="pf-note">{s.loading ? 'Reading your weeks…' : 'No weeks yet.'}</p> : (
-        <WeekBars
+        <Bars
           rows={rows}
-          label={(r) => `${r.name}: ${r.split.week.pointsStatus === 'CONFIRMED' ? `${r.split.week.points} points` : 'not scored yet'}`}
+          axis={[`Season 1 · ${rows[0]!.short}`, rows.at(-1)!.short]}
+          mark={firstL1 >= 0 ? { index: firstL1, label: 'Layer 1' } : null}
           render={(r) => r.split.week.pointsStatus !== 'CONFIRMED' ? <i className="spm-col__tbd" /> : (<>
             <i className="is-boost" style={{ height: h(r.split.boost) }} />
             <i className="is-ref" style={{ height: h(r.split.referral) }} />
             <i className="is-own" style={{ height: h(r.split.own) }} />
           </>)}
-          readout={(r) => {
+          tip={(r) => {
             const w = r.split.week;
-            if (w.pointsStatus !== 'CONFIRMED') return <><b>{r.name}</b> · not scored yet · {usd(r.split.volume)} volume so far</>;
-            return <><b>{r.name}</b> · <b>{w.points.toLocaleString('en-US')}</b> points = {fmt(r.split.own, 0)} trading + {fmt(r.split.referral, 0)} referrals{r.split.boost >= 1 ? ` + ${fmt(r.split.boost, 0)} squad (+${w.totalBonusPct ?? 0}%)` : ''} · {usd(r.split.volume)} volume{w.rank ? ` · rank ${w.rank.toLocaleString('en-US')}` : ''}</>;
+            return (<>
+              <b className="spm-tt__h">{r.name}</b>
+              {w.pointsStatus !== 'CONFIRMED' ? <TipRow k="Status" v="Not scored yet" /> : (<>
+                <TipRow k="Points" v={fmt(w.points, 0)} />
+                <TipRow dot="is-own" k="Trading" v={fmt(r.split.own, 0)} />
+                <TipRow dot="is-ref" k="Referrals" v={fmt(r.split.referral, 0)} />
+                {r.season === 'L1' && <TipRow dot="is-boost" k={`Squad +${w.totalBonusPct ?? 0}%`} v={fmt(r.split.boost, 0)} />}
+              </>)}
+              <TipRow k="Volume" v={usd(r.split.volume)} />
+              {w.rank ? <TipRow k="Rank" v={fmt(w.rank, 0)} /> : null}
+            </>);
           }}
         />
       )}
@@ -260,40 +277,123 @@ export function WeeklyPoints({ s }: { s: S2State }) {
   );
 }
 
-export function CostPerPoint({ s, pool }: { s: S2State; pool: number | null }) {
-  const rows = useAllWeeks(s);
-  const venue = useMemo(() => venueVolumeByWeek(s.weeks, s.venueDaily), [s.weeks, s.venueDaily]);
-  const field = (r: AnyWeek): number | null => {
-    if (r.season !== 'L1' || !pool) return null;
-    const v = venue.get(r.split.week.weekNo);
-    return v ? v / pool : null;
-  };
-  const vals = rows.flatMap((r) => [r.split.dollarsPerPoint, field(r)]).filter((x): x is number => x !== null && x > 0);
-  const max = Math.max(1, ...vals);
+/* --- this week so far: the forecast -------------------------------------------------------------------------------- */
+
+export function ThisWeek({ s, week }: { s: S2State; week: WeekInfo | null }) {
+  const f = useMemo(() => forecastWeek(s.weeks), [s.weeks]);
+  const now = useNow(60_000);
+  const left = week ? Math.max(0, week.nextWeekStartTime * 1000 - now) : null;
+  const leftTxt = left === null ? DASH : `${Math.floor(left / 86_400_000)}d ${Math.floor((left % 86_400_000) / 3_600_000)}h`;
   return (
-    <Card title="Volume per point" action={<span className="spm-legend"><i className="is-own" />You<i className="is-field" />Whole venue</span>}>
-      {!rows.length ? <p className="pf-note">{s.loading ? 'Reading…' : 'No weeks yet.'}</p> : (
-        <WeekBars
-          rows={rows}
-          label={(r) => `${r.name}: ${r.split.dollarsPerPoint ? usd(r.split.dollarsPerPoint) : 'no trading'} per point`}
-          render={(r) => {
-            const f = field(r);
-            return (
-              <span className="spm-col__pair">
-                <i className="is-own" style={{ height: r.split.dollarsPerPoint ? `${(r.split.dollarsPerPoint / max) * 100}%` : 0 }} />
-                <i className="is-field" style={{ height: f ? `${(f / max) * 100}%` : 0 }} />
-              </span>
-            );
-          }}
-          readout={(r) => {
-            const f = field(r);
-            return <><b>{r.name}</b> · {r.split.dollarsPerPoint ? <>you <b>{usd(r.split.dollarsPerPoint)}</b> per point</> : 'no trading by you'}{f ? <> · venue {usd(f)} per point</> : null} · lower is better</>;
-          }}
-        />
+    <Card title="This week so far" action={<Pill tone="quiet" title="From your own past weeks and our fit, not a SoDEX figure">Estimate</Pill>}>
+      {!f ? <p className="pf-note">{s.loading ? 'Reading…' : DASH}</p> : (
+        <div className="spm-tw">
+          <div className="spm-tw__big">
+            <span>Points from trading so far</span>
+            <b>{f.boosted !== null ? `≈ ${fmt(f.boosted, 0)}` : DASH}</b>
+            <small>{f.live.weekName} · scored at the snapshot in {leftTxt}</small>
+          </div>
+          <div className="spm-tw__grid">
+            <div><span>Your volume</span><b>{usd(f.volume)}</b></div>
+            <div><span>Squad boost</span><b className="is-pos">+{f.live.totalBonusPct ?? 0}%</b></div>
+            <div><span>Next $10K adds</span><b>{f.per10k !== null ? `≈ ${fmt(f.per10k, 0)}` : DASH}</b></div>
+            <div><span>Your cost per point</span><b>{f.dpp !== null ? usd(f.dpp) : DASH}</b></div>
+          </div>
+          {f.dpp === null && <p className="pf-note">Trade once to see your own rate; until then there is nothing of yours to estimate from.</p>}
+        </div>
       )}
     </Card>
   );
 }
+
+/* --- squad energy: the window volume against the steps, week by week -------------------------------------------- */
+
+export function SquadEnergy({ s, cfg }: { s: S2State; cfg: BoostConfig | null }) {
+  const rows = useMemo(() => [...s.weeks].sort((a, b) => a.weekNo - b.weekNo).map((w) => ({ key: `e${w.weekNo}`, w })), [s.weeks]);
+  const steps = cfg ? [...cfg.tiers].map((t) => ({ v: Number(t.threshold), pct: t.bonusPct })).sort((a, b) => a.v - b.v) : [];
+  const top = Math.max(1, ...rows.map((r) => r.w.teamWindowVolume || 0));
+  // The scale stops just above the next step the wallet has not reached, so the line that matters is on the chart.
+  const nextAbove = steps.find((x) => x.v > top);
+  const max = Math.max(top, nextAbove ? nextAbove.v : top) * 1.08;
+  // A step line closer than ~10% of the height to the one above it would only print over it: the higher one stays.
+  const inRange = steps.filter((x) => x.v <= max);
+  const shown = inRange.filter((x, i) => !inRange[i + 1] || (inRange[i + 1]!.v - x.v) / max > 0.1);
+  return (
+    <Card title="Squad energy" action={<span className="spm-legend"><i className="is-boost" />Your squad, last 4 weeks</span>}>
+      {!rows.length ? <p className="pf-note">{s.loading ? 'Reading…' : DASH}</p> : (
+        <div className="spm-energy">
+          <div className="spm-energy__lines" aria-hidden="true">
+            {shown.map((x) => (
+              <span key={x.v} style={{ bottom: `${(x.v / max) * 200}px` }}><em>+{x.pct}% · {usd(x.v)}</em></span>
+            ))}
+          </div>
+          <Bars
+            rows={rows}
+            axis={[rows[0]!.w.weekName.replace('Week ', 'L'), rows.at(-1)!.w.weekName.replace('Week ', 'L')]}
+            render={(r) => <i className={`is-boost${r.w.isLive ? ' is-live' : ''}`} style={{ height: `${((r.w.teamWindowVolume || 0) / max) * 100}%` }} />}
+            tip={(r) => (<>
+              <b className="spm-tt__h">Layer 1 · {r.w.weekName}{r.w.isLive ? ' (live)' : ''}</b>
+              <TipRow k="Squad volume, 4 weeks" v={usd(r.w.teamWindowVolume || 0)} />
+              <TipRow k="This week" v={usd(r.w.teamWeekVolume || 0)} />
+              <TipRow k="Your boost" v={`+${r.w.totalBonusPct ?? 0}%`} />
+            </>)}
+          />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* --- the week table, both seasons -------------------------------------------------------------------------------- */
+
+export function WeekTable({ s }: { s: S2State }) {
+  const rows = useMemo(() => allWeeks(s.s1, s.weeks).reverse(), [s.s1, s.weeks]);
+  const [all, setAll] = useState(false);
+  const firstS1 = rows.findIndex((r) => r.season === 'S1');
+  const shown = all ? rows : rows.filter((r) => r.season === 'L1' || r.split.week.points > 0);
+  if (!rows.length) return null;
+  return (
+    <Card title="Every week" action={<button type="button" className="spm-linkbtn" onClick={() => setAll((x) => !x)}>{all ? 'Hide empty weeks' : 'Show empty weeks'}</button>}>
+      <div className="spm-tbl__wrap">
+        <table className="spm-tbl">
+          <thead>
+            <tr><th>Week</th><th>Points</th><th>Trading</th><th>Referrals</th><th>Squad</th><th>Volume</th><th>Open interest</th><th>Holdings</th><th>Rank</th></tr>
+          </thead>
+          <tbody>
+            {shown.map((r, i) => {
+              const w = r.split.week;
+              const tbd = w.pointsStatus !== 'CONFIRMED';
+              const holdings = (w.wealthTvl ?? 0) + (w.vaultHolding ?? 0);
+              const seasonHead = i === 0 || shown[i - 1]!.season !== r.season;
+              return (
+                <Fragment key={r.key}>
+                  {seasonHead && <tr className="spm-tbl__season"><td colSpan={9}>{r.season === 'L1' ? 'Layer 1 Season' : 'Season 1'}</td></tr>}
+                  <tr className={w.isLive ? 'is-live' : ''}>
+                    <td><b>{w.weekName}</b>{w.isLive && <span className="spm-tbl__live">Live</span>}<small>{dateRange(w.weekStartTime, w.weekEndTime)}</small></td>
+                    <td className="is-num is-strong">{tbd ? 'TBD' : fmt(w.points, 0)}</td>
+                    <td className="is-num">{tbd ? '—' : fmt(r.split.own, 0)}</td>
+                    <td className="is-num">{tbd ? '—' : fmt(r.split.referral, 0)}</td>
+                    <td className="is-num">{r.season === 'L1' ? <span className={w.totalBonusPct ? 'is-pos' : ''}>+{w.totalBonusPct ?? 0}%</span> : '—'}</td>
+                    <td className="is-num">{r.split.volume ? usd(r.split.volume) : '—'}</td>
+                    <td className="is-num">{w.oi ? usd(w.oi) : '—'}</td>
+                    <td className="is-num">{holdings >= 1 ? usd(holdings) : '—'}</td>
+                    <td className="is-num">{w.rank ? fmt(w.rank, 0) : '—'}</td>
+                  </tr>
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {firstS1 < 0 && <p className="pf-note">Season 1 weeks appear here once SoDEX returns them for this wallet.</p>}
+    </Card>
+  );
+}
+
+const dateRange = (a: number, b: number) => {
+  const f = (t: number) => new Date(t * 1000).toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
+  return a && b ? `${f(a)} – ${f(b)}` : '';
+};
 
 /* --- how to earn more ---------------------------------------------------------------------------------------------- */
 
