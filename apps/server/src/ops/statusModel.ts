@@ -71,17 +71,24 @@ export function uptimeOf(days: readonly DayTuple[]): number | null {
 export type DayTone = 'up' | 'degraded' | 'partial' | 'down' | 'nodata';
 
 /**
+ * Bad minutes a day may hold and still show green: the same counts that open an automatic incident (statusAuto.ts AUTO
+ * uses these), so a day without an incident does not turn yellow over a one- or two-minute blip (owner 2026-11-16: "0
+ * incidents yesterday and the day before ... it still shows yellow"). The hover still lists every minute.
+ */
+export const DAY_MIN = { down: 3, degraded: 10 } as const;
+
+/**
  * What one day's bar shows. `nodata`: not a minute of it was probed (the status
  * service itself was down, or did not exist yet). `down` when a tenth or more of
- * the probed minutes were down, `partial` for any down minute below that,
- * `degraded` for degraded minutes alone.
+ * the probed minutes were down, `partial` for DAY_MIN.down down minutes or more below that,
+ * `degraded` for DAY_MIN.degraded bad minutes or more. An incident on the day colours it anyway (dayToneWith).
  */
 export function dayTone([, up, deg, down]: DayTuple): DayTone {
   const all = up + deg + down;
   if (!all) return 'nodata';
   if (down / all >= 0.1) return 'down';
-  if (down > 0) return 'partial';
-  if (deg > 0) return 'degraded';
+  if (down >= DAY_MIN.down) return 'partial';
+  if (deg + down >= DAY_MIN.degraded) return 'degraded';
   return 'up';
 }
 

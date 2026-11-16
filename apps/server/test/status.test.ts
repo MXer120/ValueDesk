@@ -314,6 +314,11 @@ test('model: the day tone, the days, the expected minutes', () => {
   assert.equal(dayTone(['d', 1440, 0, 0]), 'up');
   assert.equal(dayTone(['d', 1400, 40, 0]), 'degraded');
   assert.equal(dayTone(['d', 1430, 0, 10]), 'partial');
+  // Blips below the automatic-incident counts stay green (owner 2026-11-16); the hover still lists them.
+  assert.equal(dayTone(['d', 1438, 2, 0]), 'up');
+  assert.equal(dayTone(['d', 1438, 0, 2]), 'up');
+  assert.equal(dayTone(['d', 1430, 10, 0]), 'degraded');
+  assert.equal(dayTone(['d', 1437, 0, 3]), 'partial');
   assert.equal(dayTone(['d', 1000, 0, 440]), 'down');
   assert.equal(dayTone(['d', 0, 0, 0]), 'nodata');
   const days = lastDays(T0, 3);

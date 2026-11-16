@@ -31,10 +31,10 @@
  * through the same rules, so the past outages get their entries too.
  */
 import type { NoticeStore } from './statusNotices.js';
-import { STATUS_SERVICES, fmtUtc, noticeSpan, type ServiceId, type ServiceState } from './statusModel.js';
+import { DAY_MIN, STATUS_SERVICES, fmtUtc, noticeSpan, type ServiceId, type ServiceState } from './statusModel.js';
 import { whyText } from './indexerJudge.js';
 
-export const AUTO = { downMin: 3, degradedMin: 10, clearMin: 5, gapMin: 5 } as const;
+export const AUTO = { downMin: DAY_MIN.down, degradedMin: DAY_MIN.degraded, clearMin: 5, gapMin: 5 } as const;
 
 /** How far back an incident may start (statusNotices.ts MAX_BACK_MS), less a minute's margin. */
 const BACK_MS = 7 * 86_400_000 - 60_000;
