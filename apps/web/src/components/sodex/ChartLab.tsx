@@ -1,6 +1,6 @@
 /**
  * SoPoints chart lab - LOCALHOST ONLY (import.meta.env.DEV; owner 2026-11-16: "throw out 10 charts temporarily on
- * localhost of different types + what's shown"). Ten candidate charts from the signed-in wallet's own weeks, each with
+ * localhost of different types + what's shown"). Candidate charts from the signed-in wallet's own weeks, each with
  * a line saying what it shows, so the owner can pick which ones go on the page. Never built into production.
  */
 import { useMemo } from 'react';
@@ -109,35 +109,11 @@ export function ChartLab({ s, pool }: { s: S2State; pool: number | null }) {
     <section className="sdx-section lab" aria-label="Chart lab (localhost only)">
       <h2 className="sdx-section__title">Chart lab · localhost only, not on the live site</h2>
       <div className="lab-grid">
-        <Tile n={1} title="Points over the season" shows="Cumulative points, week by week (Season 1 and Layer 1), with SoDEX's tier lines. Shows how far the next tier is in weeks of your pace.">
-          <Line ys={cumulative} area refs={TIERS.filter((t) => t.at >= 1000).map((t) => ({ v: t.at, label: t.name }))} />
-        </Tile>
-        <Tile n={2} title="Rank by week" shows="Your weekly rank (higher on the chart = better). Shows whether you are gaining on the field or falling back.">
-          <Line ys={rows.map((r) => (r.split.week.rank > 0 ? r.split.week.rank : null))} invert />
-        </Tile>
-        <Tile n={3} title="Where your points come from" shows="All your points split into trading, referrals and squad boost. Shows which lever matters most for you.">
-          <Donut parts={[{ v: sum((r) => r.split.own), cls: 'is-own', label: 'Trading' }, { v: sum((r) => r.split.referral), cls: 'is-ref', label: 'Referrals' }, { v: sum((r) => r.split.boost), cls: 'is-boost', label: 'Squad boost' }]} />
-        </Tile>
         <Tile n={4} title="Volume vs points" shows="Each dot is one week you traded: volume across, trading points up. The curve flattening is the diminishing return of big weeks.">
           <Scatter pts={traded.map((r) => [r.split.volume, r.split.own])} />
         </Tile>
-        <Tile n={5} title="Spot and futures volume" shows="Your weekly volume split into spot (on top) and futures. Spot counted ~1.85x per dollar in our Season 1 fit.">
-          <BarsSvg stacks={rows.map((r) => [r.split.week.futuresVolume || 0, r.split.week.spotVolume || 0])} classes={['lab-r is-own', 'lab-r is-boost']} />
-        </Tile>
-        <Tile n={6} title="Squad boost by week" shows="Your total squad boost each Layer 1 week (a step line). Shows when your squads gained or lost a step - and the early-bird drop after week 4.">
-          <Line ys={l1.map((r) => r.split.week.totalBonusPct ?? 0)} step cls="is-b" />
-        </Tile>
-        <Tile n={7} title="Referral points by week" shows="Points your invitees earned you each week (25% of theirs). Shows whether your referral income is growing.">
-          <BarsSvg stacks={rows.map((r) => [r.split.referral])} classes={['lab-r is-ref']} />
-        </Tile>
         <Tile n={8} title="Your share of the pool" shows={`Your points as a share of the weekly pool (${pool ? fmt(pool, 0) : '—'}), Layer 1. Shows your slice of the season, independent of how big the pool is.`}>
           <Line ys={l1.map((r) => (pool ? (r.split.week.points / pool) * 100 : null))} area />
-        </Tile>
-        <Tile n={9} title="Platform difficulty trend" shows="The venue's volume per point of the pool, each Layer 1 week (whole venue). Rising = points get harder to earn for everyone.">
-          <Line ys={l1.map((r) => { const v = venue.get(r.split.week.weekNo); return v && pool ? v / pool : null; })} cls="is-c" />
-        </Tile>
-        <Tile n={10} title="Points per $1K traded" shows="Trading points per $1,000 of your volume, each week you traded. Higher is better; compare it across weeks of different size.">
-          <BarsSvg stacks={traded.map((r) => [(r.split.own / r.split.volume) * 1000])} classes={['lab-r is-own']} />
         </Tile>
       </div>
       <p className="pf-note">Latest figures: {rows.length} scored weeks · biggest week {usd(Math.max(...rows.map((r) => r.split.volume)))} volume · {splitWeek(rows.at(-1)!.split.week).week.weekName} last.</p>

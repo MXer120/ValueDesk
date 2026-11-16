@@ -9,6 +9,7 @@ import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { Card } from '../portfolio/parts';
 import { DASH, fmt } from '../../format';
 import { notify } from '../../toast';
+import { inviteLink, inviteLinkShown, useOwnCode } from '../../invites/invites';
 import type { BoostConfig, VolumeWeights, WeekInfo } from '../../points';
 import { Pill, SegSwitch, SkelRows, useNow } from './parts';
 import { allWeeks, difficultyRows, earnTips, forecastWeek, mmByWeek, squadBreakdown, venueOiByWeek, venueVolumeByWeek, type AnyWeek, type DifficultyRow, type S2State, type SquadBreakdown, type Tip } from './soPointsV2';
@@ -97,8 +98,11 @@ export function SoPointsCard({ s }: { s: S2State }) {
 
 /* --- the season card (SoDEX's) ------------------------------------------------------------------------------------ */
 
-export function SeasonCard({ week, code, settled }: { week: WeekInfo | null; code: string | null; settled: boolean }) {
+export function SeasonCard({ week, address, settled }: { week: WeekInfo | null; address: string | null; settled: boolean }) {
   const now = useNow();
+  // The user's own ValueDesk invite link (its SoDEX code; invites/invites.ts), never ours (owner 2026-11-16).
+  const own = useOwnCode(address);
+  const code = own.state === 'ok' ? own.code : null;
   if (!week && !settled) {
     return (
       <section className="spm-season" aria-label="Loading this week">
@@ -111,7 +115,7 @@ export function SeasonCard({ week, code, settled }: { week: WeekInfo | null; cod
   const left = ends ? Math.max(0, ends - now) : null;
   const two = (n: number) => String(n).padStart(2, '0');
   const parts = left === null ? null : [Math.floor(left / 86_400_000), Math.floor((left % 86_400_000) / 3_600_000), Math.floor((left % 3_600_000) / 60_000), Math.floor((left % 60_000) / 1000)];
-  const link = code ? `sodex.com/join/${code}?points=1` : null;
+  const link = code ? inviteLinkShown(code) : null;
   const at = (ms: number) => new Date(ms).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
   const live = week?.weekStatus === 'LIVE';
   return (
@@ -135,12 +139,12 @@ export function SeasonCard({ week, code, settled }: { week: WeekInfo | null; cod
       </div>
       <div className="spm-season__invite">
         <div>
-          <span className="spm-season__k">Invite code</span>
-          <div className="spm-season__row"><b>{code ?? (settled ? DASH : '…')}</b>{code && <CopyBtn onClick={() => void copy(code, 'Invite code')} label="Copy invite code" />}</div>
+          <span className="spm-season__k">Your invite code</span>
+          <div className="spm-season__row"><b className={code ? '' : 'is-muted'}>{code ?? (!address ? 'Connect a wallet' : own.state === 'loading' ? '…' : own.state === 'none' ? 'Trade on SoDEX first' : DASH)}</b>{code && <CopyBtn onClick={() => void copy(code, 'Invite code')} label="Copy invite code" />}</div>
         </div>
         <div>
-          <span className="spm-season__k">Invite link</span>
-          <div className="spm-season__row"><b className="is-link">{link ?? DASH}</b>{link && <CopyBtn onClick={() => void copy(`https://${link}`, 'Invite link')} label="Copy invite link" />}</div>
+          <span className="spm-season__k">Your invite link</span>
+          <div className="spm-season__row"><b className={link ? 'is-link' : 'is-muted'}>{link ?? DASH}</b>{code && <CopyBtn onClick={() => void copy(inviteLink(code), 'Invite link')} label="Copy invite link" />}</div>
         </div>
       </div>
     </section>
@@ -246,105 +250,6 @@ const TipRow = ({ k, v, dot }: { k: string; v: ReactNode; dot?: string }) => (
   <span className="spm-tt__row">{dot && <i className={dot} />}<span>{k}</span><b>{v}</b></span>
 );
 
-/* --- points by week, every week of both seasons ------------------------------------------------------------------ */
-
-type WeekChartKind = 'bar' | 'area' | 'line';
-
-/** Stacked areas or a total line over the weeks, in a 0-100 box stretched to the plot. */
-function WeekLines({ rows, max, kind }: { rows: AnyWeek[]; max: number; kind: 'area' | 'line' }) {
-  const n = rows.length;
-  const x = (i: number) => ((i + 0.5) / n) * 100;
-  const y = (v: number) => 100 - (v / max) * 100;
-  const scored = (r: AnyWeek) => r.split.week.pointsStatus === 'CONFIRMED';
-  if (kind === 'line') {
-    const pts = rows.map((r, i) => (scored(r) ? `${x(i)},${y(r.split.week.points)}` : null)).filter(Boolean).join(' ');
-    return (
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="spm-lines">
-        <polyline points={pts} className="is-total" vectorEffect="non-scaling-stroke" />
-      </svg>
-    );
-  }
-  // Stacked: trading at the bottom, referrals on it, the squad boost on top.
-  const layers: Array<[string, (r: AnyWeek) => number]> = [
-    ['is-own', (r) => r.split.own],
-    ['is-ref', (r) => r.split.own + r.split.referral],
-    ['is-boost', (r) => r.split.own + r.split.referral + r.split.boost],
-  ];
-  const band = (top: (r: AnyWeek) => number, base: (r: AnyWeek) => number) => {
-    const up = rows.map((r, i) => `${x(i)},${y(scored(r) ? top(r) : 0)}`);
-    const down = rows.map((r, i) => `${x(i)},${y(scored(r) ? base(r) : 0)}`).reverse();
-    return [...up, ...down].join(' ');
-  };
-  return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="spm-lines">
-      {layers.map(([cls, top], k) => (
-        <polygon key={cls} className={cls} points={band(top, k === 0 ? () => 0 : layers[k - 1]![1])} />
-      ))}
-    </svg>
-  );
-}
-
-export function WeeklyPoints({ s }: { s: S2State }) {
-  const all = useMemo(() => allWeeks(s.s1, s.weeks), [s.s1, s.weeks]);
-  // From the first week with points (or Layer 1's start): weeks before a wallet's first trade are only empty space.
-  const rows = useMemo(() => {
-    const first = all.findIndex((r) => r.split.week.points > 0);
-    const l1 = all.findIndex((r) => r.season === 'L1');
-    const from = first < 0 ? Math.max(0, l1) : l1 < 0 ? first : Math.min(first, l1);
-    return all.slice(from);
-  }, [all]);
-  const [kind, setKind] = useState<WeekChartKind>('bar');
-  const max = Math.max(1, ...rows.map((r) => r.split.week.points));
-  const h = (v: number) => `${(v / max) * 100}%`;
-  const firstL1 = rows.findIndex((r) => r.season === 'L1');
-  const scored = rows.filter((r) => r.split.week.pointsStatus === 'CONFIRMED');
-  const l1 = scored.filter((r) => r.season === 'L1');
-  const best = scored.reduce<AnyWeek | null>((b, r) => (!b || r.split.week.points > b.split.week.points ? r : b), null);
-  const l1Total = l1.reduce((t, r) => t + r.split.week.points, 0);
-  return (
-    <Card title="Points by week" action={<SegSwitch<WeekChartKind> label="Chart" value={kind} onChange={setKind} options={[{ v: 'bar', label: 'Bars' }, { v: 'area', label: 'Area' }, { v: 'line', label: 'Line' }]} />}>
-      {!rows.length ? (s.loading ? <SkelRows rows={1} height={220} /> : <p className="pf-note">No weeks yet.</p>) : (
-        <div className="spm-diff">
-          <div className="spm-diff__head">
-            <div><span>Layer 1 so far</span><b>{fmt(l1Total, 0)}</b><small>{l1.length} scored weeks</small></div>
-            <div><span>Best week</span><b>{best ? fmt(best.split.week.points, 0) : DASH}</b><small>{best?.name ?? ''}</small></div>
-            <div><span>Average, Layer 1</span><b>{l1.length ? fmt(l1Total / l1.length, 0) : DASH}</b><small>points a week</small></div>
-          </div>
-          {kind === 'line'
-            ? <span className="spm-legend"><i className="is-own" />Points</span>
-            : <span className="spm-legend"><i className="is-own" />Trading<i className="is-ref" />Referrals<i className="is-boost" />Squad boost</span>}
-          <Bars
-            rows={rows}
-            height={160}
-            axis={[rows[0]!.short, rows.at(-1)!.short]}
-            mark={firstL1 > 0 ? { index: firstL1, label: 'Layer 1' } : null}
-            under={kind === 'bar' ? undefined : <WeekLines rows={rows} max={max} kind={kind} />}
-            render={(r) => kind !== 'bar' ? null : r.split.week.pointsStatus !== 'CONFIRMED' ? <i className="spm-col__tbd" /> : (<>
-              <i className="is-boost" style={{ height: h(r.split.boost) }} />
-              <i className="is-ref" style={{ height: h(r.split.referral) }} />
-              <i className="is-own" style={{ height: h(r.split.own) }} />
-            </>)}
-            tip={(r) => {
-              const w = r.split.week;
-              return (<>
-                <b className="spm-tt__h">{r.name}</b>
-                {w.pointsStatus !== 'CONFIRMED' ? <TipRow k="Status" v="Not scored yet" /> : (<>
-                  <TipRow k="Points" v={fmt(w.points, 0)} />
-                  <TipRow dot="is-own" k="Trading" v={fmt(r.split.own, 0)} />
-                  <TipRow dot="is-ref" k="Referrals" v={fmt(r.split.referral, 0)} />
-                  {r.season === 'L1' && <TipRow dot="is-boost" k={`Squad +${w.totalBonusPct ?? 0}%`} v={fmt(r.split.boost, 0)} />}
-                </>)}
-                <TipRow k="Volume" v={usd(r.split.volume)} />
-                {w.rank ? <TipRow k="Rank" v={fmt(w.rank, 0)} /> : null}
-              </>);
-            }}
-          />
-        </div>
-      )}
-    </Card>
-  );
-}
-
 /* --- this week so far: the forecast -------------------------------------------------------------------------------- */
 
 export function ThisWeek({ s, week }: { s: S2State; week: WeekInfo | null }) {
@@ -372,59 +277,6 @@ export function ThisWeek({ s, week }: { s: S2State; week: WeekInfo | null }) {
       )}
       </div>
       <div className="spm-soon__badge"><b>Coming soon</b><span>This needs more data before its numbers are good enough.</span></div>
-    </Card>
-  );
-}
-
-/* --- difficulty, week by week ------------------------------------------------------------------------------------ */
-
-export function Difficulty({ s, pool }: { s: S2State; pool: number | null }) {
-  const mm = useMemo(() => mmByWeek(s.weeks, s.mmDays), [s.weeks, s.mmDays]);
-  const [basis, setBasis] = useState<'vol' | 'oi'>('vol');
-  const rows = useMemo(
-    () => difficultyRows(s.weeks, venueVolumeByWeek(s.weeks, s.venueDaily), venueOiByWeek(s.weeks, s.venueOiDaily), mm, pool).map((r) => ({ ...r, key: `d${r.weekNo}` })),
-    [s.weeks, s.venueDaily, s.venueOiDaily, mm, pool],
-  );
-  const you = (r: DifficultyRow) => (basis === 'vol' ? r.youVol : r.youOi);
-  const plat = (r: DifficultyRow) => (basis === 'vol' ? r.platVol : r.platOi);
-  const max = Math.max(1, ...rows.flatMap((r) => [you(r), plat(r)]).filter((x): x is number => x !== null));
-  const last = [...rows].reverse().find((r) => you(r) !== null && (plat(r) ?? 0) > 0) ?? null;
-  const score = last && plat(last)! > 0 ? you(last)! / plat(last)! : null;
-  const unit = basis === 'vol' ? 'volume' : 'open interest';
-  return (
-    <Card
-      title="Difficulty"
-      action={<SegSwitch<'vol' | 'oi'> label="Difficulty by" value={basis} onChange={setBasis} options={[{ v: 'vol', label: 'Volume' }, { v: 'oi', label: 'Open interest' }]} />}
-    >
-      {!rows.length ? (s.loading ? <SkelRows rows={1} height={240} /> : <p className="pf-note">{DASH}</p>) : (
-        <div className="spm-diff">
-          <div className="spm-diff__head">
-            <div><span>Your difficulty, {last?.name ?? 'last week'}</span><b>{last && you(last) !== null ? usd(you(last)!) : DASH}</b><small>of {unit} per point</small></div>
-            <div><span>Platform{last && (basis === 'vol' ? last.volOut : last.oiOut) ? (basis === 'vol' ? ', without 1002 and 23342' : ", without SoDEX's internal pair") : ''}</span><b>{last && plat(last) !== null ? usd(plat(last)!) : DASH}</b><small>of {unit} per point</small></div>
-            <div><span>Score</span><b className={score === null ? '' : score <= 1 ? 'is-pos' : 'is-neg'}>{score === null ? DASH : `${fmt(score, 2)}×`}</b><small>{score === null ? 'no trading week yet' : score <= 1 ? 'easier for you than the platform' : 'harder for you than the platform'}</small></div>
-          </div>
-          <span className="spm-legend"><i className="is-own" />You<i className="is-field" />Platform</span>
-          <Bars
-            rows={rows}
-            height={160}
-            axis={[rows[0] ? `L${rows[0].weekNo}` : '', rows.at(-1) ? `L${rows.at(-1)!.weekNo}` : '']}
-            render={(r) => (
-              <span className="spm-col__pair">
-                <i className="is-own" style={{ height: you(r) ? `${(you(r)! / max) * 100}%` : 0 }} />
-                <i className="is-field" style={{ height: plat(r) ? `${(plat(r)! / max) * 100}%` : 0 }} />
-              </span>
-            )}
-            tip={(r) => (<>
-              <b className="spm-tt__h">Layer 1 · {r.name}</b>
-              <TipRow dot="is-own" k="You, by volume" v={r.youVol ? usd(r.youVol) : '—'} />
-              <TipRow dot="is-own" k="You, by open interest" v={r.youOi ? usd(r.youOi) : '—'} />
-              <TipRow dot="is-field" k="Platform, by volume" v={r.platVol ? usd(r.platVol) : '—'} />
-              <TipRow dot="is-field" k="Platform, by open interest" v={r.platOi ? usd(r.platOi) : '—'} />
-              <TipRow k="Big accounts" v={r.volOut && r.oiOut ? 'taken out' : r.oiOut ? 'OI taken out, volume not known yet' : r.volOut ? 'volume taken out' : 'included'} />
-            </>)}
-          />
-        </div>
-      )}
     </Card>
   );
 }

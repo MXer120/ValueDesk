@@ -17,8 +17,8 @@ import { SODEX_POINTS_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
 import type { Eip1193Provider } from '../../wallet';
 import { PointsEstimate } from './PointsEstimate';
 import { ChartLab } from './ChartLab';
-import { REFERRAL_CODE } from '../../onboarding/referral';
-import { Difficulty, EarnMore, MySquadBoost, SeasonCard, SoPointsCard, ThisWeek, WeekTable, WeeklyPoints } from './SoPointsMine';
+import { EarnMore, MySquadBoost, SeasonCard, SoPointsCard, ThisWeek, WeekTable } from './SoPointsMine';
+import { DifficultyChart, PointsByWeek, PointsMix, RankByWeek, SeasonPoints } from './pointsCharts';
 import { useSoPointsV2 } from './soPointsV2';
 import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
 
@@ -55,26 +55,32 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
         <>
           <div className="spm-top">
             <SoPointsCard s={v2} />
-            <SeasonCard week={w} code={REFERRAL_CODE} settled={c.publicSettled} />
+            <SeasonCard week={w} address={address} settled={c.publicSettled} />
           </div>
           {v2.error && <p className="pf-note" role="alert">Some of your SoPoints could not be read: {v2.error}</p>}
           <div className="sdx-duo spm-charts">
             <ThisWeek s={v2} week={w} />
             <MySquadBoost s={v2} cfg={c.boost} />
           </div>
-          <EarnMore s={v2} cfg={c.boost} weights={c.weights} pool={w?.weekPoolPoints ?? null}>
-            <BoostedMarkets c={c} />
-          </EarnMore>
           <div className="sdx-duo spm-charts">
-            <WeeklyPoints s={v2} />
-            <Difficulty s={v2} pool={w?.weekPoolPoints ?? null} />
+            <PointsByWeek s={v2} />
+            <DifficultyChart s={v2} pool={w?.weekPoolPoints ?? null} />
+          </div>
+          <div className="sdx-duo spm-charts">
+            <SeasonPoints s={v2} />
+            <RankByWeek s={v2} />
+          </div>
+          <div className="sdx-duo spm-charts">
+            <PointsMix s={v2} />
+            <BoostedMarkets c={c} />
           </div>
           <WeekTable s={v2} />
+          <EarnMore s={v2} cfg={c.boost} weights={c.weights} pool={w?.weekPoolPoints ?? null} />
           {import.meta.env.DEV && <ChartLab s={v2} pool={w?.weekPoolPoints ?? null} />}
         </>
       ) : (
         <>
-          <SeasonCard week={w} code={REFERRAL_CODE} settled={c.publicSettled} />
+          <SeasonCard week={w} address={address} settled={c.publicSettled} />
           <div className="sdx-duo">
             <BoostedMarkets c={c} />
             <SquadBoost c={c} />
@@ -115,25 +121,24 @@ function BoostedMarkets({ c }: { c: PointsContext }) {
 
 function SquadBoost({ c }: { c: PointsContext }) {
   const b = c.boost;
+  const steps = b ? [...b.tiers].sort((x, y) => Number(x.threshold) - Number(y.threshold)) : [];
   return (
-    <Card title="Squad boost" action={b ? <span className="pf-unit">up to +{b.maxTotalBonusPct}%</span> : undefined}>
+    <Card title="Squad boost" action={b ? <span className="spm-sq__total">up to +{b.maxTotalBonusPct}%</span> : undefined}>
       {!c.publicSettled ? <SkelRows rows={3} height={36} /> : !b ? <p className="pf-note">{DASH}</p> : (
-        <>
-          <ol className="sdx-ladder">
-            {b.tiers.map((t) => (
-              <li key={t.threshold} className="sdx-ladder__step">
-                <b>+{t.bonusPct}%</b>
-                <span>{fmtEnergy(t.threshold)}</span>
-              </li>
+        <div className="spm-sq">
+          <p className="spm-sq__sum">Every point you earn is multiplied by your squads' boost: the squad you joined <i>+</i> the squad you built.</p>
+          <div className="spm-sq__track">
+            {steps.map((x, k) => (
+              <span key={x.threshold} className="spm-sq__step" style={{ left: `${((k + 1) / steps.length) * 100}%` }}>
+                <em>+{x.bonusPct}%</em><small>{fmtEnergy(x.threshold)}</small>
+              </span>
             ))}
-          </ol>
-          <Group title="How it counts">
-            <Fact label="Energy" value="$1 of volume = 1" />
-            <Fact label="Window" value={`Last ${b.windowRounds} weeks`} />
-            <Fact label="Your boost" value="Both squads added" hint="The squad you joined plus the squad you built." />
-            <Fact label="Early bird" value={`+${b.earlyBirdBonusPct}%, ${b.earlyBirdRounds} rounds`} />
-          </Group>
-        </>
+          </div>
+          <div className="spm-sq__facts">
+            <span>$1 traded by a squad = 1 energy</span>
+            <span>Counted over the last {b.windowRounds} weeks</span>
+          </div>
+        </div>
       )}
     </Card>
   );
