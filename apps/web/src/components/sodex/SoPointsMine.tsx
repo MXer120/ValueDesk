@@ -1,15 +1,17 @@
 /**
- * SoPoints, signed in: the wallet's own part of the page (owner 2026-11-16). The tier card is SoDEX's own design
- * (their points page: per-tier gradient, outline and shadow, tier name, total, last week, progress to the next tier);
- * the squad card shows the wallet's own boost; the two charts and the tips explain how to earn more, simply.
- * Data and arithmetic: soPointsV2.ts.
+ * SoPoints, signed in: the wallet's own part of the page (owner 2026-11-16). The tier card and the season card are
+ * SoDEX's own designs (their points page, read from their bundle: per-tier gradient, outline and shadow; total, last
+ * week, next tier or MAX LEVEL, "Rank N of all users"; the season card's pool, countdown and the wallet's invite code
+ * and link). The squad card shows the wallet's own boost; the charts show every week of both seasons at once; the
+ * tips explain how to earn more, simply. Data and arithmetic: soPointsV2.ts.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Card } from '../portfolio/parts';
 import { DASH, fmt } from '../../format';
-import { TIERS, type BoostConfig, type VolumeWeights } from '../../points';
-import { Pill } from './parts';
-import { earnTips, splitWeek, squadBreakdown, venueVolumeByWeek, type S2State, type SquadBreakdown, type Tip, type WeekSplit } from './soPointsV2';
+import { notify } from '../../toast';
+import type { BoostConfig, VolumeWeights, WeekInfo } from '../../points';
+import { Pill, useNow } from './parts';
+import { allWeeks, earnTips, squadBreakdown, venueVolumeByWeek, type AnyWeek, type S2State, type SquadBreakdown, type Tip } from './soPointsV2';
 
 /* SoDEX's own tier styles, as their points page draws its card (bundle 2026-11-16). */
 const TIER_STYLE: Record<string, { bg: string; border: string; shadow: string; bar: string; chip: string }> = {
@@ -20,47 +22,127 @@ const TIER_STYLE: Record<string, { bg: string; border: string; shadow: string; b
   Diamond: { bg: 'linear-gradient(165deg, #818CF8 0%, #4338CA 50%, #1E1B4B 100%)', border: '#818CF8', shadow: 'rgba(129,140,248,0.4)', bar: 'linear-gradient(to right, #818CF8, #A5B4FC)', chip: '#A5B4FC' },
   Epic: { bg: 'linear-gradient(165deg, #1A1A1A 0%, #080808 50%, #000000 100%)', border: 'rgba(255,255,255,0.2)', shadow: 'rgba(0,0,0,0.8)', bar: 'linear-gradient(to right, #6B7280, #FFFFFF, #D1D5DB)', chip: '#FFFFFF' },
 };
-const tierKey = (t: string | undefined) => {
-  const k = (t ?? 'Iron').toLowerCase();
+/** SoDEX's mapping: an unknown tier is Iron (their EV). */
+const tierKey = (t: string | null | undefined) => {
+  const k = (t ?? '').toLowerCase();
   return Object.keys(TIER_STYLE).find((x) => x.toLowerCase() === k) ?? 'Iron';
 };
 const usd = (n: number) => (n >= 1e6 ? `$${fmt(n / 1e6, n >= 1e7 ? 0 : 1)}M` : n >= 1e4 ? `$${fmt(n / 1e3, 0)}K` : `$${fmt(n, 0)}`);
+/** SoDEX's season card shows a fixed 900,000 (their bundle's constant), not the API's pool field. */
+const SODEX_POOL_SHOWN = 900_000;
 
-/* --- the tier card ------------------------------------------------------------------------------------------------ */
+const copy = async (text: string, what: string) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    notify('ok', `${what} copied.`);
+  } catch {
+    notify('warn', 'This browser did not allow copying.');
+  }
+};
+
+/* --- the tier card (SoDEX's) --------------------------------------------------------------------------------------- */
 
 export function SoPointsCard({ s }: { s: S2State }) {
   const sum = s.summary;
   const tier = tierKey(sum?.currentTier);
   const st = TIER_STYLE[tier]!;
-  const last = s.weeks.filter((w) => w.pointsStatus === 'CONFIRMED').sort((a, b) => b.weekNo - a.weekNo)[0];
-  const total = sum?.totalPoints ?? null;
-  const next = sum?.nextTier ? tierKey(sum.nextTier) : null;
-  const goal = sum?.nextTierPoints ?? null;
-  // Progress inside the current tier's band, as SoDEX draws it (from this tier's floor to the next tier's).
-  const floor = TIERS.find((t) => t.name.toLowerCase() === tier.toLowerCase())?.at ?? 0;
-  const pct = total !== null && goal && goal > floor ? Math.max(0, Math.min(100, ((total - floor) / (goal - floor)) * 100)) : 100;
   const epic = tier === 'Epic';
+  const iron = tier === 'Iron';
+  // SoDEX: max level when there is no next tier, or the tier is Epic; progress = total / next tier's points.
+  const max = !sum?.nextTier || epic;
+  const total = sum?.totalPoints ?? null;
+  const goal = sum?.nextTierPoints ?? 0;
+  const pct = max || !total || goal <= 0 ? 100 : Math.max(0, Math.min(100, Math.floor((total / goal) * 10_000) / 100));
+  const last = s.weeks.filter((w) => w.pointsStatus === 'CONFIRMED').sort((a, b) => b.weekNo - a.weekNo)[0];
+  const share = () => {
+    if (total === null) return;
+    const text = `I'm ${tier} on SoDEX with ${total.toLocaleString('en-US')} SoPoints${sum?.rank ? `, rank ${sum.rank.toLocaleString('en-US')}` : ''}.`;
+    const url = `${location.origin}/points`;
+    if (navigator.share) void navigator.share({ text, url }).catch(() => {});
+    else void copy(`${text} ${url}`, 'Text');
+  };
   return (
-    <section className={`spm-card${tier === 'Iron' ? ' is-iron' : ''}`} style={{ background: st.bg, outlineColor: st.border, boxShadow: `0 25px 50px -12px ${st.shadow}` }} aria-label="Your SoPoints">
+    <section className={`spm-card${iron ? ' is-iron' : ''}`} style={{ background: st.bg, outlineColor: st.border, boxShadow: `0 25px 50px -12px ${st.shadow}` }} aria-label="Your SoPoints">
       <div className="spm-card__top">
         <span className="spm-card__tier">{tier.toUpperCase()}</span>
-        {sum?.rank ? <span className="spm-card__rank">Rank #{fmt(sum.rank, 0)}{sum.totalUser ? ` of ${fmt(sum.totalUser, 0)}` : ''}</span> : null}
+        <button type="button" className="spm-card__share" onClick={share} disabled={total === null}>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="12" cy="3.5" r="2" /><circle cx="4" cy="8" r="2" /><circle cx="12" cy="12.5" r="2" /><path d="M5.7 7.1 10.3 4.4M5.7 8.9l4.6 2.7" stroke="currentColor" strokeWidth="1.3" fill="none" /></svg>
+          SHARE
+        </button>
       </div>
       <div className="spm-card__total">
-        <b className={epic ? 'is-epic' : ''}>{total !== null ? fmt(total, 0) : s.loading ? '…' : DASH}</b>
-        <span className="spm-card__chip" style={{ color: epic ? '#E5E5E5' : st.chip }}>SOPOINTS</span>
+        <b className={epic ? 'is-epic' : ''}>{total !== null ? total.toLocaleString('en-US') : s.loading ? '…' : DASH}</b>
+        <span className="spm-card__chip" style={epic ? { background: 'rgba(38,38,38,0.9)', borderColor: '#404040', color: '#E5E5E5' } : { color: st.chip }}>SOPOINTS</span>
       </div>
-      {last && last.points > 0 && <span className="spm-card__last">Last week <b>+{fmt(last.points, 0)}</b></span>}
+      {last && last.points > 0 && <span className={`spm-card__last${iron ? ' is-iron' : ''}`}>Last week <b>+{last.points.toLocaleString('en-US')}</b></span>}
       <div className="spm-card__next">
-        <div className="spm-card__nextrow">
-          <span>{next ? `NEXT TIER: ${next.toUpperCase()}` : 'MAX LEVEL'}</span>
-          {next && total !== null && goal ? <span className="spm-card__mono">{fmt(total, 0)} / {fmt(goal, 0)}</span> : null}
+        <div className={`spm-card__nextrow${iron ? ' is-iron' : ''}`}>
+          <span>{max ? 'MAX LEVEL' : `NEXT TIER: ${tierKey(sum?.nextTier).toUpperCase()}`}</span>
+          <span className="spm-card__mono">{max ? '—' : goal.toLocaleString('en-US')}</span>
         </div>
-        <div className="spm-card__bar"><i style={{ width: `${pct}%`, background: st.bar }} /></div>
+        <div className="spm-card__bar" style={epic ? { background: '#111827', borderColor: '#374151' } : undefined}>
+          <i style={{ width: `${pct}%`, background: st.bar, boxShadow: epic ? 'none' : '0 0 10px rgba(255,255,255,0.4)' }} />
+        </div>
+        {sum?.rank ? (
+          <span className="spm-card__rank">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 5.5 5.5 8 8 3.5 10.5 8l3-2.5-1.2 6.5H3.7z" /><path d="M3.7 13.5h8.6" /></svg>
+            Rank {sum.rank.toLocaleString('en-US')} of all users
+          </span>
+        ) : null}
       </div>
     </section>
   );
 }
+
+/* --- the season card (SoDEX's) ------------------------------------------------------------------------------------ */
+
+export function SeasonCard({ week, code }: { week: WeekInfo | null; code: string | null }) {
+  const now = useNow();
+  const ends = week ? week.nextWeekStartTime * 1000 : null;
+  const left = ends ? Math.max(0, ends - now) : null;
+  const two = (n: number) => String(n).padStart(2, '0');
+  const parts = left === null ? null : [Math.floor(left / 86_400_000), Math.floor((left % 86_400_000) / 3_600_000), Math.floor((left % 3_600_000) / 60_000), Math.floor((left % 60_000) / 1000)];
+  const link = code ? `sodex.com/join/${code}?points=1` : null;
+  const at = (ms: number) => new Date(ms).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  const live = week?.weekStatus === 'LIVE';
+  return (
+    <section className="spm-season" aria-label="This week">
+      <div className="spm-season__main">
+        <div className="spm-season__live">
+          <span className={`spm-season__on${live ? '' : ' is-off'}`}><i />{week ? `Layer1 Season ${week.weekName} is ${live ? 'Live' : 'closed'}` : 'Layer1 Season'}</span>
+          <span className="spm-season__split">· Split this week</span>
+        </div>
+        <b className="spm-season__pool">{SODEX_POOL_SHOWN.toLocaleString('en-US')}</b>
+        <span className="spm-season__sub">SoPoints · 20-week season</span>
+        <div className="spm-season__snap">
+          <span className="spm-season__k2">Next Snapshot</span>
+          <span className="spm-season__times">
+            {['D', 'H', 'M', 'S'].map((u, i) => (
+              <span key={u} className="spm-season__t"><b>{parts ? two(parts[i]!) : '--'}</b>{u}{i < 3 && <em>:</em>}</span>
+            ))}
+          </span>
+        </div>
+        {week && <span className="spm-season__when">Snapshot every {at(week.nextWeekStartTime * 1000)} · distribution every {at(week.distributionTime * 1000)} (your time)</span>}
+      </div>
+      <div className="spm-season__invite">
+        <div>
+          <span className="spm-season__k">Your invite code</span>
+          <div className="spm-season__row"><b>{code ?? DASH}</b>{code && <CopyBtn onClick={() => void copy(code, 'Invite code')} label="Copy invite code" />}</div>
+        </div>
+        <div>
+          <span className="spm-season__k">Your invite link</span>
+          <div className="spm-season__row"><b className="is-link">{link ?? DASH}</b>{link && <CopyBtn onClick={() => void copy(`https://${link}`, 'Invite link')} label="Copy invite link" />}</div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const CopyBtn = ({ onClick, label }: { onClick: () => void; label: string }) => (
+  <button type="button" className="spm-copy" onClick={onClick} aria-label={label} title={label}>
+    <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5" /><path d="M3 10.5V3.5A1 1 0 0 1 4 2.5h6.5" /></svg>
+  </button>
+);
 
 /* --- the wallet's squad boost ------------------------------------------------------------------------------------ */
 
@@ -74,7 +156,7 @@ export function MySquadBoost({ s, cfg }: { s: S2State; cfg: BoostConfig | null }
         <div className="spm-squad">
           <div className="spm-squad__head">
             <b>+{q.total}%</b>
-            <span>on every point you earn this week{q.fromSodex ? '' : ' (from your squads)'}</span>
+            <span>on every point you earn this week</span>
           </div>
           <div className="spm-squad__parts">
             <Part label="Squad you joined" pct={q.joined.pct} vol={q.joined.volume} next={q.joined.next} />
@@ -91,7 +173,6 @@ export function MySquadBoost({ s, cfg }: { s: S2State; cfg: BoostConfig | null }
               return <li key={t.threshold} className={on ? 'is-on' : ''}><b>+{t.bonusPct}%</b><span>{usd(Number(t.threshold))}</span></li>;
             })}
           </ol>
-          <p className="pf-note">A squad's volume over the last {cfg?.windowRounds ?? 4} weeks sets its step; $1 traded = 1 energy. Both squads add up.</p>
         </div>
       )}
     </Card>
@@ -111,85 +192,104 @@ function Part({ label, pct, vol, next, sub }: { label: string; pct: number; vol:
   );
 }
 
-/* --- weekly points ------------------------------------------------------------------------------------------------ */
+/* --- all weeks, both charts --------------------------------------------------------------------------------------- */
+
+function useAllWeeks(s: S2State) {
+  return useMemo(() => allWeeks(s.s1, s.weeks), [s.s1, s.weeks]);
+}
+
+/** One frame for both charts: a fixed height, every week of both seasons, the season start marked, a hover readout. */
+function WeekBars({ rows, render, readout, label }: {
+  rows: AnyWeek[];
+  render: (r: AnyWeek) => ReactNode;
+  readout: (r: AnyWeek) => ReactNode;
+  label: (r: AnyWeek) => string;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const firstL1 = rows.findIndex((r) => r.season === 'L1');
+  const shown = hover !== null ? rows[hover] : [...rows].reverse().find((r) => r.split.week.pointsStatus === 'CONFIRMED') ?? null;
+  return (
+    <div className="spm-weeks">
+      <div className="spm-weeks__plot" onMouseLeave={() => setHover(null)}>
+        {rows.map((r, i) => (
+          <button
+            key={r.key}
+            type="button"
+            className={`spm-col${hover === i ? ' is-hover' : ''}${i === firstL1 && i > 0 ? ' is-season' : ''}`}
+            onMouseEnter={() => setHover(i)}
+            onFocus={() => setHover(i)}
+            aria-label={label(r)}
+          >
+            <span className="spm-col__stack">{render(r)}</span>
+          </button>
+        ))}
+      </div>
+      <div className="spm-weeks__axis">
+        <span>{rows[0]?.short}</span>
+        {firstL1 > 0 && <span className="spm-weeks__mark" style={{ left: `${(firstL1 / rows.length) * 100}%` }}>Layer 1</span>}
+        <span>{rows.at(-1)?.short}</span>
+      </div>
+      {shown && <p className="spm-readout">{readout(shown)}</p>}
+    </div>
+  );
+}
 
 export function WeeklyPoints({ s }: { s: S2State }) {
-  const rows = useMemo(() => [...s.weeks].sort((a, b) => a.weekNo - b.weekNo).map(splitWeek), [s.weeks]);
-  const [hover, setHover] = useState<number | null>(null);
-  const max = Math.max(1, ...rows.map((r) => r.week.points));
-  const h = hover !== null ? rows[hover] : rows.filter((r) => r.week.pointsStatus === 'CONFIRMED').at(-1) ?? null;
+  const rows = useAllWeeks(s);
+  const max = Math.max(1, ...rows.map((r) => r.split.week.points));
+  const h = (v: number) => `${(v / max) * 100}%`;
   return (
-    <Card title="Points by week" action={<Legend />}>
+    <Card title="Points by week" action={<span className="spm-legend"><i className="is-own" />Trading<i className="is-ref" />Referrals<i className="is-boost" />Squad boost</span>}>
       {!rows.length ? <p className="pf-note">{s.loading ? 'Reading your weeks…' : 'No weeks yet.'}</p> : (
-        <div className="spm-weeks">
-          <div className="spm-weeks__plot" onMouseLeave={() => setHover(null)}>
-            {rows.map((r, i) => {
-              const tbd = r.week.pointsStatus !== 'CONFIRMED';
-              const part = (v: number) => `${(v / max) * 100}%`;
-              return (
-                <button key={r.week.weekNo} type="button" className={`spm-col${hover === i ? ' is-hover' : ''}${tbd ? ' is-tbd' : ''}`} onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} aria-label={`${r.week.weekName}: ${tbd ? 'not scored yet' : `${r.week.points} points`}`}>
-                  <span className="spm-col__stack">
-                    {tbd ? <i className="spm-col__tbd" /> : (<>
-                      <i className="is-boost" style={{ height: part(r.boost) }} />
-                      <i className="is-ref" style={{ height: part(r.referral) }} />
-                      <i className="is-own" style={{ height: part(r.own) }} />
-                    </>)}
-                  </span>
-                  <span className="spm-col__x">{r.week.weekNo}</span>
-                </button>
-              );
-            })}
-          </div>
-          {h && <WeekReadout r={h} />}
-        </div>
+        <WeekBars
+          rows={rows}
+          label={(r) => `${r.name}: ${r.split.week.pointsStatus === 'CONFIRMED' ? `${r.split.week.points} points` : 'not scored yet'}`}
+          render={(r) => r.split.week.pointsStatus !== 'CONFIRMED' ? <i className="spm-col__tbd" /> : (<>
+            <i className="is-boost" style={{ height: h(r.split.boost) }} />
+            <i className="is-ref" style={{ height: h(r.split.referral) }} />
+            <i className="is-own" style={{ height: h(r.split.own) }} />
+          </>)}
+          readout={(r) => {
+            const w = r.split.week;
+            if (w.pointsStatus !== 'CONFIRMED') return <><b>{r.name}</b> · not scored yet · {usd(r.split.volume)} volume so far</>;
+            return <><b>{r.name}</b> · <b>{w.points.toLocaleString('en-US')}</b> points = {fmt(r.split.own, 0)} trading + {fmt(r.split.referral, 0)} referrals{r.split.boost >= 1 ? ` + ${fmt(r.split.boost, 0)} squad (+${w.totalBonusPct ?? 0}%)` : ''} · {usd(r.split.volume)} volume{w.rank ? ` · rank ${w.rank.toLocaleString('en-US')}` : ''}</>;
+          }}
+        />
       )}
     </Card>
   );
 }
 
-const Legend = () => (
-  <span className="spm-legend"><i className="is-own" />Trading<i className="is-ref" />Referrals<i className="is-boost" />Squad boost</span>
-);
-
-function WeekReadout({ r }: { r: WeekSplit }) {
-  const w = r.week;
-  if (w.pointsStatus !== 'CONFIRMED') return <p className="spm-readout"><b>{w.weekName}</b> · not scored yet · {usd(r.volume)} volume so far · squad +{w.totalBonusPct ?? 0}%</p>;
-  return (
-    <p className="spm-readout">
-      <b>{w.weekName}</b> · <b>{fmt(w.points, 0)}</b> points = {fmt(r.own, 0)} trading + {fmt(r.referral, 0)} referrals + {fmt(r.boost, 0)} squad (+{w.totalBonusPct ?? 0}%) · {usd(r.volume)} volume{w.rankPercentile ? ` · ${w.rankPercentile}` : ''}
-    </p>
-  );
-}
-
-/* --- cost per point: you vs the venue ----------------------------------------------------------------------------- */
-
 export function CostPerPoint({ s, pool }: { s: S2State; pool: number | null }) {
+  const rows = useAllWeeks(s);
   const venue = useMemo(() => venueVolumeByWeek(s.weeks, s.venueDaily), [s.weeks, s.venueDaily]);
-  const rows = useMemo(() => [...s.weeks].sort((a, b) => a.weekNo - b.weekNo).filter((w) => !w.isLive).map((w) => {
-    const sp = splitWeek(w);
-    const v = venue.get(w.weekNo);
-    return { w, you: sp.dollarsPerPoint, field: v && pool ? v / pool : null };
-  }), [s.weeks, venue, pool]);
-  const vals = rows.flatMap((r) => [r.you, r.field]).filter((x): x is number => x !== null);
+  const field = (r: AnyWeek): number | null => {
+    if (r.season !== 'L1' || !pool) return null;
+    const v = venue.get(r.split.week.weekNo);
+    return v ? v / pool : null;
+  };
+  const vals = rows.flatMap((r) => [r.split.dollarsPerPoint, field(r)]).filter((x): x is number => x !== null && x > 0);
   const max = Math.max(1, ...vals);
-  const traded = rows.some((r) => r.you !== null);
   return (
     <Card title="Volume per point" action={<span className="spm-legend"><i className="is-own" />You<i className="is-field" />Whole venue</span>}>
-      <p className="pf-note spm-sub">Dollars of volume it took to earn one point. Lower is better.</p>
-      {!rows.length || !vals.length ? <p className="pf-note">{s.loading ? 'Reading…' : 'Not enough weeks yet.'}</p> : (
-        <div className="spm-cpp">
-          {rows.map((r) => (
-            <div key={r.w.weekNo} className="spm-cpp__row">
-              <span className="spm-cpp__wk">W{r.w.weekNo}</span>
-              <div className="spm-cpp__bars">
-                <span className="spm-cpp__bar is-own" style={{ width: r.you ? `${(r.you / max) * 100}%` : 0 }} />
-                <span className="spm-cpp__bar is-field" style={{ width: r.field ? `${(r.field / max) * 100}%` : 0 }} />
-              </div>
-              <span className="spm-cpp__v">{r.you ? usd(r.you) : '—'}<small>{r.field ? usd(r.field) : '—'}</small></span>
-            </div>
-          ))}
-          {!traded && <p className="pf-note">You traded too little in these weeks to measure your own cost.</p>}
-        </div>
+      {!rows.length ? <p className="pf-note">{s.loading ? 'Reading…' : 'No weeks yet.'}</p> : (
+        <WeekBars
+          rows={rows}
+          label={(r) => `${r.name}: ${r.split.dollarsPerPoint ? usd(r.split.dollarsPerPoint) : 'no trading'} per point`}
+          render={(r) => {
+            const f = field(r);
+            return (
+              <span className="spm-col__pair">
+                <i className="is-own" style={{ height: r.split.dollarsPerPoint ? `${(r.split.dollarsPerPoint / max) * 100}%` : 0 }} />
+                <i className="is-field" style={{ height: f ? `${(f / max) * 100}%` : 0 }} />
+              </span>
+            );
+          }}
+          readout={(r) => {
+            const f = field(r);
+            return <><b>{r.name}</b> · {r.split.dollarsPerPoint ? <>you <b>{usd(r.split.dollarsPerPoint)}</b> per point</> : 'no trading by you'}{f ? <> · venue {usd(f)} per point</> : null} · lower is better</>;
+          }}
+        />
       )}
     </Card>
   );

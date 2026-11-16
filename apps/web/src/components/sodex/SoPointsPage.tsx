@@ -16,7 +16,7 @@ import { RULES } from '../../points';
 import { SODEX_POINTS_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
 import type { Eip1193Provider } from '../../wallet';
 import { PointsEstimate } from './PointsEstimate';
-import { CostPerPoint, EarnMore, MySquadBoost, SoPointsCard, WeeklyPoints } from './SoPointsMine';
+import { CostPerPoint, EarnMore, MySquadBoost, SeasonCard, SoPointsCard, WeeklyPoints } from './SoPointsMine';
 import { useSoPointsV2 } from './soPointsV2';
 import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
 
@@ -49,33 +49,25 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
         pills={w && <Pill tone={w.weekStatus === 'LIVE' ? 'live' : 'quiet'} dot={w.weekStatus === 'LIVE'}>{w.weekName} · {w.weekStatus}</Pill>}
       />
 
-      <Tiles>
-        <Tile label="Pool this week" value={w ? fmt(w.weekPoolPoints, 0) : DASH} sub="SoPoints to split" />
-        <Tile label="Week ends in" value={ends ? fmtLeft(ends, now) : DASH} sub={ends ? fmtWhen(ends) : undefined} />
-        <Tile label="Next distribution" value={pays ? fmtLeft(pays, now) : DASH} sub={pays ? fmtWhen(pays) : undefined} />
-        <Tile
-          label="Boosted markets"
-          value={c.weights ? String(c.weights.weights.length) : DASH}
-          sub={c.weights ? `round ${c.weights.round.round_id}` : undefined}
-        />
-      </Tiles>
-
       {mine ? (
         <>
-          <div className="sdx-duo spm-duo">
+          <div className="spm-top">
             <SoPointsCard s={v2} />
-            <MySquadBoost s={v2} cfg={c.boost} />
+            <SeasonCard week={w} code={c.referral?.referralCode || null} />
           </div>
           {v2.error && <p className="pf-note" role="alert">Some of your SoPoints could not be read: {v2.error}</p>}
+          <MySquadBoost s={v2} cfg={c.boost} />
           <EarnMore s={v2} cfg={c.boost} weights={c.weights} pool={w?.weekPoolPoints ?? null} />
-          <div className="sdx-duo">
+          <div className="sdx-duo spm-charts">
             <WeeklyPoints s={v2} />
             <CostPerPoint s={v2} pool={w?.weekPoolPoints ?? null} />
           </div>
+          <div className="spm-table">{panel('weeks', c)}</div>
           <BoostedMarkets c={c} />
         </>
       ) : (
         <>
+          <SeasonCard week={w} code={c.referral?.referralCode || null} />
           <div className="sdx-duo">
             <BoostedMarkets c={c} />
             <SquadBoost c={c} />
@@ -134,7 +126,6 @@ function BoostedMarkets({ c }: { c: PointsContext }) {
               </li>
             ))}
           </ul>
-          <p className="pf-note">Volume in these counts at the multiple toward your weekly snapshot. No squad needed.</p>
         </>
       )}
     </Card>

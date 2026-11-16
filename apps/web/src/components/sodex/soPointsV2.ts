@@ -73,6 +73,48 @@ export const fetchS2Summary = (a: string) => authed<S2Summary>(`${BIZ}/biz/sopoi
 export const fetchS2Weeks = (a: string) => authed<S2Week[]>(`${BIZ}/biz/sopoints/v2/week/list`, a).then((r) => r ?? []);
 export const fetchS2TeamBonus = (a: string) => authed<S2TeamBonus>(`${BIZ}/biz/sopoints/v2/team/bonus`, a);
 
+/** Season 1 (before Layer 1): SoDEX's v1 list, newest first, "Closed Alpha" last. Same token. */
+export interface S1Week {
+  weekName: string;
+  weekStartTime: number;
+  weekEndTime: number;
+  spotVolume: number;
+  futuresVolume: number;
+  vaultHolding: number;
+  oi: number;
+  accountValue: number;
+  points: number;
+  referralPoints: number;
+  pointsStatus: string;
+  rank: number;
+  totalUser: number;
+}
+export const fetchS1Weeks = (a: string) => authed<S1Week[]>(`${BIZ}/biz/sopoints/week/list`, a).then((r) => r ?? []);
+
+/** One bar of the all-weeks charts: either season, oldest first. */
+export interface AnyWeek {
+  key: string;
+  season: 'S1' | 'L1';
+  /** "W12" (Season 1) or "L3" (Layer 1). */
+  short: string;
+  name: string;
+  start: number;
+  split: WeekSplit;
+}
+
+/** Season 1 and Layer 1 weeks on one line, oldest first; Closed Alpha (a 4-month period) is left out of the charts. */
+export function allWeeks(s1: S1Week[], l1: S2Week[]): AnyWeek[] {
+  const a: AnyWeek[] = s1
+    .filter((w) => /Week\s+\d+/i.test(w.weekName))
+    .map((w) => {
+      const n = Number(/Week\s+(\d+)/i.exec(w.weekName)![1]);
+      const as2: S2Week = { weekNo: n, weekName: w.weekName, status: 'COMPLETED', weekStartTime: w.weekStartTime, weekEndTime: w.weekEndTime, distributionTime: 0, isLive: false, spotVolume: w.spotVolume, futuresVolume: w.futuresVolume, vaultHolding: w.vaultHolding, wealthTvl: 0, oi: w.oi, accountValue: w.accountValue, teamWeekVolume: 0, teamWindowVolume: 0, totalBonusPct: 0, points: w.points, referralPoints: w.referralPoints, pointsStatus: w.pointsStatus, rank: w.rank, totalUser: w.totalUser, rankPercentile: '' };
+      return { key: `s1-${n}`, season: 'S1' as const, short: `W${n}`, name: `Season 1 · ${w.weekName}`, start: w.weekStartTime, split: splitWeek(as2) };
+    });
+  const b: AnyWeek[] = l1.map((w) => ({ key: `l1-${w.weekNo}`, season: 'L1' as const, short: `L${w.weekNo}`, name: `Layer 1 · ${w.weekName}`, start: w.weekStartTime, split: splitWeek(w) }));
+  return [...a, ...b].sort((x, y) => x.start - y.start);
+}
+
 /* --- squad boost ------------------------------------------------------------------------------------------------ */
 
 /** The +% one squad's window volume reaches on SoDEX's ladder (0 below the first step). */
@@ -208,7 +250,7 @@ export function earnTips(input: {
     const v = input.venue.get(traded.week.weekNo);
     const field = v ? v / input.pool : null;
     tips.push({ id: 'pace', kind: 'fact', title: 'Your cost per point', value: `${usd(traded.dollarsPerPoint!)}`,
-      line: `${traded.week.weekName}: ${usd(traded.dollarsPerPoint!)} of your volume per point${field ? `, against ${usd(field)} for the whole venue (its volume over the ${Math.round(input.pool / 1000)}K pool)` : ''}.` });
+      line: `${traded.week.weekName}: ${usd(traded.dollarsPerPoint!)} of your volume per point${field ? `, against ${usd(field)} for the whole venue` : ''}.` });
   }
 
   // 4. Steady beats one big week (our fit).
@@ -233,6 +275,7 @@ export function earnTips(input: {
 export interface S2State {
   summary: S2Summary | null;
   weeks: S2Week[];
+  s1: S1Week[];
   bonus: S2TeamBonus | null;
   venueDaily: DailyPoint[];
   loading: boolean;
@@ -240,17 +283,18 @@ export interface S2State {
 }
 
 export function useSoPointsV2(address: string | null, signedIn: boolean): S2State {
-  const [s, set] = useState<S2State>({ summary: null, weeks: [], bonus: null, venueDaily: [], loading: false, error: null });
+  const [s, set] = useState<S2State>({ summary: null, weeks: [], s1: [], bonus: null, venueDaily: [], loading: false, error: null });
   useEffect(() => {
-    if (!address || !signedIn) { set({ summary: null, weeks: [], bonus: null, venueDaily: [], loading: false, error: null }); return; }
+    if (!address || !signedIn) { set({ summary: null, weeks: [], s1: [], bonus: null, venueDaily: [], loading: false, error: null }); return; }
     let live = true;
     set((x) => ({ ...x, loading: true, error: null }));
-    void Promise.allSettled([fetchS2Summary(address), fetchS2Weeks(address), fetchS2TeamBonus(address), fetchVenueDaily('volume', 90)]).then(([a, b, c, d]) => {
+    void Promise.allSettled([fetchS2Summary(address), fetchS2Weeks(address), fetchS2TeamBonus(address), fetchVenueDaily('volume', 90), fetchS1Weeks(address)]).then(([a, b, c, d, e]) => {
       if (!live) return;
       const err = [a, b, c].find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
       set({
         summary: a.status === 'fulfilled' ? a.value : null,
         weeks: b.status === 'fulfilled' ? b.value : [],
+        s1: e.status === 'fulfilled' ? e.value : [],
         bonus: c.status === 'fulfilled' ? c.value : null,
         venueDaily: d.status === 'fulfilled' ? d.value : [],
         loading: false,
