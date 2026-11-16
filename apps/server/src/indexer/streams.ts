@@ -894,6 +894,17 @@ export class LighterStream {
   private openAt: number[] = [];
   /** Lighter's other messages (errors), by type: how many, so the log names each type without flooding. */
   private others = new Map<string, number>();
+  /** Each socket's subscribes not yet answered, oldest first: an "Invalid Channel" answer names no market, and Lighter answers in order, so it is the oldest. */
+  private unanswered: Array<number[]> = [];
+  /**
+   * Markets Lighter refused ("Invalid Channel", code 30005): not asked again, and not waited for, until the next market
+   * refresh. 2026-11-16 11:14 UTC: after Lighter's restart one market of socket 4 was refused every 20 s for hours,
+   * the socket never counted as whole, and the stream showed down (an open incident) with 219 of 220 markets flowing.
+   */
+  private rejected = new Set<number>();
+  private refreshTimer?: NodeJS.Timeout;
+  /** The active market list is read again this often: Lighter lists and delists markets while we run. */
+  static REFRESH_MS = 30 * 60_000;
   /** Subscribe messages wait this long between them, across every socket: at most 182 a minute, beside 12 pings (Lighter: 200). 330 ms, not 400: after a restart all 224 markets are whole again in ~75 s, under the 2-minute gap that breaks a stream's span (measured 2026-11-01: one socket's 54 markets confirm in 22 s at 400 ms with no error). */
   static SEND_GAP_MS = 330;
   /** At most this many subscribes in one go (a late timer catching up): 182 a minute + 6 + 12 pings stays within Lighter's 200. */
@@ -926,7 +937,56 @@ export class LighterStream {
 
   /** Markets confirmed / wanted, for the status line. */
   get subscribed(): { confirmed: number; markets: number } {
-    return { confirmed: this.confirmed.reduce((n, s) => n + s.size, 0), markets: this.groups.reduce((n, g) => n + g.length, 0) };
+    return { confirmed: this.confirmed.reduce((n, s) => n + s.size, 0), markets: this.groups.reduce((n, g) => n + this.wanted(g).length, 0) };
+  }
+
+  /** A socket's markets less the ones Lighter refused. */
+  private wanted(group: readonly number[]): number[] {
+    return this.rejected.size ? group.filter((g) => !this.rejected.has(g)) : [...group];
+  }
+
+  /** Mark socket `i` whole once every market it still wants is confirmed. */
+  private checkReady(i: number): void {
+    const conf = this.confirmed[i];
+    if (!conf || this.readyAt[i] != null) return;
+    if (!this.wanted(this.groups[i]!).every((g) => conf.has(g))) return;
+    this.readyAt[i] = Date.now();
+    const took = this.openAt[i] ? ` in ${Math.round((this.readyAt[i]! - this.openAt[i]!) / 1000)} s` : '';
+    this.log(`stream lighter#${i + 1}: all ${conf.size} markets confirmed${took}`);
+  }
+
+  /**
+   * Read the active markets again: delisted ones leave their socket (no longer waited for), new ones join the socket
+   * with the fewest, and refused ones are tried once more. Public for tests.
+   */
+  async refresh(): Promise<void> {
+    let now: Map<number, string>;
+    try {
+      now = await this.markets();
+    } catch {
+      return; // the next refresh tries again
+    }
+    if (!now.size) return;
+    const had = new Set(this.groups.flat());
+    const gone = [...had].filter((id) => !now.has(id));
+    const added = [...now.keys()].filter((id) => !had.has(id)).sort((a, b) => a - b);
+    for (const [id, sym] of now) this.symbols.set(id, sym);
+    this.groups = this.groups.map((g, i) => {
+      const keep = g.filter((id) => now.has(id));
+      for (const id of gone) this.confirmed[i]?.delete(id);
+      return keep;
+    });
+    for (const id of added) {
+      let best = 0;
+      for (let i = 1; i < this.groups.length; i++) if (this.groups[i]!.length < this.groups[best]!.length) best = i;
+      if (this.groups[best]) this.groups[best]!.push(id);
+    }
+    const retried = this.rejected.size;
+    this.rejected.clear();
+    if (gone.length || added.length || retried) {
+      this.log(`stream lighter: markets refreshed, ${gone.length} delisted (${gone.join(', ') || '-'}), ${added.length} new (${added.join(', ') || '-'}), ${retried} refused tried again`);
+    }
+    this.groups.forEach((_, i) => { if (this.sendFns[i]) this.checkReady(i); });
   }
 
   async start(): Promise<void> {
@@ -945,6 +1005,7 @@ export class LighterStream {
           // A (re)opened socket starts from nothing: every market is subscribed again.
           this.confirmed[i] = new Set();
           this.sentAt[i] = new Map();
+          this.unanswered[i] = [];
           this.readyAt[i] = null;
           this.sendFns[i] = send;
           this.openAt[i] = Date.now();
@@ -964,10 +1025,13 @@ export class LighterStream {
     for (const s of this.sockets) s.start();
     this.timer = setInterval(() => this.pump(), 100);
     this.timer.unref?.();
+    this.refreshTimer = setInterval(() => void this.refresh(), LighterStream.REFRESH_MS);
+    this.refreshTimer.unref?.();
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
     for (const s of this.sockets) s.stop();
   }
 
@@ -989,7 +1053,7 @@ export class LighterStream {
         const i = (this.turn + k) % this.groups.length;
         const send = this.sendFns[i];
         if (!send) continue;
-        const id = this.groups[i]!.find((g) => !this.confirmed[i]!.has(g) && !(now - (this.sentAt[i]!.get(g) ?? -Infinity) < LighterStream.CONFIRM_MS));
+        const id = this.groups[i]!.find((g) => !this.confirmed[i]!.has(g) && !this.rejected.has(g) && !(now - (this.sentAt[i]!.get(g) ?? -Infinity) < LighterStream.CONFIRM_MS));
         if (id === undefined) continue;
         try {
           send({ type: 'subscribe', channel: `trade/${id}` });
@@ -998,6 +1062,7 @@ export class LighterStream {
           break;
         }
         this.sentAt[i]!.set(id, now);
+        (this.unanswered[i] ??= []).push(id);
         owed -= 1;
         sent += 1;
         any = true;
@@ -1012,7 +1077,7 @@ export class LighterStream {
 
   /** One raw message on socket `i`. Public for tests. */
   handle(i: number, msg: unknown): void {
-    const m = msg as { type?: string; channel?: string; trades?: unknown; liquidation_trades?: unknown };
+    const m = msg as { type?: string; channel?: string; trades?: unknown; liquidation_trades?: unknown; error?: { code?: unknown } };
     // Anything but prints, confirmations and the socket's own chatter is Lighter telling us something (an error, a limit).
     const kind = typeof m?.type === 'string' ? m.type : 'no-type';
     if (!LIGHTER_QUIET.has(kind)) {
@@ -1020,17 +1085,25 @@ export class LighterStream {
       this.others.set(kind, n);
       if (n <= 3 || n % 100 === 0) this.log(`stream lighter#${i + 1}: Lighter said (${kind} #${n}) ${JSON.stringify(msg).slice(0, 200)}`);
     }
+    if (m?.error?.code === 30005) {
+      const id = this.unanswered[i]?.shift();
+      if (id != null && !this.confirmed[i]?.has(id) && !this.rejected.has(id)) {
+        this.rejected.add(id);
+        this.log(`stream lighter#${i + 1}: Lighter refused market ${id} (${this.symbols.get(id) ?? '?'}); not waited for until the next market refresh`);
+        this.checkReady(i);
+      }
+      return;
+    }
     if (typeof m?.type !== 'string' || typeof m.channel !== 'string' || !m.channel.startsWith('trade:')) return;
     if (m.type === 'subscribed/trade') {
       const id = Number(m.channel.slice(6));
       const conf = this.confirmed[i];
       if (conf && Number.isInteger(id)) {
         conf.add(id);
-        if (this.readyAt[i] == null && this.groups[i]!.every((g) => conf.has(g))) {
-          this.readyAt[i] = Date.now();
-          const took = this.openAt[i] ? ` in ${Math.round((this.readyAt[i]! - this.openAt[i]!) / 1000)} s` : '';
-          this.log(`stream lighter#${i + 1}: all ${conf.size} markets confirmed${took}`);
-        }
+        const q = this.unanswered[i];
+        const at = q ? q.indexOf(id) : -1;
+        if (at >= 0) q!.splice(0, at + 1);
+        this.checkReady(i);
       }
     }
     if (m.type !== 'update/trade' && m.type !== 'subscribed/trade') return;

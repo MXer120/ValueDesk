@@ -312,3 +312,39 @@ test('lighter pacing: a late timer catches up (at most BURST), the sockets take 
     Date.now = real;
   }
 });
+
+test('Lighter: a market Lighter refuses is not waited for, and the market list refresh drops delisted and adds new ones (2026-11-16)', async () => {
+  const lines: string[] = [];
+  let list = new Map([[1, 'A'], [2, 'B'], [3, 'C']]);
+  const st = new LighterStream(() => {}, async () => list, 'ws://127.0.0.1:9', (l) => lines.push(l));
+  const sent: unknown[] = [];
+  const raw = st as unknown as { groups: number[][]; confirmed: Array<Set<number>>; sentAt: Array<Map<number, number>>; readyAt: Array<number | null>; sendFns: Array<((m: unknown) => void) | null>; lastSend: number; openAt: number[]; symbols: Map<number, string>; pump(): void };
+  raw.symbols = new Map(list);
+  raw.groups = [[1, 2, 3]];
+  raw.confirmed = [new Set()];
+  raw.sentAt = [new Map()];
+  raw.readyAt = [null];
+  raw.openAt = [Date.now()];
+  raw.sendFns = [(m) => sent.push(m)];
+  // One burst sends all three; Lighter answers in order: 1 ok, 2 refused, 3 ok.
+  raw.lastSend = 0;
+  raw.pump();
+  assert.deepEqual(sent.map((m) => (m as { channel: string }).channel), ['trade/1', 'trade/2', 'trade/3']);
+  st.handle(0, { type: 'subscribed/trade', channel: 'trade:1', trades: [] });
+  st.handle(0, { error: { code: 30005, message: 'Invalid Channel:  (marketId)' } });
+  st.handle(0, { type: 'subscribed/trade', channel: 'trade:3', trades: [] });
+  assert.ok(raw.readyAt[0] != null, 'whole without the refused market');
+  assert.ok(lines.some((l) => /refused market 2 \(B\)/.test(l)));
+  assert.deepEqual(st.subscribed, { confirmed: 2, markets: 2 });
+  const before = sent.length;
+  raw.lastSend = 0;
+  raw.pump();
+  assert.equal(sent.length, before, 'the refused market is not asked again');
+  list = new Map([[1, 'A'], [3, 'C'], [4, 'D']]);
+  await st.refresh();
+  assert.deepEqual(raw.groups, [[1, 3, 4]], 'delisted 2 gone, new 4 added');
+  assert.ok(lines.some((l) => /1 delisted \(2\), 1 new \(4\)/.test(l)));
+  raw.lastSend = 0;
+  raw.pump();
+  assert.deepEqual(sent.at(-1), { type: 'subscribe', channel: 'trade/4' });
+});
