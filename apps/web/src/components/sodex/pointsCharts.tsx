@@ -141,7 +141,7 @@ export function PointsByWeek({ s }: { s: S2State }) {
       action={<ViewSeg value={span} options={SPANS} onChange={setSpan} label="Timeframe" />}
     >
       {!all.length ? (s.loading ? <SkelRows rows={1} height={H + 30} /> : <p className="pf-note">No weeks yet.</p>) : (<>
-        <span className="spm-legend">{view === 'refs' ? <><i className="is-ref" />Referrals</> : <><i className="is-own" />Trading<i className="is-ref" />Referrals<i className="is-boost" />Squad boost</>}</span>
+        <span className="spm-legend">{view === 'refs' ? <><i className="is-ref" />Referrals</> : <><i className="is-own" />Own<i className="is-ref" />Referrals<i className="is-boost" />Squad boost</>}</span>
         <Frame
           n={rows.length}
           labels={rows.map((r) => r.short)}
@@ -158,7 +158,7 @@ export function PointsByWeek({ s }: { s: S2State }) {
               <b className="spm-tt__h">{r.name}</b>
               {!ok(r) ? <Row k="Status" v="Not scored yet" /> : (<>
                 <Row k="Points" v={fmt(w.points, 0)} />
-                <Row dot="is-own" k="Trading" v={view === 'share' ? `${fmt(share(r, r.split.own), 0)}%` : fmt(r.split.own, 0)} />
+                <Row dot="is-own" k="Own" v={view === 'share' ? `${fmt(share(r, r.split.own), 0)}%` : fmt(r.split.own, 0)} />
                 <Row dot="is-ref" k="Referrals" v={view === 'share' ? `${fmt(share(r, r.split.referral), 0)}%` : fmt(r.split.referral, 0)} />
                 {r.season === 'L1' && <Row dot="is-boost" k={`Squad +${w.totalBonusPct ?? 0}%`} v={view === 'share' ? `${fmt(share(r, r.split.boost), 0)}%` : fmt(r.split.boost, 0)} />}
               </>)}
@@ -187,8 +187,12 @@ export function DifficultyChart({ s, pool }: { s: S2State; pool: number | null }
   const rows = cut(all, span);
   const you = (r: DifficultyRow) => (basis === 'vol' ? r.youVol : r.youOi);
   const plat = (r: DifficultyRow) => (basis === 'vol' ? r.platVol : r.platOi);
-  const last = [...rows].reverse().find((r) => you(r) !== null && (plat(r) ?? 0) > 0) ?? null;
-  const score = last ? you(last)! / plat(last)! : null;
+  // Your last value and the platform's last value, each from its own latest week; the score only from a week that has both.
+  const lastYou = [...rows].reverse().find((r) => you(r) !== null) ?? null;
+  const lastPlat = [...rows].reverse().find((r) => (plat(r) ?? 0) > 0) ?? null;
+  const both = [...rows].reverse().find((r) => you(r) !== null && (plat(r) ?? 0) > 0) ?? null;
+  const score = both ? you(both)! / plat(both)! : null;
+  const counted = rows.filter((r) => you(r) !== null).length;
   const max = Math.max(1, ...rows.flatMap((r) => [you(r), plat(r)]).filter((x): x is number => x !== null));
   const yt = ticks(max);
   return (
@@ -198,9 +202,10 @@ export function DifficultyChart({ s, pool }: { s: S2State; pool: number | null }
     >
       {!all.length ? (s.loading ? <SkelRows rows={1} height={H + 30} /> : <p className="pf-note">{DASH}</p>) : (<>
         <div className="spc__head">
-          <span>You <b>{last && you(last) !== null ? usd(you(last)!) : DASH}</b></span>
-          <span>Platform <b>{last && plat(last) !== null ? usd(plat(last)!) : DASH}</b></span>
+          <span title={lastYou ? lastYou.name : undefined}>You <b>{lastYou ? usd(you(lastYou)!) : DASH}</b></span>
+          <span title={lastPlat ? lastPlat.name : undefined}>Platform <b>{lastPlat ? usd(plat(lastPlat)!) : DASH}</b></span>
           <span>Score <b className={score === null ? '' : score <= 1 ? 'is-pos' : 'is-neg'}>{score === null ? DASH : `${fmt(score, 2)}×`}</b></span>
+          <span className="spc__count" title={`Weeks with your own ${basis === 'vol' ? 'volume' : 'open interest'} and own points`}>{counted} of {rows.length} weeks</span>
           <span className="spm-legend"><i className="is-own" />You<i className="is-field" />Platform</span>
         </div>
         <Frame
@@ -326,7 +331,7 @@ export function PointsMix({ s }: { s: S2State }) {
   }, [s.weeks]);
   const pick = span === 's1' ? s1 : span === 'l1' ? l1 : { own: s1.own + l1.own, ref: s1.ref + l1.ref, boost: l1.boost, n: s1.n + l1.n };
   const parts = [
-    { v: pick.own, cls: 'is-own', label: 'Trading' },
+    { v: pick.own, cls: 'is-own', label: 'Own' },
     { v: pick.ref, cls: 'is-ref', label: 'Referrals' },
     { v: pick.boost, cls: 'is-boost', label: 'Squad boost' },
   ];

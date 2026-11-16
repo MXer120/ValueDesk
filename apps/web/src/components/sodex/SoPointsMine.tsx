@@ -294,7 +294,7 @@ export function WeekTable({ s }: { s: S2State }) {
       <div className="spm-tbl__wrap">
         <table className="spm-tbl">
           <thead>
-            <tr><th>Week</th><th>Volume</th><th>Open interest</th><th>Holdings</th><th>Rank</th><th>Squad</th><th>Trading</th><th>Referrals</th><th>Points</th></tr>
+            <tr><th>Week</th><th>Volume</th><th>Open interest</th><th>Holdings</th><th>Rank</th><th>Squad</th><th>Own</th><th>Referrals</th><th>Points</th></tr>
           </thead>
           <tbody>
             {shown.map((r, i) => {

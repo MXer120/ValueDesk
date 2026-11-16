@@ -551,3 +551,5 @@ html .pf.sdx .pfx-slide { position: relative; border-radius: 8px; }
 .spm-card.is-glare:hover::after { animation-duration: 1.4s; }
 @keyframes spm-glare { 0% { transform: skewX(-18deg) translateX(0); } 22%, 100% { transform: skewX(-18deg) translateX(520%); } }
 @media (prefers-reduced-motion: reduce) { .spm-card.is-glare::after { animation: none; display: none; } }
+
+.spc__count { font-size: 11px; color: var(--dim); }
