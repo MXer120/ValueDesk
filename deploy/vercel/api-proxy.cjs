@@ -149,7 +149,9 @@ const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/a
  */
 const isInvitesPath = (p) => p === '/api/vs/invites/check' || p === '/api/vs/invites/me' || p === '/api/vs/invites/join'
   // The SoPoints sign-in relay (apps/server/src/routes/pointsAuth.ts): POST, never cached, the small body limit.
-  || p === '/api/vs/sodex-auth/nonce' || p === '/api/vs/sodex-auth/verify';
+  || p === '/api/vs/sodex-auth/nonce' || p === '/api/vs/sodex-auth/verify'
+  // The SoPoints week log (apps/server/src/routes/sopointsLog.ts): one wallet's weeks, up to 64 KiB.
+  || p === '/api/vs/sopoints/log';
 /** The app's own analytics (apps/server/src/routes/analytics.ts): a POST, the viewer's country and region added. */
 const ANALYTICS_PATH = '/api/vs/a';
 /**
@@ -194,7 +196,7 @@ const isPrivatePath = (path) => isCopyPath(path) || isReportsPath(path) || isAdm
 /** How large a POST's body may be on this path. */
 function bodyLimitFor(path) {
   if (path === '/api/vs/feedback/upload') return FEEDBACK_UPLOAD_LIMIT;
-  if (path === '/api/vs/inbox/add') return INBOX_ADD_LIMIT;
+  if (path === '/api/vs/inbox/add' || path === '/api/vs/sopoints/log') return INBOX_ADD_LIMIT;
   if (isAdminPath(path) || isBetaPath(path)) return ADMIN_BODY_LIMIT;
   if (isReportsPath(path)) return REPORTS_BODY_LIMIT;
   return BODY_LIMIT;

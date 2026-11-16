@@ -466,3 +466,29 @@ html[data-theme='light'] .sdx .coin-ic[src*='sodex' i] { background: #141414; }
 /* Loading: the tier card's size, the page's own pulse. */
 .spm-card--skel { outline: none; min-height: 236px; padding: 0; }
 .spm-season .sdx-skel { margin-bottom: 6px; }
+
+/* Points by week as area or line: drawn under the hover columns. */
+.spm-bars__under { position: absolute; inset: 0; pointer-events: none; }
+.spm-lines { width: 100%; height: 100%; display: block; overflow: visible; }
+.spm-lines polygon.is-own { fill: var(--accent); }
+.spm-lines polygon.is-ref { fill: color-mix(in srgb, var(--accent) 45%, transparent); }
+.spm-lines polygon.is-boost { fill: var(--pos); }
+.spm-lines polyline.is-total { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+
+/* Chart lab (ChartLab.tsx): localhost only. */
+.lab-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
+.lab-tile { display: flex; flex-direction: column; gap: 8px; }
+.lab-svg { width: 100%; height: 130px; display: block; overflow: visible; }
+.lab-line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.lab-line.is-a { stroke: var(--accent); } .lab-line.is-b { stroke: var(--pos); } .lab-line.is-c { stroke: #F7931A; }
+.lab-area.is-a { fill: color-mix(in srgb, var(--accent) 18%, transparent); } .lab-area.is-b { fill: color-mix(in srgb, var(--pos) 18%, transparent); }
+.lab-ref { stroke: rgb(var(--ink) / 0.25); stroke-dasharray: 4 4; }
+.lab-reft { font-size: 9px; fill: var(--muted); }
+.lab-dot { fill: var(--accent); opacity: 0.85; }
+.lab-r.is-own { fill: var(--accent); } .lab-r.is-ref { fill: color-mix(in srgb, var(--accent) 45%, transparent); } .lab-r.is-boost { fill: var(--pos); }
+.lab-donut { display: flex; align-items: center; gap: 20px; }
+.lab-arc { fill: none; stroke-width: 16; } .lab-arc.is-own { stroke: var(--accent); } .lab-arc.is-ref { stroke: color-mix(in srgb, var(--accent) 45%, transparent); } .lab-arc.is-boost { stroke: var(--pos); }
+.lab-donut ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+.lab-donut li { display: flex; align-items: center; gap: 6px; } .lab-donut li b { margin-left: 8px; color: var(--text); }
+.lab-donut li i { width: 8px; height: 8px; border-radius: 2px; } .lab-donut li i.is-own { background: var(--accent); } .lab-donut li i.is-ref { background: color-mix(in srgb, var(--accent) 45%, transparent); } .lab-donut li i.is-boost { background: var(--pos); }
+@media (max-width: 760px) { .lab-grid { grid-template-columns: 1fr; } }

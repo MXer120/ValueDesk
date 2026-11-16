@@ -16,6 +16,8 @@ import { RULES } from '../../points';
 import { SODEX_POINTS_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
 import type { Eip1193Provider } from '../../wallet';
 import { PointsEstimate } from './PointsEstimate';
+import { ChartLab } from './ChartLab';
+import { REFERRAL_CODE } from '../../onboarding/referral';
 import { Difficulty, EarnMore, MySquadBoost, SeasonCard, SoPointsCard, ThisWeek, WeekTable, WeeklyPoints } from './SoPointsMine';
 import { useSoPointsV2 } from './soPointsV2';
 import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
@@ -53,24 +55,26 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
         <>
           <div className="spm-top">
             <SoPointsCard s={v2} />
-            <SeasonCard week={w} code={c.referral?.referralCode || null} settled={c.publicSettled} />
+            <SeasonCard week={w} code={REFERRAL_CODE} settled={c.publicSettled} />
           </div>
           {v2.error && <p className="pf-note" role="alert">Some of your SoPoints could not be read: {v2.error}</p>}
           <div className="sdx-duo spm-charts">
             <ThisWeek s={v2} week={w} />
             <MySquadBoost s={v2} cfg={c.boost} />
           </div>
-          <EarnMore s={v2} cfg={c.boost} weights={c.weights} pool={w?.weekPoolPoints ?? null} />
+          <EarnMore s={v2} cfg={c.boost} weights={c.weights} pool={w?.weekPoolPoints ?? null}>
+            <BoostedMarkets c={c} />
+          </EarnMore>
           <div className="sdx-duo spm-charts">
             <WeeklyPoints s={v2} />
             <Difficulty s={v2} pool={w?.weekPoolPoints ?? null} />
           </div>
           <WeekTable s={v2} />
-          <BoostedMarkets c={c} />
+          {import.meta.env.DEV && <ChartLab s={v2} pool={w?.weekPoolPoints ?? null} />}
         </>
       ) : (
         <>
-          <SeasonCard week={w} code={c.referral?.referralCode || null} settled={c.publicSettled} />
+          <SeasonCard week={w} code={REFERRAL_CODE} settled={c.publicSettled} />
           <div className="sdx-duo">
             <BoostedMarkets c={c} />
             <SquadBoost c={c} />
@@ -80,11 +84,6 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
         </>
       )}
 
-      <div className="sdx-trio">
-        {panel('tiers', c)}
-        {panel('standing', c)}
-        {panel('programme', c)}
-      </div>
     </ProgrammePage>
   );
 }

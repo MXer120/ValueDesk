@@ -32,6 +32,7 @@ import { statsRoutes } from './routes/stats.js';
 import { scanRoutes } from './routes/scan.js';
 import { profileOnSignal } from './indexer/cpuProfile.js';
 import { pointsAuthRoutes } from './routes/pointsAuth.js';
+import { sopointsLogRoutes } from './routes/sopointsLog.js';
 import { keepValuedeskWarm, liveAskOf, valuedeskRoutes } from './routes/valuedesk.js';
 import { builderRoutes } from './routes/builder.js';
 import { betaRoutes } from './routes/beta.js';
@@ -262,6 +263,8 @@ await app.register(scanRoutes);
 // SoPoints sign-in relay (routes/pointsAuth.ts, owner 2026-11-16): SoDEX's two sign-in calls only, its own sign-in
 // text only, no forged headers, nothing kept. The points themselves are read by the browser straight from SoDEX.
 await app.register(pointsAuthRoutes());
+// SoPoints week log (routes/sopointsLog.ts): a signed-in wallet's weeks, kept for the points formula fit.
+await app.register(sopointsLogRoutes());
 // ValueDesk: multi-venue traders (SoDEX + Hyperliquid) for Explore,
 // Leaderboard, Scan and Copy. Read-only - see routes/valuedesk.ts.
 await app.register(valuedeskRoutes);

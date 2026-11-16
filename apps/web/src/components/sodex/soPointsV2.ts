@@ -393,6 +393,30 @@ export function earnTips(input: {
   return tips;
 }
 
+/* --- the week log ------------------------------------------------------------------------------------------------ */
+
+/**
+ * Every signed-in wallet's weeks go to our server once per browser session (owner 2026-11-16: "log all weeks of user
+ * data with all the infos once they connect"; server routes/sopointsLog.ts). Only SoDEX's own figures; never the token.
+ * A failure is silent: the page works the same without it.
+ */
+export function logWeeks(address: string, d: { summary: S2Summary | null; bonus: S2TeamBonus | null; layer1: S2Week[]; season1: S1Week[] }): void {
+  if (!d.layer1.length && !d.season1.length) return;
+  const key = `vd.sopoints.logged.${address.toLowerCase()}`;
+  try {
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, String(Date.now()));
+  } catch {
+    /* no storage: send anyway */
+  }
+  void fetch('/api/vs/sopoints/log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'omit',
+    body: JSON.stringify({ address, summary: d.summary ?? undefined, bonus: d.bonus ?? undefined, layer1: d.layer1, season1: d.season1 }),
+  }).catch(() => {});
+}
+
 /* --- the hook ---------------------------------------------------------------------------------------------------- */
 
 export interface S2State {
@@ -417,6 +441,12 @@ export function useSoPointsV2(address: string | null, signedIn: boolean): S2Stat
     void Promise.allSettled([fetchS2Summary(address), fetchS2Weeks(address), fetchS2TeamBonus(address), fetchVenueDaily('volume', 90), fetchS1Weeks(address), fetchVenueDaily('open-interest', 90), fetchMmDaily(Date.now() - 90 * 86_400_000)]).then(([a, b, c, d, e, g, h]) => {
       if (!live) return;
       const err = [a, b, c].find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+      logWeeks(address, {
+        summary: a.status === 'fulfilled' ? a.value : null,
+        bonus: c.status === 'fulfilled' ? c.value : null,
+        layer1: b.status === 'fulfilled' ? b.value : [],
+        season1: e.status === 'fulfilled' ? e.value : [],
+      });
       set({
         summary: a.status === 'fulfilled' ? a.value : null,
         weeks: b.status === 'fulfilled' ? b.value : [],
