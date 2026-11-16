@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { STATUS_PATH } from '../router';
-import { DOWN_VIEW, INCIDENT_KEY, dismissIncident, incidentKey, incidentView, incidentsShown, parseDismissed, pruneDismissed, type IncidentView } from './incidentState';
+import { DOWN_VIEW, INCIDENT_KEY, QUIET_KEY, QUIET_MS, dismissIncident, incidentKey, incidentView, incidentsShown, indexerMinor, parseDismissed, pruneDismissed, quietUntil, type IncidentView } from './incidentState';
 import { WarnMark, usePin } from './MaintNote';
 import './maintNote.css';
 
@@ -61,8 +61,11 @@ export function IncidentNote({ health, down = false, onOpenStatus }: { health: u
   useEffect(() => {
     if (!down) setDownAway(false);
   }, [down]);
+  // Minor indexer-only incidents quieted for a day by one X (incidentState.ts QUIET_MS).
+  const [quiet, setQuiet] = useState(() => { try { return quietUntil(localStorage.getItem(QUIET_KEY)); } catch { return 0; } });
+  const quietOn = quiet > Date.now();
   const pin = usePin();
-  const shown = down ? [] : incidentsShown(health, dismissed);
+  const shown = down ? [] : incidentsShown(health, dismissed).filter((n) => !(quietOn && indexerMinor(n)));
   if (!pin || (!shown.length && !(down && !downAway))) return null;
   return createPortal(
     <>
@@ -73,7 +76,14 @@ export function IncidentNote({ health, down = false, onOpenStatus }: { health: u
           v={incidentView(n)}
           href={`${STATUS_PATH}#notice-${n.id}`}
           onOpenStatus={onOpenStatus}
-          onDismiss={() => apply(dismissIncident(ref.current, incidentKey(n)))}
+          onDismiss={() => {
+            apply(dismissIncident(ref.current, incidentKey(n)));
+            if (indexerMinor(n)) {
+              const until = Date.now() + QUIET_MS;
+              setQuiet(until);
+              try { localStorage.setItem(QUIET_KEY, String(until)); } catch { /* this tab still remembers it */ }
+            }
+          }}
         />
       ))}
     </>,

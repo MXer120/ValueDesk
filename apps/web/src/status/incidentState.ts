@@ -96,3 +96,18 @@ export const DOWN_VIEW: IncidentView = {
   rows: [],
   note: null,
 };
+
+/**
+ * The indexer's automatic incidents open and close several times a day, each with a new id, so one X brought the next
+ * card straight back (owner 2026-11-16: "make it possible to press X on the indexer"). An X on a minor incident that
+ * touches the indexer alone quiets minor indexer-only incidents for QUIET_MS; anything major, or touching another
+ * service, still shows.
+ */
+export const QUIET_KEY = 'vs.incident.quiet.indexer';
+export const QUIET_MS = 24 * 3_600_000;
+export const indexerMinor = (n: Pick<HealthNotice, 'impact' | 'components'>): boolean =>
+  (n.impact ?? 'minor') === 'minor' && Array.isArray(n.components) && n.components.length > 0 && n.components.every((c) => c === 'indexer');
+export function quietUntil(raw: string | null): number {
+  const v = Number(raw);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}

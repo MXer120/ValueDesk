@@ -81,3 +81,13 @@ test('the data service not answering: a red card of its own, to the status page'
   assert.ok(html.includes('href="/status"'));
   assert.doesNotMatch(html, /mn-note__parts|mn-note__eta/);
 });
+
+test('one X on a minor indexer-only incident quiets the next ones for a day; major or other services still show', async () => {
+  const { indexerMinor, quietUntil, QUIET_MS } = await import('./incidentState');
+  assert.equal(indexerMinor({ impact: 'minor', components: ['indexer'] }), true);
+  assert.equal(indexerMinor({ impact: 'major', components: ['indexer'] }), false);
+  assert.equal(indexerMinor({ impact: 'minor', components: ['indexer', 'api'] }), false);
+  assert.equal(indexerMinor({ impact: 'minor', components: [] }), false);
+  assert.equal(quietUntil('abc'), 0);
+  assert.equal(QUIET_MS, 86_400_000);
+});
