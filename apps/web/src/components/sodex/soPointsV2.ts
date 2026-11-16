@@ -300,7 +300,14 @@ export interface DifficultyRow {
   oiOut: boolean;
 }
 
-export function difficultyRows(all: AnyWeek[], venueVol: Map<number, number>, venueOi: Map<number, number>, mm: Map<number, MmWeek> | null, pool: number | null): DifficultyRow[] {
+/**
+ * difficultyRows' `own`: the wallet's own volume per week from its trade history (exchange/allTime.ts weeklyVolume), by
+ * week key. SoDEX's week list carries no volume for Season 1's early weeks; the history does. Used where SoDEX's row
+ * says 0 and the history covers the week.
+ */
+export type OwnVolume = Map<string, number>;
+
+export function difficultyRows(all: AnyWeek[], venueVol: Map<number, number>, venueOi: Map<number, number>, mm: Map<number, MmWeek> | null, pool: number | null, own: OwnVolume | null = null): DifficultyRow[] {
   return all.filter((r) => !r.split.week.isLive).map((r) => {
     const sp = r.split;
     const w = sp.week;
@@ -315,7 +322,7 @@ export function difficultyRows(all: AnyWeek[], venueVol: Map<number, number>, ve
       short: r.short,
       name: r.name,
       season: r.season,
-      youVol: sp.own >= 1 && sp.volume >= 1000 ? sp.volume / sp.own : null,
+      youVol: (() => { const vol = sp.volume >= 1000 ? sp.volume : own?.get(r.key) ?? 0; return sp.own >= 1 && vol >= 1000 ? vol / sp.own : null; })(),
       youOi: sp.own >= 1 && (w.oi ?? 0) >= 1 ? (w.oi as number) / sp.own : null,
       platVol: v && pool ? Math.max(0, v - (mmVol ?? 0)) / pool : null,
       platOi: o && pool ? Math.max(0, o - (mmOi ?? 0)) / pool : null,

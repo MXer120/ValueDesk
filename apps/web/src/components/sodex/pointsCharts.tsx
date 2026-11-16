@@ -4,13 +4,14 @@
  * (ViewSeg), as on the portfolio page. Charts: points by week (points / share in % / referrals), difficulty (line by
  * default), points over the season (tier bands behind), rank by week, and where the points come from.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { weeklyVolume } from '../../exchange/allTime';
 import { Card } from '../portfolio/parts';
 import { RangePicker, ViewSeg } from '../portfolio/RangePicker';
 import { DASH, fmt } from '../../format';
 import { TIERS } from '../../points';
 import { SkelRows } from './parts';
-import { allWeeks, difficultyRows, mmByWeek, venueOiByWeek, venueVolumeByWeek, type AnyWeek, type DifficultyRow, type S2State } from './soPointsV2';
+import { allWeeks, difficultyRows, mmByWeek, venueOiByWeek, venueVolumeByWeek, type AnyWeek, type DifficultyRow, type OwnVolume, type S2State } from './soPointsV2';
 import '../PlatformSelect.css';
 import '../portfolio/PortfolioPage.css';
 
@@ -178,12 +179,36 @@ const DBASES: ReadonlyArray<readonly [DBasis, string]> = [['vol', 'Difficulty by
 type DKind = 'line' | 'bar';
 const DKINDS: ReadonlyArray<readonly [DKind, string]> = [['line', 'Line'], ['bar', 'Bars']];
 
-export function DifficultyChart({ s, pool }: { s: S2State; pool: number | null }) {
+export function DifficultyChart({ s, pool, address }: { s: S2State; pool: number | null; address: string | null }) {
+  // The wallet's own weekly volume from its trade history, for weeks SoDEX's list shows none (Season 1's early weeks).
+  const weeksAll = useMemo(() => allWeeks(s.s1, s.weeks).filter((r) => r.split.week.pointsStatus === 'CONFIRMED'), [s.s1, s.weeks]);
+  const [own, setOwn] = useState<OwnVolume | null>(null);
+  useEffect(() => {
+    if (!address || !weeksAll.length) return;
+    let live = true;
+    const tick = () => {
+      const need = weeksAll.filter((r) => r.split.volume < 1000 && r.split.own >= 1);
+      if (!need.length) return;
+      void weeklyVolume(address, need.map((r) => [r.split.week.weekStartTime * 1000, (r.split.week.weekEndTime > r.split.week.weekStartTime ? r.split.week.weekEndTime : r.split.week.weekStartTime + 7 * 86_400) * 1000] as const))
+        .then((vols) => {
+          if (!live) return;
+          const m = new Map<string, number>();
+          need.forEach((r, i) => { const v = vols[i]; if (v != null && v > 0) m.set(r.key, v); });
+          setOwn(m);
+          // Weeks the walk has not covered yet come in as it goes on.
+          if (vols.some((v) => v === null)) t = window.setTimeout(tick, 15_000);
+        })
+        .catch(() => {});
+    };
+    let t = 0;
+    tick();
+    return () => { live = false; window.clearTimeout(t); };
+  }, [address, weeksAll]);
   const [basis, setBasis] = useState<DBasis>('vol');
   const [kind, setKind] = useState<DKind>('line');
   const [span, setSpan] = useState<Span>('all');
   const mm = useMemo(() => mmByWeek(s.weeks, s.mmDays), [s.weeks, s.mmDays]);
-  const all = useMemo(() => difficultyRows(allWeeks(s.s1, s.weeks).filter((r) => r.split.week.pointsStatus === 'CONFIRMED'), venueVolumeByWeek(s.weeks, s.venueDaily), venueOiByWeek(s.weeks, s.venueOiDaily), mm, pool), [s.s1, s.weeks, s.venueDaily, s.venueOiDaily, mm, pool]);
+  const all = useMemo(() => difficultyRows(weeksAll, venueVolumeByWeek(s.weeks, s.venueDaily), venueOiByWeek(s.weeks, s.venueOiDaily), mm, pool, own), [weeksAll, s.weeks, s.venueDaily, s.venueOiDaily, mm, pool, own]);
   const rows = cut(all, span);
   const you = (r: DifficultyRow) => (basis === 'vol' ? r.youVol : r.youOi);
   const plat = (r: DifficultyRow) => (basis === 'vol' ? r.platVol : r.platOi);

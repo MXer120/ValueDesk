@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { earnTips, nextStep, splitWeek, squadBreakdown, stepPct, type S2TeamBonus, type S2Week } from './soPointsV2';
+import { allWeeks, difficultyRows, earnTips, nextStep, splitWeek, squadBreakdown, stepPct, type S2TeamBonus, type S2Week } from './soPointsV2';
 import type { BoostConfig } from '../../points';
 
 const CFG: BoostConfig = {
@@ -48,4 +48,14 @@ test('tips: the squad tip names the cheapest next step; the fitted one is marked
   assert.equal(sq.value, '+5%');
   assert.match(sq.line, /\$50K more volume in your squad/);
   assert.equal(tips.find((t) => t.id === 'steady')!.kind, 'estimate');
+});
+
+test('difficulty: a week SoDEX lists without volume takes the wallet\'s own history volume', () => {
+  const s1 = [
+    { weekName: 'Week 2', weekStartTime: 100, weekEndTime: 200, spotVolume: 0, futuresVolume: 0, vaultHolding: 0, oi: 0, accountValue: 0, points: 500, referralPoints: 0, pointsStatus: 'CONFIRMED', rank: 1, totalUser: 9 },
+    { weekName: 'Week 3', weekStartTime: 200, weekEndTime: 300, spotVolume: 0, futuresVolume: 0, vaultHolding: 0, oi: 0, accountValue: 0, points: 400, referralPoints: 0, pointsStatus: 'CONFIRMED', rank: 1, totalUser: 9 },
+  ];
+  const rows = difficultyRows(allWeeks(s1, []), new Map(), new Map(), null, null, new Map([['s1-2', 1_000_000]]));
+  assert.equal(rows[0]!.youVol, 2000);
+  assert.equal(rows[1]!.youVol, null);
 });

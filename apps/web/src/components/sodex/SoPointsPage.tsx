@@ -64,7 +64,7 @@ export function SoPointsPage({ address, provider }: { address: string | null; pr
           </div>
           <div className="sdx-duo spm-charts">
             <PointsByWeek s={v2} />
-            <DifficultyChart s={v2} pool={w?.weekPoolPoints ?? null} />
+            <DifficultyChart s={v2} pool={w?.weekPoolPoints ?? null} address={address} />
           </div>
           <div className="sdx-duo spm-charts">
             <SeasonPoints s={v2} />

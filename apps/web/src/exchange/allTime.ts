@@ -162,6 +162,11 @@ export interface AllTime {
   stats(address: string, rebuild?: boolean): Promise<AllTimeStats>;
   /** A wallet's trades and funding from `since` (null: all time); starts (or continues) its walks. */
   activity(address: string, engine: Engine, since: number | null): Promise<ActivityWindow>;
+  /**
+   * The wallet's own spot + perps volume inside each [from, to) window (ms), from the rows this browser walked; null for
+   * a window the walks have not covered whole (same rule as `activity`). Starts (or continues) the walks.
+   */
+  weeklyVolume(address: string, windows: ReadonlyArray<readonly [number, number]>): Promise<Array<number | null>>;
   readonly sync: HistorySync;
   /** Resolves once every queued write has reached persistence (tests). */
   flush(): Promise<void>;
@@ -490,6 +495,29 @@ export function createAllTime(d: AllTimeDeps): AllTime {
     };
   }
 
+  async function weeklyVolume(addressIn: string, windows: ReadonlyArray<readonly [number, number]>): Promise<Array<number | null>> {
+    if (!addressIn || !ADDRESS_RE.test(addressIn)) throw new MarketRequestError('a valid 0x wallet address is required', 400);
+    const address = addressIn;
+    await hydrate(address);
+    await follow(address);
+    const out: Array<number | null> = windows.map(() => 0);
+    for (const kind of ['trades-perps', 'trades-spot'] as const) {
+      sync.ensureSync(kind, address);
+      const scope = scopeKey(kind, address);
+      const state = store.readState(scope);
+      const running = sync.progressOf(kind, address).status === 'running';
+      const rows = store.loadRows(scope);
+      windows.forEach(([from, to], i) => {
+        if (out[i] === null) return;
+        const cover = coverOf(state, running, from, store.cachedCount(scope), now());
+        if (cover.state !== 'final') { out[i] = null; return; }
+        const f = tradeFigures(rows, from, Math.min(to - 1, state.newest ?? to - 1));
+        out[i] = f.unreadable > 0 ? null : (out[i] as number) + f.volume;
+      });
+    }
+    return out;
+  }
+
   function checked(addressIn: string): string {
     if (!addressIn || !ADDRESS_RE.test(addressIn)) throw new MarketRequestError('a valid 0x wallet address is required', 400);
     return addressIn;
@@ -576,6 +604,7 @@ export function createAllTime(d: AllTimeDeps): AllTime {
     forget,
     stats,
     activity,
+    weeklyVolume,
     sync,
     flush: async () => {
       for (;;) {
@@ -624,6 +653,11 @@ export const walks = {
   setSpeed: (s: WalkSpeed) => appInstance().setSpeed(s),
   forget: (address: string) => appInstance().forget(address),
 };
+
+/** A wallet's own volume per window (the SoPoints difficulty: SoDEX's week list has no volume for early weeks). */
+export function weeklyVolume(address: string, windows: ReadonlyArray<readonly [number, number]>): Promise<Array<number | null>> {
+  return appInstance().weeklyVolume(address, windows);
+}
 
 /** One window of a wallet's own trades and funding (the Portfolio summary). */
 export function activityWindow(address: string, engine: Engine, since: number | null): Promise<ActivityWindow> {
