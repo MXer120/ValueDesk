@@ -65,7 +65,7 @@ function fakeLedger() {
   };
   const L = {
     builder: builder as unknown as BuilderService,
-    extra: (a: string, now = T0) => (extra?.(a, now) ?? []) as Array<{ fee: number; label: string; until: number | null }>,
+    extra: (a: string, now = T0) => (extra?.(a, now) ?? []) as Array<{ fee: number; label: string; until: number | null; products: string[] }>,
     budget: (a: string, now = T0): Budget => (budget ? budget(a, now) : null),
     /** Traded on SoDEX with no builder fee paid (the welcome's fee 0, or elsewhere): not a counted order. */
     traded(a: string, t: number, usd: number, engine: 'perps' | 'spot' = 'perps') {
