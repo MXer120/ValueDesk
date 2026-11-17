@@ -11,7 +11,7 @@ import { RangePicker, ViewSeg } from '../portfolio/RangePicker';
 import { DASH, fmt } from '../../format';
 import { TIERS } from '../../points';
 import { SkelRows } from './parts';
-import { allWeeks, difficultyRows, mmByWeek, venueOiByWeek, venueVolumeByWeek, type AnyWeek, type DifficultyRow, type OwnVolume, type S2State } from './soPointsV2';
+import { allWeeks, difficultyRows, mmByWeek, venueOiByWeek, venueVolumeByWeek, type AnyWeek, type DifficultyRow, type OwnVolume, type S2State, logOwnVolume } from './soPointsV2';
 import '../PlatformSelect.css';
 import '../portfolio/PortfolioPage.css';
 
@@ -187,7 +187,8 @@ export function DifficultyChart({ s, pool, address }: { s: S2State; pool: number
     if (!address || !weeksAll.length) return;
     let live = true;
     const tick = () => {
-      const need = weeksAll.filter((r) => r.split.volume < 1000 && r.split.own >= 1);
+      // Every confirmed week: the chart uses the ones SoDEX lists without volume, the log keeps all of them.
+      const need = weeksAll;
       if (!need.length) return;
       void weeklyVolume(address, need.map((r) => [r.split.week.weekStartTime * 1000, (r.split.week.weekEndTime > r.split.week.weekStartTime ? r.split.week.weekEndTime : r.split.week.weekStartTime + 7 * 86_400) * 1000] as const))
         .then((vols) => {
@@ -195,6 +196,7 @@ export function DifficultyChart({ s, pool, address }: { s: S2State; pool: number
           const m = new Map<string, number>();
           need.forEach((r, i) => { const v = vols[i]; if (v != null && v > 0) m.set(r.key, v); });
           setOwn(m);
+          if (vols.every((v) => v !== null)) logOwnVolume(address, need.map((r, i) => ({ season: r.season === 'S1' ? 'season1' as const : 'layer1' as const, week: Number(r.key.split('-')[1]), volume: Math.round((vols[i] ?? 0) * 100) / 100 })));
           // Weeks the walk has not covered yet come in as it goes on.
           if (vols.some((v) => v === null)) t = window.setTimeout(tick, 15_000);
         })
