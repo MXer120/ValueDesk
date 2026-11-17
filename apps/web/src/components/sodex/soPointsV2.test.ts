@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { allWeeks, difficultyRows, earnTips, nextStep, splitWeek, squadBreakdown, stepPct, type S2TeamBonus, type S2Week } from './soPointsV2';
+import { allWeeks, contentHash, difficultyRows, earnTips, nextStep, splitWeek, squadBreakdown, stepPct, type S2TeamBonus, type S2Week } from './soPointsV2';
 import type { BoostConfig } from '../../points';
 
 const CFG: BoostConfig = {
@@ -58,4 +58,11 @@ test('difficulty: a week SoDEX lists without volume takes the wallet\'s own hist
   const rows = difficultyRows(allWeeks(s1, []), new Map(), new Map(), null, null, new Map([['s1-2', 1_000_000]]));
   assert.equal(rows[0]!.youVol, 2000);
   assert.equal(rows[1]!.youVol, null);
+});
+
+test('log: a changed answer hashes differently, the same answer the same', () => {
+  const a = JSON.stringify({ w: [{ weekNo: 11, points: 0, pointsStatus: 'TBD' }] });
+  const b = JSON.stringify({ w: [{ weekNo: 11, points: 812, pointsStatus: 'CONFIRMED' }] });
+  assert.equal(contentHash(a), contentHash(a));
+  assert.notEqual(contentHash(a), contentHash(b));
 });

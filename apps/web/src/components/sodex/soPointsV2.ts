@@ -90,8 +90,6 @@ export interface S1Week {
   totalUser: number;
 }
 export const fetchS1Weeks = (a: string) => authed<S1Week[]>(`${BIZ}/biz/sopoints/week/list`, a).then((r) => r ?? []);
-/** Season 1's own summary (balance, tier, rank at the season's end); only kept in the log. */
-export const fetchS1Summary = (a: string) => authed<Record<string, unknown>>(`${BIZ}/biz/sopoints/summary`, a);
 
 /** One bar of the all-weeks charts: either season, oldest first. */
 export interface AnyWeek {
@@ -422,33 +420,33 @@ export function earnTips(input: {
  * A failure is silent: the page works the same without it.
  */
 /**
- * Sends `body` to the log unless this browser already sent the same thing for this wallet (owner 2026-11-17: "ensure all
- * the data we can track of users on sign that's relevant is tracked"). Keyed by content, not by visit: a week that
- * settles, a new week or a moving live week goes again on the next read; an unchanged answer is not re-sent.
+ * Sends the wallet's SoDEX answer to the log unless this browser already sent exactly that answer (owner 2026-11-17).
+ * Keyed by content, not by visit: a week that settles, a new week or a moving live week goes again on the next read, so
+ * the server's row for a live week is replaced by its final points; an unchanged answer is not re-sent.
  */
-function sendLog(address: string, part: string, body: Record<string, unknown>): void {
-  const text = JSON.stringify({ address, ...body });
-  let h = 0;
-  for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) | 0;
-  const key = `vd.sopoints.logged.${part}.${address.toLowerCase()}`;
+export function logWeeks(address: string, d: { summary: S2Summary | null; bonus: S2TeamBonus | null; layer1: S2Week[]; season1: S1Week[] }): void {
+  if (!d.layer1.length && !d.season1.length) return;
+  const text = JSON.stringify({ address, summary: d.summary ?? undefined, bonus: d.bonus ?? undefined, layer1: d.layer1, season1: d.season1 });
+  const h = String(contentHash(text));
+  const key = `vd.sopoints.logged.${address.toLowerCase()}`;
   try {
-    if (localStorage.getItem(key) === String(h)) return;
+    if (localStorage.getItem(key) === h) return;
   } catch {
     /* no storage: send anyway */
   }
   void fetch('/api/vs/sopoints/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', body: text })
-    .then((r) => { if (r.ok) try { localStorage.setItem(key, String(h)); } catch { /* ignore */ } })
+    .then((r) => {
+      if (!r.ok) return;
+      try { localStorage.setItem(key, h); } catch { /* ignore */ }
+    })
     .catch(() => {});
 }
 
-export function logWeeks(address: string, d: { summary: S2Summary | null; bonus: S2TeamBonus | null; layer1: S2Week[]; season1: S1Week[]; summaryS1: Record<string, unknown> | null }): void {
-  if (!d.layer1.length && !d.season1.length) return;
-  sendLog(address, 'weeks', { summary: d.summary ?? undefined, bonus: d.bonus ?? undefined, summaryS1: d.summaryS1 ?? undefined, layer1: d.layer1, season1: d.season1 });
-}
-
-/** The wallet's own volume per week from its trade history (spot + perps), for every week the walk has covered. */
-export function logOwnVolume(address: string, weeks: Array<{ season: 'season1' | 'layer1'; week: number; volume: number }>): void {
-  if (weeks.length) sendLog(address, 'volume', { ownVolume: weeks });
+/** A 32-bit string hash: only tells "same answer as last time" apart from "changed". */
+export function contentHash(text: string): number {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) | 0;
+  return h;
 }
 
 /* --- the hook ---------------------------------------------------------------------------------------------------- */
@@ -472,7 +470,7 @@ export function useSoPointsV2(address: string | null, signedIn: boolean): S2Stat
     if (!address || !signedIn) { set({ summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, bonus: null, venueDaily: [], loading: false, error: null }); return; }
     let live = true;
     set((x) => ({ ...x, loading: true, error: null }));
-    void Promise.allSettled([fetchS2Summary(address), fetchS2Weeks(address), fetchS2TeamBonus(address), fetchVenueDaily('volume', 90), fetchS1Weeks(address), fetchVenueDaily('open-interest', 90), fetchMmDaily(Date.now() - 90 * 86_400_000), fetchS1Summary(address)]).then(([a, b, c, d, e, g, h, k]) => {
+    void Promise.allSettled([fetchS2Summary(address), fetchS2Weeks(address), fetchS2TeamBonus(address), fetchVenueDaily('volume', 90), fetchS1Weeks(address), fetchVenueDaily('open-interest', 90), fetchMmDaily(Date.now() - 90 * 86_400_000)]).then(([a, b, c, d, e, g, h]) => {
       if (!live) return;
       const err = [a, b, c].find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
       logWeeks(address, {
@@ -480,7 +478,6 @@ export function useSoPointsV2(address: string | null, signedIn: boolean): S2Stat
         bonus: c.status === 'fulfilled' ? c.value : null,
         layer1: b.status === 'fulfilled' ? b.value : [],
         season1: e.status === 'fulfilled' ? e.value : [],
-        summaryS1: k.status === 'fulfilled' ? k.value ?? null : null,
       });
       set({
         summary: a.status === 'fulfilled' ? a.value : null,

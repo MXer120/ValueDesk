@@ -5,11 +5,7 @@
  * wins. It feeds the points formula fit (SoDEX publishes none). No token, signature or anything but SoDEX's own week
  * figures is sent or kept.
  *
- *   POST /api/vs/sopoints/log  {address, summary?, bonus?, summaryS1?, layer1?: [...], season1?: [...], ownVolume?: [...]}
- *
- * 2026-11-17 (owner: "ensure all the data we can track of users on sign that's relevant is tracked"): also Season 1's
- * summary, and the wallet's own volume per week from its trade history (`ownVolume`: SoDEX's Season 1 weeks 1-6 carry
- * no volume; the history does). The page re-sends whenever SoDEX's answer changed, so settled weeks replace live ones.
+ *   POST /api/vs/sopoints/log  {address, summary?, bonus?, layer1: [...], season1: [...]}
  *
  * The sender is not proven to own the address: the figures are SoDEX's, the page reads them with the wallet's own
  * token, and a forged post can only add rows marked with the address it names. Rows are capped per post and posts per
@@ -39,14 +35,6 @@ CREATE TABLE IF NOT EXISTS weeks (
   at INTEGER NOT NULL,
   PRIMARY KEY (address, season, week)
 ) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS own_volume (
-  address TEXT NOT NULL,
-  season TEXT NOT NULL,
-  week TEXT NOT NULL,
-  volume REAL NOT NULL,
-  at INTEGER NOT NULL,
-  PRIMARY KEY (address, season, week)
-) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS wallets (
   address TEXT PRIMARY KEY,
   summary TEXT,
@@ -63,12 +51,10 @@ export class SopointsLog {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec(SCHEMA);
-    const cols = this.db.prepare('PRAGMA table_info(wallets)').all() as Array<{ name: string }>;
-    if (!cols.some((c) => c.name === 'summary_s1')) this.db.exec('ALTER TABLE wallets ADD COLUMN summary_s1 TEXT');
   }
 
   /** Keep one post. Returns the rows written. */
-  put(address: string, body: { summary?: unknown; bonus?: unknown; summaryS1?: unknown; layer1?: unknown; season1?: unknown; ownVolume?: unknown }, now = Date.now()): number {
+  put(address: string, body: { summary?: unknown; bonus?: unknown; layer1?: unknown; season1?: unknown }, now = Date.now()): number {
     const a = address.toLowerCase();
     const json = (v: unknown) => {
       const s = JSON.stringify(v ?? null);
@@ -92,22 +78,9 @@ export class SopointsLog {
           n++;
         }
       }
-      if (Array.isArray(body.ownVolume)) {
-        const ov = this.db.prepare(`INSERT INTO own_volume (address, season, week, volume, at) VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT (address, season, week) DO UPDATE SET volume = excluded.volume, at = excluded.at`);
-        for (const r of body.ownVolume.slice(0, MAX_WEEKS * 2)) {
-          const rec = (r ?? {}) as { season?: unknown; week?: unknown; volume?: unknown };
-          const season = rec.season === 'season1' || rec.season === 'layer1' ? rec.season : null;
-          const week = Number(rec.week);
-          const volume = Number(rec.volume);
-          if (!season || !Number.isInteger(week) || week < 0 || week > 200 || !Number.isFinite(volume) || volume < 0 || volume > 1e12) continue;
-          ov.run(a, season, String(week), volume, now);
-          n++;
-        }
-      }
-      this.db.prepare(`INSERT INTO wallets (address, summary, bonus, summary_s1, first_at, last_at) VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT (address) DO UPDATE SET summary = COALESCE(excluded.summary, summary), bonus = COALESCE(excluded.bonus, bonus), summary_s1 = COALESCE(excluded.summary_s1, summary_s1), last_at = excluded.last_at`)
-        .run(a, body.summary === undefined ? null : json(body.summary), body.bonus === undefined ? null : json(body.bonus), body.summaryS1 === undefined ? null : json(body.summaryS1), now, now);
+      this.db.prepare(`INSERT INTO wallets (address, summary, bonus, first_at, last_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (address) DO UPDATE SET summary = COALESCE(excluded.summary, summary), bonus = COALESCE(excluded.bonus, bonus), last_at = excluded.last_at`)
+        .run(a, body.summary === undefined ? null : json(body.summary), body.bonus === undefined ? null : json(body.bonus), now, now);
       this.db.exec('COMMIT');
     } catch (e) {
       this.db.exec('ROLLBACK');
@@ -117,11 +90,10 @@ export class SopointsLog {
   }
 
   /** For the fit and for tests. */
-  count(): { wallets: number; weeks: number; ownVolume: number } {
+  count(): { wallets: number; weeks: number } {
     const w = this.db.prepare('SELECT COUNT(*) AS n FROM wallets').get() as { n: number };
     const k = this.db.prepare('SELECT COUNT(*) AS n FROM weeks').get() as { n: number };
-    const v = this.db.prepare('SELECT COUNT(*) AS n FROM own_volume').get() as { n: number };
-    return { wallets: Number(w.n), weeks: Number(k.n), ownVolume: Number(v.n) };
+    return { wallets: Number(w.n), weeks: Number(k.n) };
   }
 }
 
@@ -134,9 +106,9 @@ export function sopointsLogRoutes(o: { log?: SopointsLog; now?: () => number } =
       reply.header('Cache-Control', 'no-store');
       const wait = limiter.take(`sl|${clientKey(req.ip)}`, SOPOINTS_LOG_LIMIT, now());
       if (wait) return reply.header('Retry-After', String(wait)).code(429).send({ ok: false, error: `too many requests - wait ${wait}s` });
-      const b = (req.body ?? {}) as { address?: unknown; summary?: unknown; bonus?: unknown; summaryS1?: unknown; layer1?: unknown; season1?: unknown; ownVolume?: unknown };
+      const b = (req.body ?? {}) as { address?: unknown; summary?: unknown; bonus?: unknown; layer1?: unknown; season1?: unknown };
       if (typeof b.address !== 'string' || !ADDRESS.test(b.address)) return reply.code(400).send({ ok: false, error: 'address is required' });
-      if (!Array.isArray(b.layer1) && !Array.isArray(b.season1) && !Array.isArray(b.ownVolume)) return reply.code(400).send({ ok: false, error: 'no weeks' });
+      if (!Array.isArray(b.layer1) && !Array.isArray(b.season1)) return reply.code(400).send({ ok: false, error: 'no weeks' });
       log ??= new SopointsLog();
       const rows = log.put(b.address, b, now());
       return reply.send({ ok: true, rows });

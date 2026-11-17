@@ -19,7 +19,7 @@ test('every week of both seasons is kept; a later post replaces the same week', 
   assert.equal(r.statusCode, 200);
   assert.deepEqual(r.json(), { ok: true, rows: 3 });
   await a.inject({ method: 'POST', url: '/api/vs/sopoints/log', payload: { address: A.toLowerCase(), layer1: [wk(2, 25)] } });
-  assert.deepEqual(log.count(), { wallets: 1, weeks: 3, ownVolume: 0 });
+  assert.deepEqual(log.count(), { wallets: 1, weeks: 3 });
 });
 
 test('no address or no weeks: refused', async () => {
@@ -35,14 +35,4 @@ test('rate limit per client', async () => {
   let last = 0;
   for (let i = 0; i <= SOPOINTS_LOG_LIMIT.max; i++) last = (await a.inject({ method: 'POST', url: '/api/vs/sopoints/log', payload: { address: A, layer1: [wk(1, 1)] } })).statusCode;
   assert.equal(last, 429);
-});
-
-test('own volume per week from the trade history is kept; bad entries skipped; Season 1 summary kept', async () => {
-  const log = new SopointsLog(':memory:');
-  const a = Fastify();
-  void a.register(sopointsLogRoutes({ log }));
-  const r = await a.inject({ method: 'POST', url: '/api/vs/sopoints/log', payload: { address: A, ownVolume: [{ season: 'season1', week: 3, volume: 120000.5 }, { season: 'layer1', week: 2, volume: 0 }, { season: 'x', week: 1, volume: 5 }, { season: 'layer1', week: 1.5, volume: 5 }] } });
-  assert.deepEqual(r.json(), { ok: true, rows: 2 });
-  await a.inject({ method: 'POST', url: '/api/vs/sopoints/log', payload: { address: A, summaryS1: { totalPoints: 900 }, ownVolume: [{ season: 'season1', week: 3, volume: 130000 }] } });
-  assert.deepEqual(log.count(), { wallets: 1, weeks: 0, ownVolume: 2 });
 });
