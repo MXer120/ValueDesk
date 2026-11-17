@@ -12,7 +12,7 @@
 import {
   FRESH_TARGETS, IMPACT_TEXT, STAGE_TEXT, STATUS_SERVICES, dayToneWith, fmtAge, fmtUtc, fmtWindow, minutesExpected, noticeLive, noticePhase,
   noticeSpan, noticesOnDay, overallOf, overallShown, parseFreshness, parseNotice, shownState,
-  type DayTone, type FreshId, type FreshItem, type FreshState, type Freshness, type DayToneShown, type DayTuple, type HealthNotice, type Notice, type NoticePhase, type ServiceId,
+  type DayTone, type FreshId, type FreshItem, type FreshState, type Freshness, type DayToneShown, type DayTuple, type HealthNotice, type Impact, type Notice, type NoticePhase, type ServiceId,
   type ServiceState, type StatusReport, type Overall, type OverallShown, type ShownState,
 } from '@sign/ops/statusModel.js';
 import { fmtFixed } from '../numStyle';

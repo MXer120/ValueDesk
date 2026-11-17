@@ -7,6 +7,7 @@
 import { botCard } from '../share/shareData';
 import { openShare } from '../share/host';
 import { useTheme } from '../../theme';
+import { usePrivacy, type PrivacyKey } from '../../privacy';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FINAL_STATUSES, type AlgoView } from '@copy-engine';
 import { DASH, fmtUsd } from '../../format';
@@ -427,6 +428,9 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
   // Signed in shows the bots and their stop buttons; only starting new ones waits for the setup (ctx.ready).
   const ready = ctx.seen;
   const val = (x: string) => (ready ? x : DASH);
+  // Incognito (owner 2026-11-08): the fleet's own amounts read as asterisks; counts and the cost rate stay.
+  const { isHidden } = usePrivacy();
+  const amt = (x: string, k: PrivacyKey) => (ready && isHidden(k) ? '***' : val(x));
   // The Fleet panel's timeframe (24 hours by default): volume, net PnL (at the mark), fees and cost in it; volume and
   // PnL sparklines both as running totals inside it.
   const fw = useMemo(() => fleetWindow(s, fleetFrom), [s, fleetFrom]);
@@ -459,11 +463,11 @@ export function BotsOverview({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
         <ShellHeader icon="robot" title="Fleet" subtitle={ready ? fleetLine : 'Your bots, together'} aside={<Segmented value={fleetSpan} label="Fleet timeframe" onChange={setFleetSpan} options={[{ value: '24h', label: '24H' }, { value: '7d', label: '7D' }, { value: 'all', label: 'All' }]} />} />
         <div className="bots-kpigrid">
           <StatCard index={0} label="Running" value={ready ? `${t.running}` : DASH} hint={ready ? [t.paused ? `${t.paused} paused` : '', t.practice.running ? `${t.practice.running} practice` : '', t.bots ? `of ${t.bots} real` : ''].filter(Boolean).join(' · ') || undefined : undefined} />
-          <StatCard index={1} label="Volume" value={val(fmtUsd(fw.volume, 0))} trend={ready ? trendVol : undefined} />
-          <StatCard index={2} label="Net PnL" value={val(fmtPnl(fw.netPnl))} valueTone={ready ? pnlTone : undefined} trend={ready ? trendPnl : undefined} trendTone={pnlTone ?? 'neutral'} hint="After every fee, open positions at the mark" />
+          <StatCard index={1} label="Volume" value={amt(fmtUsd(fw.volume, 0), 'funds')} trend={ready ? trendVol : undefined} />
+          <StatCard index={2} label="Net PnL" value={amt(fmtPnl(fw.netPnl), 'pnl')} valueTone={ready ? pnlTone : undefined} trend={ready ? trendPnl : undefined} trendTone={pnlTone ?? 'neutral'} hint="After every fee, open positions at the mark" />
           <StatCard index={3} label="Per $1M" value={val(fmtCost(fw.costPerMillion))} valueTone={ready ? costTone(fw.costPerMillion) : undefined} hint="What the volume cost, net" />
-          <StatCard index={4} label="Fees paid" value={val(fmtUsd(fw.fees, 2))} hint={`At least ${fmtUsd(floor.fees, 0)} per $1M`} />
-          <StatCard index={5} label="Holding" value={val(fmtUsd(cleanUsd(t.holdingUsd), 0))} hint={t.holdingUsd > 0.005 ? `Long ${fmtUsd(t.longUsd, 0)} · short ${fmtUsd(t.shortUsd, 0)}` : 'Running bots, now'} />
+          <StatCard index={4} label="Fees paid" value={amt(fmtUsd(fw.fees, 2), 'fees')} hint={`At least ${fmtUsd(floor.fees, 0)} per $1M`} />
+          <StatCard index={5} label="Holding" value={amt(fmtUsd(cleanUsd(t.holdingUsd), 0), 'funds')} hint={t.holdingUsd > 0.005 ? `Long ${fmtUsd(t.longUsd, 0)} · short ${fmtUsd(t.shortUsd, 0)}` : 'Running bots, now'} />
         </div>
       </Shell>
 
