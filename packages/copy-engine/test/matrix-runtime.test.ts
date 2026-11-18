@@ -547,3 +547,71 @@ test.todo('FINDING "ask me each time": an unanswered prompt holds the follower\'
     await rt.stop();
   }
 });
+
+/* ========================================================= held copies ===== */
+
+test('a held (blocked) copy: the follower is reminded once a day; held a week holding nothing, it is stopped with a notice (owner 2026-11-18)', async () => {
+  const w = world();
+  const { rt, notices } = runtime(w, () => new PaperSink());
+  await rt.start();
+  try {
+    await ready();
+    const s = await rt.add(sub({ paper: true }, { id: 'held-1' }));
+    const blocked = await rt.setStatus(s.id, 'blocked', 'The copy key is no longer registered on SoDEX (revoked or replaced). Approve a new one in copy setup.');
+    const t0 = blocked.updatedAt;
+    const held = () => notices.filter((n) => n.ref === s.id && n.kind === 'blocked');
+    const first = held().length;
+    await rt.remindBlocked(t0 + 3_600_000);
+    assert.equal(held().length, first, 'no reminder within the first day');
+    await rt.remindBlocked(t0 + 25 * 3_600_000);
+    assert.equal(held().length, first + 1, 'reminded after a day');
+    assert.match(held().at(-1)!.body, /Still held after 1 day: The copy key/);
+    await rt.remindBlocked(t0 + 30 * 3_600_000);
+    assert.equal(held().length, first + 1, 'once a day only');
+    await rt.remindBlocked(t0 + 50 * 3_600_000);
+    assert.equal(held().length, first + 2);
+    await rt.remindBlocked(t0 + 7 * 86_400_000 + 1);
+    assert.equal(rt.view(s.id)!.subscription.status, 'stopped');
+    assert.ok(notices.some((n) => n.ref === s.id && n.kind === 'stopped' && /held for 7 days/.test(n.body)), 'told it was stopped');
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('a held copy that still holds a position is reminded but never stopped by the wait', async () => {
+  const w = world();
+  const { rt, notices } = runtime(w, () => new PaperSink());
+  await rt.start();
+  try {
+    await ready();
+    const s = await rt.add(sub({ paper: true }, { id: 'held-2' }));
+    buys(LEADER_ID, '1');
+    assert.ok(await until(() => size(rt, s.id) > 0), 'copied');
+    const blocked = await rt.setStatus(s.id, 'blocked', 'The copy key is not available here.');
+    await rt.remindBlocked(blocked.updatedAt + 30 * 86_400_000);
+    assert.equal(rt.view(s.id)!.subscription.status, 'blocked');
+    assert.ok(notices.some((n) => n.ref === s.id && n.kind === 'blocked' && /Still held after 30 days/.test(n.body) && !/stopped/.test(n.body)));
+  } finally {
+    await rt.stop();
+  }
+});
+
+test('a held copy of a busy leader writes its "held" skip once an hour per market, not once per trade', async () => {
+  const w = world();
+  const { rt, store } = runtime(w, () => new PaperSink());
+  await rt.start();
+  try {
+    await ready();
+    const s = await rt.add(sub({ paper: true }, { id: 'held-3' }));
+    await rt.setStatus(s.id, 'blocked', 'The copy key is not available here.');
+    for (let i = 0; i < 5; i++) {
+      buys(LEADER_ID, '1');
+      await wait(60);
+    }
+    await wait(300);
+    const held = (await skips(store, s.id)).filter((r) => r === 'blocked');
+    assert.equal(held.length, 1, `one line for five trades: ${held.length}`);
+  } finally {
+    await rt.stop();
+  }
+});

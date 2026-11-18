@@ -77,6 +77,21 @@ export const RECONCILE_MS = 60_000;
 export const FOLLOWER_REFRESH_MS = 30_000;
 export const GUARD_MS = 2_000;
 export const READY_CHECK_MS = 10 * 60_000;
+/**
+ * A held (blocked) copy (owner 2026-11-18, "fix": one wallet's copies sat blocked a week, no word after the first
+ * notice, writing a skip row for every leader trade): the follower is reminded once a day, and a copy held this long
+ * that holds nothing is stopped with a notice. One that still holds positions is never stopped by this: its reductions
+ * and closes are still followed once the block lifts.
+ */
+export const BLOCKED_REMIND_MS = 24 * 3_600_000;
+export const BLOCKED_STOP_MS = 7 * 24 * 3_600_000;
+/**
+ * A skip that only repeats the copy's own state (held, halted, paused) is written at most once in this long per
+ * copy and market: a held copy of a busy leader wrote 4,663 such rows in a day. Skips that say something about the
+ * trade itself (a coin SoDEX does not list, a declined prompt) keep one line per trade.
+ */
+export const SKIP_REPEAT_MS = 3_600_000;
+const STATE_SKIPS: ReadonlySet<string> = new Set(['blocked', 'halted', 'paused', 'market-halted']);
 export const MARKETS_REFRESH_MS = 10 * 60_000;
 /** Firehose mode: Hyperliquid's coin list is read again this often (new listings, new HIP-3 dexes). */
 export const HL_COINS_REFRESH_MS = 10 * 60_000;
@@ -385,6 +400,7 @@ export class CopyRuntime {
       timers.every(GUARD_MS, () => void this.runGuards()),
       timers.every(READY_CHECK_MS, () => {
         for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
+        void this.remindBlocked().catch((e) => this.host.log.warn('copy: blocked reminder failed', { error: String(e) }));
       }),
       timers.every(MARKETS_REFRESH_MS, () => void this.loadMarkets().then(() => this.sodexFeed?.refreshSymbols())),
       timers.every(5_000, () => void this.flush()),
@@ -2389,7 +2405,44 @@ export class CopyRuntime {
     }
   }
 
+  /**
+   * Remind the follower of each held copy once a day; stop one held BLOCKED_STOP_MS that holds nothing.
+   * Since: the status change (updatedAt, as setStatus stamps it). Exposed for tests.
+   */
+  async remindBlocked(now = Date.now()): Promise<void> {
+    for (const s of [...this.subs.values()]) {
+      if (s.status !== 'blocked') continue;
+      const st = this.stateOf(s);
+      const since = s.updatedAt;
+      const held = now - since;
+      const holds = Object.values(st.owned).some((p) => Number.isFinite(p.size) && Math.abs(p.size) > 1e-12);
+      const why = s.statusReason ?? 'The copier cannot trade it.';
+      if (held >= BLOCKED_STOP_MS && !holds) {
+        const days = Math.floor(held / 86_400_000);
+        await this.setStatus(s.id, 'stopped', `Stopped by the copier: held for ${days} days and holding nothing (${why}). Start a new copy once that is fixed.`);
+        continue;
+      }
+      if (held < BLOCKED_REMIND_MS || now - (st.blockedRemindedAt ?? since) < BLOCKED_REMIND_MS) continue;
+      st.blockedRemindedAt = now;
+      this.dirty.add(s.id);
+      const days = Math.max(1, Math.floor(held / 86_400_000));
+      const left = Math.ceil((BLOCKED_STOP_MS - held) / 86_400_000);
+      this.notice(copyNotice(s, 'blocked', `Still held after ${days} day${days === 1 ? '' : 's'}: ${why}${holds ? '' : ` If it is still held in ${left} day${left === 1 ? '' : 's'}, it is stopped (it holds nothing).`}`, now));
+    }
+  }
+
+  /** (copy, reason, market) -> when that skip was last written: a repeat within SKIP_REPEAT_MS is not written again. */
+  private skipWritten = new Map<string, number>();
+
   private async activity(s: Subscription, e: Partial<ActivityEntry> & Pick<ActivityEntry, 'kind' | 'reason'>): Promise<void> {
+    if (e.kind === 'skip' && STATE_SKIPS.has(e.reason)) {
+      const k = `${s.id}|${e.reason}|${e.symbol ?? ''}`;
+      const now = Date.now();
+      const last = this.skipWritten.get(k);
+      if (last !== undefined && now - last < SKIP_REPEAT_MS) return;
+      this.skipWritten.set(k, now);
+      if (this.skipWritten.size > 50_000) for (const [key, at] of this.skipWritten) if (now - at >= SKIP_REPEAT_MS) this.skipWritten.delete(key);
+    }
     const entry: ActivityEntry = {
       id: randomId('a'),
       subId: s.id,

@@ -214,6 +214,8 @@ export interface SubState {
   seen: string[];
   lastEventAt: number | null;
   lastReconcileAt: number | null;
+  /** When the follower was last reminded that this copy is held (blocked); absent until the first reminder. */
+  blockedRemindedAt?: number;
   /** Orders placed / skipped since the start. */
   orders: number;
   skips: number;
