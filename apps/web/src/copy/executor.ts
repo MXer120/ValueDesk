@@ -113,7 +113,16 @@ export async function signCopy(provider: Eip1193Provider, owner: string, executo
 interface DayKey { key: CryptoKey; approval: SignedCopyRequest; expiresAt: number }
 const dayKeyName = (executor: string, owner: string, chainId: number) => `vd.copy.daykey:${executor}:${chainId}:${owner.toLowerCase()}`;
 const dayKeys = new Map<string, DayKey>();
-const dayKeyPending = new Map<string, Promise<DayKey | null>>();
+const dayKeyPending = new Map<string, { p: Promise<DayKey | null>; at: number }>();
+/**
+ * A day-key request left unanswered (owner 2026-11-18, "fix that": a Start sat on "Waiting for your wallet…" with no
+ * popup, because every later action waited on the first, unanswered request). An action within SHARE_MS of the request
+ * shares it (two clicks, one popup); a later one asks the wallet again. No action waits longer than ANSWER_MS: it fails
+ * with words, so its button is free again. An approval that comes in late is still kept for the next action.
+ */
+const DAY_KEY_SHARE_MS = 15_000;
+const DAY_KEY_ANSWER_MS = 90_000;
+export const DAY_KEY_NO_ANSWER = 'Your wallet did not answer the request. Open your wallet, then try again: the next try asks it again.';
 const DAY_DB = 'vd-daykeys';
 function dayDb(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
@@ -151,9 +160,9 @@ async function dayKey(provider: Eip1193Provider, owner: string, executor: string
     dayKeys.set(name, stored);
     return stored;
   }
-  // One approval at a time: actions that wait on it all use the same key.
+  // One approval at a time while it is fresh: actions that wait on it all use the same key.
   const pending = dayKeyPending.get(name);
-  if (pending) return pending;
+  if (pending && Date.now() - pending.at < DAY_KEY_SHARE_MS) return withAnswerTime(pending.p);
   const make = (async (): Promise<DayKey | null> => {
     let pair: CryptoKeyPair;
     try {
@@ -170,12 +179,18 @@ async function dayKey(provider: Eip1193Provider, owner: string, executor: string
     await dayDbDo('readwrite', (s) => s.put(d, name));
     return d;
   })();
-  dayKeyPending.set(name, make);
-  try {
-    return await make;
-  } finally {
-    dayKeyPending.delete(name);
-  }
+  const entry = { p: make, at: Date.now() };
+  dayKeyPending.set(name, entry);
+  // Forgotten once answered (or refused); a newer request that replaced it stays.
+  void make.then(() => {}, () => {}).finally(() => { if (dayKeyPending.get(name) === entry) dayKeyPending.delete(name); });
+  return withAnswerTime(make);
+}
+
+/** The request as an action waits on it: at most DAY_KEY_ANSWER_MS, then a clear failure (the request itself goes on). */
+function withAnswerTime<T>(p: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(DAY_KEY_NO_ANSWER)), DAY_KEY_ANSWER_MS); });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
 /** Forget this browser's day keys for a wallet (sign-out, a refused approval): the next action asks the wallet again. */
