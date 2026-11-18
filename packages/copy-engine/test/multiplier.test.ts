@@ -81,15 +81,18 @@ test('planner: a decrease keeps the multiplied size per leader unit', () => {
   assert.equal(dec.intents[0]!.reduceOnly, true);
 });
 
-test('only new positions: a position held before the start is detached and its adds are skipped; the next open after flat is copied with the multiplier', () => {
+test('only new positions: a position held before the start is not joined, its add is copied with the add share and the multiplier; the next open after flat is copied in full', () => {
   const s = sub({ copyExisting: false, multiplier: 2, maxPositionUsd: 100_000, maxLeverage: 50 });
   const st = state({ detached: { 'BTC-USD': 'pre-existing' } });
   const add = planLeaderEvent(ctx({ sub: s, state: st, event: ev('BTC-USD', 1, 2, 80_000) }));
-  assert.equal(add.intents.length, 0);
-  assert.equal(add.skip, 'pre-existing-position');
-  const flat = planLeaderEvent(ctx({ sub: s, state: st, event: ev('BTC-USD', 2, 0, 80_000) }));
-  assert.equal(flat.attach, true);
+  assert.equal(add.attach, true);
+  const fresh1 = planLeaderEvent(ctx({ sub: s, state: state(), event: ev('BTC-USD', 0, 1, 80_000) }));
+  assert.equal(add.intents[0]!.quantity, fresh1.intents[0]!.quantity, 'the add of 1 is sized as a fresh open of 1');
   delete st.detached['BTC-USD'];
+  st.owned['BTC-USD'] = { size: Number(add.intents[0]!.quantity), entry: 80_000, openedAt: 1 };
+  const flat = planLeaderEvent(ctx({ sub: s, state: st, event: ev('BTC-USD', 2, 0, 80_000) }));
+  assert.equal(flat.intents[0]!.leg, 'close');
+  delete st.owned['BTC-USD'];
   const fresh = planLeaderEvent(ctx({ sub: s, state: st, event: ev('BTC-USD', 0, 1, 80_000) }));
   assert.equal(fresh.intents[0]!.quantity, '0.02');
 });

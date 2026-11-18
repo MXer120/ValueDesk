@@ -73,11 +73,12 @@ For market `m` at price `p`:
      - Equity is floored at 0, because the venue absorbs the shortfall.
      - It reports `stoppedBy = 'drawdownStop'` and `haltReason = 'liquidation'`, because the shared `stoppedBy` type has no liquidation member.
 6. **Pre-existing positions.** On the first in-window fill of a market with `L_before ≠ 0`:
-   - With `copyExisting = false`, detach the market. The rule is `NEW_POSITIONS_ONLY`: adopt only positions opened after the start.
+   - With `copyExisting = false`, detach the market. The rule is `NEW_POSITIONS_ONLY`: what the leader holds at the start is not joined.
+   - An add on it is copied with the add's share only (owner 2026-11-18). `partial` keeps the size held before, scaled down with the leader's reductions, so later adds are copied the same way and reductions take the copy down in proportion.
    - With `copyExisting = true`, **join**: open to the target for `L_after` at this price.
 7. **Asset filters.** Allow and deny are case-insensitive on `coin`. If `assetAllow` is non-empty, it wins.
 8. **Detached markets.**
-   - Stay detached until the leader is flat. That fill is skipped and re-attaches the market.
+   - Stay detached until the leader is flat. That fill is skipped and re-attaches the market. A pre-existing market also re-attaches on the leader's add (above).
    - If the leader flips, the new side is copied as a fresh **open**. The old side was never ours.
    - This stops a stopped-out copy from re-entering on the leader's next add.
 9. **Classify and target.** `F` is the follower position. The target `T(L)` depends on the sizing mode:

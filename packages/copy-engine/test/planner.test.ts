@@ -105,15 +105,47 @@ test('below the minimum order value is skipped; reductions are exempt', () => {
   assert.equal(close.intents[0]!.quantity, '0.0001');
 });
 
-test('pre-existing positions wait until the leader is flat; then the next open is copied', () => {
+test('pre-existing positions: a reduction waits, the leader flat attaches; then the next open is copied', () => {
   const st = state({ detached: { 'BTC-USD': 'pre-existing' } });
-  const add = planLeaderEvent(ctx({ state: st, event: ev('BTC-USD', 1, 2, 80_000) }));
-  assert.equal(add.skip, 'pre-existing-position');
-  const flat = planLeaderEvent(ctx({ state: st, event: ev('BTC-USD', 2, 0, 80_000) }));
+  const red = planLeaderEvent(ctx({ state: st, event: ev('BTC-USD', 2, 1, 80_000) }));
+  assert.equal(red.skip, 'pre-existing-position');
+  const flat = planLeaderEvent(ctx({ state: st, event: ev('BTC-USD', 1, 0, 80_000) }));
   assert.equal(flat.attach, true);
   delete st.detached['BTC-USD'];
   const open = planLeaderEvent(ctx({ state: st, event: ev('BTC-USD', 0, 1, 80_000) }));
   assert.equal(open.intents[0]!.leg, 'open');
+});
+
+test('an add on a pre-existing position: the copy follows the added part only, through later adds and reductions (owner 2026-11-18)', () => {
+  const st = state({ detached: { 'BTC-USD': 'pre-existing' } });
+  const full = (l: number) => Number(planLeaderEvent(ctx({ state: state(), event: ev('BTC-USD', 0, l, 80_000) })).intents[0]!.quantity);
+  const book = (p: { intents: Array<{ quantity: string; side: string }> }) => {
+    for (const i of p.intents) {
+      const q = Number(i.quantity) * (i.side === 'buy' ? 1 : -1);
+      const cur = st.owned['BTC-USD']?.size ?? 0;
+      st.owned['BTC-USD'] = { size: cur + q, entry: 80_000, openedAt: 1 };
+    }
+  };
+  // Leader held 2 before the copy watched; adds 1 -> the copy opens what a fresh 1 would be.
+  const add = planLeaderEvent(ctx({ state: st, event: ev('BTC-USD', 2, 3, 80_000) }));
+  assert.equal(add.attach, true);
+  assert.equal(Number(add.intents[0]!.quantity), full(1));
+  delete st.detached['BTC-USD'];
+  book(add);
+  assert.equal(st.partial?.['BTC-USD'], 2);
+  // Another add of 1: the copy grows to the size of the 2 added.
+  const add2 = planLeaderEvent(ctx({ state: st, event: ev('BTC-USD', 3, 4, 80_000) }));
+  book(add2);
+  assert.ok(Math.abs(st.owned['BTC-USD']!.size - full(2)) < 1e-9, `two adds copied: ${st.owned['BTC-USD']!.size}`);
+  // The leader halves: the copy halves, the part held before halves with it.
+  const half = planLeaderEvent(ctx({ state: st, event: ev('BTC-USD', 4, 2, 80_000) }));
+  book(half);
+  assert.ok(Math.abs(st.owned['BTC-USD']!.size - full(1)) < 1e-9, `halved: ${st.owned['BTC-USD']!.size}`);
+  assert.equal(st.partial?.['BTC-USD'], 1);
+  // Flat: closed, and the book-keeping forgotten.
+  const close = planLeaderEvent(ctx({ state: st, event: ev('BTC-USD', 2, 0, 80_000) }));
+  assert.equal(close.intents[0]!.leg, 'close');
+  assert.equal(st.partial?.['BTC-USD'], undefined);
 });
 
 test('a flip on a detached market opens the new side fresh', () => {

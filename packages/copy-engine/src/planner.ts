@@ -244,10 +244,19 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
     } else if (sign(lBefore) * sign(lAfter) < 0) {
       attach = true;
       if (isFlat(F)) before = 0;
+    } else if (detached === 'pre-existing' && isFlat(F) && Math.abs(lAfter) > Math.abs(lBefore) && !isFlat(lBefore)) {
+      // An add on a position the leader held before the copy watched it (owner 2026-11-18: "any adds should be
+      // added"): the copy joins with the add's share only. The part held before stays the leader's alone
+      // (`state.partial` keeps its size, scaled down with the leader's reductions), so later adds are copied the
+      // same way and reductions take the copy down in proportion.
+      attach = true;
+      (state.partial ??= {})[lSym] = Math.abs(lBefore);
     } else {
       return none(DETACH_SKIP[detached]);
     }
   }
+  /** The leader's size held before the copy watched this market (absolute), when the copy follows its adds only. */
+  const partBase = state.partial?.[lSym];
   if (reduceOnly && isFlat(F)) return none(lAfter === 0 ? 'no-follower-position' : stopSkip, { attach });
 
   const coin = coinOf(s.leader.venue, lSym);
@@ -393,11 +402,17 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
     if (sized !== null) nextRatio = sized / Math.abs(lAfter);
   };
 
+  if (partBase !== undefined && partBase > 0 && sign(before) * sign(lAfter) > 0 && Math.abs(lAfter) < Math.abs(before)) {
+    // A reduction takes the part held before down in the same proportion as the copy's part.
+    state.partial![lSym] = (partBase * Math.abs(lAfter)) / Math.abs(before);
+  }
+
   if (lAfter === 0) {
     // Close.
     nextRatio = null;
     if (isFlat(F)) {
       if (state.ratios) delete state.ratios[lSym];
+      if (state.partial) delete state.partial[lSym];
       return none('no-follower-position', { attach });
     }
     reduce(0, 'close');
@@ -419,7 +434,18 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
     // Increase. A fixed amount grows with the leader by the copy's size per leader unit (kept
     // across adds too small to trade, so they add up); the other modes by their target.
     if (!isFlat(F) && sign(F) !== sign(lAfter)) flip();
-    else if (s.sizingMode === 'fixedNotional' && !isFlat(F)) {
+    else if (partBase !== undefined && partBase > 0 && (isFlat(F) || s.sizingMode !== 'fixedNotional')) {
+      // Following the adds only: the target is the mode's size for the part added since the copy watched.
+      const full = T(lAfter);
+      if (full === null) return none('no-leader-equity', { attach });
+      const share = Math.max(0, Math.abs(lAfter) - partBase) / Math.abs(lAfter);
+      const t = sign(lAfter) * Math.abs(full) * share;
+      if (Math.abs(t) <= Math.abs(F)) skip = 'at-target';
+      else {
+        const sized = grow(F, t, isFlat(F) ? 'open' : 'increase');
+        if (sized !== null) nextRatio = sized / Math.abs(lAfter);
+      }
+    } else if (s.sizingMode === 'fixedNotional' && !isFlat(F)) {
       const r = ratioFrom(before);
       nextRatio = r;
       const t = sign(lAfter) * r * Math.abs(lAfter);
@@ -454,6 +480,9 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
     skip = 'at-target';
   }
 
+  if (nextRatio === null || lAfter === 0 || sign(before) * sign(lAfter) < 0) {
+    if (state.partial) delete state.partial[lSym];
+  }
   if (nextRatio === null) {
     if (state.ratios) delete state.ratios[lSym];
   } else if (nextRatio !== undefined && Number.isFinite(nextRatio) && nextRatio > 0) (state.ratios ??= {})[lSym] = nextRatio;

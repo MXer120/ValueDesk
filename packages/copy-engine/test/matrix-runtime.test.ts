@@ -192,13 +192,14 @@ test('copy existing: on, the leader\'s open positions are joined at the start (a
         buys(LEADER_ID, '1');
         w.leader[0]!.sz = '2';
         await wait(300);
-        assert.ok((await skips(store, s.id)).includes('pre-existing-position'), 'the add on a position held before the start is skipped');
-        assert.equal(size(rt, s.id), 0);
-        // Flat, then a new open: copied.
+        // The add on a position held before the start is copied with the add's share.
+        assert.ok(await until(() => size(rt, s.id) > 0), `the add is copied: ${size(rt, s.id)}`);
+        // Flat (the copy closes with the leader), then a new open: copied in full.
         sells(LEADER_ID, '2');
-        await wait(250);
+        assert.ok(await until(() => size(rt, s.id) === 0), 'closed with the leader');
         buys(LEADER_ID, '1');
-        assert.ok(await until(() => size(rt, s.id) === 0.01), 'the next open after the leader was flat is copied');
+        // In full (the equity is a little lower after the add's round trip and its fees).
+        assert.ok(await until(() => size(rt, s.id) > 0.009), `the next open after the leader was flat is copied: ${size(rt, s.id)}`);
       }
     } finally {
       await rt.stop();
@@ -224,8 +225,7 @@ test('copy existing after a restart: a position the leader opened while no copie
         assert.equal(size(rt, s.id), 0, 'pre-existing: not joined');
         buys(LEADER_ID, '1');
         await wait(300);
-        assert.equal(size(rt, s.id), 0, 'and its add is not copied either');
-        assert.ok((await skips(store, s.id)).includes('pre-existing-position'));
+        assert.ok(await until(() => size(rt, s.id) > 0), `its add is copied with the add's share: ${size(rt, s.id)}`);
       }
     } finally {
       await rt.stop();

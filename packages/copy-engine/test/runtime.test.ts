@@ -134,7 +134,7 @@ test('paper copy end to end: the leader opens, adds and closes; the copy follows
   await rt.stop();
 });
 
-test('positions open when copying starts are left alone until the leader is flat', async () => {
+test('positions open when copying starts are not joined; an add on them is copied with its own share', async () => {
   const w: World = { leaderPositions: [{ s: 'BTC-USD', sz: '2', ep: '79000' }], followerPositions: [], builderRate: 25, mark: 80_000 };
   const paper = new PaperSink();
   const { rt } = runtime(w, () => paper);
@@ -142,11 +142,12 @@ test('positions open when copying starts are left alone until the leader is flat
   const s = await rt.add(sub({ paper: true }, { id: 'p2' }));
   await until(() => sodexWs()?.readyState === 1);
   await wait(20);
-  sodexWs().push(print(10, 'BUY', '1', '80000', LEADER_ID, 1002));
-  await wait(400);
-  assert.equal(rt.view(s.id)!.positions.length, 0);
+  await wait(300);
+  assert.equal(rt.view(s.id)!.positions.length, 0, 'the position held at the start is not joined');
+  sodexWs().push(print(10, 'BUY', '1', '80000', LEADER_ID, 1002)); // an add: 2 -> 3
+  await until(() => rt.view(s.id)!.positions.length === 1);
   sodexWs().push(print(11, 'SELL', '3', '80000', 1002, LEADER_ID)); // flat
-  await wait(400);
+  await until(() => rt.view(s.id)!.positions.length === 0);
   sodexWs().push(print(12, 'BUY', '1', '80000', LEADER_ID, 1002)); // a new position
   await until(() => rt.view(s.id)!.positions.length === 1);
   await rt.stop();

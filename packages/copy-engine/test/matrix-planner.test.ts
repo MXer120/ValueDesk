@@ -374,7 +374,10 @@ test('every detach reason x event: the market waits until the leader is flat (a 
       const det = (owned = 0) => state({ detached: { 'BTC-USD': why }, ...(owned ? { owned: { 'BTC-USD': { size: dir * owned, entry: PRICE, openedAt: 1 } } } : {}) });
       const what = `${why} ${direction}`;
       const add = planLeaderEvent(ctxFor({ rules: r, state: det(), event: ev('BTC-USD', 1, 2, PRICE) }));
-      assert.deepEqual([add.intents.length, add.skip, add.attach], [0, skipOf[why], false], `${what}: add`);
+      // An add on a position held before the copy watched it is copied with the add's share (owner 2026-11-18);
+      // a market detached by a stop, a take-profit or the follower's own position still waits until flat.
+      if (why === 'pre-existing') assert.deepEqual([add.intents.map((i) => [i.leg, i.side]), add.attach], [[['open', dir > 0 ? 'buy' : 'sell']], true], `${what}: add`);
+      else assert.deepEqual([add.intents.length, add.skip, add.attach], [0, skipOf[why], false], `${what}: add`);
       const red = planLeaderEvent(ctxFor({ rules: r, state: det(), event: ev('BTC-USD', 2, 1, PRICE) }));
       assert.deepEqual([red.intents.length, red.skip, red.attach], [0, skipOf[why], false], `${what}: reduce`);
       const close = planLeaderEvent(ctxFor({ rules: r, state: det(), event: ev('BTC-USD', 1, 0, PRICE) }));
@@ -467,7 +470,7 @@ test('every skip reason the planner gives is reachable, and each has words for t
     ['different-asset', ctxFor({ rules: rules('proportional', 'copy', 'hyperliquid'), sameAsset: false, event: ev('BTC', 0, 1, PRICE, 'hyperliquid') })],
     ['asset-not-allowed', ctxFor({ rules: { ...base, assetAllow: ['ETH'] }, event: ev('BTC-USD', 0, 1, PRICE) })],
     ['asset-denied', ctxFor({ rules: { ...base, assetDeny: ['BTC'] }, event: ev('BTC-USD', 0, 1, PRICE) })],
-    ['pre-existing-position', ctxFor({ rules: base, state: state({ detached: { 'BTC-USD': 'pre-existing' } }), event: ev('BTC-USD', 1, 2, PRICE) })],
+    ['pre-existing-position', ctxFor({ rules: base, state: state({ detached: { 'BTC-USD': 'pre-existing' } }), event: ev('BTC-USD', 2, 1, PRICE) })],
     ['after-stop-loss', ctxFor({ rules: base, state: state({ detached: { 'BTC-USD': 'stop-loss' } }), event: ev('BTC-USD', 1, 2, PRICE) })],
     ['after-take-profit', ctxFor({ rules: base, state: state({ detached: { 'BTC-USD': 'take-profit' } }), event: ev('BTC-USD', 1, 2, PRICE) })],
     ['own-position', ctxFor({ rules: base, heldBy: 'follower', event: ev('BTC-USD', 0, 1, PRICE) })],

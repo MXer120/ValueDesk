@@ -287,6 +287,11 @@ interface Mkt {
   fEntry: number;
   fVal: number;
   detached: Detach | null;
+  /**
+   * The leader's size (absolute) held before the copy watched this market, while the copy follows only the adds
+   * made since (the copier's `state.partial`, owner 2026-11-18). Scaled with reductions, cleared on close or flip.
+   */
+  partial: number | null;
   /** Asset filter verdict (null = copyable). */
   filtered: SkipReason | null;
 }
@@ -703,6 +708,7 @@ export function runCopySimulation(fills: Fill[], config: CopyConfig, opts: SimOp
         fEntry: 0,
         fVal: 0,
         detached: null,
+        partial: null,
         filtered: allow.size > 0 && !allow.has(coin) ? 'asset-not-allowed' : deny.has(coin) ? 'asset-denied' : null,
       };
       markets.set(key, m);
@@ -1020,13 +1026,17 @@ export function runCopySimulation(fills: Fill[], config: CopyConfig, opts: SimOp
       const reason: SkipReason =
         m.detached === 'pre-existing' ? 'pre-existing-position' : m.detached === 'stop-loss' ? 'after-stop-loss' : 'after-take-profit';
       const flips = cA !== 0 && sgn(cA) !== sgn(cB);
-      if (cA === 0 || flips) m.detached = null;
-      if (!flips) {
+      // An add on a position held before the copy watched it is copied with the add's share (as the copier does).
+      const adds = m.detached === 'pre-existing' && m.fLots === 0 && cB !== 0 && sgn(cA) === sgn(cB) && Math.abs(cA) > Math.abs(cB);
+      if (cA === 0 || flips || adds) m.detached = null;
+      if (adds) {
+        m.partial = Math.abs(cB);
+        kind = 'increase';
+      } else if (!flips) {
         skip(ev, m, reason, lBefore, lAfter);
         record(ev.time);
         continue;
-      }
-      kind = 'open';
+      } else kind = 'open';
     } else if (join) kind = cA === 0 ? 'close' : 'join';
     else if (cB === 0) kind = 'open';
     else if (cA === 0) kind = 'close';
@@ -1034,6 +1044,10 @@ export function runCopySimulation(fills: Fill[], config: CopyConfig, opts: SimOp
     else kind = Math.abs(cA) > Math.abs(cB) ? 'increase' : 'decrease';
 
     // 7. Desired follower position D (signed base units).
+    if (m.partial !== null) {
+      if (kind === 'close' || kind === 'flip' || kind === 'open') m.partial = null;
+      else if (kind === 'decrease') m.partial = (m.partial * Math.abs(cA)) / Math.abs(cB);
+    }
     const F = m.fLots * m.lot;
     let D: number;
     let note: string | null = null;
@@ -1045,10 +1059,13 @@ export function runCopySimulation(fills: Fill[], config: CopyConfig, opts: SimOp
       }
       D = kind === 'close' || sgn(F) !== sgn(cB) ? 0 : (F * Math.abs(cA)) / Math.abs(cB);
     } else {
-      const target =
+      const partial = kind === 'increase' && m.partial !== null && (F === 0 || mode !== 'fixedNotional') ? m.partial : null;
+      const full =
         kind === 'increase' && mode === 'fixedNotional' && F !== 0 && sgn(F) === sgn(cA)
           ? (F * Math.abs(cA)) / Math.abs(cB)
           : openTarget(m, cA, ev.time);
+      // Following the adds only: the mode's size for the part added since the copy watched.
+      const target = partial !== null && typeof full !== 'string' ? (full * Math.max(0, Math.abs(cA) - partial)) / Math.abs(cA) : full;
       if (typeof target === 'string') {
         if (F !== 0 && sgn(F) !== sgn(cA)) {
           D = 0; // still close the old side of a flip

@@ -188,6 +188,12 @@ export interface SubState {
    */
   ratios?: Record<string, number>;
   /**
+   * Leader-venue symbol -> the leader's size (absolute) held before this copy watched the market, while the copy
+   * follows only the adds made since (an add on a pre-existing position). Scaled down with the leader's
+   * reductions, removed on its close or flip.
+   */
+  partial?: Record<string, number>;
+  /**
    * Leader-venue symbol -> when this copy was told that its SoDEX market is a different asset
    * (MarketBook.sameAsset; a notice); removed, with a notice, once the two prices agree again.
    */
@@ -301,7 +307,7 @@ export const SKIP_REASONS = {
   'market-halted': 'SoDEX is not trading this market right now',
   'asset-not-allowed': 'Not on your list of coins to copy',
   'asset-denied': 'On your list of coins never to copy',
-  'pre-existing-position': 'The leader already held this position when you started copying',
+  'pre-existing-position': 'The leader held this position before you started copying: only what they add to it is copied',
   'after-stop-loss': 'Your stop-loss closed this copy; it resumes when the leader is flat',
   'after-take-profit': 'Your take-profit closed this copy; it resumes when the leader is flat',
   'own-position': 'You hold your own position in this market, so it is left alone',

@@ -271,7 +271,7 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
           <Rule
             title="Only new positions"
             hint={c.setup.onlyNew
-              ? 'Copies only positions the trader opens after you start. What they hold now is left alone until they close it.'
+              ? 'What the trader holds now is not joined. New positions are copied in full; when they add to one they already held, only the added part is copied.'
               : 'Off: the positions the trader holds now are joined at the start too, at the current price.'}
           >
             <Switch checked={c.setup.onlyNew} onChange={(v) => c.patchSetup({ onlyNew: v })} label="Only copy newly opened positions" on="Only new" off="Off" />

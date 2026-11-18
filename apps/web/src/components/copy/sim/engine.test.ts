@@ -224,19 +224,38 @@ test('partial closes reduce by the same fraction as the leader', () => {
   );
 });
 
-test('copyExisting=false ignores positions opened before the start until the leader is flat', () => {
+test('copyExisting=false: a position held before the start is not joined, its add is copied with the add share (owner 2026-11-18)', () => {
   const r = runCopySimulation(
     [
-      fill('buy', 5, 100, 1, { startPosition: 5 }), // pre-existing 5 -> 10: ignored
-      fill('sell', 10, 100, 2, { startPosition: 10 }), // closed: re-attach, still ignored
-      fill('buy', 10, 100, 3, { startPosition: 0 }), // fresh position: copied
+      fill('buy', 5, 100, 1, { startPosition: 5 }), // pre-existing 5 -> 10: the add of 5 is copied (x 0.1)
+      fill('sell', 10, 100, 2, { startPosition: 10 }), // closed: the copy closes with it
+      fill('buy', 10, 100, 3, { startPosition: 0 }), // fresh position: copied in full
     ],
     cfg({ ratio: 0.1 }),
     opt(),
   );
-  assert.deepEqual(actions(r), ['skip', 'skip', 'open']);
-  assert.deepEqual(r.skippedByReason, { 'pre-existing-position': 2 });
+  assert.deepEqual(actions(r), ['open', 'close', 'open']);
+  approx(r.fills[0]!.followerPositionAfter, 0.5);
+  approx(r.fills[1]!.followerPositionAfter, 0);
   approx(r.fills[2]!.followerPositionAfter, 1);
+});
+
+test('copyExisting=false: a reduction of a pre-existing position is skipped, and later adds follow the added part only', () => {
+  const r = runCopySimulation(
+    [
+      fill('sell', 2, 100, 1, { startPosition: 10 }), // pre-existing 10 -> 8: skipped
+      fill('buy', 4, 100, 2, { startPosition: 8 }), // 8 -> 12: add of 4 copied = 0.4
+      fill('sell', 6, 100, 3, { startPosition: 12 }), // halved: the copy halves to 0.2
+      fill('buy', 2, 100, 4, { startPosition: 6 }), // 6 -> 8 (4 held before, 4 added): 0.4
+    ],
+    cfg({ ratio: 0.1 }),
+    opt(),
+  );
+  assert.equal(actions(r)[0], 'skip');
+  assert.deepEqual(r.skippedByReason, { 'pre-existing-position': 1 });
+  approx(r.fills[1]!.followerPositionAfter, 0.4);
+  approx(r.fills[2]!.followerPositionAfter, 0.2);
+  approx(r.fills[3]!.followerPositionAfter, 0.4);
 });
 
 test('copyExisting=false: a flip out of a pre-existing position copies only the new side', () => {

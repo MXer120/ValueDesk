@@ -342,7 +342,7 @@ test('a trade.xyz position the stream copied stays open across reconciles (and o
   await rt.stop();
 });
 
-test('a copy started while the leader could not be read treats what it holds as pre-existing once it can', async () => {
+test('a copy started while the leader could not be read treats what it holds as pre-existing once it can: only its add is copied', async () => {
   const w = world({ states: { '': 400, xyz: { accountValue: '0' } } });
   const { rt, store, reconcile } = runtime(w);
   await rt.start();
@@ -354,10 +354,11 @@ test('a copy started while the leader could not be read treats what it holds as 
   await until(() => hlWs()?.readyState === 1);
   hlWs()!.push(userFills(fill('BTC', 'B', 1, 80_000, 1)));
   await until(() => rt.view(s.id)!.leader.positions.BTC === 2);
-  const skipped = async () => (await store.activity({ subId: s.id })).some((e) => e.kind === 'skip' && e.reason === 'pre-existing-position');
-  for (let i = 0; i < 100 && !(await skipped()); i++) await wait(10);
-  assert.ok(await skipped(), 'the add to a position held before the copy started is not copied');
-  assert.equal(rt.view(s.id)!.positions.length, 0);
+  // The add is copied with its own share (owner 2026-11-18), the part held before is not joined.
+  await until(() => rt.view(s.id)!.positions.length === 1);
+  assert.equal(rt.view(s.id)!.positions.length, 1, 'the add to a position held before the copy started is copied');
+  const skipped = (await store.activity({ subId: s.id })).some((e) => e.kind === 'skip' && e.reason === 'pre-existing-position');
+  assert.equal(skipped, false);
   await rt.stop();
 });
 
