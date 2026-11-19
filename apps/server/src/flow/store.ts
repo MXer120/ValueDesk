@@ -168,7 +168,16 @@ export class FlowStore {
   /** Party ids of an address (any venue) or of a venue key (a SoDEX / Lighter account id). */
   partiesOf(addressOrKey: string): FlowParty[] {
     const a = addressOrKey.toLowerCase();
-    return this.q('SELECT id, venue, key, address FROM flow_party WHERE address = ? OR key = ? OR key = ?').all(a, a, addressOrKey) as unknown as FlowParty[];
+    // One indexed read per venue (UNIQUE (venue, key)) and one by address: `key = ?` alone has no index (venue leads),
+    // so the old `address = ? OR key = ?` scanned all ~400k parties - 9-26 s on the API thread from a cold page cache
+    // (server 1 stall profiles 2026-11-19, under /api/vs/bots/markets). Now ~20 ms.
+    const byId = new Map<number, FlowParty>();
+    const add = (rows: unknown) => { for (const r of rows as FlowParty[]) byId.set(r.id, r); };
+    add(this.q('SELECT id, venue, key, address FROM flow_party WHERE address = ?').all(a));
+    const keys = a === addressOrKey ? [a] : [a, addressOrKey];
+    const byKey = this.q(`SELECT id, venue, key, address FROM flow_party WHERE venue = ? AND key IN (${keys.map(() => '?').join(', ')})`);
+    for (const { venue } of this.q('SELECT DISTINCT venue FROM flow_market').all() as Array<{ venue: string }>) add(byKey.all(venue, ...keys));
+    return [...byId.values()].sort((x, y) => x.id - y.id);
   }
 
   // --- chunks ----------------------------------------------------------------------------------------
@@ -265,7 +274,9 @@ export class FlowStore {
 
   /** Which markets have chunks in [from, to). */
   marketsWithChunks(from: number, to: number): number[] {
-    return (this.q('SELECT DISTINCT mid FROM flow_chunk WHERE t >= ? AND t < ?').all(from, to) as Array<{ mid: number }>).map((r) => r.mid);
+    // Per market through the (mid, t) key: `WHERE t` alone read the whole chunk index, 18-33 s on the API thread from a
+    // cold page cache (server 1 stall profiles 2026-11-19, under /api/vs/bots/markets). Now ~20 ms.
+    return (this.q('SELECT m.id AS mid FROM flow_market m WHERE EXISTS (SELECT 1 FROM flow_chunk c WHERE c.mid = m.id AND c.t >= ? AND c.t < ?) ORDER BY m.id').all(from, to) as Array<{ mid: number }>).map((r) => r.mid);
   }
 
   /** The oldest chunk of a market (how far back its flow goes). */
