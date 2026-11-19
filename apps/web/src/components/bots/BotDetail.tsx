@@ -18,6 +18,8 @@ import { FINAL_STATUSES, regionPolicy, type AlgoEvent, type AlgoView } from '@co
 import { DASH, fmtDateTime, fmtQty, fmtUsd } from '../../format';
 import { fmtPriceAuto } from '../palette/model';
 import { useBotLeverage } from '../../bots/leverage';
+import { useTwins } from '../../bots/useEngines';
+import { ENGINE_NAME, marketLabel } from '../../bots/engines';
 import { CoinIcon } from '../CoinIcon';
 import { SeriesChart } from '../datachart/SeriesChart';
 import { useBotLog } from '../../bots/useBots';
@@ -110,6 +112,10 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
   // A list refresh brings a new spec object every few seconds: only pick it up while nothing is being edited.
   useEffect(() => { if (!n) setD(before); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [before]);
   const holds = Math.abs(v.bot?.inventory ?? 0) > 0;
+  // Futures or spot (owner 2026-11-19): the same coin on the other engine is another market - a clean restart moves the
+  // bot there (it closes what it holds here first); an instant restart keeps the market, so it is not offered then.
+  const twins = useTwins(before.symbol);
+  const moved = d.symbol !== before.symbol;
   const ended = botState(v) === 'ended' || botState(v) === 'failed';
   // Closing what it holds: no change and no restart until it has stopped (audit 2026-11-09: a restart then orphaned it).
   const closing = !ended && v.bot?.closing === true;
@@ -150,7 +156,7 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         <Panel className="bots-sizepanel">
           <fieldset className="bots-fieldset" disabled={ended || closing}>
             <div className="bots-setname"><NameField d={d} set={(p) => setD((x) => ({ ...x, ...p }))} /></div>
-            <BotSettings cards d={d} set={(p) => setD((x) => ({ ...x, ...p }))} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} lev={{ ...lev, max: leverageCap(lev.max, regionMax) }} />
+            <BotSettings cards d={d} set={(p) => setD((x) => ({ ...x, ...p }))} twins={d.strategy === 'hedge' ? undefined : twins} range={d.strategy === 'grid' ? gridRange(d, null) : null} mark={v.bot?.mark ?? null} liveAllowed={ctx.liveAllowed} hidePractice noLead={est?.lead === null} lev={{ ...lev, max: leverageCap(lev.max, regionMax) }} />
           </fieldset>
         </Panel>
       </Shell>
@@ -159,13 +165,13 @@ function SettingsTab({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         <div className={`bots-restartbar${n ? ' is-dirty' : ''}`}>
           <span className="bots-restartbar__t">
             <b>{n ? `${n} change${n === 1 ? '' : 's'}` : 'No change yet'}</b>
-            <small>{!n ? 'Edit any setting above.' : patch ? 'Save changes the running bot: nothing restarts, nothing is closed.' : 'This change makes it another bot (its market, its type, or practice and real): a restart applies it.'}</small>
+            <small>{!n ? 'Edit any setting above.' : patch ? 'Save changes the running bot: nothing restarts, nothing is closed.' : moved ? `It moves to ${marketLabel(d.symbol)} ${ENGINE_NAME[d.engine].toLowerCase()}: a clean restart closes what it holds here, then starts there.` : 'This change makes it another bot (its market, its type, or practice and real): a restart applies it.'}</small>
           </span>
           {patch || !n ? (
             <Button variant="go" icon="check" disabled={!patch || busy !== null} loading={busy === 'save'} onClick={() => void save()}>Save</Button>
           ) : (
             <>
-              <Button variant="secondary" icon="bolt" disabled={!n || busy !== null} loading={busy === 'takeover'} onClick={() => void restart('takeover')} title={holds ? 'Starts now and keeps its position.' : 'Starts now.'}>Instant restart</Button>
+              <Button variant="secondary" icon="bolt" disabled={!n || moved || busy !== null} loading={busy === 'takeover'} onClick={() => void restart('takeover')} title={moved ? 'An instant restart keeps the market: a move to another market is a clean restart.' : holds ? 'Starts now and keeps its position.' : 'Starts now.'}>Instant restart</Button>
               <Button variant="go" icon="shield" disabled={!n || busy !== null} loading={busy === 'clean'} onClick={() => void restart('clean')} title={holds ? 'Closes its position, then starts fresh.' : 'Stops, then starts fresh.'}>Clean restart<span className="bots-rec">Recommended</span></Button>
             </>
           )}

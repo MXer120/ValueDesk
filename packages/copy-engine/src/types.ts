@@ -396,6 +396,12 @@ export interface MarketInfo {
   /** Base-tier maker fee, fraction (algo orders that rest), when SoDEX lists one. */
   makerFee?: number;
   status: string;
+  /**
+   * 'spot': a SoDEX spot market (GET /api/v1/spot/markets/symbols, 'vBTC_vUSDC'); then `base` is SoDEX's coin name as
+   * the spot balances list it ('vBTC', case kept) and `quote` the quote coin ('vUSDC'). Absent: a perps market.
+   */
+  engine?: 'spot';
+  quote?: string;
 }
 
 /** The follower's account on SoDEX, as the copier last read it. */

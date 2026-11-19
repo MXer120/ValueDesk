@@ -79,6 +79,52 @@ export function parseMarkets(rows: unknown): MarketInfo[] {
 }
 
 /**
+ * SoDEX's spot markets (GET /api/v1/spot/markets/symbols, read 2026-11-19: id, name 'vBTC_vUSDC', baseCoin 'vBTC',
+ * quoteCoin 'vUSDC', tickSize, stepSize, minQuantity, minNotional, makerFee 0.00035, takerFee 0.00065, status). Spot ids
+ * overlap perps ids (vBTC_vUSDC is 1 there): a market is told apart by its `engine` and name, never by its id alone.
+ * The base keeps SoDEX's case ('vBTC'): it is the coin name the spot balances use. No leverage on spot (1).
+ */
+export function parseSpotMarkets(rows: unknown): MarketInfo[] {
+  if (!Array.isArray(rows)) return [];
+  const out: MarketInfo[] = [];
+  for (const r of rows as Array<Record<string, unknown>>) {
+    const id = num(r.id);
+    const name = str(r.name, '');
+    const step = str(r.stepSize, '');
+    const tick = str(r.tickSize, '');
+    if (!Number.isSafeInteger(id) || !name || !step || !tick || num(step) <= 0 || num(tick) <= 0) continue;
+    const taker = num(r.takerFee);
+    const maker = num(r.makerFee);
+    // A market whose fee SoDEX does not list is left out: a bot never books a fee it assumed.
+    if (!Number.isFinite(taker)) continue;
+    out.push({
+      id,
+      name,
+      base: str(r.baseCoin, name.split('_')[0] ?? name),
+      quote: str(r.quoteCoin, name.split('_')[1] ?? ''),
+      engine: 'spot',
+      tickSize: canonicalDecimal(tick),
+      stepSize: canonicalDecimal(step),
+      minQuantity: canonicalDecimal(str(r.minQuantity, step)),
+      maxQuantity: canonicalDecimal(str(r.maxQuantity, '0')),
+      marketMaxQuantity: typeof r.marketMaxQuantity === 'string' ? canonicalDecimal(r.marketMaxQuantity) : null,
+      minNotional: num(r.minNotional, 5),
+      maxNotional: num(r.maxNotional) > 0 ? num(r.maxNotional) : null,
+      maxLeverage: 1,
+      openInterestCap: null,
+      openInterestCapUSD: null,
+      buyLimitUpRatio: num(r.buyLimitUpRatio, 1),
+      sellLimitDownRatio: num(r.sellLimitDownRatio, 0.5),
+      // The spot market's own fees (3.5 / 6.5 bp on 2026-11-19), never a perps default.
+      takerFee: taker,
+      ...(Number.isFinite(maker) ? { makerFee: maker } : {}),
+      status: str(r.status, 'TRADING'),
+    });
+  }
+  return out;
+}
+
+/**
  * When a Hyperliquid market and the SoDEX market of its name are the same asset, by
  * how far their prices for one coin are apart. Measured 2026-10-29 13:07 UTC on every
  * tradable Hyperliquid perp (main dex and all ten HIP-3 dexes) that maps to a SoDEX

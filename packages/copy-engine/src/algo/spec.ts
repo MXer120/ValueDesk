@@ -23,6 +23,8 @@ import {
   type QuietWindow,
   type NewsGate,
   BOT_KINDS,
+  BOT_ENGINES,
+  type BotEngine,
   type ScaleSpec,
   type SweepSpec,
   type BoundAction,
@@ -230,10 +232,53 @@ const bool = (o: Obj, key: string, fallback = false): boolean => (typeof o[key] 
 
 const SYMBOL = /^[A-Z0-9]{1,24}-USD$/;
 
-function symbol(o: Obj, key: string, e: Errors, path = key): string {
-  const s = typeof o[key] === 'string' ? (o[key] as string).trim().toUpperCase() : '';
+function symbol(o: Obj, key: string, e: Errors, path = key, spot = false): string {
+  const raw = typeof o[key] === 'string' ? (o[key] as string).trim() : '';
+  // A spot name keeps SoDEX's case ('vBTC_vUSDC'): only a volume maker or a grid may name one, and its spec checks it
+  // against its engine (botEngine).
+  if (isSpotMarket(raw)) {
+    if (!spot) e[path] = 'Only a volume maker or a grid trades a spot market: choose a SoDEX perps market (like BTC-USD).';
+    return raw;
+  }
+  const s = raw.toUpperCase();
   if (!SYMBOL.test(s)) e[path] = 'Choose a SoDEX perps market (like BTC-USD).';
   return s;
+}
+
+/**
+ * A SoDEX spot market's name, any pair ('vBTC_vUSDC', 'WSOSO_vUSDC', 'vUSDT_vUSDC'): base and quote joined by '_'.
+ * Perps names never have one ('BTC-USD'). How the runtime, the feed and the sink tell a spot market from a perps one.
+ */
+export const isSpotMarket = (s: string): boolean => typeof s === 'string' && /^[A-Za-z0-9.]{1,24}_[A-Za-z0-9.]{1,24}$/.test(s);
+
+/** The spot pairs a bot may trade: quoted in vUSDC, never the dollar pair vUSDT_vUSDC (web contract 2026-11-19). */
+const SPOT_BOT_SYMBOL = /^[A-Za-z0-9]{1,24}_vUSDC$/;
+export const isSpotBotSymbol = (s: string): boolean => SPOT_BOT_SYMBOL.test(s) && s !== 'vUSDT_vUSDC';
+
+/** The exchange a spec trades on: a bot's `engine` ('perps' when a spec from before 2026-11-19 has none); every other algo is perps. */
+export const engineOf = (s: (Pick<AlgoSpec, 'kind'> & { engine?: BotEngine; symbol?: string }) | null | undefined): BotEngine =>
+  !!s && (s.kind === 'mm' || s.kind === 'grid') && s.engine === 'spot' ? 'spot' : 'perps';
+
+/** Whether an algo trades a SoDEX spot market (a spot volume maker or grid). */
+export const isSpotSpec = (s: (Pick<AlgoSpec, 'kind'> & { engine?: BotEngine }) | null | undefined): boolean => engineOf(s) === 'spot';
+
+/**
+ * The engine of a volume maker or grid, checked against its symbol and the options spot does not have (field errors):
+ * leverage, margin mode, exits, reduce-only, the Binance-led reference (it reads Binance's futures for a perps market).
+ */
+function botEngine(o: Obj, b: AlgoBase, e: Errors): BotEngine {
+  const engine = oneOf<BotEngine>(o, 'engine', 'Exchange', BOT_ENGINES, 'perps', e);
+  const spotName = isSpotMarket(b.symbol);
+  if (engine === 'perps' && spotName) e.symbol = `${b.symbol} is a SoDEX spot market: set the exchange to spot, or choose a perps market (like BTC-USD).`;
+  if (engine === 'spot') {
+    if (!spotName) e.symbol = b.symbol ? `${b.symbol} is a SoDEX perps market: choose a spot market (like vBTC_vUSDC), or set the exchange to perps.` : 'Choose a SoDEX spot market (like vBTC_vUSDC).';
+    else if (!isSpotBotSymbol(b.symbol)) e.symbol = 'A spot bot trades a coin against vUSDC (like vBTC_vUSDC); vUSDT_vUSDC is not one.';
+    if (b.leverage !== null) e.leverage = 'Spot has no leverage: a spot bot buys with the vUSDC it holds.';
+    if (b.marginMode !== null) e.marginMode = 'Spot has no margin mode.';
+    if (b.exits) e.exits = 'Spot has no take-profit or stop-loss orders: set a loss limit instead.';
+    if (o.ref !== undefined && o.ref !== null) e.ref = 'The oracle maker quotes perps markets only (it reads Binance futures).';
+  }
+  return engine;
 }
 
 const BOUND_ACTIONS: readonly BoundAction[] = ['hold', 'stop', 'rush'];
@@ -290,7 +335,7 @@ function base(o: Obj, kind: AlgoKind, e: Errors): AlgoBase {
   const marginMode = o.marginMode === null || o.marginMode === undefined ? null : oneOf(o, 'marginMode', 'Margin mode', ['cross', 'isolated'] as const, 'cross', e);
   const b: AlgoBase = {
     kind,
-    symbol: symbol(o, 'symbol', e),
+    symbol: symbol(o, 'symbol', e, 'symbol', kind === 'mm' || kind === 'grid'),
     side: oneOf<Side>(o, 'side', 'Side', ['buy', 'sell'], 'buy', e),
     reduceOnly: bool(o, 'reduceOnly'),
     limitPrice: optPrice(o, 'limitPrice', 'Limit price', e),
@@ -723,6 +768,7 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         ...b,
         ...botLimits(o, e, b.paper),
         kind,
+        engine: botEngine(o, b, e),
         side: 'buy',
         orderUsd,
         maxInventoryUsd,
@@ -785,6 +831,7 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         ...b,
         ...botLimits(o, e, b.paper),
         kind,
+        engine: botEngine(o, b, e),
         side: 'buy',
         low,
         high,
@@ -794,7 +841,10 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         outOfRange: oneOf(o, 'outOfRange', 'Out of the range', ['wait', 'stop'] as const, 'wait', e),
       };
       {
-        const direction = oneOf(o, 'direction', 'Direction', ['neutral', 'long', 'short'] as const, 'neutral', e);
+        const spot = (spec as GridSpec).engine === 'spot';
+        // A spot grid cannot go short: it is a long grid (buys first, sells only what it bought), set or not.
+        const direction = oneOf(o, 'direction', 'Direction', ['neutral', 'long', 'short'] as const, spot ? 'long' : 'neutral', e);
+        if (spot && direction !== 'long') e.direction = 'A spot grid only buys first and sells what it bought: its direction is long.';
         if (direction !== 'neutral') (spec as GridSpec).direction = direction;
       }
       break;

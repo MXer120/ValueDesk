@@ -4,6 +4,7 @@
  * or a list (many): search, filter by state, sort by any column, 25 a page, pause / resume / stop for one bot or
  * every bot shown.
  */
+import { marketLabel } from '../../bots/engines';
 import { botCard } from '../share/shareData';
 import { openShare } from '../share/host';
 import { useTheme } from '../../theme';
@@ -319,7 +320,7 @@ function BotTile({ v, ctx, runs = 1 }: { v: AlgoView; ctx: BotsCtx; runs?: numbe
           <BotAvatar symbol={v.algo.spec.symbol} strategy={st} size={38} />
           <div className="bots-tile__t">
             <p className="bots-tile__name">{botName(v)}</p>
-            <p className="bots-tile__sub">{v.algo.spec.symbol.replace(/-USD$/, '')} · {STRATEGY_INFO[st].name}{gate ? ' · gate' : ''}</p>
+            <p className="bots-tile__sub">{marketLabel(v.algo.spec.symbol)} · {STRATEGY_INFO[st].name}{gate ? ' · gate' : ''}</p>
           </div>
           <span className="bots-tile__pills">
             {v.algo.spec.paper && <StatusPill size="sm" tone="brand">Practice</StatusPill>}

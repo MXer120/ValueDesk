@@ -67,13 +67,13 @@ export interface AlgoMarket {
    * (replaces the previous sets). `owners` most important first: when there
    * are more than the socket may follow, the first ones get the socket.
    */
-  watch(symbols: readonly string[], owners: readonly string[]): void;
+  watch(symbols: readonly string[], owners: readonly string[], spotOwners?: readonly string[]): void;
   /**
    * Whether this wallet's order updates arrive on the socket now. false: the
    * runtime reads its orders by REST instead (AlgoRuntime.pollOrders). Absent
    * (a test's fake): every wallet is followed.
    */
-  followsOrders?(owner: string): boolean;
+  followsOrders?(owner: string, spot?: boolean): boolean;
   quote(symbol: string): Quote | null;
   last(symbol: string): { price: number; at: number } | null;
   mark(symbol: string): MarkInfo | null;
@@ -118,6 +118,13 @@ const toNum = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+/**
+ * A market's key here: a perps name upper-cased ('BTC-USD'), a spot name as SoDEX writes it ('vBTC_vUSDC': SoDEX's spot
+ * socket and REST answer it so, and refuse it upper-cased).
+ */
+export const feedKey = (s: string): string => (s.includes('_') ? s : s.toUpperCase());
+const isSpotKey = (s: string): boolean => s.includes('_');
+
 const rows = (d: unknown): Array<Record<string, unknown>> =>
   Array.isArray(d) ? (d as Array<Record<string, unknown>>) : d && typeof d === 'object' ? [d as Record<string, unknown>] : [];
 
@@ -140,6 +147,8 @@ export interface AlgoFeedOptions {
    * market keeps a fresh price. Absent: socket only.
    */
   bookTickers?: () => Promise<unknown>;
+  /** The same for spot markets (GET /api/v1/spot/markets/bookTickers: symbol, bidPx, bidSz, askPx, askSz). */
+  spotBookTickers?: () => Promise<unknown>;
 }
 
 /**
@@ -152,6 +161,15 @@ export const ACCOUNT_USERS_PER_IP = 10;
 
 export class AlgoFeed implements AlgoMarket {
   private socket: LiveSocket;
+  /**
+   * SoDEX's spot socket (/ws/spot, read 2026-11-19): bookTicker, trade and accountOrderUpdate for the spot markets and
+   * the wallets of spot bots (the same messages as perps; spot has no allMarkPrice - a spot market's mark is its mid).
+   * Started the first time a spot market or wallet is watched.
+   */
+  private spot: LiveSocket;
+  private spotStarted = false;
+  private spotOwners = new Set<string>();
+  private spotSubscribed = { symbols: new Set<string>(), owners: new Set<string>() };
   private symbols = new Set<string>();
   /** The wallets the socket follows: at most maxAccountUsers, most important first. */
   private owners = new Set<string>();
@@ -186,6 +204,15 @@ export class AlgoFeed implements AlgoMarket {
         for (const cb of this.stateCbs) cb(up);
       },
     });
+    this.spot = new LiveSocket({
+      url: `${origin}/ws/spot`,
+      factory: o.factory,
+      ping: '{"op":"ping"}',
+      name: 'sodex-algo-spot',
+      log: o.log,
+      subscribe: (send, fresh) => this.subscribeSpot(send, fresh),
+      onMessage: (m) => this.handle(m),
+    });
     for (const [k, factory] of (o.accountFactories ?? []).entries()) {
       const x = { socket: null as unknown as LiveSocket, owners: new Set<string>(), subscribed: new Set<string>() };
       x.socket = new LiveSocket({
@@ -213,6 +240,7 @@ export class AlgoFeed implements AlgoMarket {
 
   start(): void {
     this.socket.start();
+    if (this.spotStarted) this.spot.start();
     for (const x of this.extras) x.socket.start();
     this.sampler ??= timers.every(500, () => {
       const now = Date.now();
@@ -223,6 +251,8 @@ export class AlgoFeed implements AlgoMarket {
 
   stop(): void {
     this.socket.stop();
+    this.spot.stop();
+    this.spotStarted = false;
     for (const x of this.extras) x.socket.stop();
     timers.cancel(this.sampler);
     this.sampler = null;
@@ -232,16 +262,17 @@ export class AlgoFeed implements AlgoMarket {
     return this.socket.up;
   }
 
-  watch(symbols: readonly string[], owners: readonly string[]): void {
-    const s = new Set(symbols.map((x) => x.toUpperCase()));
+  watch(symbols: readonly string[], owners: readonly string[], spotOwners: readonly string[] = []): void {
+    const s = new Set(symbols.map(feedKey));
     const want = [...new Set(owners.map((x) => x.toLowerCase()))];
     // Who keeps the socket: a wallet it follows already stays (no churn), the free places go in order of importance.
     const cap = Math.max(0, this.o.maxAccountUsers ?? ACCOUNT_USERS_PER_IP);
     const w = new Set(want.filter((x) => this.owners.has(x)).slice(0, cap));
     for (const x of want) if (w.size < cap) w.add(x);
-    const changed = [...s].some((x) => !this.subscribed.symbols.has(x)) || [...w].some((x) => !this.subscribed.owners.has(x)) || [...this.subscribed.owners].some((x) => !w.has(x));
+    const changed = [...s].some((x) => !isSpotKey(x) && !this.subscribed.symbols.has(x)) || [...w].some((x) => !this.subscribed.owners.has(x)) || [...this.subscribed.owners].some((x) => !w.has(x));
     this.symbols = s;
     this.owners = w;
+    this.watchSpot([...s].filter(isSpotKey), spotOwners);
     if (changed) this.socket.resubscribe();
     // The rest on the extra sockets, in order: each keeps the wallets it follows, the free places go in order.
     const rest = want.filter((x) => !w.has(x));
@@ -259,8 +290,9 @@ export class AlgoFeed implements AlgoMarket {
     }
   }
 
-  followsOrders(owner: string): boolean {
+  followsOrders(owner: string, spot = false): boolean {
     const o = owner.toLowerCase();
+    if (spot) return this.spot.up && this.spotSubscribed.owners.has(o);
     if (this.socket.up && this.subscribed.owners.has(o)) return true;
     return this.extras.some((x) => x.socket.up && x.subscribed.has(o));
   }
@@ -274,7 +306,7 @@ export class AlgoFeed implements AlgoMarket {
       send({ op: 'subscribe', id: id++, params: { channel: 'allMarkPrice' } });
       this.subscribed.marks = true;
     }
-    const add = [...this.symbols].filter((s) => !this.subscribed.symbols.has(s));
+    const add = [...this.symbols].filter((s) => !isSpotKey(s) && !this.subscribed.symbols.has(s));
     for (let i = 0; i < add.length; i += 40) {
       const chunk = add.slice(i, i + 40);
       send({ op: 'subscribe', id: id++, params: { channel: 'bookTicker', symbols: chunk } });
@@ -294,6 +326,45 @@ export class AlgoFeed implements AlgoMarket {
     }
   }
 
+  /** The spot markets and the spot bots' wallets to follow on the spot socket (at most maxAccountUsers wallets). */
+  private watchSpot(symbols: readonly string[], owners: readonly string[]): void {
+    const cap = Math.max(0, this.o.maxAccountUsers ?? ACCOUNT_USERS_PER_IP);
+    const want = [...new Set(owners.map((x) => x.toLowerCase()))];
+    const w = new Set(want.filter((x) => this.spotOwners.has(x)).slice(0, cap));
+    for (const x of want) if (w.size < cap) w.add(x);
+    const changed = symbols.some((x) => !this.spotSubscribed.symbols.has(x)) || [...w].some((x) => !this.spotSubscribed.owners.has(x)) || [...this.spotSubscribed.owners].some((x) => !w.has(x));
+    this.spotOwners = w;
+    if (!this.spotStarted) {
+      if (!symbols.length && !w.size) return;
+      this.spotStarted = true;
+      this.spot.start();
+      return;
+    }
+    if (changed) this.spot.resubscribe();
+  }
+
+  private subscribeSpot(send: (m: unknown) => void, fresh: boolean): void {
+    if (fresh) this.spotSubscribed = { symbols: new Set(), owners: new Set() };
+    let id = 700;
+    const add = [...this.symbols].filter((s) => isSpotKey(s) && !this.spotSubscribed.symbols.has(s));
+    for (let i = 0; i < add.length; i += 40) {
+      const chunk = add.slice(i, i + 40);
+      send({ op: 'subscribe', id: id++, params: { channel: 'bookTicker', symbols: chunk } });
+      send({ op: 'subscribe', id: id++, params: { channel: 'trade', symbols: chunk } });
+      for (const s of chunk) this.spotSubscribed.symbols.add(s);
+    }
+    for (const w of [...this.spotSubscribed.owners]) {
+      if (this.spotOwners.has(w)) continue;
+      send({ op: 'unsubscribe', id: id++, params: { channel: 'accountOrderUpdate', user: w } });
+      this.spotSubscribed.owners.delete(w);
+    }
+    for (const w of this.spotOwners) {
+      if (this.spotSubscribed.owners.has(w)) continue;
+      send({ op: 'subscribe', id: id++, params: { channel: 'accountOrderUpdate', user: w } });
+      this.spotSubscribed.owners.add(w);
+    }
+  }
+
   private dedupe(id: string): boolean {
     if (this.seen.has(id)) return false;
     this.seen.add(id);
@@ -310,7 +381,7 @@ export class AlgoFeed implements AlgoMarket {
     const now = Date.now();
     if (ch === 'bookTicker') {
       for (const r of rows(msg.data)) {
-        const s = typeof r.s === 'string' ? r.s.toUpperCase() : null;
+        const s = typeof r.s === 'string' ? feedKey(r.s) : null;
         const bid = toNum(r.b);
         const ask = toNum(r.a);
         const bidSz = toNum(r.B);
@@ -325,7 +396,7 @@ export class AlgoFeed implements AlgoMarket {
     }
     if (ch === 'allMarkPrice' || ch === 'markPrice') {
       for (const r of rows(msg.data)) {
-        const s = typeof r.s === 'string' ? r.s.toUpperCase() : null;
+        const s = typeof r.s === 'string' ? feedKey(r.s) : null;
         const p = toNum(r.p);
         if (!s || p === null || !(p > 0)) continue;
         const prev = this.marks.get(s);
@@ -341,7 +412,7 @@ export class AlgoFeed implements AlgoMarket {
     }
     if (ch === 'trade') {
       for (const r of rows(msg.data)) {
-        const s = typeof r.s === 'string' ? r.s.toUpperCase() : null;
+        const s = typeof r.s === 'string' ? feedKey(r.s) : null;
         const price = toNum(r.p);
         const qty = toNum(r.q);
         if (!s || price === null || qty === null || !(price > 0) || !(qty > 0)) continue;
@@ -375,7 +446,7 @@ export class AlgoFeed implements AlgoMarket {
         const u: OrderUpdate = {
           clOrdID: c,
           orderId: r.i === undefined || r.i === null ? null : String(r.i),
-          symbol: typeof r.s === 'string' ? r.s.toUpperCase() : '',
+          symbol: typeof r.s === 'string' ? feedKey(r.s) : '',
           status: String(r.X ?? r.x ?? '').toUpperCase(),
           filledQty: toNum(r.z) ?? 0,
           filledValue: toNum(r.v) ?? 0,
@@ -394,17 +465,20 @@ export class AlgoFeed implements AlgoMarket {
    * for all of them. A REST answer never overwrites a socket quote newer than the read.
    */
   async refreshQuotes(now = Date.now()): Promise<void> {
-    if (!this.o.bookTickers || this.refreshing || now - this.refreshedAt < QUOTE_REFRESH_EVERY_MS || !this.symbols.size) return;
+    if ((!this.o.bookTickers && !this.o.spotBookTickers) || this.refreshing || now - this.refreshedAt < QUOTE_REFRESH_EVERY_MS || !this.symbols.size) return;
     const stale = [...this.symbols].filter((s) => now - (this.quotes.get(s)?.at ?? 0) > QUOTE_REFRESH_AGE_MS);
     if (!stale.length) return;
     this.refreshing = true;
     this.refreshedAt = now;
     try {
-      const data = await this.o.bookTickers();
-      const list = Array.isArray(data) ? data : ((data as { bookTickers?: unknown[] } | null)?.bookTickers ?? []);
+      const reads: Array<Promise<unknown>> = [];
+      if (this.o.bookTickers && stale.some((s) => !isSpotKey(s))) reads.push(this.o.bookTickers());
+      if (this.o.spotBookTickers && stale.some(isSpotKey)) reads.push(this.o.spotBookTickers());
+      const list: unknown[] = [];
+      for (const data of await Promise.all(reads)) list.push(...(Array.isArray(data) ? data : ((data as { bookTickers?: unknown[] } | null)?.bookTickers ?? [])));
       const at = Date.now();
       for (const r of list as Array<Record<string, unknown>>) {
-        const s = typeof r.symbol === 'string' ? r.symbol.toUpperCase() : typeof r.s === 'string' ? r.s.toUpperCase() : null;
+        const s = typeof r.symbol === 'string' ? feedKey(r.symbol) : typeof r.s === 'string' ? feedKey(r.s) : null;
         if (!s || !stale.includes(s)) continue;
         const bid = toNum(r.bidPx ?? r.bidPrice ?? r.b);
         const ask = toNum(r.askPx ?? r.askPrice ?? r.a);
@@ -438,16 +512,21 @@ export class AlgoFeed implements AlgoMarket {
   }
 
   quote(symbol: string): Quote | null {
-    const q = this.quotes.get(symbol.toUpperCase());
+    const q = this.quotes.get(feedKey(symbol));
     return q && Date.now() - q.at <= QUOTE_MAX_AGE_MS ? q : null;
   }
 
   last(symbol: string): { price: number; at: number } | null {
-    return this.lasts.get(symbol.toUpperCase()) ?? null;
+    return this.lasts.get(feedKey(symbol)) ?? null;
   }
 
   mark(symbol: string): MarkInfo | null {
-    const m = this.marks.get(symbol.toUpperCase());
+    const m = this.marks.get(feedKey(symbol));
+    // Spot has no mark price: a spot market's mark is its mid (what its bounds, holding and PnL are valued at).
+    if (!m && isSpotKey(symbol)) {
+      const q = this.quote(symbol);
+      return q ? { mark: (q.bid + q.ask) / 2, index: null, funding: null, oi: null, at: q.at } : null;
+    }
     return m && Date.now() - m.at <= 120_000 ? m : null;
   }
 
@@ -462,7 +541,7 @@ export class AlgoFeed implements AlgoMarket {
   }
 
   private sampleAgo(symbol: string, agoMs: number): Sample | null {
-    const list = this.history.get(symbol.toUpperCase());
+    const list = this.history.get(feedKey(symbol));
     if (!list?.length) return null;
     const want = Date.now() - agoMs;
     if (list[0]!.t > want + 2_000) return null;
@@ -487,7 +566,7 @@ export class AlgoFeed implements AlgoMarket {
   }
 
   volume(symbol: string, windowMs: number): { qty: number; usd: number } {
-    const list = this.tape.get(symbol.toUpperCase());
+    const list = this.tape.get(feedKey(symbol));
     if (!list) return { qty: 0, usd: 0 };
     const from = Date.now() - windowMs;
     let qty = 0;

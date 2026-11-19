@@ -21,6 +21,7 @@ import {
   TriggerType,
   failedOrders,
   perpsActions,
+  spotActions,
   signAndBuildWithNonceManager,
   unwrapList,
   type BuilderParams,
@@ -113,6 +114,7 @@ export const readStops = (data: unknown, stops: readonly StopRequest[]): ChildRe
   );
 
 export function childrenAction(accountId: number, market: MarketInfo, orders: readonly ChildRequest[], builder: BuilderParams | null): SignableAction {
+  if (market.engine === 'spot') return spotChildrenAction(accountId, market, orders, builder);
   return perpsActions.newOrder(
     accountId,
     market.id,
@@ -128,6 +130,52 @@ export function childrenAction(accountId: number, market: MarketInfo, orders: re
     })),
     builder ?? undefined,
   );
+}
+
+/**
+ * A spot bot's children as one spot batch (POST /api/v1/spot/trade/orders/batch): plain LIMIT orders, each naming its
+ * market. Spot has no reduce-only flag (the bot bounds every sell by what it bought itself: runtime.ts spotSellRoom), no
+ * stops and no leverage. The builder rides at batch level, as on perps; SoDEX charges it on the sells only.
+ */
+export function spotChildrenAction(accountId: number, market: MarketInfo, orders: readonly ChildRequest[], builder: BuilderParams | null): SignableAction {
+  return spotActions.batchNewOrder(
+    accountId,
+    orders.map((o) => ({
+      symbolID: market.id,
+      clOrdID: o.clOrdID,
+      side: o.side === 'buy' ? OrderSide.BUY : OrderSide.SELL,
+      type: OrderType.LIMIT,
+      timeInForce: TIF[o.tif],
+      price: o.price,
+      quantity: o.quantity,
+    })),
+    builder ?? undefined,
+  );
+}
+
+let spotCancelSeq = 0;
+/** A spot cancel's own client id (SoDEX's spot cancel carries one of its own besides the order's: origClOrdID). */
+export const spotCancelId = (): string => `vx-${Date.now().toString(36)}-${(++spotCancelSeq).toString(36)}`;
+
+/**
+ * Spot cancels by the orders' client ids (DELETE /api/v1/spot/trade/orders/batch, as the app's own spot cancel:
+ * apps/web/src/trading/orderParams.ts cancelOrderAction). Returns the action and each cancel id's order id, so the
+ * answer's rows can be read back as the orders'.
+ */
+export function spotCancelAction(accountId: number, rows: ReadonlyArray<{ symbolID: number; clOrdID: string }>): { action: SignableAction; orig: Map<string, string> } {
+  const orig = new Map<string, string>();
+  const cancels = rows.map((r) => {
+    const id = spotCancelId();
+    orig.set(id, r.clOrdID);
+    return { symbolID: r.symbolID, clOrdID: id, origClOrdID: r.clOrdID };
+  });
+  return { action: spotActions.batchCancelOrder(accountId, cancels), orig };
+}
+
+/** A spot cancel's answer with every row naming the ORDER it is about (a row may name the cancel's own id). */
+export function spotCancelAnswer(data: unknown, orig: ReadonlyMap<string, string>): unknown {
+  const list = Array.isArray(data) ? (data as OrderResult[]) : unwrapList<OrderResult>(data, 'orders');
+  return list.map((r) => (r && typeof r === 'object' && r.clOrdID && orig.has(r.clOrdID) ? { ...r, clOrdID: orig.get(r.clOrdID)! } : r));
 }
 
 const describe = (e: unknown): string => (e instanceof SodexApiError ? `${e.message}${e.hint ? ` (${e.hint})` : ''}` : e instanceof Error ? e.message : String(e));
@@ -212,6 +260,7 @@ export class KeyAlgoSink implements AlgoSink {
 
   async placeStops(a: AlgoRecord, market: MarketInfo, stops: StopRequest[]): Promise<ChildResult[]> {
     if (!stops.length) return [];
+    if (market.engine === 'spot') return stops.map((s) => ({ clOrdID: s.clOrdID, ok: false, orderId: null, error: 'Spot has no stop orders.', outcomeUnknown: false }));
     try {
       // A failed lookup refuses the batch (the catch below) - never an order without our builder.
       const builder = await this.builder(a);
@@ -229,29 +278,36 @@ export class KeyAlgoSink implements AlgoSink {
    * and pulls came late). Each caller gets its own orders' outcome: the ids SoDEX answered as gone, or an error naming
    * only its orders that SoDEX did not cancel.
    */
-  private pending = new Map<number, { a: AlgoRecord; rows: Array<{ symbolID: number; clOrdID: string }>; waiters: Array<{ ids: string[]; resolve: (v: string[]) => void; reject: (e: unknown) => void }> }>();
+  private pending = new Map<string, { a: AlgoRecord; spot: boolean; rows: Array<{ symbolID: number; clOrdID: string }>; waiters: Array<{ ids: string[]; resolve: (v: string[]) => void; reject: (e: unknown) => void }> }>();
   cancel(a: AlgoRecord, market: MarketInfo, clOrdIDs: string[]): Promise<void | string[]> {
     if (!clOrdIDs.length) return Promise.resolve();
     return new Promise<string[]>((resolve, reject) => {
-      let b = this.pending.get(a.accountId);
+      // One request per account and exchange: spot and perps cancels are different signed actions.
+      const spot = market.engine === 'spot';
+      const key = `${a.accountId}:${spot ? 'spot' : 'perps'}`;
+      let b = this.pending.get(key);
       if (!b) {
-        b = { a, rows: [], waiters: [] };
-        this.pending.set(a.accountId, b);
+        b = { a, spot, rows: [], waiters: [] };
+        this.pending.set(key, b);
         // The same turn of the event loop: whatever else is cancelled for this account now joins this request.
-        void Promise.resolve().then(() => this.flushCancels(a.accountId));
+        void Promise.resolve().then(() => this.flushCancels(key));
       }
       for (const clOrdID of clOrdIDs) b.rows.push({ symbolID: market.id, clOrdID });
       b.waiters.push({ ids: [...clOrdIDs], resolve, reject });
     });
   }
 
-  private async flushCancels(accountId: number): Promise<void> {
-    const b = this.pending.get(accountId);
-    this.pending.delete(accountId);
+  private async flushCancels(key: string): Promise<void> {
+    const b = this.pending.get(key);
+    this.pending.delete(key);
     if (!b) return;
+    const accountId = b.a.accountId;
     let data: unknown;
     try {
-      data = await this.signAndSend(perpsActions.cancelOrder(accountId, b.rows));
+      if (b.spot) {
+        const { action, orig } = spotCancelAction(accountId, b.rows);
+        data = spotCancelAnswer(await this.signAndSend(action), orig);
+      } else data = await this.signAndSend(perpsActions.cancelOrder(accountId, b.rows));
     } catch (e) {
       // The whole cancel answered "gone": every order in it was filled or cancelled already.
       if (e instanceof SodexApiError && GONE.test(e.message)) {
@@ -273,6 +329,8 @@ export class KeyAlgoSink implements AlgoSink {
   }
 
   async setLeverage(a: AlgoRecord, market: MarketInfo, leverage: number, margin: MarginChoice): Promise<void> {
+    // Spot has no leverage: nothing to set (a spot bot's spec never carries one).
+    if (market.engine === 'spot') return;
     await this.signAndSend(leverageAction(a.accountId, market, leverage, margin));
   }
 }

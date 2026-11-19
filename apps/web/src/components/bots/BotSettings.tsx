@@ -20,6 +20,7 @@ import type { AlgoSpec } from '@copy-engine';
 import { HoursGate } from './HoursGate';
 import { RECIPE, recipeOfDraft } from '../../bots/recipes';
 import type { BotLeverage } from '../../bots/leverage';
+import { BOT_ENGINES, ENGINE_NAME, coinOf, marketLabel, type BotEngine } from '../../bots/engines';
 import { Button, Field, Icon, NumberField, Segmented, Slider, StatusPill, Switch, Tabs, TextInput } from './kit/kit';
 import { useTickers } from '../../hooks';
 
@@ -51,12 +52,12 @@ function SpreadPick({ d, set, symbol }: { d: BotDraft; set: (p: Partial<BotDraft
   const [custom, setCustom] = useState(!SPREAD_PICKS.includes(v));
   // The market's spread now, from SoDEX's book (owner 2026-11-09: KORU's ~29 bp book never quoted under a 20 bp
   // limit, and the bot said only "held"). The tickers poll is shared with the rest of the app.
-  const tickers = useTickers('perps', { pollMs: 15_000, enabled: !!symbol });
+  const tickers = useTickers(d.engine, { pollMs: 15_000, enabled: !!symbol });
   const t = symbol ? (tickers.data?.tickers ?? []).find((x) => x.symbol === symbol) : undefined;
   const bid = Number(t?.bidPx);
   const ask = Number(t?.askPx);
   const now = bid > 0 && ask > bid ? ((ask - bid) / ((ask + bid) / 2)) * 10_000 : null;
-  const coin = symbol ? symbol.replace(/-USD$/, '') : '';
+  const coin = symbol ? coinOf(symbol) : '';
   return (
     <>
       <div className="bots-spreadpick">
@@ -157,7 +158,54 @@ export function gridProblems(d: Pick<BotDraft, 'strategy' | 'stopAbove' | 'stopB
   return { range: rangeE, stop };
 }
 
-export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part, lev, sizeErrors = [], sizeNotes = [], cards = false, grid }: {
+/**
+ * Futures or spot (owner 2026-11-19): the same coin's market on either engine. A side with no market for this coin is
+ * shown and disabled, with why. On a running bot a change is a new market: the restart applies it (BotDetail).
+ */
+export function EngineRow({ d, twins, onEngine, hint }: {
+  d: BotDraft;
+  /** This coin's market on each engine (null: SoDEX has none). */
+  twins: Record<BotEngine, string | null>;
+  onEngine: (engine: BotEngine, symbol: string) => void;
+  hint?: ReactNode;
+}) {
+  const coin = coinOf(d.symbol);
+  const words = d.engine === 'spot'
+    ? `${marketLabel(twins.spot ?? d.symbol)}: buys with your spot USDC and sells only what it bought. No leverage, no short.`
+    : `${marketLabel(twins.perps ?? d.symbol)} perpetual: long and short, on your futures margin.`;
+  return (
+    <Row label="Market type" wide hint={hint ?? words}>
+      <div className="bots-engine" role="radiogroup" aria-label="Market type">
+        {BOT_ENGINES.map((e) => {
+          const to = twins[e];
+          const on = d.engine === e;
+          return (
+            <button
+              key={e}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              disabled={!to}
+              title={to ? undefined : `${coin} has no ${ENGINE_NAME[e].toLowerCase()} market on SoDEX.`}
+              className={`bots-engine__opt${on ? ' is-on' : ''}`}
+              onClick={() => { if (to && !on) onEngine(e, to); }}
+            >
+              <Icon name={e === 'perps' ? 'layers' : 'coins'} size={15} />
+              <span className="bots-engine__t"><b>{ENGINE_NAME[e]}</b><small>{e === 'perps' ? 'Long & short, leverage' : 'Buy then sell, no leverage'}</small></span>
+              <span className="bots-engine__m">{to ? marketLabel(to) : 'Not listed'}</span>
+            </button>
+          );
+        })}
+      </div>
+    </Row>
+  );
+}
+
+export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePractice, part, lev, sizeErrors = [], sizeNotes = [], cards = false, grid, twins, onEngine }: {
+  /** This coin's market on each engine: shows the Futures / Spot choice (absent: not offered, e.g. a hedge). */
+  twins?: Record<BotEngine, string | null>;
+  /** Where New bot takes the choice (it moves its picked markets too); absent: the draft's own engine and symbol change. */
+  onEngine?: (engine: BotEngine, symbol: string) => void;
   /** A grid's step now (bp), what a round trip keeps after the fees, the step in units of the hourly volatility, the fee a fill. */
   grid?: { stepBps: number; netStepBps: number; k: number | null; feeBps: number };
   d: BotDraft;
@@ -187,6 +235,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
   const sec = part ?? tab;
   const [customTgt, setCustomTgt] = useState(tgtKey(d.volumeTargetUsd) === 'custom');
   const mm = d.strategy !== 'grid';
+  const spot = d.engine === 'spot';
   const market = d.strategy === 'market' && !noLead;
   const holdX = d.orderUsd > 0 ? d.maxInventoryUsd / d.orderUsd : 3;
   // Max holding as a multiple of the order, kept as it was set (audit B: re-derived from the rounded dollars on every
@@ -227,11 +276,20 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
 
       {sec === 'size' && (
         <div className="bots-fgrid">
+          {twins && d.strategy !== 'hedge' && (
+            <EngineRow d={d} twins={twins} onEngine={onEngine ?? ((engine, symbol) => set({ engine, symbol, low: null, high: null, leverage: null }))} />
+          )}
           {d.strategy === 'grid' && (
             <>
-              <Row label="Direction" wide hint={DIR_HINT[d.gridDir]}>
-                <Segmented label="Direction" value={d.gridDir} onChange={(v) => set({ gridDir: v })} options={[{ value: 'neutral', label: 'Neutral' }, { value: 'long', label: 'Long' }, { value: 'short', label: 'Short' }]} />
-              </Row>
+              {spot ? (
+                <Row label="Direction" wide hint="Spot cannot short: the grid buys first and sells only what it bought.">
+                  <Segmented label="Direction" value="long" onChange={() => {}} options={[{ value: 'long', label: 'Long' }]} />
+                </Row>
+              ) : (
+                <Row label="Direction" wide hint={DIR_HINT[d.gridDir]}>
+                  <Segmented label="Direction" value={d.gridDir} onChange={(v) => set({ gridDir: v })} options={[{ value: 'neutral', label: 'Neutral' }, { value: 'long', label: 'Long' }, { value: 'short', label: 'Short' }]} />
+                </Row>
+              )}
               <Row
                 label="Price range"
                 wide
@@ -283,7 +341,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
               </Row>
             </>
           )}
-          <Row label="Order size" hint={(mark && mark > 0) || sizeNotes.length ? <>{mark && mark > 0 ? `≈ ${(d.orderUsd / mark).toPrecision(3)} ${d.symbol.replace(/-USD$/, '')} per order.` : null}{sizeNotes.map((n) => <span key={n}> {n}</span>)}</> : undefined}>
+          <Row label="Order size" hint={(mark && mark > 0) || sizeNotes.length ? <>{mark && mark > 0 ? `≈ ${(d.orderUsd / mark).toPrecision(3)} ${coinOf(d.symbol)} per order.` : null}{sizeNotes.map((n) => <span key={n}> {n}</span>)}</> : undefined}>
             <div className="bots-sizeline">
               <Slider label="Order size slider" value={d.orderUsd} min={10} max={500} step={1} onChange={(v) => setOrder(v)} minLabel="$10" maxLabel="$500" />
               <NumberField label="Order size" hideLabel value={d.orderUsd} onChange={(v) => v !== null && setOrder(v)} error={sizeErrors[0] ?? null} unit="USD" className="bots-sizeline__n" />
@@ -291,7 +349,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
             {sizeErrors.slice(1).map((e) => <p key={e} className="bots-err" role="alert">{e}</p>)}
           </Row>
           {mm && (
-            <Row label={<Term t="holding">Max holding</Term>} hint={`${holdX.toFixed(1)}× the order: the most it holds either way. At the cap it only unwinds.`}>
+            <Row label={<Term t="holding">Max holding</Term>} hint={spot ? `${holdX.toFixed(1)}× the order: the most it buys and holds. It sells only what it bought; at the cap it only sells.` : `${holdX.toFixed(1)}× the order: the most it holds either way. At the cap it only unwinds.`}>
               <div className="bots-sizeline">
                 <Slider label="Max holding slider" value={Math.min(10, Math.max(1, ratio))} min={1} max={10} step={0.5} onChange={(x) => setHold(Math.round(d.orderUsd * x))} minLabel="1×" maxLabel="10×" />
                 <NumberField label="Max holding" hideLabel value={d.maxInventoryUsd} onChange={(v) => v !== null && setHold(v)} unit="USD" className="bots-sizeline__n" />
@@ -304,7 +362,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
           <Row label="Take profit" hint="Optional: it stops once its net PnL, after every fee, reaches this. Then it closes as On stop says.">
             <NumberField label="Profit" value={d.takeProfitUsd} optional onChange={(v) => set({ takeProfitUsd: v !== null && v > 0 ? v : null })} unit="USD" />
           </Row>
-          {lev && lev.max !== null && <LeverageRow d={d} set={set} lev={lev} max={lev.max} />}
+          {!spot && lev && lev.max !== null && <LeverageRow d={d} set={set} lev={lev} max={lev.max} />}
           <Row label="Stop after trading" wide hint="Stops once it has bought and sold this much in total.">
             <Segmented
               label="Stop after trading"
@@ -495,7 +553,7 @@ export function BotSettings({ d, set, range, mark, liveAllowed, noLead, hidePrac
 export function NameField({ d, set }: { d: BotDraft; set: (p: Partial<BotDraft>) => void }) {
   return (
     <Field label="Bot name" htmlFor="bot-name">
-      <TextInput id="bot-name" maxLength={40} placeholder={`${RECIPE[recipeOfDraft(d)].name} ${d.symbol.replace(/-USD$/, '')}`} value={d.label} onChange={(e) => set({ label: e.target.value })} aria-label="Name" />
+      <TextInput id="bot-name" maxLength={40} placeholder={`${RECIPE[recipeOfDraft(d)].name} ${marketLabel(d.symbol)}`} value={d.label} onChange={(e) => set({ label: e.target.value })} aria-label="Name" />
     </Field>
   );
 }

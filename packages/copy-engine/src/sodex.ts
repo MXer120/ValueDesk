@@ -24,7 +24,7 @@ import {
   type Network,
 } from '../../sodex-core/src/index.ts';
 import { abortController, sleep, timers, type FetchLike, type RequestInitLike, type ResponseLike } from './io.ts';
-import { parseMarkets } from './markets.ts';
+import { parseMarkets, parseSpotMarkets } from './markets.ts';
 import type { FollowerSnapshot, LeaderRead, MarginChoice, MarketInfo } from './types.ts';
 
 export class OutcomeUnknownError extends Error {
@@ -597,6 +597,9 @@ export const ALLOWED_WRITES: ReadonlyArray<{ method: string; path: string }> = [
   { method: 'POST', path: '/api/v1/perps/trade/orders' },
   { method: 'DELETE', path: '/api/v1/perps/trade/orders' },
   { method: 'POST', path: '/api/v1/perps/trade/leverage' },
+  // Spot bots (2026-11-19): spot limit orders and their cancels, nothing else on spot (no transfer, no withdrawal).
+  { method: 'POST', path: '/api/v1/spot/trade/orders/batch' },
+  { method: 'DELETE', path: '/api/v1/spot/trade/orders/batch' },
 ];
 
 /** What a signed write is, read from its body: its account, how many orders, and whether it only protects. */
@@ -889,6 +892,34 @@ export class SodexClient {
     return parseMarkets(await this.get<unknown>('/api/v1/perps/markets/symbols'));
   }
 
+  /** SoDEX's spot markets (engine 'spot'; their own fees, ticks and minimums). */
+  async spotMarkets(): Promise<MarketInfo[]> {
+    return parseSpotMarkets(await this.get<unknown>('/api/v1/spot/markets/symbols'));
+  }
+
+  /** Every spot market's mid (best bid and ask, GET /api/v1/spot/markets/bookTickers: symbol, bidPx, askPx). */
+  async spotMids(): Promise<Array<{ symbol: string; price: number }>> {
+    const rows = await this.get<Array<{ symbol?: string; bidPx?: string; askPx?: string }>>('/api/v1/spot/markets/bookTickers');
+    return (rows ?? [])
+      .map((r) => ({ symbol: String(r.symbol ?? ''), bid: Number(r.bidPx), ask: Number(r.askPx) }))
+      .filter((r) => r.symbol && r.bid > 0 && r.ask >= r.bid)
+      .map((r) => ({ symbol: r.symbol, price: (r.bid + r.ask) / 2 }));
+  }
+
+  /**
+   * The wallet's spot balances by coin (GET /api/v1/spot/accounts/{a}/state, rows B {a: coin, t: total, l: locked in
+   * orders}; read 2026-11-19). Coin names as SoDEX gives them ('vUSDC', 'vBTC'). An account SoDEX never saw: {}.
+   */
+  async spotBalances(address: string): Promise<Record<string, { total: number; locked: number }>> {
+    const st = await this.get<{ B?: Array<{ a?: string; t?: string; l?: string }> | null } | null>(`/api/v1/spot/accounts/${address.toLowerCase()}/state`);
+    const out: Record<string, { total: number; locked: number }> = {};
+    for (const r of st?.B ?? []) {
+      const t = Number(r.t);
+      if (typeof r.a === 'string' && Number.isFinite(t)) out[r.a] = { total: t, locked: Number(r.l) || 0 };
+    }
+    return out;
+  }
+
   /** Every market's mark, and its open interest in the coin (`openInterest`, null when absent). */
   async markPrices(): Promise<Array<{ symbol: string; price: number; oi?: number | null }>> {
     const rows = await this.get<Array<{ symbol?: string; markPrice?: string; openInterest?: string }>>('/api/v1/perps/markets/mark-prices');
@@ -928,7 +959,9 @@ export class SodexClient {
    */
   async fills(address: string, symbol: string, since: number, until?: number): Promise<Array<{ clOrdID: string | null; side: 'buy' | 'sell'; qty: number; price: number; time: number }>> {
     const end = until !== undefined && Number.isFinite(until) ? `&endTime=${Math.max(0, Math.floor(until))}` : '';
-    const path = `/api/v1/perps/accounts/${address.toLowerCase()}/trades?symbol=${encodeURIComponent(symbol)}&startTime=${Math.max(0, Math.floor(since))}${end}&limit=100`;
+    // A spot market ('vBTC_vUSDC': a spot bot) is read from the spot trades, the same rows (read 2026-11-19).
+    const engine = symbol.includes('_') ? 'spot' : 'perps';
+    const path = `/api/v1/${engine}/accounts/${address.toLowerCase()}/trades?symbol=${encodeURIComponent(symbol)}&startTime=${Math.max(0, Math.floor(since))}${end}&limit=100`;
     const rows = await this.get<unknown>(path, weightFor(path, 100));
     const list = Array.isArray(rows) ? rows : ((rows as { trades?: unknown[] } | null)?.trades ?? []);
     return (list as Array<Record<string, unknown>>)
@@ -963,18 +996,18 @@ export class SodexClient {
   }
 
   /** Whether `keyAddress` is registered under `name` and not expired. */
-  async keyRegistered(owner: string, name: string, keyAddress: string, now = Date.now()): Promise<{ ok: boolean; expiresAt: number | null }> {
-    const rows = await this.apiKeys(owner, 'perps');
+  async keyRegistered(owner: string, name: string, keyAddress: string, now = Date.now(), engine: 'spot' | 'perps' = 'perps'): Promise<{ ok: boolean; expiresAt: number | null }> {
+    const rows = await this.apiKeys(owner, engine);
     const row = rows.find((r) => r.name === name);
     if (!row || row.publicKey.toLowerCase() !== keyAddress.toLowerCase()) return { ok: false, expiresAt: null };
     if (row.expiresAt && row.expiresAt <= now) return { ok: false, expiresAt: row.expiresAt };
     return { ok: true, expiresAt: row.expiresAt || null };
   }
 
-  /** The perps builder-fee ceiling the account approved for `builderId` (null: none). */
-  async builderApproval(owner: string, builderId: number): Promise<number | null> {
+  /** The builder-fee ceiling the account approved for `builderId` on `engine` (null: none). */
+  async builderApproval(owner: string, builderId: number, engine: 'spot' | 'perps' = 'perps'): Promise<number | null> {
     const data = await this.get<unknown>(`/api/v1/user/${owner.toLowerCase()}/builders`);
-    return approvedBuilderRates(data, builderId).perps;
+    return approvedBuilderRates(data, builderId)[engine];
   }
 }
 

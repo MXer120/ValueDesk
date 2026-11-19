@@ -61,7 +61,7 @@ import { checkLimits, limitLeverage, oiHeadroom, oiRoomWords, positionCapUsd, li
 import { checkSizes, coins, maxWords, minWords, money } from './sizes.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
 import { GONE } from './sink.ts';
-import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
+import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, isSpotSpec, isSpotMarket, opensPosition, parseAlgoSpec } from './spec.ts';
 import { countsAsFailure, refusalKind, refusalWords } from './refusals.ts';
 import type { AlgoStore } from './store.ts';
 import type { AlgoUpdatePatch } from '../api.ts';
@@ -544,7 +544,7 @@ export class AlgoRuntime {
     else {
       if (!host.factory) throw new Error('an algo runtime needs a market feed or a WebSocket factory');
       // A still market's quote is kept fresh by REST (bots hold on a quote older than BOT_QUOTE_MAX_AGE_MS).
-      this.market = new AlgoFeed({ network: host.network, factory: host.factory, log: host.log, bookTickers: () => host.sodex.get<unknown>('/api/v1/perps/markets/bookTickers'), ...(host.accountFactories?.length ? { accountFactories: host.accountFactories } : {}) });
+      this.market = new AlgoFeed({ network: host.network, factory: host.factory, log: host.log, bookTickers: () => host.sodex.get<unknown>('/api/v1/perps/markets/bookTickers'), spotBookTickers: () => host.sodex.get<unknown>('/api/v1/spot/markets/bookTickers'), ...(host.accountFactories?.length ? { accountFactories: host.accountFactories } : {}) });
     }
     this.market.onOrder((u) => this.onOrderUpdate(u));
     this.market.onPrint((p) => this.onPrint(p));
@@ -600,6 +600,8 @@ export class AlgoRuntime {
         }
       }
     }
+    // A spot bot's market is on SoDEX's spot list: read once there is one (the first read above knew no algo yet).
+    if (!this.spotLoaded && [...this.algos.values()].some((a) => isSpotSpec(a.spec))) await this.loadMarkets(true);
     this.market.start();
     this.host.reference?.onQuote((market) => this.onReference(market));
     // Bots act on every update (owner 2026-11-09): a change of their market's best prices steps them at once.
@@ -631,10 +633,30 @@ export class AlgoRuntime {
     await this.flush();
   }
 
-  private async loadMarkets(): Promise<void> {
+  /** Spot markets were read (a spot bot ran here): every later reload reads them too. */
+  private spotLoaded = false;
+
+  /**
+   * SoDEX's markets: perps always; spot too once a spot bot is here (`withSpot`, or one loaded before). A spot list that
+   * fails keeps the spot markets read last time. Only spot names ('vBTC_vUSDC') are taken from the spot list.
+   */
+  private async loadMarkets(withSpot = false): Promise<void> {
     try {
       const list = await this.host.sodex.markets();
-      if (list.length) this.markets.load(list);
+      let spot = this.markets.all().filter((x) => x.engine === 'spot');
+      const sodex = this.host.sodex as Partial<Pick<SodexClient, 'spotMarkets'>>;
+      if ((withSpot || this.spotLoaded || [...this.algos.values()].some((a) => isSpotSpec(a.spec))) && typeof sodex.spotMarkets === 'function') {
+        try {
+          const rows = (await sodex.spotMarkets()).filter((x) => x.engine === 'spot' && isSpotMarket(x.name));
+          if (rows.length) {
+            spot = rows;
+            this.spotLoaded = true;
+          }
+        } catch (e) {
+          this.host.log.warn('algo: spot market list failed', { error: String(e) });
+        }
+      }
+      if (list.length || spot.length) this.markets.load([...list.filter((x) => x.engine !== 'spot'), ...spot]);
     } catch (e) {
       this.host.log.warn('algo: market list failed', { error: String(e) });
     }
@@ -656,7 +678,9 @@ export class AlgoRuntime {
       weight.set(a.owner, (weight.get(a.owner) ?? 0) + 1 + live.length * 10 + resting * 100 + (a.spec.bot && !FINAL_STATUSES.has(a.status) ? 1e9 : 0));
     }
     const owners = [...weight.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([o]) => o);
-    this.market.watch([...symbols], owners);
+    // The wallets of real spot bots: their order updates come on SoDEX's spot socket.
+    const spotOwners = owners.filter((o) => [...this.algos.values()].some((a) => a.owner === o && !a.spec.paper && isSpotSpec(a.spec) && !FINAL_STATUSES.has(a.status)));
+    this.market.watch([...symbols], owners, spotOwners);
     if (this.host.reference) {
       const refs = new Set<string>();
       for (const a of this.algos.values()) if (!FINAL_STATUSES.has(a.status) && a.spec.kind === 'mm' && a.spec.ref) refs.add(a.spec.symbol);
@@ -871,7 +895,7 @@ export class AlgoRuntime {
       if (a.spec.paper || this.busy.has(a.id)) return false;
       const open = [...this.live(a), ...this.liveExits(a)].filter((c) => c.state === 'open');
       if (!open.length) return false;
-      if (!this.resync.has(a.id) && (!follows || follows(a.owner))) return false;
+      if (!this.resync.has(a.id) && (!follows || follows(a.owner, isSpotSpec(a.spec)))) return false;
       return now - (this.polledAt.get(a.id) ?? 0) >= ORDER_POLL_MIN_MS;
     });
     if (!due.length) return;
@@ -966,6 +990,7 @@ export class AlgoRuntime {
   async add(n: NewAlgo): Promise<AlgoRecord> {
     const spec = parseAlgoSpec(n.spec);
     if (!this.markets.size) await this.loadMarkets();
+    if (isSpotSpec(spec) && !this.markets.get(spec.symbol)) await this.loadMarkets(true);
     if (!this.markets.size) throw new Error("SoDEX's market list could not be read, so the market cannot be checked. Try again in a moment.");
     for (const sym of algoSymbols(spec)) {
       const m = this.markets.get(sym);
@@ -1566,7 +1591,7 @@ export class AlgoRuntime {
     } else add({ id: 'oracle', label: 'Oracle price', state: 'off', value: 'not used by this bot' });
     // Its orders: SoDEX's socket (pushed) or read by REST, and how late the updates arrive.
     if (!s.paper) {
-      const follows = this.market.followsOrders?.(a.owner) ?? true;
+      const follows = this.market.followsOrders?.(a.owner, isSpotSpec(a.spec)) ?? true;
       const lag = w?.lagMs ?? null;
       const fl = w?.fillLagMs ?? null;
       add({ id: 'fills', label: 'Fills booked', state: fl === null ? 'off' : fl <= 1_000 ? 'ok' : fl <= 5_000 ? 'warn' : 'bad', value: fl === null ? 'no fill yet' : `${Math.round(fl)} ms after the trade` });
@@ -2927,6 +2952,9 @@ export class AlgoRuntime {
     const sz = shrunk ? { ...s, orderUsd: s.orderUsd * shrink } : s;
     const inv = bookInventory(a.book!);
     const tick = Number(m.tickSize);
+    // Spot: the ask quotes only what it bought itself (never short): with nothing held there is no ask.
+    const spotOnly = isSpotSpec(s);
+    const quotable = (x: { side: Side }) => !spotOnly || x.side === 'buy' || inv >= Number(m.stepSize) - 1e-12;
     // The Binance-led maker: no fair price (no feed here, or it went quiet), no quotes.
     const fair = s.ref ? this.fairFor(s.symbol, q, now) : null;
     if (s.ref && fair === null) {
@@ -2942,15 +2970,15 @@ export class AlgoRuntime {
     const ago = (s.moveGuard ?? 0) > 0 ? this.market.priceAgo(s.symbol, 'mid', 2_000) : null;
     const moved = ago ? (mid(q) - ago) / tick : 0;
     const movesInto = (side: Side) => (s.moveGuard ?? 0) > 0 && (side === 'sell' ? moved >= s.moveGuard! : moved <= -s.moveGuard!) && (side === 'buy' ? inv >= 0 : inv <= 0);
-    const want = mmQuotes(sz, q, m, inv, mk, s.noFair ? null : fair).filter((x) => !movesInto(x.side));
+    const want = mmQuotes(sz, q, m, inv, mk, s.noFair ? null : fair).filter((x) => quotable(x) && !movesInto(x.side));
     // A ladder's front line: where a quote may stand at most (the touch, the skew and the edge as they are now, with no
     // step back). A ladder quote the touch came to is kept up to it - near the front of that queue is where its fills
     // are the bounce (a level that holds), not the sweep - and only one past it is pulled.
-    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...sz, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair) : want;
+    const front = (s.levels ?? 1) > 1 ? mmQuotes({ ...sz, offsetTicks: Math.min(0, s.offsetTicks), queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair).filter(quotable) : want;
     // What it would quote without the guards: a side missing only because of a guard is pulled no sooner than half
     // a second after it went out, and quoted again no sooner than minRepriceMs after (no cancel storm on a queue or a
     // price that flickers around the line).
-    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...sz, queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair) : want;
+    const unguarded = (s.queueGuard ?? 0) > 0 || (s.moveGuard ?? 0) > 0 ? mmQuotes({ ...sz, queueGuard: 0 }, q, m, inv, mk, s.noFair ? null : fair).filter(quotable) : want;
     const guardedAt = { ...((a.k.mguard as Record<string, number> | undefined) ?? {}) };
     const levels = Math.max(1, s.levels ?? 1);
     const live = this.live(a);
@@ -4099,6 +4127,24 @@ export class AlgoRuntime {
   private async send(a: AlgoRecord, m: MarketInfo, list: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string; reduceOnly?: boolean }>, commit?: () => void): Promise<ChildOrder[]> {
     const s = a.spec;
     if (this.stopped(a)) return [];
+    // Spot (2026-11-19): a sell never offers more than the bot bought itself and still holds (spotSellRoom) - every kind,
+    // every caller (a quote, a grid level, a close). What would pass it is cut down, or left out under SoDEX's minimum.
+    if (isSpotSpec(s) && list.some((x) => x.side === 'sell')) {
+      let room = this.spotSellRoom(a, m);
+      const kept: typeof list = [];
+      for (const x of list) {
+        if (x.side !== 'sell') {
+          kept.push(x);
+          continue;
+        }
+        const q = floorStep(Math.min(x.quantity, room), m);
+        if (!(q > 0) || q < minChildQty(m, x.price) - 1e-12) continue;
+        kept.push(q < x.quantity - 1e-12 ? { ...x, quantity: q } : x);
+        room -= q;
+      }
+      list = kept;
+      if (!list.length) return [];
+    }
     const sink = s.paper ? null : this.host.sinkFor(a);
     if (!s.paper && !sink) {
       await this.hold(a, 'The trading key for this algo is not available here.');
@@ -4700,9 +4746,13 @@ export class AlgoRuntime {
     if (isMaker) a.makerQty += dq;
     const m = this.markets.get(a.spec.symbol);
     // A resting fill pays the wallet's own maker fee where the host knows its tier (bp), else the market's base rate.
-    const tier = isMaker ? (this.host.makerFeeFor?.(a.owner, a.spec.symbol) ?? null) : null;
+    // Spot (2026-11-19): the spot market's own fee (its maker/taker, never the wallet's perps tier), and the builder fee
+    // on the sells only - SoDEX charges a builder on spot sells, not buys (apps/server/src/builder/counting.ts).
+    const spotFill = isSpotSpec(a.spec);
+    const tier = isMaker && !spotFill ? (this.host.makerFeeFor?.(a.owner, a.spec.symbol) ?? null) : null;
     const tradeRate = isMaker ? (tier !== null && Number.isFinite(tier) ? tier / 10_000 : (m?.makerFee ?? (m?.takerFee ?? 0.0004) / 2)) : (m?.takerFee ?? 0.0004);
-    const rate = tradeRate + (this.host.builderRate?.(a) ?? 0);
+    const builderRate = spotFill && c.side === 'buy' ? 0 : (this.host.builderRate?.(a) ?? 0);
+    const rate = tradeRate + builderRate;
     a.fees += dv * rate;
     if (!a.spec.paper) {
       try { this.host.onFill?.(a, dv, Date.now()); } catch { /* the host's bookkeeping never stops a fill */ }
@@ -4710,7 +4760,14 @@ export class AlgoRuntime {
     if (a.spec.bot) {
       a.book ??= emptyBook();
       a.k.lastFillAt = Date.now();
-      bookFill(a.book, c.side, dq, dv, isMaker, tradeRate, this.host.builderRate?.(a) ?? 0);
+      bookFill(a.book, c.side, dq, dv, isMaker, tradeRate, builderRate);
+      // A spot buy pays SoDEX's fee in the coin it bought: the wallet receives that much less, so the bot holds that much
+      // less (and never sells it). Booked as coin gone at the fill price - the fee itself is in tradeFees, counted once.
+      if (spotFill && c.side === 'buy' && tradeRate > 0) {
+        const fee = dq * tradeRate;
+        a.book.carryQty = (a.book.carryQty ?? 0) - fee;
+        a.book.carryValue = (a.book.carryValue ?? 0) - fee * (dv / dq);
+      }
     }
     if (a.k.consecRejects) a.k.consecRejects = 0;
     void this.event(a, 'fill', `Filled ${dec(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, '')}.`, { ...c, quantity: dq, price: dv / dq }, isMaker);
@@ -5147,7 +5204,7 @@ export class AlgoRuntime {
     const follows = this.market.followsOrders?.bind(this.market);
     if (follows) {
       for (const a of this.algos.values()) {
-        if (a.spec.paper || a.spec.symbol !== p.symbol || FINAL_STATUSES.has(a.status) || follows(a.owner)) continue;
+        if (a.spec.paper || a.spec.symbol !== p.symbol || FINAL_STATUSES.has(a.status) || follows(a.owner, isSpotSpec(a.spec))) continue;
         if (p.buyer === a.accountId || p.seller === a.accountId) {
           this.resync.add(a.id);
           this.polledAt.delete(a.id);
@@ -5427,7 +5484,8 @@ export class AlgoRuntime {
 
   private async lookupOrders(a: AlgoRecord, symbol: string, history: boolean) {
     if (this.host.lookup) return this.host.lookup(a, symbol, history);
-    const path = `/api/v1/perps/accounts/${a.owner}/orders${history ? '/history' : ''}?symbol=${encodeURIComponent(symbol)}${history ? '&limit=100' : ''}`;
+    // A spot market's orders are on the spot routes (same rows: read 2026-11-19).
+    const path = `/api/v1/${isSpotMarket(symbol) ? 'spot' : 'perps'}/accounts/${a.owner}/orders${history ? '/history' : ''}?symbol=${encodeURIComponent(symbol)}${history ? '&limit=100' : ''}`;
     const data = await this.host.sodex.get<unknown>(path);
     const list = Array.isArray(data) ? data : ((data as { orders?: unknown[] } | null)?.orders ?? []);
     return (list as Array<Record<string, unknown>>)
@@ -5494,6 +5552,7 @@ export class AlgoRuntime {
     const paperPos = a.k.paperPos;
     if (a.spec.paper && typeof paperPos === 'number' && paperPos !== 0) return paperPos;
     try {
+      if (isSpotSpec(a.spec) && symbol === a.spec.symbol) return await this.spotHeld(a);
       if (this.host.position) return await this.host.position(a, symbol);
       const book = await this.loadPositions(a);
       return book ? (book[symbol]?.size ?? 0) : null;
@@ -5501,6 +5560,34 @@ export class AlgoRuntime {
       this.host.log.warn('algo: position read failed', { algo: a.id, error: String(e) });
       return null;
     }
+  }
+
+  /**
+   * A spot bot's holding as SoDEX's spot balances show it (2026-11-19): the coin the wallet holds (total, its own sell
+   * orders included), but never more than the bot's own book - coin the wallet held before the bot, or bought by hand,
+   * is the wallet's, not the bot's (the position check then matches, and only coin GONE from the wallet is booked out).
+   * Practice: its own book. null: not readable.
+   */
+  private async spotHeld(a: AlgoRecord): Promise<number | null> {
+    const inv = Math.max(0, a.book ? bookInventory(a.book) : 0);
+    if (a.spec.paper) return inv;
+    const m = this.markets.get(a.spec.symbol);
+    if (!m) return null;
+    const sodex = this.host.sodex as Partial<Pick<SodexClient, 'spotBalances'>>;
+    if (typeof sodex.spotBalances !== 'function') return null;
+    const coin = (await sodex.spotBalances(a.owner))[m.base]?.total ?? 0;
+    return Math.min(coin, inv);
+  }
+
+  /**
+   * What a spot bot may still offer for sale: what it holds by its own book less every sell of its own that could still
+   * fill (resting, on its way, unanswered or being cancelled), on the market's step. Spot cannot go short, and a spot bot
+   * never sells coin it did not buy itself (the wallet's other coin is never touched).
+   */
+  private spotSellRoom(a: AlgoRecord, m: MarketInfo): number {
+    const inv = a.book ? bookInventory(a.book) : 0;
+    const selling = this.live(a).filter((c) => c.side === 'sell').reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
+    return Math.max(0, floorStep(Math.max(0, inv - selling), m));
   }
 
   private async profileFor(symbol: string, start: number, durationMs: number, slices: number, lookbackDays: number) {

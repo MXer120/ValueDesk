@@ -1801,3 +1801,25 @@ html[data-theme='light'] .sv-ladder__rows li.is-vip .sv-ladder__fee { background
   .sv-ref__rates { grid-template-columns: 1fr; }
   .sv-ref__rate { flex-direction: row; align-items: baseline; gap: 8px; }
 }
+
+/* Market type: Futures or Spot, two cards side by side (BotSettings EngineRow), the chosen one lit. No edge stripe. */
+.bots-engine { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.bots-engine__opt {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 56px; padding: 10px 12px;
+  border: 0; border-radius: 12px; background: rgb(var(--ink) / 0.04); color: var(--tf-fg); font: inherit; text-align: left; cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.06); transition: background-color 150ms var(--tf-ease), box-shadow 150ms var(--tf-ease);
+}
+.bots-engine__opt > svg { justify-self: center; color: var(--tf-muted); }
+.bots-engine__opt:hover:not(:disabled) { background: rgb(var(--ink) / 0.07); }
+.bots-engine__opt:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--tf-brand); }
+.bots-engine__opt.is-on { background: color-mix(in srgb, var(--tf-brand) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tf-brand) 55%, transparent); }
+.bots-engine__opt.is-on > svg { color: var(--tf-brand); }
+.bots-engine__opt:disabled { opacity: 0.45; cursor: not-allowed; }
+.bots-engine__t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bots-engine__t b { font-size: 13.5px; font-weight: 600; }
+.bots-engine__t small { font-size: 11.5px; color: var(--tf-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bots-engine__m { font-family: var(--font-num); font-size: 12px; color: var(--tf-muted); white-space: nowrap; }
+.bots-engine__opt.is-on .bots-engine__m { color: var(--tf-fg); }
+@media (max-width: 520px) { .bots-engine { grid-template-columns: 1fr; } .bots-engine__opt { min-height: 50px; } }
+/* New bot > Markets: the Futures / Spot switch beside Compare all. */
+.bots-mhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }

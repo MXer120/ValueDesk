@@ -33,7 +33,12 @@ import { logger } from '../log';
 
 const log = logger('copy');
 
-export const COPY_ENGINES: readonly Engine[] = ['perps'];
+/**
+ * The engines the copy / bot trading key is registered on. Spot too since 2026-11-19 (bots on spot, owner): SoDEX lists
+ * keys per engine, and a spot order signed with a perps-only key is refused. Still one wallet signature (the same body
+ * goes to each engine's /exchange); a key from before covers perps only until it is renewed.
+ */
+export const COPY_ENGINES: readonly Engine[] = ['spot', 'perps'];
 export const MAX_COPY_KEY_DAYS = 180;
 export const MAX_BROWSER_KEY_DAYS = 7;
 
@@ -149,15 +154,24 @@ export async function revokeCopyKey(o: { owner: string; provider: Eip1193Provide
       blockExplorerUrls: p.explorerUrl ? [p.explorerUrl] : [],
     });
   }
-  const prepared = prepareApiKeyRevocationExchange({
-    userAddress: owner,
-    engine: 'perps',
-    accountID: accountId,
-    name: o.name,
-    nonce: await nonces().next(nonceKey(owner, cfg.chainId)),
-    sodexChainId: cfg.chainId,
-  });
-  const signature = await signTypedData(o.provider, owner, prepared.typedData);
-  for (const req of assembleExchangeRequests(prepared, signature, { base: '' })) await sendSigned(req, 'copy key revocation');
+  // One signature per engine (the engine is in the signed domain): perps first, then spot, where a key from before the
+  // spot bots never was - SoDEX refusing that one is not a failure of the revocation.
+  for (const engine of ['perps', 'spot'] as const) {
+    const prepared = prepareApiKeyRevocationExchange({
+      userAddress: owner,
+      engine,
+      accountID: accountId,
+      name: o.name,
+      nonce: await nonces().next(nonceKey(owner, cfg.chainId)),
+      sodexChainId: cfg.chainId,
+    });
+    const signature = await signTypedData(o.provider, owner, prepared.typedData);
+    try {
+      for (const req of assembleExchangeRequests(prepared, signature, { base: '' })) await sendSigned(req, `copy key revocation (${engine})`);
+    } catch (e) {
+      if (engine === 'perps') throw e;
+      log.info('copy key: no spot key to revoke', { name: o.name, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
   log.info('copy key revoked', { name: o.name });
 }

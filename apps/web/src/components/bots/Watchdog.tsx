@@ -4,6 +4,7 @@
  * SoDEX's refusals in the last hour and whether it quotes. One line each with a dot, the state in the header. An
  * executor older than the Watchdog sends none: the card says so.
  */
+import { marketLabel } from '../../bots/engines';
 import type { AlgoView, BotHealthCheck } from '@copy-engine';
 import { Panel, Shell, ShellHeader, StatusPill, type Tone } from './kit/kit';
 
@@ -64,7 +65,7 @@ export function FleetWatchdog({ bots, name, open }: { bots: readonly AlgoView[];
   // Bots with the same name (seven "live-test bot.makers") are told apart by their market.
   const seen = new Map<string, number>();
   for (const v of live) seen.set(name(v), (seen.get(name(v)) ?? 0) + 1);
-  const label = (v: AlgoView) => ((seen.get(name(v)) ?? 0) > 1 ? `${name(v)} · ${v.algo.spec.symbol.replace(/-USD$/, '')}` : name(v));
+  const label = (v: AlgoView) => ((seen.get(name(v)) ?? 0) > 1 ? `${name(v)} · ${marketLabel(v.algo.spec.symbol)}` : name(v));
   return (
     <Shell className="bots-watchdog is-fleet">
       <ShellHeader

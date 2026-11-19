@@ -25,6 +25,9 @@ import { marketOf } from '../algo/draft';
 import { useHistory } from '../algo/liveData';
 import { CoinIcon } from '../CoinIcon';
 import { useBotMarkets, bpToPerMillion, type BotMarket } from '../../bots/data';
+import { ENGINE_NAME, coinOf, marketLabel, twinOf, type BotEngine } from '../../bots/engines';
+import { useBotSymbolNames, useSpotCash } from '../../bots/useEngines';
+import { SpotMarketStep } from './SpotMarkets';
 import { goBots, type BotsView } from '../../bots/routes';
 import { PRACTICE_BOTS, STRATEGY_INFO, autoLeverage, clampLeverage, draftOfSpec, costPerMillion, gridRange, leverageCap, planMarkets, refusalOf, suggestedSpreadBps, type BotDraft, type RefusalAction, type Strategy } from '../../bots/presets';
 import { CATEGORIES, RECIPE, draftOfRecipe, recipeOfDraft, recipesOf, type Category, type Recipe, type RecipeId } from '../../bots/recipes';
@@ -136,7 +139,7 @@ const placesFor = (grid: boolean): Place[] => [
 
 /** A market without an oracle runs the plain maker: quotes off SoDEX's book, no gate, no rest. */
 export const noLeadOf = (m: BotMarket | null | undefined): boolean => m?.lead === null;
-export const effectiveDraft = (d: BotDraft, m: BotMarket | null | undefined): BotDraft => (d.strategy === 'market' && noLeadOf(m) ? { ...d, strategy: 'maker', gate: false } : d);
+export const effectiveDraft = (d: BotDraft, m: BotMarket | null | undefined): BotDraft => ((d.engine === 'spot' ? d.strategy === 'market' || d.strategy === 'lead' : d.strategy === 'market' && noLeadOf(m)) ? { ...d, strategy: 'maker', gate: false } : d);
 
 type MSort = 'best' | 'activity' | 'uninformed' | 'spread';
 
@@ -185,7 +188,7 @@ function MarketStep({ picked, toggle, markets, costOf, running, real }: {
         <td>
           <span className="bots-mt__name">
             <CoinIcon coin={symbol} size={22} />
-            <span><b>{symbol.replace(/-USD$/, '')}</b><small>{symbol}</small></span>
+            <span><b>{marketLabel(symbol)}</b><small>{symbol}</small></span>
             {symbol === best && <StatusPill size="sm" tone="positive">best</StatusPill>}
             {busy && <StatusPill size="sm" tone={real ? 'warning' : 'neutral'} dot>running</StatusPill>}
             {m?.lead === null && <StatusPill size="sm">no oracle</StatusPill>}
@@ -296,7 +299,7 @@ function RecipeRow({ rc, on, pick, est, where, best, blocked, grid = null, symbo
                 ...(grid.horizon === '1d' && grid.row.day ? [{ what: `1-day runs, ${GRID_BT_MARKETS.length} markets`, per1m: grid.row.day[4] }] : []),
                 { what: grid.horizon === '1d' ? '7-day runs' : `7-day runs, ${GRID_BT_MARKETS.length} markets`, per1m: grid.row.all[4] },
                 ...(grid.horizon === '7d' && grid.row.day ? [{ what: '1-day runs', per1m: grid.row.day[4] }] : []),
-                ...(symbol && grid.row.m[symbol] ? [{ what: `${symbol.replace(/-USD$/, '')} alone, 7-day runs`, per1m: grid.row.m[symbol]![4] }] : []),
+                ...(symbol && grid.row.m[symbol] ? [{ what: `${marketLabel(symbol)} alone, 7-day runs`, per1m: grid.row.m[symbol]![4] }] : []),
               ].map((e) => { const x = costText(-e.per1m / 100); return <span key={e.what} className="bots-ev is-replay"><i aria-hidden="true" />{e.what}<b className={x.cls}>{x.v}</b></span>; })}
             </span>
             <small className="bots-rrow__nc">Backtest on {GRID_BT_DAYS} days of 1-minute prices, price moves included, at a 1.7 bp fee a fill (the cost on the right is at yours). A grid earns while the price swings sideways and loses when it runs off: on average it comes out close to even.</small>
@@ -390,7 +393,7 @@ function Receipt({ d, eff, picked, markets, feeBps, feeAdj, paper, floor, runs, 
   const maxAbs = Math.max(0.5, ...lines.map((l) => Math.abs(l.bp ?? 0)));
   const learned = known.map((x) => x.e.learned).find((l) => !!l) ?? null;
   const conf = known[0]?.e.confidence ?? null;
-  const name = d.label.trim() || `${rc.name}${chosen && picked.length === 1 ? ` ${picked[0]!.replace(/-USD$/, '')}` : ''}`;
+  const name = d.label.trim() || `${rc.name}${chosen && picked.length === 1 ? ` ${marketLabel(picked[0]!)}` : ''}`;
   const guards = [
     { id: 'gate', icon: 'pulse' as const, label: 'Volatility gate', on: eff.strategy === 'market' && eff.gate },
     { id: 'flow', icon: 'robot' as const, label: 'Flow gate', on: !grid && d.flowOn },
@@ -406,7 +409,7 @@ function Receipt({ d, eff, picked, markets, feeBps, feeAdj, paper, floor, runs, 
           : picked.length > 1
           ? <span className="bots-rc__coins" aria-label={picked.join(', ')}>{picked.slice(0, 3).map((x) => <CoinIcon key={x} coin={x} size={28} />)}{picked.length > 3 && <b>+{picked.length - 3}</b>}</span>
           : <BotAvatar symbol={picked[0] ?? d.symbol} strategy={eff.strategy} size={44} />}
-        <span className="bots-rc__name"><b>{name}</b><small>{!chosen ? (rc.category === 'grid' ? 'Grid' : 'Market maker') : picked.length > 1 ? `${rc.name} · ${picked.map((x) => x.replace(/-USD$/, '')).join(', ')}` : rc.name}</small></span>
+        <span className="bots-rc__name"><b>{name}</b><small>{!chosen ? (rc.category === 'grid' ? 'Grid' : 'Market maker') : picked.length > 1 ? `${rc.name} · ${picked.map((x) => marketLabel(x)).join(', ')}` : rc.name}</small></span>
         <StatusPill size="sm" tone={paper ? 'neutral' : 'positive'} dot>{paper ? 'Practice' : 'Live'}</StatusPill>
       </header>
 
@@ -457,7 +460,7 @@ function Receipt({ d, eff, picked, markets, feeBps, feeAdj, paper, floor, runs, 
       <section className="bots-rc__tiles">
         <div className="bots-rc__tile is-wide">
           <span>{picked.length === 1 ? 'Market' : `Markets · ${picked.length}`}</span>
-          <b className="bots-rc__mkts">{!chosen ? <span className="dim">Picked in the next step</span> : picked.length ? picked.map((s) => <span key={s}><CoinIcon coin={s} size={16} />{s.replace(/-USD$/, '')}</span>) : DASH}</b>
+          <b className="bots-rc__mkts">{!chosen ? <span className="dim">Picked in the next step</span> : picked.length ? picked.map((s) => <span key={s}><CoinIcon coin={s} size={16} />{marketLabel(s)}</span>) : DASH}</b>
         </div>
         <div className="bots-rc__tile"><span>Order size</span><b>{fmtUsd(d.orderUsd, 0)}<small>{grid ? ` × ${d.levels}` : ' a side'}</small></b></div>
         {!grid ? <div className="bots-rc__tile"><span>Max holding</span><b>{fmtUsd(d.maxInventoryUsd, 0)}</b></div> : <div className="bots-rc__tile"><span>Levels</span><b>{d.levels}{gEst && gEst.stepBps > 0 ? <small>{` · ${pct(gEst.stepBps / 100)} apart`}</small> : null}</b></div>}
@@ -526,9 +529,25 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const set = (p: Partial<BotDraft>) => setD((x) => ({ ...x, ...p }));
   // The first picked market leads the form (its price, its minimum size); the others start with the same settings.
   useEffect(() => { if (picked[0] && picked[0] !== d.symbol) setD((x) => ({ ...x, symbol: picked[0]!, low: null, high: null })); }, [picked, d.symbol]);
-  const { byName } = useSymbols('perps');
+  const { byName } = useSymbols(d.engine);
   const sym = byName.get(d.symbol);
   const market: MarketInfo | null = sym ? marketOf(sym) : null;
+  const spot = d.engine === 'spot';
+  // Futures or spot (owner 2026-11-19): the picked markets move to the same coins on the other engine (a coin with no
+  // market there drops out; none left: that engine's BTC, else its first market).
+  const names = useBotSymbolNames();
+  const twins = useMemo(() => ({ perps: twinOf(d.symbol, 'perps', names.perps), spot: twinOf(d.symbol, 'spot', names.spot) }), [d.symbol, names]);
+  const switchEngine = (engine: BotEngine, lead?: string) => {
+    if (engine === d.engine) return;
+    const list = names[engine];
+    const moved = [...new Set(picked.map((x) => twinOf(x, engine, list)).filter((x): x is string => !!x))];
+    const first = lead ?? moved[0] ?? list.find((n) => coinOf(n) === 'BTC') ?? list[0];
+    if (!first) return;
+    const next = moved.includes(first) ? [first, ...moved.filter((x) => x !== first)] : [first, ...moved];
+    setPicked(grid ? [first] : next.slice(0, 8));
+    setD((x) => ({ ...x, engine, symbol: first, low: null, high: null, leverage: null, leverageAuto: true, ...(engine === 'spot' ? { gridDir: 'long' as const } : {}) }));
+  };
+  const spotCash = useSpotCash(spot ? ctx.address : null);
   const hist = useHistory(d.symbol, true, 10);
   const mark = hist?.length ? hist[hist.length - 1]!.p : null;
   // A grid preset's step is k x the market's hourly volatility: its range follows the market once that is read.
@@ -547,7 +566,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const regionMax: number | null = null;
   const lev = useBotLeverage(ctx.address, d.symbol);
   const maxes = picked.map((x) => byName.get(x)?.maxLeverage ?? null);
-  const levCap = maxes.some((x) => x === null || x === undefined) ? null : leverageCap(Math.min(...(maxes as number[])), regionMax);
+  const levCap = spot ? null : maxes.some((x) => x === null || x === undefined) ? null : leverageCap(Math.min(...(maxes as number[])), regionMax);
   const holdLev = useRef(false);
   const levSym = useRef(d.symbol);
   useEffect(() => {
@@ -570,10 +589,11 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   };
   const runs = useMemo(() => ownRuns(ctx.bots, markets.data?.markets ?? null), [ctx.bots, markets.data]);
   const est = markets.data?.markets.find((m) => m.symbol === d.symbol) ?? null;
-  const noLead = noLeadOf(est);
+  // Spot has no oracle (the Binance-led makers read futures): the plain maker, as on a market with no lead.
+  const noLead = spot || noLeadOf(est);
   const eff = effectiveDraft(d, est);
   // Fees: SoDEX's maker rate and this wallet's own bot fee (ctx.feeTenths, from the executor's /me), never a flat 0.1 bp.
-  const feeBps = (markets.data ? markets.data.fee.makerBps : 1.2) + ctx.feeTenths / 10;
+  const feeBps = (spot ? (Number(sym?.makerFee) > 0 ? Number(sym?.makerFee) * 10_000 : 3.5) : markets.data ? markets.data.fee.makerBps : 1.2) + ctx.feeTenths / 10;
   const feeAdj = feeAdjOf(ctx.feeTenths, markets.data?.fee.builderBps);
   const floor = costPerMillion(eff, market, mark, ctx.feeTenths);
   // A grid's estimate is what the same grid did in our backtest (price moves included), at this wallet's fee.
@@ -593,8 +613,8 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   const many = picked.length > 1;
   const sizeErrors = lead?.errors ?? [];
   const sizeNotes = lead?.notes ?? [];
-  const allErrors = plans.flatMap((x) => x.errors.map((e) => (many ? `${x.symbol.replace(/-USD$/, '')}: ${e}` : e)));
-  const allNotes = plans.flatMap((x) => x.notes.map((e) => (many ? `${x.symbol.replace(/-USD$/, '')}: ${e}` : e)));
+  const allErrors = plans.flatMap((x) => x.errors.map((e) => (many ? `${marketLabel(x.symbol)}: ${e}` : e)));
+  const allNotes = plans.flatMap((x) => x.notes.map((e) => (many ? `${marketLabel(x.symbol)}: ${e}` : e)));
   const why = ctx.setupWhy(paper);
   // Smart margining: a real bot (each of several) sets aside what it needs; together they fit the free margin.
   const alloc = useAllocation(ctx);
@@ -602,14 +622,16 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   // Free as the executor counts it: the account less the real bots' margin and the hosted copies' allocations. The
   // user's own positions are shown beside it, not taken off (the executor does not).
   const hostedCopyUsd = alloc.copies.filter((c) => !c.mode || c.mode === 'hosted').reduce((t, c) => t + c.usd, 0);
-  const free = alloc.equity === null ? null : Math.max(0, alloc.equity - alloc.botUsd - hostedCopyUsd);
+  const free = spot ? (spotCash ? spotCash.free : null) : alloc.equity === null ? null : Math.max(0, alloc.equity - alloc.botUsd - hostedCopyUsd);
   const short = !paper && free !== null && needAll > free + 1e-6 ? needAll - free : 0;
   // The size check itself (owner 2026-11-09: settings must not take more size than the margin can carry): an error on
   // the size step, with the size that fits, so Next waits for it - not only a refusal at Start.
   const levNow = Math.max(1, d.leverage ?? 1);
   const atCap = levCap !== null && levNow >= levCap;
   const fit = short > 0 && needAll > 0 ? (free ?? 0) / needAll : 1;
-  const marginError: string | null = short > 0
+  const marginError: string | null = short > 0 && spot
+    ? `Needs about ${fmtUsd(needAll, 0)} of spot USDC for its buys, but ${fmtUsd(free ?? 0, 0)} is free. Lower ${grid ? `the order size to about ${fmtUsd(Math.floor(d.orderUsd * fit), 0)}` : `Max holding to about ${fmtUsd(Math.floor(d.maxInventoryUsd * fit), 0)}`}, or move USDC to spot.`
+    : short > 0
     ? `Needs about ${fmtUsd(needAll, 0)} of margin at ${levNow}x, but ${fmtUsd(free ?? 0, 0)} is free. `
       + (grid
         ? `Lower the order size to about ${fmtUsd(Math.floor(d.orderUsd * fit), 0)}`
@@ -635,9 +657,9 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     : grid && !range ? 'Waiting for the price to set the range.'
     : gridErr ? gridErr
     : allErrors.length ? 'Fix the order size first (see Review).'
-    : !paper && d.leverage === null ? "Reading the market's leverage and your account…"
-    : clash.length ? `You already run a real bot on ${clash.map((x) => x.replace(/-USD$/, '')).join(', ')}. Stop it or untick it.`
-    : short > 0 ? `Needs ${fmtUsd(needAll, 0)} of margin, ${fmtUsd(free ?? 0, 0)} is free.`
+    : !paper && !spot && d.leverage === null ? "Reading the market's leverage and your account…"
+    : clash.length ? `You already run a real bot on ${clash.map((x) => marketLabel(x)).join(', ')}. Stop it or untick it.`
+    : short > 0 ? `Needs ${fmtUsd(needAll, 0)} of ${spot ? 'spot USDC' : 'margin'}, ${fmtUsd(free ?? 0, 0)} is free.`
     : null;
   const can = whyNot === null;
 
@@ -646,7 +668,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     if (!can) return;
     const list = [...picked];
     const ok = await confirm({
-      title: many ? `Start ${list.length} bots?` : `Start ${d.label.trim() || `${RECIPE[rid].name} ${d.symbol.replace(/-USD$/, '')}`}?`,
+      title: many ? `Start ${list.length} bots?` : `Start ${d.label.trim() || `${RECIPE[rid].name} ${marketLabel(d.symbol)}`}?`,
       body: `${RECIPE[rid].name} on ${list.join(', ')}, ${fmtUsd(d.orderUsd, 0)} orders${grid ? '' : `, up to ${fmtUsd(d.maxInventoryUsd, 0)} held each`}${d.maxLossUsd !== null ? `, stops at a ${fmtUsd(d.maxLossUsd, 0)} loss` : ''}.${allNotes.length ? ` ${allNotes.join(' ')}` : ''} ${paper ? 'Practice: no orders are sent.' : `Real orders in your SoDEX account, about ${fmtUsd(needAll, 0)} of margin set aside.`}`,
       confirmLabel: paper ? (many ? `Start ${list.length} practice bots` : 'Start practice bot') : (many ? `Start ${list.length} bots` : 'Start bot'),
     });
@@ -709,7 +731,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   // The picker: the best on this market first (credited only for measured edges: bestOf), then cheapest first.
   const pickedMs = picked.map((x) => markets.data?.markets.find((m) => m.symbol === x) ?? null).filter((m): m is BotMarket => !!m);
   // A preset that quotes off the oracle needs every picked market to have one (owner 2026-11-08).
-  const noOracle = pickedMs.filter((m) => m.lead === null).map((m) => m.symbol.replace(/-USD$/, ''));
+  const noOracle = pickedMs.filter((m) => m.lead === null).map((m) => marketLabel(m.symbol));
   const blocked = (rc: Recipe) => rc.oracle && noOracle.length > 0;
   const scored = recipesOf(cat).filter((rc) => !blocked(rc)).map((rc) => {
     if (rc.category === 'grid') {
@@ -718,7 +740,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
     }
     return { id: rc.id, rc, e: estimateOver(pickedMs, (m) => estimate(effectiveDraft(fromRecipe(rc.id, m.symbol, d), m), m, runs, feeAdj)), g: null };
   });
-  const where = picked.length === 1 ? `on ${picked[0]!.replace(/-USD$/, '')}` : `average, ${picked.length} markets`;
+  const where = picked.length === 1 ? `on ${marketLabel(picked[0]!)}` : `average, ${picked.length} markets`;
   const bestId = cat === 'market' && pickedMs.length ? bestOf(scored.filter((x): x is typeof x & { e: BotEstimate } => !!x.e && x.e.bp !== null).map((x) => ({ id: x.id, est: x.e })))?.id ?? null : null;
   const blockedRows = recipesOf(cat).filter(blocked);
   // Grids keep their order (tight, balanced, wide): their costs are within each other's noise, the order says what they are.
@@ -797,7 +819,7 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
 
           {place.step === 2 && (
             <Shell>
-              <ShellHeader icon="star" title="Preset" subtitle={grid ? `Grids we backtested on ${GRID_BT_MARKETS.length} markets over ${GRID_BT_DAYS} days, sized to ${d.symbol.replace(/-USD$/, '')}'s swings now.` : `Setups we tested, ${picked.length === 1 ? `on ${picked[0]!.replace(/-USD$/, '')}` : `on your ${picked.length} markets`}. Lower cost is better.`} />
+              <ShellHeader icon="star" title="Preset" subtitle={grid ? `Grids we backtested on ${GRID_BT_MARKETS.length} markets over ${GRID_BT_DAYS} days, sized to ${marketLabel(d.symbol)}'s swings now.` : `Setups we tested, ${picked.length === 1 ? `on ${marketLabel(picked[0]!)}` : `on your ${picked.length} markets`}. Lower cost is better.`} />
               <div className="bots-strows" role="radiogroup" aria-label="Preset">
                 {rows.map(({ rc, e, g }) => (
                   <RecipeRow key={rc.id} rc={rc} on={rid === rc.id} pick={() => pickRecipe(rc.id)} where={where} est={e} best={rc.id === bestId} grid={g} symbol={d.symbol} />
@@ -811,16 +833,28 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
 
           {place.step === 1 && (
             <Shell>
-              <ShellHeader icon="compass" title="Markets" subtitle={grid ? 'One market for a grid.' : 'Tick one or several: one bot each, with the same settings.'} aside={<Button variant="quiet" onClick={() => goBots({ page: 'explore' })}>Compare all<Icon name="arrowRight" size={13} /></Button>} />
-              <MarketStep picked={picked} toggle={toggle} markets={markets.data?.markets ?? (markets.error ? [] : null)} costOf={costOf} running={runningReal} real={!paper} />
+              <ShellHeader
+                icon="compass"
+                title="Markets"
+                subtitle={grid ? `One ${ENGINE_NAME[d.engine].toLowerCase()} market for a grid.` : 'Tick one or several: one bot each, with the same settings.'}
+                aside={
+                  <div className="bots-mhead">
+                    <Segmented label="Futures or spot" value={d.engine} onChange={(e) => switchEngine(e)} options={[{ value: 'perps', label: 'Futures' }, { value: 'spot', label: 'Spot' }]} />
+                    {!spot && <Button variant="quiet" onClick={() => goBots({ page: 'explore' })}>Compare all<Icon name="arrowRight" size={13} /></Button>}
+                  </div>
+                }
+              />
+              {spot
+                ? <SpotMarketStep picked={picked} toggle={toggle} running={runningReal} real={!paper} />
+                : <MarketStep picked={picked} toggle={toggle} markets={markets.data?.markets ?? (markets.error ? [] : null)} costOf={costOf} running={runningReal} real={!paper} />}
             </Shell>
           )}
 
           {place.step === 3 && (
             <Shell>
-              <ShellHeader icon="gear" title={PART_NAMES[place.part!]} subtitle={place.part === 'size' ? (picked.length > 1 ? `The same for all ${picked.length} markets.` : 'Uses your SoDEX futures USDC.') : place.part === 'quote' ? `${RECIPE[rid].name}'s values, marked Default where they are unchanged.` : 'Each one moves the estimate on the right.'} />
+              <ShellHeader icon="gear" title={PART_NAMES[place.part!]} subtitle={place.part === 'size' ? (picked.length > 1 ? `The same for all ${picked.length} markets.` : spot ? `Buys with your SoDEX spot USDC${spotCash ? `: ${fmtUsd(spotCash.free, 0)} free` : ''}.` : 'Uses your SoDEX futures USDC.') : place.part === 'quote' ? `${RECIPE[rid].name}'s values, marked Default where they are unchanged.` : 'Each one moves the estimate on the right.'} />
               <Panel className="bots-sizepanel">
-                <BotSettings d={d} set={set} range={range} mark={mark} grid={gEst ? { stepBps: gEst.stepBps, netStepBps: gEst.netStepBps, k: gEst.k, feeBps } : undefined} liveAllowed={ctx.liveAllowed} noLead={noLead} part={place.part as Sec} hidePractice={place.part !== 'size'} lev={levCap === null ? undefined : { ...lev, max: levCap }} sizeErrors={sizeProblems} sizeNotes={sizeNotes} />
+                <BotSettings d={d} set={set} twins={twins} onEngine={(e, s) => switchEngine(e, s)} range={range} mark={mark} grid={gEst ? { stepBps: gEst.stepBps, netStepBps: gEst.netStepBps, k: gEst.k, feeBps } : undefined} liveAllowed={ctx.liveAllowed} noLead={noLead} part={place.part as Sec} hidePractice={place.part !== 'size'} lev={levCap === null ? undefined : { ...lev, max: levCap }} sizeErrors={sizeProblems} sizeNotes={sizeNotes} />
               </Panel>
             </Shell>
           )}
@@ -832,13 +866,13 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
                 <NameField d={d} set={set} />
                 {allErrors.map((e) => <p key={e} className="bots-err" role="alert">{e} <button type="button" className="bots-link" onClick={() => act('size')}>Change the size</button></p>)}
                 {allNotes.map((e) => <p key={e} className="bots-note"><Icon name="warning" size={13} />{e} The margin below counts that size.</p>)}
-                {clash.length > 0 && <p className="bots-err" role="alert">You already run a real bot on {clash.map((x) => x.replace(/-USD$/, '')).join(', ')}: one real bot per market. Untick {clash.length === 1 ? 'it' : 'them'} in Markets, stop the other bot, or turn on Practice.</p>}
+                {clash.length > 0 && <p className="bots-err" role="alert">You already run a real bot on {clash.map((x) => marketLabel(x)).join(', ')}: one real bot per market. Untick {clash.length === 1 ? 'it' : 'them'} in Markets, stop the other bot, or turn on Practice.</p>}
                 {short > 0 && <p className="bots-err" role="alert">{many ? 'These bots' : 'This bot'} would set aside {fmtUsd(needAll, 0)}, but only {fmtUsd(free ?? 0, 0)} of your futures account is free ({[alloc.botUsd > 0 ? `${fmtUsd(alloc.botUsd, 0)} with your other bots` : '', hostedCopyUsd > 0 ? `${fmtUsd(hostedCopyUsd, 0)} with copy trading` : ''].filter(Boolean).join(', ') || 'nothing set aside yet'}). Lower the size or max holding, deposit more, or stop a bot or a copy. <button type="button" className="bots-link" onClick={() => requestDeposit()}>Deposit</button></p>}
                 {why && ctx.address && <p className="bots-note">{why} <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></p>}
                 {!ctx.address && <p className="bots-note">Connect your wallet to start a bot.</p>}
                 {error && (
                   <div className="bots-err" role="alert">
-                    <p>{error.started.length > 0 ? `Not every bot started. ${error.symbol ? `${error.symbol.replace(/-USD$/, '')}: ` : ''}` : ''}{error.text}</p>
+                    <p>{error.started.length > 0 ? `Not every bot started. ${error.symbol ? `${marketLabel(error.symbol)}: ` : ''}` : ''}{error.text}</p>
                     {error.started.length > 0 && <p>Started: {error.started.join(', ')}. Not started: {error.left.join(', ')}. Start again to try only the ones not started.</p>}
                     {error.action && error.label && <Button variant="secondary" onClick={() => act(error.action)}>{error.label}</Button>}
                   </div>

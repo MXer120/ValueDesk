@@ -46,6 +46,14 @@ export const ALGO_KINDS: readonly AlgoKind[] = ['twap', 'vwap', 'pov', 'iceberg'
 /** The kinds that only ever run as bots (the Bots page): open-ended, two-sided, resting only. */
 export const BOT_KINDS: readonly AlgoKind[] = ['mm', 'grid', 'hedge'];
 
+/**
+ * The SoDEX exchange a volume maker or a grid trades on (2026-11-19): 'perps' (the futures markets, 'BTC-USD') or
+ * 'spot' (the spot markets, 'vBTC_vUSDC'; only the *_vUSDC pairs). On spot a bot never goes short: it sells only
+ * what it bought itself, never coin the wallet held before it.
+ */
+export type BotEngine = 'perps' | 'spot';
+export const BOT_ENGINES: readonly BotEngine[] = ['perps', 'spot'];
+
 export type Side = 'buy' | 'sell';
 
 /**
@@ -471,6 +479,12 @@ export interface BotLimits {
  */
 export interface MmSpec extends AlgoBase, BotLimits {
   kind: 'mm';
+  /**
+   * The exchange it quotes on (BotEngine). Always set by parseAlgoSpec ('perps' when the input has none); optional in
+   * the type because a spec stored before 2026-11-19 has none, and that one is perps (engineOf).
+   * On 'spot' the ask quotes only what it bought itself (never short), the bid up to maxInventoryUsd.
+   */
+  engine?: BotEngine;
   /** Each quote, USD. */
   orderUsd: number;
   /** The most it holds either way, USD at the mark. */
@@ -616,6 +630,8 @@ export interface QuietWindow {
  */
 export interface GridSpec extends AlgoBase, BotLimits {
   kind: 'grid';
+  /** As MmSpec.engine. A spot grid is always a long grid (direction 'long'): it sells only what it bought. */
+  engine?: BotEngine;
   /** The lowest and the highest level. */
   low: number;
   high: number;

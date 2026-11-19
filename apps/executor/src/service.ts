@@ -49,6 +49,7 @@ import {
   botFeeFor,
   ALGO_NAMES,
   algoSymbols,
+  isSpotSpec,
   coinOf,
   minChildQty,
   sodexNamesFor,
@@ -335,6 +336,12 @@ export function remember<K, V>(m: Map<K, V>, k: K, v: V, max = WALLET_CACHE_MAX)
 }
 
 /** botMarginUsd with the market's minimum order and the region's leverage ceiling (the engine's newer signature; an older one ignores them). */
+/** A spot bot's key not on SoDEX spot (spotKeyProblem): what the trader reads. */
+const SPOT_KEY_TEXT = 'Your trading key is not registered for SoDEX spot yet. Renew the trading key (it registers it on spot too), then the spot bot goes on.';
+/** A key SoDEX did not list on spot is read again no sooner than this. */
+const SPOT_KEY_READ_MS = 60_000;
+/** The coin a spot bot buys with (bots trade only the *_vUSDC pairs). */
+const SPOT_QUOTE = 'vUSDC';
 const marginOf = botMarginUsd as unknown as (s: AlgoSpec, minOrderUsd?: number, ceiling?: number) => number;
 
 export interface RequestContext {
@@ -2035,12 +2042,76 @@ export class ExecutorService {
         if ((await this.hedgeAccess(a.owner, a.spec)) === false) return 'Held: hedges are early access, and neither wallet of it is on the beta list any more.';
       } else if ((await this.betaAnswer(a.owner)) === false) return 'Held: real bots are for beta testers only, and this wallet is no longer on the beta list.';
     }
+    // A spot bot signs spot orders: the key must be registered on SoDEX's spot engine too (spotKeyProblem).
+    const spot = isSpotSpec(a.spec);
+    if (spot && !a.spec.paper) {
+      const sp = await this.spotKeyProblem(a.owner);
+      if (sp) return sp;
+    }
     if (this.cfg.builderId > 0) {
       const fee = await this.algoFee(a);
-      const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
-      if (approved === null || approved < fee) return `Your SoDEX account does not approve the ValueDesk fee (${fee / 10} bp) these orders carry. Approve it in copy setup.`;
+      // The approval of the engine the orders go to: spot for a spot bot (SoDEX keeps one per engine).
+      const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId, spot ? 'spot' : 'perps');
+      if (approved === null || approved < fee) return `Your SoDEX account does not approve the ValueDesk fee (${fee / 10} bp) these orders carry${spot ? ' on spot' : ''}. Approve it in copy setup.`;
     }
     return null;
+  }
+
+  /** The trading key's spot registration, per wallet (its address, whether SoDEX listed it on spot, when read). */
+  private spotKeys = new Map<string, { address: string; ok: boolean; at: number; expiresAt: number | null }>();
+
+  /**
+   * A spot bot's key on SoDEX's SPOT engine (2026-11-19). SoDEX registers an API key per engine: the key the browser
+   * registers for the executor (apps/web copy/sodexSetup.ts registerCopyKey, COPY_ENGINES = ['perps']) is on perps
+   * only, and spot orders it signs would be refused. Listed on spot once: trusted until its expiry (as trustedKey);
+   * not listed: read again at most every SPOT_KEY_READ_MS. null: fine.
+   */
+  private async spotKeyProblem(owner: string, now = Date.now(), fresh = false): Promise<string | null> {
+    const k = this.db.key(owner, 'active');
+    if (!k) return null; // keyProblem says it
+    const hit = this.spotKeys.get(owner);
+    if (hit && hit.address === k.address) {
+      if (hit.ok && (!hit.expiresAt || hit.expiresAt > now)) return null;
+      if (!hit.ok && !fresh && now - hit.at < SPOT_KEY_READ_MS) return SPOT_KEY_TEXT;
+    }
+    let r: { ok: boolean; expiresAt: number | null };
+    try {
+      r = await this.sodex.keyRegistered(owner, k.name, k.address, now, 'spot');
+    } catch (e) {
+      this.deps.log.warn('executor: spot key read failed', { owner, error: String(e) });
+      return hit && hit.address === k.address && hit.ok ? null : "The trading key's spot registration could not be read just now; trying again.";
+    }
+    this.spotKeys.set(owner, { address: k.address, ok: r.ok, at: now, expiresAt: r.expiresAt });
+    return r.ok ? null : SPOT_KEY_TEXT;
+  }
+
+  /** A spot bot's vUSDC on SoDEX spot (total, its own resting buys included). Unreadable: a 503 (never guessed). */
+  private async spotUsdcOf(owner: string): Promise<number> {
+    try {
+      const b = await this.sodex.spotBalances(owner);
+      return b[SPOT_QUOTE]?.total ?? 0;
+    } catch {
+      throw new ApiError(503, 'margin-unknown', 'Your SoDEX spot balance could not be read just now, so what this bot needs cannot be checked. Try again in a moment.');
+    }
+  }
+
+  /**
+   * What the wallet's running real spot bots set aside of its spot vUSDC (each the most it may buy: botReserveUsd at
+   * 1x, its market's minimum order counted), and whether `need` more fits. Spot bots set nothing aside of the futures
+   * account, and futures copies and bots nothing of spot.
+   */
+  private async spotFits(owner: string, need: number, skipAlgo?: string): Promise<{ ok: boolean; usdc: number; reserved: number; nBots: number }> {
+    const running = this.algos.list(owner).filter((x) => x.spec?.bot === true && !x.spec.paper && isSpotSpec(x.spec) && !FINAL_STATUSES.has(x.status) && x.id !== skipAlgo);
+    const mins = await this.minOrderUsd(running.map((x) => x.spec.symbol));
+    const reserved = running.reduce((t, x) => t + marginOf(x.spec, mins.get(x.spec.symbol)), 0);
+    const usdc = await this.spotUsdcOf(owner);
+    return { ok: reserved + need <= usdc + 1e-6, usdc, reserved, nBots: running.length };
+  }
+
+  private spotRefusal(need: number, f: { usdc: number; reserved: number; nBots: number }, change = false): ApiError {
+    const free = Math.max(0, f.usdc - f.reserved);
+    const held = f.nBots ? ` (${f.nBots} running spot ${f.nBots === 1 ? 'bot' : 'bots'} set aside ${usd(f.reserved)})` : '';
+    return new ApiError(409, 'margin', `This ${change ? 'change needs' : 'spot bot needs'} ${usd(need)} of vUSDC to buy with, but only ${usd(free)} of your ${usd(f.usdc)} spot vUSDC is free${held}. Lower its order size, levels or max holding, move vUSDC to your spot account, or stop another spot bot.`, { needUsd: need, reservedUsd: f.reserved, botsUsd: f.reserved, copiesUsd: 0, equityUsd: f.usdc, freeUsd: free, engine: 'spot' });
   }
 
   /**
@@ -2090,9 +2161,28 @@ export class ExecutorService {
     }
   }
 
+  private spotMarketCache: { at: number; rows: MarketInfo[] } | null = null;
+
   private async minOrderUsd(symbols: readonly string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>();
     if (!symbols.length) return out;
+    // Spot markets (a spot bot): SoDEX's spot list and its best prices' mid (spot has no mark).
+    const spot = [...new Set(symbols.filter((s) => s.includes('_')))];
+    if (spot.length) {
+      try {
+        if (!this.spotMarketCache || Date.now() - this.spotMarketCache.at > 10 * 60_000) this.spotMarketCache = { at: Date.now(), rows: await this.sodex.spotMarkets() };
+        const mids = await this.sodex.spotMids();
+        for (const sym of spot) {
+          const m = this.spotMarketCache.rows.find((r) => r.name === sym);
+          const px = mids.find((r) => r.symbol === sym)?.price;
+          if (m && px && px > 0) out.set(sym, minChildQty(m, px) * px);
+        }
+      } catch (e) {
+        this.deps.log.warn('bots: spot market minimums could not be read', { error: String(e) });
+      }
+      symbols = symbols.filter((s) => !s.includes('_'));
+      if (!symbols.length) return out;
+    }
     try {
       if (!this.marketCache || Date.now() - this.marketCache.at > 10 * 60_000) this.marketCache = { at: Date.now(), rows: await this.sodex.markets() };
       const marks = await this.sodex.markPrices();
@@ -2130,7 +2220,8 @@ export class ExecutorService {
    * the bot being changed or replaced; `copy`: a copy's allocation as it would be (id null: a new one).
    */
   private async reservedOf(owner: string, o: { skipAlgo?: string; copy?: { id: string | null; usd: number } } = {}): Promise<{ bots: number; nBots: number; copies: number }> {
-    const running = this.algos.list(owner).filter((x) => x.spec?.bot === true && !x.spec.paper && !FINAL_STATUSES.has(x.status) && x.id !== o.skipAlgo);
+    // Spot bots set aside spot vUSDC, not futures margin (spotFits).
+    const running = this.algos.list(owner).filter((x) => x.spec?.bot === true && !x.spec.paper && !isSpotSpec(x.spec) && !FINAL_STATUSES.has(x.status) && x.id !== o.skipAlgo);
     const mins = await this.minOrderUsd(running.map((x) => x.spec.symbol));
     // Bots: no region ceiling, only the market's maximum (owner 2026-11-08).
     const bots = running.reduce((t, x) => t + marginOf(x.spec, mins.get(x.spec.symbol)), 0);
@@ -2153,6 +2244,13 @@ export class ExecutorService {
    */
   private marketConflict(owner: string, spec: AlgoSpec, live: AlgoRecord[], positions: Record<string, { size: number }> | null, old: AlgoRecord | null): void {
     const sym = spec.symbol;
+    // A spot bot: only another algo on its spot market conflicts. Copies and positions are perps; the coin the wallet holds
+    // on spot is not the bot's and is never sold by it (runtime.ts spotSellRoom).
+    if (isSpotSpec(spec)) {
+      const other = live.find((x) => x.spec?.bot !== true && !x.spec.paper && algoSymbols(x.spec).includes(sym));
+      if (other) throw new ApiError(409, 'market-algo', `Your ${ALGO_NAMES[other.spec.kind] ?? 'algo'} order on ${sym} is still running. Let it finish or cancel it, then start the bot.`, { algoId: other.id, symbol: sym });
+      return;
+    }
     const coin = coinOf('sodex', sym);
     const algo = live.find((x) => x.spec?.bot !== true && !x.spec.paper && algoSymbols(x.spec).includes(sym));
     if (algo) throw new ApiError(409, 'market-algo', `Your ${ALGO_NAMES[algo.spec.kind] ?? 'algo'} order on ${sym} is still running. Let it finish or cancel it, then start the bot.`, { algoId: algo.id, symbol: sym });
@@ -2278,7 +2376,22 @@ export class ExecutorService {
       }
       accountId = await this.sodex.accountId(owner);
       if (!accountId) throw new ApiError(412, 'account', spec.bot ? 'Deposit to SoDEX first: this wallet has no SoDEX account yet.' : 'This wallet has no SoDEX account yet. Deposit first.');
-      if (spec.bot) {
+      // A spot bot (feature 'spot-bots'): its key registered on SoDEX spot, the ValueDesk fee approved on spot, and the
+      // vUSDC in its spot account for what it may buy (spot bots set aside spot vUSDC, not futures margin).
+      if (spec.bot && isSpotSpec(spec)) {
+        // Read now (a start follows a renewal the trader just signed), not from the last miss.
+        const sp = await this.spotKeyProblem(owner, Date.now(), true);
+        if (sp) throw new ApiError(412, 'key-spot', sp);
+        if (this.cfg.builderId > 0) {
+          const fee = await this.algoFee({ owner, spec } as AlgoRecord);
+          const approved = await this.sodex.builderApproval(owner, this.cfg.builderId, 'spot');
+          if (approved === null || approved < fee) throw new ApiError(412, 'builder-spot', `Your SoDEX account does not approve the ValueDesk fee (${fee / 10} bp) on spot. Approve it in copy setup, then start the bot.`, { feeTenthsBp: fee, approved });
+        }
+        this.marketConflict(owner, spec, live, null, old);
+        const need = marginOf(spec, (await this.minOrderUsd([spec.symbol])).get(spec.symbol));
+        const f = await this.spotFits(owner, need, old?.id);
+        if (!f.ok) throw this.spotRefusal(need, f);
+      } else if (spec.bot) {
         // A3: nothing else of the wallet's on this market (an algo or a copy: no read needed; a position: read now).
         this.marketConflict(owner, spec, live, null, old);
         const acct = await this.accountOf(owner);
@@ -2315,7 +2428,16 @@ export class ExecutorService {
         checks.push(`Nothing else of yours trades ${spec.symbol} (no other bot, position, copy or algo order).`);
       }
     }
-    if (spec.kind === 'mm' || spec.kind === 'grid') {
+    if ((spec.kind === 'mm' || spec.kind === 'grid') && isSpotSpec(spec)) {
+      checks.push(`${spec.symbol} is trading on SoDEX spot, and the order size is at least its minimum order.`);
+      checks.push('On spot it sells only what it bought itself: the coin your wallet held before it is never sold.');
+      if (!spec.paper) {
+        checks.push('Your trading key is approved on SoDEX spot and your SoDEX account was found.');
+        checks.push('Beta access and a place on the servers.');
+        checks.push(`Nothing else of yours trades ${spec.symbol} (no other bot or algo order).`);
+        checks.push('Your free spot vUSDC covers what it may buy.');
+      }
+    } else if (spec.kind === 'mm' || spec.kind === 'grid') {
       checks.push(`${spec.symbol} is trading on SoDEX, and the order size is at least its minimum order.`);
       if (!spec.paper) {
         checks.push('Your trading key is approved and your SoDEX account was found.');
@@ -2359,6 +2481,11 @@ export class ExecutorService {
     const before = marginOf(a.spec, min);
     const need = marginOf(next, min);
     if (!(need > before + 1e-9)) return;
+    if (isSpotSpec(a.spec)) {
+      const f = await this.spotFits(owner, need, a.id);
+      if (!f.ok) throw this.spotRefusal(need, f, true);
+      return;
+    }
     const acct = await this.accountOf(owner);
     const r = await this.reservedOf(owner, { skipAlgo: a.id });
     if (r.bots + r.copies + need > acct.equity + 1e-6) {

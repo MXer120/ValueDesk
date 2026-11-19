@@ -479,8 +479,10 @@ export interface ExecutorInfo {
  * 'terms-doc': GET /terms/copy serves the copy terms in force here (version, hash, text) for the web to sign exactly.
  * 'day-key': it accepts requests signed by a wallet-approved day key (SignedCopyRequest.delegation); the site signs
  * with the wallet itself for an executor without it (an older release refuses a 64-byte signature).
+ * 'spot-bots': it runs volume makers and grids on SoDEX spot (spec engine 'spot', a *_vUSDC market): spot orders, spot
+ * balances, its key's spot registration and the spot builder approval checked. The site starts a spot bot only there.
  */
-export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier', 'bot-restart', 'day-key', 'terms-doc', 'hedge'] as const;
+export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier', 'bot-restart', 'day-key', 'terms-doc', 'hedge', 'spot-bots'] as const;
 
 export interface SessionGrant {
   token: string;

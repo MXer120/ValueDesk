@@ -15,6 +15,7 @@
  * Pure: the page and its tests read the same numbers.
  */
 import type { AlgoSpec, MarketInfo } from '@copy-engine';
+import { engineOfSymbol, type BotEngine, marketLabel } from './engines';
 import { botMarginUsd, checkSizes, gridPrices, gridStepPct, minChildQty, parseAlgoSpec } from '@copy-engine';
 
 export type Strategy = 'market' | 'maker' | 'lead' | 'grid' | 'hedge';
@@ -119,6 +120,11 @@ export const FLOW_DEFAULT = { flowMinUsd: 250_000, flowWindowMin: 10, flowAction
 /** What the form holds: every strategy's fields, the market and the switches. */
 export interface BotDraft {
   strategy: Strategy;
+  /**
+   * Futures or spot (owner 2026-11-19): the engine `symbol` belongs to (bots/engines.ts). Spot has no short, no
+   * leverage: a spot grid runs long (buys first, sells only what it bought), a spot market maker sells only what it bought.
+   */
+  engine: BotEngine;
   symbol: string;
   label: string;
   paper: boolean;
@@ -244,6 +250,7 @@ export const GATE_DEFAULT = { gateBps: 12, gateWindowS: 60 } as const;
 export function draftFor(strategy: Strategy, preset: PresetId = 'balanced', symbol = 'BTC-USD'): BotDraft {
   return {
     strategy,
+    engine: engineOfSymbol(symbol),
     symbol,
     label: '',
     paper: false, // real by default (owner 2026-11-10: "remove paper option enabled per default"); a wallet that may not trade real bots is held on Practice (BotNewPage liveAllowed)
@@ -313,7 +320,10 @@ const roundSig = (x: number): number => Number(x.toPrecision(6));
 
 /** The spec the wallet signs (parseAlgoSpec form; the executor checks it again). */
 export function specOf(d: BotDraft, mark: number | null): Record<string, unknown> {
-  const base = { symbol: d.symbol, paper: d.paper, label: d.label.trim() || null, ...(d.leverage !== null ? { leverage: d.leverage } : {}), ...(d.postOnly === false ? { postOnly: false } : {}) };
+  const spot = d.engine === 'spot';
+  // The oracle makers quote off Binance futures: not on spot (the engine refuses `ref` there). A spot maker is the plain one.
+  if (spot && (d.strategy === 'market' || d.strategy === 'lead')) d = { ...d, strategy: 'maker' };
+  const base = { symbol: d.symbol, engine: d.engine, paper: d.paper, label: d.label.trim() || null, ...(!spot && d.leverage !== null ? { leverage: d.leverage } : {}), ...(d.postOnly === false ? { postOnly: false } : {}) };
   const limits = { volumeTargetUsd: d.volumeTargetUsd, maxLossUsd: d.maxLossUsd, onStop: d.onStop, ...(d.takeProfitUsd !== null && d.takeProfitUsd > 0 ? { takeProfitUsd: d.takeProfitUsd } : {}) };
   if (d.strategy === 'market') {
     return {
@@ -337,7 +347,8 @@ export function specOf(d: BotDraft, mark: number | null): Record<string, unknown
   const r = gridRange(d, mark);
   return {
     ...base, ...limits, kind: 'grid', low: r?.low ?? null, high: r?.high ?? null, levels: d.levels, orderUsd: d.orderUsd, spacing: d.spacing, outOfRange: d.outOfRange,
-    ...(d.gridDir !== 'neutral' ? { direction: d.gridDir } : {}),
+    // Spot cannot short: its grid runs long - buys first, sells only what it bought.
+    ...(spot ? { direction: 'long' } : d.gridDir !== 'neutral' ? { direction: d.gridDir } : {}),
     ...(d.triggerPrice !== null && d.triggerPrice > 0 ? { triggerPrice: d.triggerPrice } : {}),
     ...(d.stopAbove !== null && d.stopAbove > 0 ? { upper: { price: d.stopAbove, then: 'stop' } } : {}),
     ...(d.stopBelow !== null && d.stopBelow > 0 ? { lower: { price: d.stopBelow, then: 'stop' } } : {}),
@@ -637,7 +648,7 @@ export function planMarkets(
     const min = minQuoteUsd(market, px);
     // An order under SoDEX's minimum is not raised behind the user's back: it cannot be started (owner 2026-11-08).
     const errors = [...r.errors];
-    if (min > 0 && x.orderUsd < min - 0.005) errors.push(`The order size is under SoDEX's minimum order on ${symbol.replace(/-USD$/, '')} (about ${fmtUsdPlain(Math.ceil(min * 100) / 100)}). Raise it to at least that.`);
+    if (min > 0 && x.orderUsd < min - 0.005) errors.push(`The order size is under SoDEX's minimum order on ${marketLabel(symbol)} (about ${fmtUsdPlain(Math.ceil(min * 100) / 100)}). Raise it to at least that.`);
     if (min > 0 && parsed.kind === 'mm' && parsed.maxInventoryUsd < Math.max(x.orderUsd, min) - 0.005) errors.push(`Max holding must be at least one order (${fmtUsdPlain(Math.max(x.orderUsd, min))}).`);
     return { symbol, spec, errors, notes: [], quoteUsd: Math.max(x.orderUsd, min), marginUsd: botNeedUsd(parsed, min, o.regionMax ?? null) };
   });
@@ -665,7 +676,12 @@ export function refusalOf(code: string | null | undefined, message: string, many
     case 'paper-only':
     case 'beta': return { text: 'Real bots are open to beta testers only for now. Ask on Discord to be added.', action: 'discord', label: 'Ask on Discord' };
     case 'limit': return { text: 'You already run the most bots and algo orders allowed at once. Stop one first.', action: 'stop-other', label: 'See my bots' };
-    case 'margin': return { text: `Your futures account does not have enough free margin for ${it}. Lower the order size or max holding, deposit more, or stop another bot or copy.`, action: 'deposit', label: 'Deposit' };
+    case 'margin': return /spot|vUSDC/i.test(message)
+      ? { text: `Your spot account does not have enough USDC for ${it}'s buys. Lower the order size or max holding, or move USDC to spot.`, action: 'deposit', label: 'Add USDC' }
+      : { text: `Your futures account does not have enough free margin for ${it}. Lower the order size or max holding, deposit more, or stop another bot or copy.`, action: 'deposit', label: 'Deposit' };
+    // Spot bots (2026-11-19): a trading key or fee approval from before covers futures only.
+    case 'key-spot': return { text: 'Your trading key covers futures only. Renew it once in the bot setup (one signature): it then covers spot too.', action: 'setup', label: 'Renew trading key' };
+    case 'builder-spot': return { text: 'The bot fee is not approved for spot yet. Approve it once in the bot setup, then start again.', action: 'setup', label: 'Approve for spot' };
     case 'bot-market': return { text: 'You already run a real bot on this market. Stop it first, or pick another market.', action: 'stop-other', label: 'Stop the other bot' };
     // The executor's own codes (apps/executor service.ts BotRefusalCode), each with its one thing to do (audit 2026-11-09).
     case 'bot-capacity':

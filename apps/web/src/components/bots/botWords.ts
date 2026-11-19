@@ -1,4 +1,5 @@
 /** A bot's name, its state in words and its PnL as the page prints them. */
+import { marketLabel } from '../../bots/engines';
 import { FINAL_STATUSES, type AlgoView } from '@copy-engine';
 import { DASH, fmtUsd } from '../../format';
 import { STRATEGY_INFO, strategyOf } from '../../bots/presets';
@@ -7,7 +8,7 @@ export function botName(v: AlgoView): string {
   const s = v.algo.spec;
   if (s.label) return s.label;
   const st = strategyOf(s);
-  return `${st ? STRATEGY_INFO[st].name : 'Bot'} ${s.symbol.replace(/-USD$/, '')}`;
+  return `${st ? STRATEGY_INFO[st].name : 'Bot'} ${marketLabel(s.symbol)}`;
 }
 
 /** +$1.23 / −$1.23; a dash when unknown. */
