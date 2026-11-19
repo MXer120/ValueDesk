@@ -15,6 +15,7 @@
 import { createMatcher, hasWords, type Catalogue } from './match';
 
 const ATTRS = ['title', 'placeholder', 'aria-label', 'alt'] as const;
+const ATTR_SELECTOR = ATTRS.map((a) => `[${a}]`).join(',');
 const SKIP = 'script, style, code, pre, textarea, [contenteditable=""], [contenteditable="true"], [data-no-i18n]';
 
 /** Every piece of English shown with no translation, when asked for (e2e/ui/themeAudit.ts --lang). */
@@ -86,8 +87,11 @@ function walk(root: Node): void {
   for (let n = w.nextNode(); n; n = w.nextNode()) doText(n as Text);
   const el = root as Element;
   if (root.nodeType === Node.ELEMENT_NODE) for (const a of ATTRS) if (el.hasAttribute(a)) doAttr(el, a);
-  const parent = root as ParentNode;
-  for (const a of ATTRS) parent.querySelectorAll(`[${a}]`).forEach((e) => doAttr(e, a));
+  // One query for the four attributes, not four: this runs for every subtree React adds (on /trade every book and
+  // trade row), and each (element, attribute) is independent of the order it is visited in.
+  (root as ParentNode).querySelectorAll(ATTR_SELECTOR).forEach((e) => {
+    for (const a of ATTRS) if (e.hasAttribute(a)) doAttr(e, a);
+  });
 }
 
 /** Show this catalogue from now on; null goes back to the English everything was written in. */

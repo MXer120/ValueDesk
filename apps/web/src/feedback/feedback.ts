@@ -22,19 +22,8 @@ export type FeedbackCategory = 'bug' | 'idea' | 'other';
 /** The longest message the server takes (apps/server ops/feedback.ts MAX_MESSAGE). */
 export const FEEDBACK_MAX = 2000;
 
-/** A usable Discord (or other community) page: https, nothing else. Anything else counts as unset. */
-export function feedbackUrlFrom(raw: unknown): string | null {
-  if (typeof raw !== 'string' || !raw.trim()) return null;
-  try {
-    const u = new URL(raw.trim());
-    return u.protocol === 'https:' && !u.username && !u.password ? u.href : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The build's Discord invite, or null. */
-export const FEEDBACK_URL: string | null = feedbackUrlFrom(import.meta.env?.VITE_FEEDBACK_URL);
+/* The Discord invite lives in ./url (nothing behind it); still exported from here. */
+export { FEEDBACK_URL, feedbackUrlFrom } from './url';
 
 /** The message's length as the server counts it (code points). */
 export const messageLength = (s: string): number => [...s.trim()].length;

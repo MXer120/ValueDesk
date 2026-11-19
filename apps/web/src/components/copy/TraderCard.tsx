@@ -13,11 +13,14 @@ import { CoinIcon } from '../CoinIcon';
 import { VENUE_BRAND } from '../venueBrand';
 import { DASH, fmtUsd, shortAddr } from '../../format';
 import { VENUE_LABEL, vsApi, type BoardWindow, type CardPeek, type TraderRow, type Window } from '../../vsApi';
+/* This view reads venues in its first render: their code comes with its page (exchange/venuesLazy.ts). */
+import * as venuesModule from '../../exchange/venues';
+import { bindVenues } from '../../exchange/venuesLazy';
 import { explainScore, scoreBand, type CopyScore } from './copyScore';
-import { fmtSignedPct, fmtSignedUsd } from './setup';
+import { fmtSignedPct, fmtSignedUsd } from './fmtSigned';
 import { markOffscreen } from '../../offscreen';
 import { serverCards } from '../../exchange/copyCards';
-import { prefetchCopy } from './useCopy';
+bindVenues(venuesModule);
 
 /** How long a pointer rests on a card before its copy setup's reads start (a sweep over the grid starts none). */
 const HOVER_INTENT_MS = 150;
@@ -340,8 +343,9 @@ export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen,
   const glow = useRef<HTMLSpanElement>(null);
   useEffect(() => (glow.current ? markOffscreen(glow.current) : undefined), []);
   // The copy setup's reads started on a hover that stays (or focus, or a press): usually in before the click (useCopy.ts prefetchCopy).
+  // useCopy is loaded here, not imported: it brings the copy engine, which a page of cards (Explore) does not draw with.
   const intent = useRef<number | null>(null);
-  const warm = () => { if (copyable) prefetchCopy(row.venue, row.address, row.accountValue); };
+  const warm = () => { if (copyable) void import('./useCopy').then((m) => m.prefetchCopy(row.venue, row.address, row.accountValue), () => {}); };
   const hoverOn = () => { if (intent.current === null) intent.current = window.setTimeout(() => { intent.current = null; warm(); }, HOVER_INTENT_MS); };
   const hoverOff = () => { if (intent.current !== null) { window.clearTimeout(intent.current); intent.current = null; } };
   useEffect(() => hoverOff, []);

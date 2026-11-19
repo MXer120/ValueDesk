@@ -12,6 +12,7 @@
  */
 import { assertSigninLive, SODEX_SIGNIN_LIVE } from './sodexProgrammes';
 import { serverGetJson } from './serverFetch';
+import { vsPaths } from './vsPaths';
 
 export const LEVELS = ['Common', 'Uncommon', 'Rare', 'SuperRare'] as const;
 export type Level = (typeof LEVELS)[number];
@@ -64,9 +65,11 @@ const readPublic = async <T>(path: string, signal?: AbortSignal): Promise<T> => 
   return r.body;
 };
 
-export const fetchLotteryMeta = (signal?: AbortSignal): Promise<LotteryMeta> => readPublic('/api/vs/sodex/lottery/meta', signal);
+export const fetchLotteryMeta = (signal?: AbortSignal): Promise<LotteryMeta> => readPublic(vsPaths.lotteryMeta, signal);
 
-export const fetchLotteryFeed = (limit: number, signal?: AbortSignal): Promise<LotteryFeed> => readPublic(`/api/vs/sodex/lottery/feed?limit=${limit}`, signal);
+/** How many recent openings the Blind Box page's feed shows. */
+export const LOTTERY_FEED_SIZE = 24;
+export const fetchLotteryFeed = (limit: number, signal?: AbortSignal): Promise<LotteryFeed> => readPublic(vsPaths.lotteryFeed(limit), signal);
 
 /** The steps of the merge ladder that exist: `mergeSize` 0 means that level cannot be merged. */
 export function mergeLadder(rules: Pick<LotteryRules, 'mergeSize'>): Array<{ from: Level; to: Level; consume: number }> {

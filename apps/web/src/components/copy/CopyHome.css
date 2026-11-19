@@ -140,9 +140,12 @@
 }
 .cpy-deck__card:focus-visible { outline: 1px solid var(--focus); outline-offset: 3px; }
 .cpy-deck__card > :not(.cpy-glow) { position: relative; z-index: 1; pointer-events: none; }
-.cpy-deck__card--ghost {
-  height: 214px; pointer-events: none;
-  background: linear-gradient(100deg, var(--cpy-card) 40%, var(--cpy-surface-2) 50%, var(--cpy-card) 60%) 0 0 / 300% 100%;
+/* The ghosts' sweep on the compositor: a layer of the same 3-wide tiles slides by one tile (motion.css), as the
+   background-position did - the same picture each frame, without a main-thread repaint. */
+.cpy-deck__card--ghost { height: 214px; pointer-events: none; overflow: hidden; background: none; }
+.cpy-deck__card--ghost::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -300%; width: 600%;
+  background: linear-gradient(100deg, var(--cpy-card) 40%, var(--cpy-surface-2) 50%, var(--cpy-card) 60%) 0 0 / 50% 100% repeat-x;
   animation: cpy-shimmer 1.4s linear infinite;
 }
 .cpy-deck__head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -284,17 +287,22 @@
 }
 .cpy-card:hover { transform: translateY(-3px); box-shadow: var(--depth-3); }
 .cpy-card:focus-visible { transform: translateY(-3px); box-shadow: var(--depth-3), 0 0 0 1px var(--focus); }
-.cpy-card--ghost {
-  cursor: default;
-  background: linear-gradient(100deg, var(--bg-panel) 40%, var(--bg-elevated) 50%, var(--bg-panel) 60%) 0 0 / 300% 100%;
+.cpy-card--ghost { position: relative; cursor: default; background: none; }
+.cpy-card--ghost::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -300%; width: 600%;
+  background: linear-gradient(100deg, var(--bg-panel) 40%, var(--bg-elevated) 50%, var(--bg-panel) 60%) 0 0 / 50% 100% repeat-x;
   animation: cpy-shimmer 1.4s linear infinite;
+  pointer-events: none;
 }
+/* In the glass look the card's glass (appearance.css) is the ghost's ground, and it never swept: its background
+   tile is the box itself, so the moving position drew the same frame 60 times a second. Still, and no layer. */
+html[data-glass] .cpy-card--ghost::after { content: none; }
 .cpy-card--ghost:hover { transform: none; box-shadow: var(--depth-2); }
-@keyframes cpy-shimmer { to { background-position: -150% 0; } }
+@keyframes cpy-shimmer { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(50%, 0, 0); } }
 @media (prefers-reduced-motion: reduce) {
-  .cpy-card--ghost { animation: none; }
+  .cpy-card--ghost::after { animation: none; }
   .cpy-card, .cpy-deck__card { transition: none; }
-  .cpy-deck__card--ghost { animation: none; }
+  .cpy-deck__card--ghost::after { animation: none; }
 }
 .cpy-card__head { display: flex; align-items: center; gap: 10px; padding: var(--sp-3) var(--sp-3) 0; }
 .cpy-card__id { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -317,12 +325,14 @@
 
 .cpy-spark { display: block; width: 100%; overflow: visible; }
 .cpy-spark--empty { border-bottom: 1px dashed var(--line-soft); }
-.cpy-spark--loading {
-  border-radius: 6px;
-  background: linear-gradient(100deg, transparent 30%, var(--tint-strong) 50%, transparent 70%) 0 0 / 300% 100%;
+.cpy-spark--loading { position: relative; overflow: hidden; border-radius: 6px; }
+.cpy-spark--loading::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: -300%; width: 600%;
+  background: linear-gradient(100deg, transparent 30%, var(--tint-strong) 50%, transparent 70%) 0 0 / 50% 100% repeat-x;
   animation: cpy-shimmer 1.4s linear infinite;
+  pointer-events: none;
 }
-@media (prefers-reduced-motion: reduce) { .cpy-spark--loading { animation: none; background: var(--tint); } }
+@media (prefers-reduced-motion: reduce) { .cpy-spark--loading { background: var(--tint); } .cpy-spark--loading::after { content: none; } }
 .cpy-spark__zero { stroke: var(--line-soft); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
 .cpy-spark__line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .cpy-spark__line--pos { stroke: var(--pos); }

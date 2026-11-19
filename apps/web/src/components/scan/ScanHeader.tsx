@@ -22,6 +22,7 @@ import type { Presence } from './useVs';
 import { CopyButton } from '../copy/TraderCard';
 import { isCopyable } from '../copy/gridModel';
 import { NotCopyableNote, useNotCopyable } from '../copy/useNotCopyable';
+import { openPath } from '../../nav';
 import './scan.css';
 
 export interface ScanHeaderProps {
@@ -65,7 +66,7 @@ export function ScanHeader({ venue, onVenue, presence, scanned, onNewSearch, pos
   const notCopyable = useNotCopyable({ enabled: !!scanned && copyVenue !== null, venue: copyVenue ?? 'hyperliquid', positions, positionsAt, fills: null });
   const copy = (direction: 'copy' | 'counter') => {
     if (!scanned) return;
-    window.location.href = `/copy?address=${encodeURIComponent(scanned)}&venue=${venue}&direction=${direction}`;
+    openPath(`/copy?address=${encodeURIComponent(scanned)}&venue=${venue}&direction=${direction}`);
   };
 
   return (

@@ -7,8 +7,8 @@
  */
 import type { IndicatorTemplate } from 'klinecharts';
 import type { LiqHeatmap as HeatApi } from '@sign/indexer/liqRead.js';
-import type { Res } from '../components/liqmap/WalletView';
 import { LIQ_HEAT, unboxed, type Boxed } from './liqHeatIndicator';
+import { groupFor } from '@sign/valuedesk/liquidations/bars.js';
 import { LEV_BANDS, addBands, shownBands, shownTotal, sideBands, type Bands, type ColorBy, type LevFilter } from './liqLev';
 import { drawProfile, type LiqMapData } from './liqProfile';
 
@@ -26,30 +26,13 @@ export function coinOfSymbol(symbol: string): string {
 }
 
 /**
- * Each resolution's bar as a share of the price. Fixed: zooming and panning change how wide a
- * bar is drawn, never how much of the price it holds (owner, 2026-10-29: fine, medium and coarse
- * "shouldn't change granularity when scrolling in and out"). The same in the live and the chart view.
+ * Each resolution's bar as a share of the price, and how many server buckets make one bar
+ * (groupFor). Fixed: zooming and panning change how wide a bar is drawn, never how much of the
+ * price it holds (owner, 2026-10-29: fine, medium and coarse "shouldn't change granularity when
+ * scrolling in and out"). The same in the live and the chart view - and on the server, which sums
+ * the trade chart's map to the Fine bar itself (server valuedesk/liquidations/bars.ts: one rule).
  */
-export const RES_PCT: Record<Res, number> = { fine: 0.001, medium: 0.0025, coarse: 0.005 };
-/** Multiples of the server's bucket a bar may span: the widths stay round numbers. */
-const MULTIPLES = [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
-
-/**
- * How many server buckets (`step` wide) make one bar at `price`: the first round multiple that
- * holds the resolution's share - and each resolution at least one multiple wider than the one
- * before, so Medium and Coarse never come out the same where the multiples jump (10 to 25).
- */
-export function groupFor(step: number, price: number, res: Res): number {
-  const last = MULTIPLES.length - 1;
-  const first = (r: Res) => {
-    const i = MULTIPLES.findIndex((k) => step * k >= price * RES_PCT[r] * (1 - 1e-9));
-    return i < 0 ? last : i;
-  };
-  let i = first('fine');
-  if (res !== 'fine') i = Math.min(last, Math.max(first('medium'), i + 1));
-  if (res === 'coarse') i = Math.min(last, Math.max(first('coarse'), i + 1));
-  return MULTIPLES[i]!;
-}
+export { RES_PCT, groupFor } from '@sign/valuedesk/liquidations/bars.js';
 
 /**
  * The levels now for the map, in the heatmap's Fine bars: fixed, as there, whatever the zoom or

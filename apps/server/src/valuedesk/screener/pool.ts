@@ -187,6 +187,11 @@ export class PoolCache {
     return this.rebuild(venue, provider);
   }
 
+  /** When the venue's pool in hand was built (null: none yet). */
+  builtAt(venue: Venue): number | null {
+    return this.entries.get(venue)?.value?.builtAt ?? null;
+  }
+
   /** Tests only. */
   clear(): void {
     this.entries.clear();

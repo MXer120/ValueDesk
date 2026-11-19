@@ -6,6 +6,7 @@
  * A pair is two bots, each signed by its own wallet. This page starts this wallet's leg and keeps an invitation in the
  * browser; when the second wallet is connected, the Bots page shows "Start leg 2" (HedgeInvites).
  */
+import { PhoneActionBar } from './PhoneActionBar';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { onWalletPrompting, walletAccountList, walletPrompting, type WalletInfo } from '../../wallet';
 import { toQrDataUrl } from '../../walletconnect';
@@ -25,6 +26,7 @@ import { HEDGE_PAIRS_LIVE } from '../../bots/hedgeRules';
 import { applyForBeta, useBetaAccessState } from '../../beta/access';
 import { requestDeposit, requestTransfer } from '../account/actions';
 import { notify } from '../../toast';
+import { openPath } from '../../nav';
 import { StrategyTile } from './BotIcon';
 import { BotsHead, type BotsCtx } from './BotsPage';
 import { useFuturesCoin } from './hedgeData';
@@ -161,6 +163,16 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
   };
   const signing = useSyncExternalStore(onWalletPrompting, walletPrompting);
   const last = STEPS.length - 1;
+
+  /* Back / Next / Start: in the receipt, and on a phone also in the bar above the tab bar (PhoneActionBar). */
+  const actButtons = (
+    <>
+      {at > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={() => setAt((x) => Math.max(0, x - 1))}>Back</Button>}
+      {at < last
+        ? <Button variant="primary" size="md" className="bots-stepper__next" disabled={!!stepErr} title={stepErr ?? undefined} onClick={() => setAt((x) => Math.min(last, x + 1))}>Next<Icon name="arrowRight" size={14} /></Button>
+        : <Button variant="go" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!!whyNot || busy} title={whyNot ?? undefined} onClick={() => void start()}>{busy && signing ? 'Waiting for your wallet…' : busy ? 'Starting…' : paper ? 'Start practice hedge' : d.shape === 'pair' ? 'Start leg 1' : 'Start hedge'}</Button>}
+    </>
+  );
 
   return (
     <>
@@ -357,7 +369,7 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
                   <b className="hg-coin">{coin === null ? DASH : `${coin} ${sym?.baseCoin ?? ''}`}<small>{coinUsd !== null ? ` · ${fmtUsd(coinUsd, 0)}` : ''}</small></b>
                 </Row>
                 <div className="hg-actions">
-                  <Button variant="secondary" icon="arrowRight" onClick={() => { window.location.assign(`/trade?engine=spot&symbol=${encodeURIComponent(`${sym?.baseCoin ?? 'BTC'}-USDC`)}`); }}>Buy {sym?.baseCoin ?? 'it'} on spot</Button>
+                  <Button variant="secondary" icon="arrowRight" onClick={() => { openPath(`/trade?engine=spot&symbol=${encodeURIComponent(`${sym?.baseCoin ?? 'BTC'}-USDC`)}`); }}>Buy {sym?.baseCoin ?? 'it'} on spot</Button>
                   <Button variant="secondary" icon="layers" onClick={() => requestTransfer({ from: 'spot', to: 'perps', coin: sym?.baseCoin })}>Move to Futures</Button>
                   <Button variant="quiet" onClick={() => requestDeposit()}>Deposit</Button>
                 </div>
@@ -418,18 +430,14 @@ export function HedgeNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsVi
                 <div className="bots-rc__tile"><span>Loss limit</span><b>{d.maxLossUsd === null ? 'None' : fmtUsd(d.maxLossUsd, 0)}</b></div>
                 <div className="bots-rc__tile"><span>Runs</span><b>{d.runHours === null ? 'Until stopped' : `${d.runHours} h`}</b></div>
               </section>
-              <div className="bots-sidepanel__act">
-                {at > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={() => setAt((x) => Math.max(0, x - 1))}>Back</Button>}
-                {at < last
-                  ? <Button variant="primary" size="md" className="bots-stepper__next" disabled={!!stepErr} title={stepErr ?? undefined} onClick={() => setAt((x) => Math.min(last, x + 1))}>Next<Icon name="arrowRight" size={14} /></Button>
-                  : <Button variant="go" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!!whyNot || busy} title={whyNot ?? undefined} onClick={() => void start()}>{busy && signing ? 'Waiting for your wallet…' : busy ? 'Starting…' : paper ? 'Start practice hedge' : d.shape === 'pair' ? 'Start leg 1' : 'Start hedge'}</Button>}
-              </div>
+              <div className="bots-sidepanel__act">{actButtons}</div>
               {at === last && whyNot && !busy && <p className="bots-fine" role="status">{whyNot}{ctx.address && !early && meAccess !== 'checking' ? <> <button type="button" className="bots-link" onClick={applyForBeta}>Get access</button></> : null}{ctx.address && early && ctx.setupWhy(paper) ? <> <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></> : null}</p>}
               {stepErr && at < last && <p className="bots-fine" role="status">{stepErr}</p>}
             </div>
           </Shell>
         </aside>
       </div>
+      <PhoneActionBar step={`Step ${at + 1} of ${last + 1}`} note={at === last && whyNot && !busy ? whyNot : stepErr && at < last ? stepErr : undefined}>{actButtons}</PhoneActionBar>
     </>
   );
 }

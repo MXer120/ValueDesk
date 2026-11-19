@@ -27,6 +27,11 @@ export const GRID_VENUES = ['sodex', 'hyperliquid', 'tradexyz', 'lighter', 'arcu
 /** A copy can follow this trader's venue. */
 export const isCopyable = (v: Venue): boolean => (COPY_VENUES as readonly Venue[]).includes(v);
 
+/** The window the Copy page opens on. */
+export const GRID_DEFAULT_WINDOW: BoardWindow = '30d';
+/** The boards the Copy page reads for these platforms: theirs, plus the two a copy follows (the hero deals from those). */
+export const boardVenues = (venues: readonly Venue[]): Venue[] => [...new Set<Venue>([...venues, ...COPY_VENUES])];
+
 /** The chosen platforms, from what a browser stored: known venues, in GRID_VENUES order, never none. */
 export function normaliseVenues(v: unknown): Venue[] {
   const got = Array.isArray(v) ? v.filter((x): x is Venue => (GRID_VENUES as readonly string[]).includes(x)) : [];

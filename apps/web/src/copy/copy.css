@@ -111,6 +111,14 @@
 
 /* --- "copy this trade?" prompts (CopyRunner.tsx) ------------------------------- */
 .copy-prompts { position: fixed; right: 16px; bottom: 56px; z-index: 1250; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 32px)); }
+/* A phone: above the tab bar (its height holds the home indicator's inset, PhoneTabBar.css), across the width as the
+   analytics question is (legal/gate.css .lg-ask). */
+@media (max-width: 760px) {
+  .copy-prompts { bottom: calc(var(--ptabs-h, 0px) + var(--sp-3)); }
+}
+@media (max-width: 600px) {
+  .copy-prompts { left: var(--sp-3); right: var(--sp-3); width: auto; }
+}
 .copy-prompt {
   padding: 12px;
   border-radius: 12px;

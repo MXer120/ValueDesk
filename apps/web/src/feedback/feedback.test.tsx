@@ -55,11 +55,13 @@ test('go-live: the shell renders the navbar and the feedback host on every page,
 });
 
 test('Settings sits right under Copy Address in the wallet menu, with a row in More when there is no wallet', () => {
-  const bar = readFileSync(new URL('../components/NavBar.tsx', import.meta.url), 'utf8');
-  const copy = bar.indexOf("'Copy Address'");
-  const settings = bar.indexOf('<span>Settings</span>');
-  const feedback = bar.indexOf('<span>{FEEDBACK_LABEL}</span>');
+  // The wallet menu is account/AddressMenu.tsx (out of NavBar.tsx since 2026-11-18: it loads with a wallet).
+  const menu = readFileSync(new URL('../components/account/AddressMenu.tsx', import.meta.url), 'utf8');
+  const copy = menu.indexOf("'Copy Address'");
+  const settings = menu.indexOf('<span>Settings</span>');
+  const feedback = menu.indexOf('<span>{FEEDBACK_LABEL}</span>');
   assert.ok(copy > 0 && copy < settings && settings < feedback);
+  const bar = readFileSync(new URL('../components/NavBar.tsx', import.meta.url), 'utf8');
   assert.match(bar, /settingsRow=\{rail && !address\}/);
   const side = readFileSync(new URL('../components/SideBar.tsx', import.meta.url), 'utf8');
   assert.match(side, /trigger=\{false\}/, 'the sidebar shows no Settings button');
@@ -198,7 +200,8 @@ test('right-click: the browser\'s menu stays where people need it', async () => 
 });
 
 test('Settings: a Help & FAQ section with Send feedback, and answers that match the code', async () => {
-  const menu = readFileSync(new URL('../components/SettingsMenu.tsx', import.meta.url), 'utf8');
+  // The window and its sections are SettingsWindow.tsx (SettingsMenu.tsx is the gear since 2026-11-18).
+  const menu = readFileSync(new URL('../components/SettingsWindow.tsx', import.meta.url), 'utf8');
   assert.match(menu, /id: 'help', label: 'Help & FAQ'/);
   assert.match(menu, /section === 'help' && <HelpSection/);
   const { FAQ, HelpSection } = await import('./HelpSection');

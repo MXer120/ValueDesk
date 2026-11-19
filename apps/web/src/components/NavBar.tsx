@@ -26,13 +26,13 @@
  */
 import { BOTS_ON } from '../bots/routes';
 import { BotsNavSeg } from './bots/BotsNavSeg';
-import { Identicon } from './Identicon';
-import { useUsername } from '../onboarding/profile';
-import { fmtDecimalString } from '../numStyle';
 import type { Engine } from '../api';
 import { BrandMark } from './BrandMark';
+import { slotRef } from '../slots';
+import { MarketTypeSwitch } from './MarketTypeSwitch';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Guarded } from './ErrorBoundary';
 import { applyForBeta, useBotsAccess } from '../beta/access';
 import { NAV_TABS, SOON_TABS, TAB_LABELS, pathForTab, type LegalPage, type SodexView, type Tab } from '../router';
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
@@ -42,27 +42,14 @@ import { NavTrade } from './NavTrade';
 import { LanguageGlobe } from './LanguageMenu';
 import { useHoverMenu } from './useHoverMenu';
 import { SettingsMenu, useSettingsBadge } from './SettingsMenu';
-import { PrefsIcon } from './PrefsIcon';
-import { openSettings } from '../settingsBus';
-import { useAddressMask, useMask } from '../privacy';
-import { fmtUsd } from '../format';
-import {
-  WALLET_EVENTS,
-  requestDeposit,
-  requestSignOut,
-  requestTransfer,
-  requestWithdrawFrom,
-  useAccountPending,
-} from './account/actions';
-import { CoinIcon } from './CoinIcon';
+import { useAddressMask } from '../privacy';
+import { WALLET_EVENTS, useAccountPending } from './account/actions';
 import { ConnectedWalletLogo } from './funds/ui';
-import { Collapse, usePresence } from './motion';
+import { usePresence } from './motion';
 import { openConnectDialog } from './account/connect';
-import { prefetchAccountTotals, useAccountTotals } from './account/useAccountTotals';
-import { NO_ACCOUNT_TRANSFER, useAccountExists } from './account/useAccountExists';
-import { useWalletSnapshot } from './account/useWallet';
+/* The address menu and its figures load once there is an address (account/addressMenuLazy.ts). */
+import { AddressMenu, warmAddressMenu, warmAddressMenuAfterLoad } from './account/addressMenuLazy';
 import { RegionPill } from '../legal/LegalGate';
-import { FEEDBACK_LABEL, FeedbackIcon, openFeedback } from '../feedback/FeedbackButton';
 import './account/account.css';
 
 /** `/scan/index.html?address=0x...` - scan.js reads `address` (or `wallet`) off
@@ -144,12 +131,11 @@ export function NavBar({
   const addrMenu = addrHover.open;
   const addrPres = usePresence(addrMenu);
   const pending = useAccountPending();
+  const badge = useSettingsBadge(address);
   /* The address book's logo for whichever wallet is connected, left of the address. */
-  /* The menu's wallet figures are read as soon as there is an address (and
-     again on hover once stale), so opening it rarely waits. */
-  useEffect(() => {
-    if (address) prefetchAccountTotals(address);
-  }, [address]);
+  /* The menu's code and wallet figures come once the page has loaded with an address (and again on hover once
+     stale), so opening it rarely waits. */
+  useEffect(() => (address ? warmAddressMenuAfterLoad(address) : undefined), [address]);
 
   /*
    * `wallet:menu` opens this menu from elsewhere (actions.ts:goToWallet).
@@ -185,18 +171,10 @@ export function NavBar({
     return () => { ro.disconnect(); root.style.removeProperty('--navbar-live'); };
   }, []);
 
-  /* Futures or Spot, on the trade page: the rail's bar shows it before the links, a bar without the rail in its first row. */
+  /* Futures or Spot, on the trade page: the rail's bar shows it before the links (a phone's trade page has it instead). */
   const onTrade = tab === 'trade';
   /* Always there: it opens and closes in place when the page changes, instead of popping in and shoving the links along (owner 2026-11-06). */
-  const marketType = engine && onEngine ? (
-    <div className="nav-seg" role="radiogroup" aria-label="Market type">
-      {(['perps', 'spot'] as const).map((e) => (
-        <button key={e} type="button" role="radio" aria-checked={engine === e} className={engine === e ? 'is-on' : ''} onClick={() => onEngine(e)}>
-          {e === 'perps' ? 'Futures' : 'Spot'}
-        </button>
-      ))}
-    </div>
-  ) : null;
+  const marketType = engine && onEngine ? <MarketTypeSwitch engine={engine} onEngine={onEngine} /> : null;
 
   /* Bots: the section's pages in the same switch and slot (BotsNavSeg) wherever the section is open to this wallet - a
      local build, or a wallet on the beta list in production (owner 2026-11-10: production had no Overview / New bot /
@@ -212,7 +190,8 @@ export function NavBar({
         {!rail && (
           <span className="brand">
             <BrandMark />
-            ValueDesk
+            {/* A phone shows the mark and the Beta tag; the name stays for screen readers (styles.css .brand__name). */}
+            <span className="brand__name">ValueDesk</span>
             <span className="dv-devtag dv-devtag--beta brand__beta">Beta</span>
           </span>
         )}
@@ -275,18 +254,11 @@ export function NavBar({
         </nav>
         {/* More: Leaderboard, Trading limits, Status, Help & FAQ, Send feedback, Community, News (owner, 2026-11-05). Outside the nav: its menu's rows are not nav links. */}
         <NavMore alert={alert} tab={tab} limits={limitsOn} status={statusOn} excluded={excludedOn} onNavigate={onNavigate} onOpenStatus={onOpenStatus} onOpenExcluded={onOpenExcluded} onOpenLimits={onOpenLimits} onOpenSodex={onOpenSodex} sodexOn={sodexOn} onOpenLegal={onOpenLegal} legalOn={legalOn} settingsRow={rail && !address} sodexOpen={botsOpen} />
-        {/* Without the rail (a phone, a narrow window) the same switch sits in the bar's first row, beside
-            the wordmark: spot markets were otherwise reachable only through the market search there. */}
-        {!rail && marketType && (
-          <div className={`nav-seg-slot nav-seg-slot--bar${onTrade ? ' is-on' : ''}`} aria-hidden={!onTrade}>
-            <div className="nav-seg-slot__in">{marketType}</div>
-          </div>
-        )}
-        {!rail && botsSeg && (
-          <div className={`nav-seg-slot nav-seg-slot--bar${onBots ? ' is-on' : ''}`} aria-hidden={!onBots}>
-            <div className="nav-seg-slot__in">{botsSeg}</div>
-          </div>
-        )}
+        {/* Without the rail (a phone) the bar is ONE row (phone pass, 2026-11-18): the mark, then search, the bell
+            and the wallet. Futures / Spot sits in the trade page's own market row there (MarketTypeSwitch at the
+            ticker's end, registry.tsx) and Bots' pages at the top of the Bots page (BotsPage.tsx), each the same switch; the
+            language and Settings are in More's sheet (PhoneTabBar.tsx) and the wallet menu. Two and three rows of
+            bar took 112-165px of a 812px phone above the page. */}
 
         <div className={`navstatus${rail ? ' navstatus--rail' : ''}`}>
           {/*
@@ -295,16 +267,18 @@ export function NavBar({
            * into this slot); the bell with its list beside them. Deposits, withdrawals and
            * transfers announce themselves on the wallet button instead (SideBar.tsx).
            */}
-          {rail && <div id="vs-notify-slot" className="navnotify" />}
-          {/* A restricted (close-only) place: the red pill, always, rail or not (legal/LegalGate.tsx). */}
+          {rail && <div id="vs-notify-slot" className="navnotify" ref={slotRef('vs-notify-slot')} />}
+          {/* A restricted (close-only) place: the red pill beside the rail (legal/LegalGate.tsx); a phone's one-row bar
+              leaves it to the red strip across the top of the app, which says the same (styles.css). */}
           <RegionPill address={address} />
           <ConnectionPill ok={connOk} label={connLabel} />
-          <LanguageGlobe />
+          {rail && <LanguageGlobe />}
           {rail && <Notices address={address} />}
-          {/* Settings: under Copy Address in the wallet menu; a phone keeps its gear, it has no rail and may have no wallet. */}
+          {/* Settings: under Copy Address in the wallet menu, and in More's sheet without a wallet; on a phone the bar
+              holds only its window, opened from those rows (openSettings). */}
           {!rail && (
             <>
-              <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} address={address} />
+              <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} address={address} trigger={false} />
               <Notices address={address} />
               <button
                 type="button" className="navicon" title="Search markets (⌘K)"
@@ -331,13 +305,21 @@ export function NavBar({
                 aria-haspopup="menu"
                 aria-expanded={addrMenu}
                 onClick={addrHover.press}
-                onPointerEnter={() => prefetchAccountTotals(address)}
+                onPointerEnter={() => warmAddressMenu(address)}
+                onPointerDown={() => warmAddressMenu(address)}
               >
                 <ConnectedWalletLogo size={18} className="navaddr__wicon" />
                 {maskAddr(address)}
+                {/* Settings live in this menu on a phone (no gear in the bar), so the wallet carries their "your
+                    profile is waiting", as the rail's wallet does (SideBar.tsx). */}
+                {badge.profile && <span className="settings__dot settings__dot--go" aria-hidden="true" />}
               </button>
               {addrPres.mounted && (
-                <AddressMenu address={address} onClose={addrHover.close} closing={addrPres.closing} onExited={addrPres.done} onPortfolio={() => onNavigate('portfolio')} />
+                <Guarded name="Address menu" bare>
+                <Suspense fallback={null}>
+                  <AddressMenu address={address} onClose={addrHover.close} closing={addrPres.closing} onExited={addrPres.done} onPortfolio={() => onNavigate('portfolio')} />
+                </Suspense>
+                </Guarded>
               )}
             </div>
           ) : (
@@ -395,277 +377,5 @@ const SearchIcon = () => (
   <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
     <circle cx="8.6" cy="8.6" r="6.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
     <path d="M13.3 13.3L18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-  </svg>
-);
-
-/**
- * The connected address's menu, laid out after the owner's reference:
- *
- *   Perps                       label over  (USDC) $1,243.79
- *        [⇅]
- *   Spot               [↑]
- *   EVM                [↓]      collapsed; opens smoothly to the 4 largest holdings + "& N others"
- *   ─────────────────────
- *   Portfolio             ▦
- *   Copy Address          ⧉
- *   Send feedback         💬   (after Copy Address: owner 2026-10-31)
- *   Sign out              ⇥   (always red)
- *
- * Perps has no action of its own (SoDEX has no route from Perps to a wallet -
- * [⇅] moves it); Spot [↑] is Withdraw; [⇅] the Transfer sheet; EVM [↓] the
- * Deposit sheet. Sign out forgets this browser's trading key, then the wallet.
- * Preferences, API keys and Help are deliberately not here.
- *
- * The actions run in AccountController (mounted once in App.tsx), so the menu
- * closes the moment a row is pressed without cancelling anything.
- */
-export function AddressMenu({ address, onClose, closing = false, onExited, onPortfolio }: {
-  address: string;
-  onClose: () => void;
-  /** The Portfolio page (owner 2026-10-31: from the wallet menu too). */
-  onPortfolio: () => void;
-  /** Playing its exit (motion.css) - `onExited` unmounts it. */
-  closing?: boolean;
-  onExited?: () => void;
-}) {
-  const wallet = useWalletSnapshot();
-  const totals = useAccountTotals(address);
-  const noAccount = useAccountExists(address) === false;
-  const maskFunds = useMask('funds');
-  const [copied, setCopied] = useState(false);
-  const [evmOpen, setEvmOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    /* The address button is outside the menu but inside .navaddr: a press on it
-       is left to its own toggle - closing here first made it reopen at once. */
-    const onDown = (e: PointerEvent) => {
-      const host = wrap.current?.closest('.navaddr') ?? wrap.current;
-      if (!host?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('pointerdown', onDown, true);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onDown, true);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [onClose]);
-
-  /* Toasts live in this same corner and sit above everything, so while the menu
-     is open the stack steps left of it (or, with no room there, hides): a toast
-     over the menu swallowed presses on its buttons. */
-  useLayoutEffect(() => {
-    const root = document.documentElement;
-    const left = wrap.current?.getBoundingClientRect().left ?? window.innerWidth;
-    const reserve = Math.round(window.innerWidth - left + 8);
-    root.style.setProperty('--addr-menu-reserve', `${reserve}px`);
-    root.setAttribute('data-addr-menu', left < 380 ? 'narrow' : 'wide');
-    return () => {
-      root.removeAttribute('data-addr-menu');
-      root.style.removeProperty('--addr-menu-reserve');
-    };
-  }, []);
-
-  /* The menu stays open on copy, and says so for a moment. Closing it is the
-     obvious thing to do and the wrong one: the confirmation would unmount in
-     the same frame it appeared, so a copy that silently failed would look
-     exactly like one that worked. */
-  const copy = () => {
-    navigator.clipboard.writeText(address).then(
-      () => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      },
-      () => {},
-    );
-  };
-
-  /* Close first, then act: the action opens its own sheet, and this menu must
-     not sit on top of it. */
-  const run = (fn: () => void) => () => { onClose(); fn(); };
-
-  /* "Live" = this page can ask the wallet to sign right now. An address can be
-     remembered from last visit with nothing attached to it. */
-  const live = wallet.status === 'connected' && !!wallet.provider;
-  const username = useUsername(address);
-  const badge = useSettingsBadge(address);
-  const restoring = wallet.status === 'connecting';
-  const usd = (v: number | null) => maskFunds(v === null ? '—' : fmtUsd(v));
-  // Largest value first, then largest amount; four shown, the rest summed.
-  const evmRows = [...(totals.evm ?? [])].sort((a, b) => b.usd - a.usd || Number(b.amount) - Number(a.amount));
-  const evmShown = evmRows.slice(0, 4);
-  const evmRest = evmRows.slice(4);
-
-  return (
-    <div
-      className={`navaddr__menu menu-popup acct-menu navpop${closing ? ' is-closing' : ''}`}
-      role="menu"
-      ref={wrap}
-      onAnimationEnd={(e) => { if (closing && e.animationName === 'mo-pop-out') onExited?.(); }}
-    >
-      {!live && (
-        <button
-          type="button"
-          className="navaddr__item acct-menu__item--accent"
-          role="menuitem"
-          disabled={restoring}
-          onClick={run(openConnectDialog)}
-        >
-          {restoring ? 'Reconnecting wallet…' : 'Reconnect wallet'}
-        </button>
-      )}
-
-      <div className="acct-menu__funds">
-        <div className="acct-menu__pair">
-          <div className="acct-menu__acct">
-            <div className="acct-menu__acct-main">
-              <span className="acct-menu__acct-k">Futures</span>
-              <span className="acct-menu__acct-v"><CoinIcon coin="USDC" size={22} />{usd(totals.perpsUsd)}</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            className="acct-menu__swap"
-            role="menuitem"
-            aria-label="Transfer between Spot, Futures and EVM"
-            title={noAccount ? NO_ACCOUNT_TRANSFER : 'Transfer'}
-            disabled={noAccount}
-            onClick={run(() => requestTransfer({ from: 'spot', to: 'perps' }))}
-          >
-            <SwapIcon />
-          </button>
-          <div className="acct-menu__acct">
-            <div className="acct-menu__acct-main">
-              <span className="acct-menu__acct-k">Spot</span>
-              <span className="acct-menu__acct-v"><CoinIcon coin="USDC" size={22} />{usd(totals.spotUsd)}</span>
-            </div>
-            <button
-              type="button"
-              className="acct-menu__iconbtn"
-              role="menuitem"
-              aria-label="Withdraw from Spot"
-              title="Withdraw"
-              onClick={run(() => requestWithdrawFrom('spot'))}
-            >
-              <UploadIcon />
-            </button>
-          </div>
-        </div>
-
-        <div className={`acct-menu__acct acct-menu__acct--evm${evmOpen ? ' is-open' : ''}`}>
-          <button
-            type="button"
-            className="acct-menu__acct-main acct-menu__acct-toggle"
-            aria-expanded={evmOpen}
-            onClick={() => setEvmOpen((v) => !v)}
-            title={evmOpen ? 'Hide wallet holdings' : 'Show wallet holdings'}
-          >
-            <span className="acct-menu__acct-k">EVM <Chevron /></span>
-            <span className="acct-menu__acct-v">
-              <ConnectedWalletLogo size={22} />{usd(totals.evmUsd)}
-              {totals.evmLoading && <span className="acct-menu__spin" role="status" aria-label="Reading the other chains" />}
-            </span>
-          </button>
-          <button
-            type="button"
-            className="acct-menu__iconbtn"
-            role="menuitem"
-            aria-label="Deposit"
-            title="Deposit"
-            onClick={run(requestDeposit)}
-          >
-            <DownloadIcon />
-          </button>
-          <Collapse open={evmOpen}>
-            <ul className="acct-menu__holdings">
-              {totals.evm === null && <li className="acct-menu__holding is-dim">Reading your wallet…</li>}
-              {totals.evm !== null && evmRows.length === 0 && <li className="acct-menu__holding is-dim">Nothing on ValueChain or the other EVM chains.</li>}
-              {evmShown.map((h) => (
-                <li key={`${h.chain}:${h.symbol}`} className="acct-menu__holding">
-                  <span className="acct-menu__holding-ic">
-                    <CoinIcon coin={h.symbol} size={18} />
-                    <CoinIcon chain={h.chain} size={11} className="acct-menu__holding-chain" />
-                  </span>
-                  <span className="acct-menu__holding-t">
-                    {maskFunds(`${fmtAmount(h.amount)} ${h.symbol}`)}
-                    <small>{h.chainLabel}</small>
-                  </span>
-                  <span className="acct-menu__holding-v">{maskFunds(fmtUsd(h.usd))}</span>
-                </li>
-              ))}
-              {evmRest.length > 0 && (
-                <li className="acct-menu__holding acct-menu__holding--rest">
-                  <span>& {evmRest.length} {evmRest.length === 1 ? 'other' : 'others'}</span>
-                  <span className="acct-menu__holding-v">{maskFunds(fmtUsd(evmRest.reduce((sum, h) => sum + h.usd, 0)))}</span>
-                </li>
-              )}
-            </ul>
-          </Collapse>
-        </div>
-      </div>
-
-      <div className="acct-menu__section">
-        {username ? (
-          <div className="acct-menu__who" title="Your username. It can't be changed."><Identicon seed={address} size={18} /><b>{username}</b></div>
-        ) : null}
-        <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(onPortfolio)}>
-          <span>Portfolio</span>
-          <PortfolioIcon />
-        </button>
-        <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={copy}>
-          <span>{copied ? 'Copied' : 'Copy Address'}</span>
-          <CopyIcon />
-        </button>
-        <button
-          type="button"
-          className="navaddr__item acct-menu__row"
-          role="menuitem"
-          title={badge.profile ? 'Settings - your profile' : badge.anyHidden ? 'Settings - some of your data is hidden' : undefined}
-          onClick={run(() => openSettings('profile'))}
-        >
-          <span>Settings</span>
-          <span className="acct-menu__rowic">
-            <PrefsIcon size={16} />
-            {badge.profile ? <span className="settings__dot settings__dot--go" aria-hidden="true" /> : badge.anyHidden && <span className="settings__dot" aria-hidden="true" />}
-          </span>
-        </button>
-        <button type="button" className="navaddr__item acct-menu__row" role="menuitem" onClick={run(() => openFeedback())}>
-          <span>{FEEDBACK_LABEL}</span>
-          <FeedbackIcon />
-        </button>
-        <button type="button" className="navaddr__item acct-menu__row acct-menu__row--out" role="menuitem" onClick={run(requestSignOut)}>
-          <span>Sign out</span>
-          <SignOutIcon />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** Up to 6 significant decimals, never rounded up: a wallet line, not an order. */
-const fmtAmount = (amount: string): string => {
-  const [w, f = ''] = amount.split('.');
-  const frac = f.slice(0, Number(w) >= 1000 ? 2 : 6).replace(/0+$/, '');
-  return fmtDecimalString(frac ? `${w ?? 0}.${frac}` : (w ?? '0'));
-};
-
-const glyph = (d: string, size = 16) => () => (
-  <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d={d} />
-  </svg>
-);
-/** Out of the account: an arrow leaving a tray. */
-const UploadIcon = glyph('M8 10.5V2.5M5 5.5l3-3 3 3M2.5 10v2.2c0 .7.6 1.3 1.3 1.3h8.4c.7 0 1.3-.6 1.3-1.3V10');
-/** Into the account: the same tray, arrow turned round. */
-const DownloadIcon = glyph('M8 2.5v8M5 7.5l3 3 3-3M2.5 10v2.2c0 .7.6 1.3 1.3 1.3h8.4c.7 0 1.3-.6 1.3-1.3V10');
-const SwapIcon = glyph('M5 2.5v11M2.5 5 5 2.5 7.5 5M11 13.5v-11M8.5 11 11 13.5 13.5 11');
-const CopyIcon = glyph('M5.5 5.5V3.8c0-.7.6-1.3 1.3-1.3h5.4c.7 0 1.3.6 1.3 1.3v5.4c0 .7-.6 1.3-1.3 1.3h-1.7M3.8 5.5h5.4c.7 0 1.3.6 1.3 1.3v5.4c0 .7-.6 1.3-1.3 1.3H3.8c-.7 0-1.3-.6-1.3-1.3V6.8c0-.7.6-1.3 1.3-1.3Z');
-/** Portfolio: a small bar chart. */
-const PortfolioIcon = glyph('M2.5 13.5h11M4.5 11V7.5M8 11V4.5M11.5 11V8');
-const SignOutIcon = glyph('M6.5 13.5H3.8c-.7 0-1.3-.6-1.3-1.3V3.8c0-.7.6-1.3 1.3-1.3h2.7M10.5 11 13.5 8l-3-3M13.5 8H6');
-const Chevron = () => (
-  <svg className="acct-menu__chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-    <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );

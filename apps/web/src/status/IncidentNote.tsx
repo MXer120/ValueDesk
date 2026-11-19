@@ -10,12 +10,25 @@
  * No request of its own: the incidents ride on /api/health, which the shell reads every
  * 30 s (App.tsx); the probes open and resolve them by themselves (ops/statusAuto.ts).
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { STATUS_PATH } from '../router';
-import { DOWN_VIEW, INCIDENT_KEY, QUIET_KEY, QUIET_MS, dismissIncident, incidentKey, incidentView, incidentsShown, indexerMinor, parseDismissed, pruneDismissed, quietUntil, type IncidentView } from './incidentState';
+import { useConnState } from '../hooks';
+import { INCIDENT_KEY, QUIET_KEY, QUIET_MS, connectionView, dismissIncident, incidentKey, incidentView, incidentsShown, indexerMinor, parseDismissed, pruneDismissed, quietUntil, type IncidentView } from './incidentState';
 import { WarnMark, usePin } from './MaintNote';
 import './maintNote.css';
+
+/** The browser's own word on its network, kept current by its online / offline events. */
+const subscribeOnline = (f: () => void) => {
+  window.addEventListener('online', f);
+  window.addEventListener('offline', f);
+  return () => {
+    window.removeEventListener('online', f);
+    window.removeEventListener('offline', f);
+  };
+};
+const onlineNow = () => typeof navigator === 'undefined' || navigator.onLine !== false;
+export const useOnline = (): boolean => useSyncExternalStore(subscribeOnline, onlineNow, () => true);
 
 function readDismissed(): string[] {
   try {
@@ -56,20 +69,27 @@ export function IncidentNote({ health, down = false, onOpenStatus }: { health: u
     window.addEventListener('storage', on);
     return () => window.removeEventListener('storage', on);
   }, []);
-  // The data service down: one card until it answers again; its X holds for this outage only.
-  const [downAway, setDownAway] = useState(false);
+  /* This device offline, or the data service down - worded for this device's link when SoDEX's own socket has
+     failed too (a market connection retrying), else for the service (incidentState.ts connectionView). */
+  const online = useOnline();
+  const { upstream } = useConnState();
+  const sodexDown = Object.values(upstream).some((s) => s === 'reconnecting');
+  const conn = connectionView({ online, down, sodexDown });
+  // One card until it clears; its X holds for this outage only.
+  const [connAway, setConnAway] = useState<IncidentView | null>(null);
   useEffect(() => {
-    if (!down) setDownAway(false);
-  }, [down]);
+    if (!conn) setConnAway(null);
+  }, [conn]);
   // Minor indexer-only incidents quieted for a day by one X (incidentState.ts QUIET_MS).
   const [quiet, setQuiet] = useState(() => { try { return quietUntil(localStorage.getItem(QUIET_KEY)); } catch { return 0; } });
   const quietOn = quiet > Date.now();
   const pin = usePin();
-  const shown = down ? [] : incidentsShown(health, dismissed).filter((n) => !(quietOn && indexerMinor(n)));
-  if (!pin || (!shown.length && !(down && !downAway))) return null;
+  const connShown = conn && conn !== connAway ? conn : null;
+  const shown = conn ? [] : incidentsShown(health, dismissed).filter((n) => !(quietOn && indexerMinor(n)));
+  if (!pin || (!shown.length && !connShown)) return null;
   return createPortal(
     <>
-      {down && !downAway && <IncidentCard v={DOWN_VIEW} href={STATUS_PATH} onOpenStatus={onOpenStatus} onDismiss={() => setDownAway(true)} />}
+      {connShown && <IncidentCard key={connShown.title} v={connShown} href={STATUS_PATH} onOpenStatus={onOpenStatus} onDismiss={() => setConnAway(connShown)} />}
       {shown.map((n) => (
         <IncidentCard
           key={n.id}
@@ -143,7 +163,7 @@ export function IncidentCard({ v, href, onDismiss, onOpenStatus }: {
           )}
           {v.note && <p className="mn-note__note">{v.note}</p>}
           {v.since && <p className="mn-note__eta">{v.since}</p>}
-          <a
+          {!v.local && <a
             className="mn-note__link"
             href={href}
             onClick={(e) => {
@@ -155,7 +175,7 @@ export function IncidentCard({ v, href, onDismiss, onOpenStatus }: {
             }}
           >
             Status page →
-          </a>
+          </a>}
         </div>
       </div>
     </aside>

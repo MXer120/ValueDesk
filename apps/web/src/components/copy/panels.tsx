@@ -34,8 +34,7 @@ import { skipReasonLabel, type SimTrade } from './sim';
 import { fmtSignedPct, fmtSignedUsd, fmtSize } from './setup';
 import type { CopyContext } from './useCopy';
 import { fmtPlain } from '../../numStyle';
-import { openShare } from '../share/host';
-import { copyCard } from '../share/shareData';
+import { shareCard, useShareBuildersPrefetch } from '../share/host';
 
 /* ------------------------------------------------------------ helpers ----- */
 
@@ -154,6 +153,7 @@ function sizingOf(v: CopyView): string {
 }
 
 function MyCopies({ src: c, rows, onActivity }: { src: CopiesSource; rows: CopyRow[]; onActivity: (id: string) => void }) {
+  useShareBuildersPrefetch();
   const { confirm, dialog } = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   const live = rows.filter((r) => r.view.subscription.status !== 'stopped');
@@ -269,7 +269,7 @@ function MyCopies({ src: c, rows, onActivity }: { src: CopiesSource; rows: CopyR
                     <button
                       type="button"
                       className="pf-ctl"
-                      onClick={() => { const card = copyCard({ leader: lead.address, venue: VENUE_LABEL[lead.venue], pnl: v.pnl, pct: v.pnlPct, since: s.createdAt, multiplier: s.settings.multiplier ?? 1, orders: v.orders, realized: v.realizedPnl, paper: s.settings.paper, wallet: s.owner }); if (card) openShare(card); }}
+                      onClick={() => shareCard((b) => b.copyCard({ leader: lead.address, venue: VENUE_LABEL[lead.venue], pnl: v.pnl, pct: v.pnlPct, since: s.createdAt, multiplier: s.settings.multiplier ?? 1, orders: v.orders, realized: v.realizedPnl, paper: s.settings.paper, wallet: s.owner }))}
                     >
                       Share
                     </button>

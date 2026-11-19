@@ -626,6 +626,45 @@ export interface GateOptions {
   /** Routes answered to a caller on this instance only (default ON_INSTANCE_ROUTES). */
   onInstance?: readonly HostedRoute[];
   limiter?: KeyedLimiter;
+  /** Where the minute's count of 429s goes (LimitedCount), when there were any. */
+  log?: (obj: Record<string, unknown>, msg: string) => void;
+}
+
+/**
+ * The per-client limits' refusals, counted (2026-11-18, maps F13: many phones can share one carrier address, and every
+ * one of them counts against the same `read|<address>` bucket). Numbers only - never an address: per limit class, how
+ * many 429s, from how many clients, the most from one client, and the route patterns refused most. `flush` gives the
+ * minute's count and starts the next; the gate logs it once a minute when there was any, so whether the limits bite
+ * real users (many clients with a few each) or one runaway (one client with all of them) can be read from the journal.
+ */
+export class LimitedCount {
+  private byClass = new Map<string, number>();
+  private byClient = new Map<string, number>();
+  private byRoute = new Map<string, number>();
+  /** Since the start, per class. */
+  readonly total: Record<string, number> = {};
+
+  note(cls: string, client: string, route: string): void {
+    this.byClass.set(cls, (this.byClass.get(cls) ?? 0) + 1);
+    // Bounded: a flood of addresses counts as many clients without holding them all.
+    if (this.byClient.size < 10_000 || this.byClient.has(client)) this.byClient.set(client, (this.byClient.get(client) ?? 0) + 1);
+    this.byRoute.set(route, (this.byRoute.get(route) ?? 0) + 1);
+    this.total[cls] = (this.total[cls] ?? 0) + 1;
+  }
+
+  flush(): { refused: Record<string, number>; clients: number; mostFromOne: number; routes: Array<[string, number]> } | null {
+    if (!this.byClass.size) return null;
+    const out = {
+      refused: Object.fromEntries(this.byClass),
+      clients: this.byClient.size,
+      mostFromOne: Math.max(0, ...this.byClient.values()),
+      routes: [...this.byRoute].sort((a, b) => b[1] - a[1]).slice(0, 5),
+    };
+    this.byClass.clear();
+    this.byClient.clear();
+    this.byRoute.clear();
+    return out;
+  }
 }
 
 /**
@@ -653,6 +692,16 @@ export function installHostedGate(app: FastifyInstance, o: GateOptions): KeyedLi
   const routes = o.routes ?? HOSTED_ROUTES;
   const onInstance = o.onInstance ?? ON_INSTANCE_ROUTES;
   const secrets = originSecretDigests(o.cfg.originSecrets);
+  const limited = new LimitedCount();
+  if (o.log) {
+    const log = o.log;
+    const every = setInterval(() => {
+      const m = limited.flush();
+      if (m) log({ ...m, total: { ...limited.total } }, 'hosted gate: requests refused by the per-client limits in the last minute');
+    }, 60_000);
+    every.unref?.();
+    app.addHook('onClose', async () => clearInterval(every));
+  }
   app.addHook('onRequest', async (req, reply) => {
     if (req.method === 'OPTIONS') return;
     const pattern = req.routeOptions?.url;
@@ -669,9 +718,11 @@ export function installHostedGate(app: FastifyInstance, o: GateOptions): KeyedLi
     if (route.method === 'POST' && !isSiteOrigin(req.headers.origin, route.cls === 'admin' ? o.admin ?? [] : o.site)) {
       return reply.code(403).send({ error: 'origin not allowed', source: 'server' });
     }
-    for (const { key, limit } of limitsFor(route, req.query, o.cfg.limits, clientKey(req.ip))) {
+    const who = clientKey(req.ip);
+    for (const { key, limit } of limitsFor(route, req.query, o.cfg.limits, who)) {
       const wait = limiter.take(key, limit);
       if (wait !== null) {
+        limited.note(key.slice(0, key.indexOf('|')), who, route.url);
         reply.header('Retry-After', String(wait));
         return reply.code(429).send({ error: `too many requests - wait ${wait}s`, source: 'server' });
       }

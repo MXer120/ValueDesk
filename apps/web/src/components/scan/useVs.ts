@@ -17,9 +17,13 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { vsApi, VsError, type TraderProfile, type Venue, type VsFill } from '../../vsApi';
+/* This view reads venues in its first render: their code comes with its page (exchange/venuesLazy.ts). */
+import * as venuesModule from '../../exchange/venues';
+import { bindVenues } from '../../exchange/venuesLazy';
 import { hasActivity } from './hlModel';
 import { logLoadFailure } from '../LoadFailed';
 import { pollEvery, visibleTimeout } from '../../exchange/visibility';
+bindVenues(venuesModule);
 
 export interface VsRead<T> {
   data: T | null;

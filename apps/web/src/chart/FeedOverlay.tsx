@@ -194,8 +194,20 @@ export function FeedOverlay({ view, label, onRetry, bare = false }: FeedOverlayP
   );
 }
 
-/** Footer word: "Live" with a green dot, or "Delayed" in amber. */
-export function FeedBadge({ health, why }: { health: FeedHealth; why: string }) {
+/**
+ * Footer word: "Live" with a green dot, or "Delayed" in amber - or, while a series the chart had
+ * already loaded is shown before its newest bars are in (chart/seriesCache.ts), the app's "As of"
+ * line (asOf.ts) with a neutral dot, for the moment those bars take to arrive.
+ */
+export function FeedBadge({ health, why, asOf }: { health: FeedHealth; why: string; asOf?: string | null }) {
+  if (asOf) {
+    return (
+      <span className="kc-feed kept" title="Candles this chart had already loaded. The newest are on their way." role="status">
+        <span className="kc-feed-dot" aria-hidden="true" />
+        {asOf}
+      </span>
+    );
+  }
   return (
     <span className={`kc-feed ${health}`} title={why} role="status">
       <span className="kc-feed-dot" aria-hidden="true" />

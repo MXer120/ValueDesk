@@ -21,6 +21,10 @@ import { EarnMore, MySquadBoost, SeasonCard, SoPointsCard, ThisWeek, WeekTable }
 import { DifficultyChart, PointsByWeek, PointsMix, RankByWeek, SeasonPoints } from './pointsCharts';
 import { useSoPointsV2 } from './soPointsV2';
 import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
+import { openConnectDialog } from '../account/connect';
+import { useAccountPending } from '../account/actions';
+import { useWalletSnapshot } from '../account/useWallet';
+import { warmWalletModal } from '../../walletconnect';
 
 /** The panels of components/Points.tsx, on the page instead of in a movable grid. */
 const panel = (id: string, c: PointsContext) => {
@@ -156,7 +160,16 @@ const KEY = (
  * what it shows, and the one button. The relay and why it cannot move funds: server routes/pointsAuth.ts.
  */
 function PointsSignIn({ c }: { c: PointsContext }) {
-  const label = c.signingIn ? 'Check your wallet…' : c.signInError ? 'Try again' : 'Show my SoPoints';
+  /* With no wallet (or one remembered from last visit with nothing attached) the card's one button connects, in the
+     app's own Connect dialog as the navbar's does - it was a disabled "Show my SoPoints", a dead end on a phone. */
+  const pending = useAccountPending();
+  /* A return visit: the remembered wallet is being reattached; it waits for that, as the wallet menu does. */
+  const wallet = useWalletSnapshot();
+  const restoring = !!c.address && !c.provider && wallet.status === 'connecting';
+  const connect = !c.address || !c.provider;
+  const opening = connect && (pending === 'connect' || restoring);
+  const label = restoring ? 'Reconnecting wallet…' : opening ? 'Opening…' : !c.address ? 'Connect wallet' : !c.provider ? 'Reconnect wallet'
+    : c.signingIn ? 'Check your wallet…' : c.signInError ? 'Try again' : 'Show my SoPoints';
   return (
     <section className="sdx-locked sdx-signin" aria-label="Your SoPoints">
       <span className="sdx-locked__icon">{KEY}</span>
@@ -175,9 +188,12 @@ function PointsSignIn({ c }: { c: PointsContext }) {
       <button
         type="button"
         className="pf-btn pf-btn--primary sdx-locked__go"
-        disabled={!c.address || !c.provider || c.signingIn}
+        disabled={opening || (!connect && c.signingIn)}
+        aria-busy={opening || (!connect && c.signingIn) || undefined}
         title={c.address && !c.provider ? 'Reconnect your wallet to sign.' : undefined}
-        onClick={() => { void c.signIn(); }}
+        onPointerEnter={connect ? warmWalletModal : undefined}
+        onFocus={connect ? warmWalletModal : undefined}
+        onClick={() => { if (connect) void openConnectDialog(); else void c.signIn(); }}
       >
         {label}
       </button>

@@ -54,6 +54,7 @@ import './dashboard/terminalWidgets.css';
 import './components/IndexPrompt.css';
 import './components/Points.css';
 import './components/account/ConnectDialog.css';
+import './components/PhoneTabBar.css';
 import './components/funds/funds.css';
 import './components/FeeSchedule.css';
 import './setup/setup.css';

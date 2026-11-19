@@ -14,6 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSlot } from '../slots';
 import { STATUS_PATH } from '../router';
 import { TTL } from '../toast';
 import {
@@ -43,15 +44,7 @@ function writeMaint(s: MaintState): void {
 
 /** The toasts' pin (toast.tsx), found again when the rail moves between the corner and the navbar's lane. Also the incident cards' (IncidentNote.tsx). */
 export function usePin(): HTMLElement | null {
-  const [pin, setPin] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    const find = () => setPin(document.getElementById('vs-toast-pin'));
-    find();
-    const mo = new MutationObserver(find);
-    mo.observe(document.body, { childList: true, subtree: true });
-    return () => mo.disconnect();
-  }, []);
-  return pin;
+  return useSlot('vs-toast-pin');
 }
 
 export function MaintNote({ health, onOpenStatus }: { health: unknown; onOpenStatus?: () => void }) {

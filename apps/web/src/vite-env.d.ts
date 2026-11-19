@@ -11,6 +11,8 @@ interface ImportMetaEnv {
 
 /** The build's name (vite.config.ts buildId); read through src/buildInfo.ts. */
 declare const __VS_BUILD__: string | undefined;
+/** True in a build: the catalogues come in parts, one per chunk (tools/i18n-parts.mjs, src/i18n/store.ts). */
+declare const __VS_I18N_PARTS__: boolean | undefined;
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;

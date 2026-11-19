@@ -61,6 +61,9 @@
 .lqm-legend span { display: inline-flex; align-items: center; gap: 5px; }
 /* Exact steps: where the bars come from, and how often (LiqHeatmap.tsx fineNote). */
 .lqm-legend .lqm-legend-note { margin-left: auto; font-variant-numeric: tabular-nums; }
+/* The kept snapshot drawn until the stream's own lands (liveHeat.ts keptHeat). */
+.lqm-body { transition: opacity 160ms ease-out; }
+.lqm-body.is-kept { opacity: 0.6; }
 .lqm-sw { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
 .lqm-sw.is-long { background: var(--neg); }
 .lqm-sw.is-short { background: var(--pos); }

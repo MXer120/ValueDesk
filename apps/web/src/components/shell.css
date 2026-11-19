@@ -177,7 +177,8 @@
   transition: background 140ms, color 140ms, box-shadow 140ms;
 }
 .nav-seg > button:hover { color: var(--text); }
-/* In a bar without the rail (a phone): the first row, after the wordmark and More, at the row's end; compact. */
+/* Beside the rail only: a phone's one-row bar has no switch - its trade page's market row and the Bots page carry it
+   (NavBar.tsx; Market.css .mkt-aside, botsPages.css .bots-phoneseg). */
 /* Its slot opens and closes with the trade page. Only the width moves, by the grid track, so the links beside it glide; the -14px takes back the bar's gap while it is shut. */
 .nav-seg-slot {
   display: grid; flex: none; grid-template-columns: 0fr; margin-right: -14px; opacity: 0; visibility: hidden;
@@ -189,7 +190,17 @@
 .nav-seg-slot--bar { margin-left: auto; margin-right: 0; }
 .nav-seg-slot--bar .nav-seg { padding: 2px; }
 .nav-seg-slot--bar .nav-seg > button { height: 30px; padding: 0 12px; }
-@media (prefers-reduced-motion: reduce) { .nav-seg-slot, .nav-seg-slot.is-on { transition: none; } }
+/* On a phone the slot does not glide: its grid track animated every frame of a switch to or from Trade or Bots,
+   240 ms of layout in the very frames that page mounts in. The track takes its width in one step - at once on
+   the way in, after the fade on the way out - and the switch inside eases in on the compositor (opacity and a
+   short slide, the chart's curve). */
+@media (max-width: 760px) {
+  .nav-seg-slot--bar { transition: opacity 120ms var(--ease-out), grid-template-columns 0s linear 120ms, visibility 0s linear 120ms; }
+  .nav-seg-slot--bar.is-on { transition: opacity var(--dur-med) var(--ease-view), grid-template-columns 0s, visibility 0s; }
+  .nav-seg-slot--bar .nav-seg-slot__in { transform: translateX(8px); transition: transform var(--dur-med) var(--ease-view); }
+  .nav-seg-slot--bar.is-on .nav-seg-slot__in { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .nav-seg-slot, .nav-seg-slot.is-on, .nav-seg-slot__in { transition: none; } }
 .nav-seg > button.is-on {
   background: #2b2b2e;
   color: var(--text);

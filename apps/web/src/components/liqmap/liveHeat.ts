@@ -73,6 +73,29 @@ export function mergeFine(f: LiveFine, d: { at: number; p: number; b: Row[] }): 
   return { ...f, at: d.at, p: d.p, buckets: [...by.values()].sort((a, b) => a[0] - b[0]) };
 }
 
+/**
+ * The last live snapshot of each subscription, kept in memory so a widget mounted again (its tab picked again, another
+ * panel on the same market) draws it at once instead of 'Reading the books…' for the socket's round trips. It is shown
+ * only while younger than the levels route's own cache (perf.ts /api/vs/liquidations: max-age 5 plus
+ * stale-while-revalidate 5), dimmed with its as-of time, and replaced by the socket's first snapshot.
+ */
+export const KEPT_MAX_MS = 10_000;
+export interface KeptHeat { heat: LiqHeatmap; k: number; fineMeta: FineMeta | null; keptAt: number }
+const kept = new Map<string, KeptHeat>();
+export function keepHeat(key: string, v: KeptHeat): void {
+  kept.delete(key);
+  kept.set(key, v);
+  // A handful of markets at most; the oldest go first.
+  while (kept.size > 16) kept.delete(kept.keys().next().value as string);
+}
+/** The kept snapshot for `key`, or null once it is older than KEPT_MAX_MS. */
+export function keptHeat(key: string, now: number = Date.now()): KeptHeat | null {
+  const v = kept.get(key);
+  if (!v) return null;
+  if (now - v.keptAt > KEPT_MAX_MS) { kept.delete(key); return null; }
+  return v;
+}
+
 /** A tab hidden this long closes the socket until it is shown again. */
 export const HIDDEN_CLOSE_MS = 60_000;
 
@@ -81,12 +104,19 @@ export type FineSub = { k: number; from: number; to: number } | null;
 
 export function useLiveHeat(coin: string, venues: readonly Venue[], on: boolean, k = 5, fineSub: FineSub = null): {
   data: LiqHeatmap | null; connected: boolean; k: number; fineMeta: FineMeta | null; fine: LiveFine | null;
+  /** `data` is the kept snapshot (keptHeat), not yet replaced by this socket's: its own time, shown with it. */
+  keptAt: number | null;
 } {
-  const [data, setData] = useState<LiqHeatmap | null>(null);
+  const keepKey = `${coin}|${venues.join(',')}|${k}`;
+  const seed = useRef<KeptHeat | null | undefined>(undefined);
+  if (seed.current === undefined) seed.current = on ? keptHeat(keepKey) : null;
+  const [data, setData] = useState<LiqHeatmap | null>(seed.current?.heat ?? null);
   /** The width (server buckets per bar) the data held is summed to. */
-  const [dataK, setDataK] = useState(1);
+  const [dataK, setDataK] = useState(seed.current?.k ?? 1);
   const [connected, setConnected] = useState(false);
-  const [fineMeta, setFineMeta] = useState<FineMeta | null>(null);
+  const [fineMeta, setFineMeta] = useState<FineMeta | null>(seed.current?.fineMeta ?? null);
+  /** Set while `data` is the kept snapshot; cleared by the socket's first 's' (or a change of market). */
+  const [fromKept, setFromKept] = useState<boolean>(!!seed.current);
   const [fine, setFine] = useState<LiveFine | null>(null);
   const want = useRef({ coin, venues, k, fineSub });
   want.current = { coin, venues, k, fineSub };
@@ -125,6 +155,7 @@ export function useLiveHeat(coin: string, venues: readonly Venue[], on: boolean,
           setDataK(Number(sk) || 1);
           setData(heat);
           setFineMeta(fm ?? null);
+          setFromKept(false);
         } else if (m.t === 'd') {
           setData((h) => (h && h.coin === m.coin ? mergeDelta(h, m as never) : h));
         } else if (m.t === 'fm') {
@@ -178,6 +209,19 @@ export function useLiveHeat(coin: string, venues: readonly Venue[], on: boolean,
     };
   }, [on]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Every snapshot and delta of this socket is kept for the next mount (never the kept copy itself again).
+  useEffect(() => {
+    if (data && !fromKept && data.coin === coin && data.venues.join(',') === venues.join(',')) keepHeat(keepKey, { heat: data, k: dataK, fineMeta, keptAt: Date.now() });
+  }, [data, dataK, fineMeta]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A kept copy is shown for at most KEPT_MAX_MS from when it was kept: then it is dropped even if the socket has sent
+  // nothing yet (the page falls back to the HTTP answer or its loading state, never an ever older copy).
+  useEffect(() => {
+    if (!fromKept) return undefined;
+    const keptAt = seed.current?.keptAt ?? 0;
+    const t = window.setTimeout(() => { setFromKept(false); setData(null); }, Math.max(0, keptAt + KEPT_MAX_MS - Date.now()));
+    return () => window.clearTimeout(t);
+  }, [fromKept]);
+
   useEffect(() => {
     setData((h) => (h && h.coin === coin && h.venues.join(',') === venues.join(',') ? h : null));
     // A window panned stays drawn until the next arrives; another coin's never.
@@ -194,5 +238,6 @@ export function useLiveHeat(coin: string, venues: readonly Venue[], on: boolean,
     return undefined;
   }, [subKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { data: data && data.coin === coin ? data : null, connected, k: dataK, fineMeta: data && data.coin === coin ? fineMeta : null, fine: fine && fine.coin === coin && fineSub ? fine : null };
+  const mine = !!data && data.coin === coin;
+  return { keptAt: mine && fromKept ? data!.at : null, data: mine ? data : null, connected, k: dataK, fineMeta: data && data.coin === coin ? fineMeta : null, fine: fine && fine.coin === coin && fineSub ? fine : null };
 }

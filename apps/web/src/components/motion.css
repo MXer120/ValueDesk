@@ -1,4 +1,12 @@
-/* motion.tsx: smooth expand, animated height, fade-in of a new view. */
+/* motion.tsx: smooth expand, animated height, fade-in of a new view.
+
+   SKELETON SWEEPS ON THE COMPOSITOR (nav pass, 2026-11-18). A loading bone used to sweep by animating its own
+   background-position: style and paint on the main thread every frame, frozen through every long task - which is
+   when a page is loading. Every sweep is now a layer (::after) of the same gradient tile, repeated, wider than the
+   bone, that slides by whole tiles with `transform`: a tile of size s*W moved by background-position P% sits at
+   P/100*(1-s)*W, and a pattern moved by one period is the same pattern, so the layer translated by one tile per loop
+   draws exactly the frames the position did (Portfolio, Copy, Cohorts, Bots, the trade flow, the palette). The bone
+   keeps its shape and clips the layer (overflow: hidden, its radius); its phase at rest is the one it had at rest. */
 
 .mo-collapse {
   display: grid;

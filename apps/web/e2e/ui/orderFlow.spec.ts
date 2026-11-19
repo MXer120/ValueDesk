@@ -348,7 +348,8 @@ h.test('sizing with a balance: MAX and the percentage are balance x leverage at 
 h.test('spot: Buy / Sell, Market and Limit only, no leverage or TP/SL; a spot order is a batch on the spot engine', async (env) => {
   const sx = await enableTrading(env);
   const { page } = env;
-  // Futures / Spot in the bar, on every screen: a phone's bar had no switch (spot only through the search).
+  // Futures / Spot on every screen: in the bar beside the rail, in the trade page's market row on a phone (its bar is
+  // one row) - one switch either way; a phone once had none (spot only through the search).
   const kind = page.getByRole('radiogroup', { name: 'Market type' });
   await kind.waitFor({ state: 'visible', timeout: 20_000 });
   const box = (await kind.boundingBox())!;

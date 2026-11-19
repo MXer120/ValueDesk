@@ -35,7 +35,9 @@
  * `subscribeBar` callback the library gives us.
  *
  * The library is imported dynamically so it lands in its own chunk and never
- * blocks first paint.
+ * blocks first paint. Its download starts when this module evaluates (the trade
+ * chunk arriving, before React renders the page), not in the mount effect
+ * (chart/klineLib.ts).
  */
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useLatched, usePresence } from './motion';
@@ -205,7 +207,7 @@ import {
 import { dragAnywhere } from '../chart/dragAnywhere';
 import { holdFrame } from '../chart/switchFrame';
 import { captureAxis, type AxisHold } from '../chart/axisHandoff';
-import { HistoryPager } from '../chart/historyPager';
+import { HistoryPager, nearOldest, prefetchAtLoad } from '../chart/historyPager';
 import { HistoryReveal } from '../chart/historyReveal';
 import { ViewTween, defaultView, readView } from '../chart/viewTween';
 import {
@@ -228,6 +230,22 @@ import { notify } from '../toast';
 import { logger, recentLogs } from '../log';
 import { plotViolation, readPlot, type Violation } from '../chart/invariant';
 import { pollEvery } from '../exchange/visibility';
+import { loadKlineLib, preloadKlineLib } from '../chart/klineLib';
+import { KLINE_LIMIT, seriesKey } from '../chart/series';
+import { keepOf, restorePlan, seriesCache as keptCache, unverifiedAfterRead, type KeptSeries, type RestorePlan } from '../chart/seriesCache';
+import { HeldPush } from '../chart/heldPush';
+import { installKeptPersistence, keptChanged, keptSeeded, returnEarly, setLiveSeries, startEarlyReads, takeEarly, type EarlyRead } from '../chart/earlyBars';
+import { prefetchSeries } from '../chart/seriesPrefetch';
+import { onPress, setMarketPrefetch } from '../chart/press';
+import { asOfText } from '../asOf';
+import { ttlFor } from '@sign/sodex/restCore.js';
+
+/* The chart library is on its way while the page renders: the mount effect
+   below awaits this same download instead of starting it after the first paint. */
+preloadKlineLib();
+/* A load that lands on the trade page reads its 1m candles and the tickers now,
+   as the trade code arrives (chart/earlyBars.ts); the chart takes the read over. */
+startEarlyReads();
 
 /** Who traded a candle (flow/TradeFlow.tsx): its own chunk, loaded when the panel is first opened. */
 const TradeFlowView = lazy(() => import('./flow/TradeFlow').then((m) => ({ default: m.TradeFlowView })));
@@ -236,8 +254,13 @@ const TradeFlowView = lazy(() => import('./flow/TradeFlow').then((m) => ({ defau
  *  info = lifecycle; debug = high-volume detail (`?debug=chart`). */
 const log = logger('chart');
 
-/** How much history to seed. Matches the previous implementation. */
-const KLINE_LIMIT = 500;
+/** How long an early read's answer (chart/earlyBars.ts) is the series' load as it is: the
+ *  gateway's own cache lifetime for candles. An older one is shown as a kept series - closed
+ *  bars, "As of", the right edge read afresh (chart/seriesCache.ts). */
+const EARLY_FRESH_MS = ttlFor('/klines');
+/** The longest a page's first load waits for the series kept across a reload to be read
+ *  (chart/earlyBars.ts keptSeeded); its own read goes on meanwhile. */
+const SEED_WAIT_MS = 250;
 /** Older bars per request when scrolling back (the backend's maximum) -
  *  and how many such pages are kept fetched ahead of the user
  *  (chart/historyPager.ts). */
@@ -503,8 +526,19 @@ const asBar = (k: KLineData) => ({
   row: k,
 });
 
-/** Which series a load or a live candle belongs to. */
-const feedKey = (engine: string, symbol: string, interval: string): string => `${engine}|${symbol}|${interval}`;
+/** Which series a load or a live candle belongs to (chart/series.ts). */
+const feedKey = seriesKey;
+
+/** "As of hh:mm:ss" (asOf.ts) in the chart's own zone, so it reads like the footer clock beside it. */
+function asOfInZone(at: number, tz: TimeZoneMode, now = Date.now()): string | null {
+  if (tz !== 'utc') return asOfText(at, now);
+  const shift = new Date(at).getTimezoneOffset() * 60_000;
+  return asOfText(at + shift, now + shift);
+}
+
+/** The next animation frame (a resolved promise where there is none). */
+const nextFrame = (): Promise<void> =>
+  new Promise((resolve) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => resolve()) : resolve()));
 
 /** Which price the candles show. */
 type PriceSource = 'latest' | 'mark' | 'index';
@@ -535,6 +569,18 @@ interface Series {
   engine: Engine;
   symbol: string;
   interval: string;
+}
+
+/** A kept series to show at once: the copy, its restore plan, and the right edge's read when one
+ *  is already on its way (an early read). */
+interface KeptShow {
+  entry: KeptSeries;
+  plan: RestorePlan;
+  /** The early read this show took over (given back if it is superseded before it shows). */
+  early: EarlyRead | null;
+  edge: Promise<unknown[]> | null;
+  /** The copy is the cache's (taken out once shown), not one made from an early read. */
+  cached: boolean;
 }
 
 /** How long to wait for the venue to report a submitted modify before giving up
@@ -679,6 +725,8 @@ function Chart({
    *  as the "history for the CURRENT symbol+period is loaded" flag — see the
    *  stale-tick guard below. */
   const pushBar = useRef<((d: KLineData) => void) | null>(null);
+  /** Holds live bars while the chart's carousel page is swiped away (chart/heldPush.ts). */
+  const held = useRef(new HeldPush<KLineData>());
   const lastBar = useRef<KLineData | null>(null);
   const hovering = useRef(false);
   /** Monotonic id so a slow history fetch can never overwrite a newer one. */
@@ -696,6 +744,18 @@ function Chart({
   /** Bars for a silent rebuild (gap repair): the next `init` load of this key
    *  takes them instead of fetching, and without the loading mask. */
   const primed = useRef<{ key: string; rows: KLineData[] } | null>(null);
+  /** The oldest bar on the chart the candle stream may have written since a REST answer last
+   *  confirmed the bars (null: none): what a kept copy of the series has to re-read
+   *  (chart/seriesCache.ts). */
+  const unverifiedFrom = useRef<number | null>(null);
+  /** A kept series is on the chart and its right edge is on its way: the entry it came from
+   *  (put back as it was if the chart leaves it before the edge lands). Its live ticks wait. */
+  const keptFill = useRef<KeptSeries | null>(null);
+  /** The right offset is wider than DEFAULT_OFFSET_RIGHT: room held free for a kept series'
+   *  bars on their way, given back the moment they land. */
+  const offsetHeld = useRef(false);
+  /** The footer's "As of" while a kept series' right edge is on its way. */
+  const [keptAsOf, setKeptAsOf] = useState<{ key: string; at: number } | null>(null);
   /** Older bars of the series on the chart, fetched ahead of the user
    *  (chart/historyPager.ts); replaced with the series. */
   const pager = useRef<HistoryPager | null>(null);
@@ -779,6 +839,16 @@ function Chart({
     if (css === badgeCss.current) return;
     badgeCss.current = css;
     c.setStyles(badgeStyles(css));
+  }, []);
+  /** What a switch back to the series on the chart can start from (chart/seriesCache.ts): its
+   *  closed bars - or, while a kept series' right edge is still on its way, that kept series as it
+   *  came, so nothing unconfirmed is kept and its "As of" stays its own. */
+  const keptNow = useCallback((): KeptSeries | null => {
+    const s = series.current;
+    const c = chart.current;
+    if (!s || !c) return null;
+    if (keptFill.current?.key === s.key) return keptFill.current;
+    return keepOf(s.key, c.getDataList(), unverifiedFrom.current, pager.current?.more ?? true, Date.now());
   }, []);
   /** The chart library itself failed to start (its chunk did not load). */
   const [initFailed, setInitFailed] = useState<{ error: string; failures: number; nextRetryAt: number } | null>(null);
@@ -1265,8 +1335,18 @@ function Chart({
             (failures >= 3 ? log.error : log.warn)('older bars failed to load; retrying', { key: s.key, failures, retryInMs, error }),
         });
         pager.current = next;
-        next.prefetch();
-        log.debug('history: fetching older bars ahead', { key: s.key, from: first, pages: HISTORY_AHEAD, pageSize: HISTORY_PAGE });
+        // A narrow plot (a phone) holds many screens of bars already: the
+        // runway waits for the first touch on the plot (historyPager.ts).
+        const c = chart.current;
+        const plotW = c?.getSize(CANDLE_PANE_ID, 'main')?.width;
+        const barW = c?.getBarSpace().bar;
+        const visible = plotW && barW ? plotW / barW : null;
+        if (prefetchAtLoad(rows.length, visible)) {
+          next.prefetch();
+          log.debug('history: fetching older bars ahead', { key: s.key, from: first, pages: HISTORY_AHEAD, pageSize: HISTORY_PAGE });
+        } else {
+          log.debug('history: older bars wait for the first touch on the plot', { key: s.key, bars: rows.length, visible: Math.round(visible ?? 0) });
+        }
       }
     };
 
@@ -1323,7 +1403,8 @@ function Chart({
       for (const x of mine) onCandle.current(x.d);
     };
 
-    const recover = async (reason: RecoverReason): Promise<RecoverResult> => {
+    /** `given`: the right edge's read, already on its way (a kept series' restore). */
+    const recover = async (reason: RecoverReason, given?: Promise<unknown[]>): Promise<RecoverResult> => {
       const s = series.current;
       const c = chart.current;
       if (disposed || !s || !c || !pushBar.current) return 'failed';
@@ -1339,10 +1420,10 @@ function Chart({
       let raw: unknown[];
       const t0 = performance.now();
       try {
-        raw = await fetchKlineRows(
+        raw = await (given ?? fetchKlineRows(
           { engine: s.engine, symbol: s.symbol, interval: s.interval, limit },
           { timeoutMs: LOAD_TIMEOUT_MS },
-        );
+        ));
       } catch (error) {
         log.warn('gap-fill request failed; the watchdog retries', { key: s.key, reason, limit, error });
         return 'failed';
@@ -1354,7 +1435,15 @@ function Chart({
       const held = c.getDataList().map(asBar);
       const fetched = toRows(raw).map(asBar);
       const plan = planMerge(held, fetched);
-      if (plan.kind === 'none') return 'current';
+      /** What the page confirmed (chart/seriesCache.ts unverifiedAfterRead). */
+      const confirmed = (heldLast: number | null) => {
+        if (!fetched.length) return;
+        unverifiedFrom.current = unverifiedAfterRead(unverifiedFrom.current, fetched[0]!.time, fetched[fetched.length - 1]!.time, heldLast);
+      };
+      if (plan.kind === 'none') {
+        confirmed(held[held.length - 1]?.time ?? null);
+        return 'current';
+      }
       if (plan.kind === 'append') {
         // The chart's realtime path: a bar at its last time replaces it, a
         // later one is appended - so nothing is ever drawn twice.
@@ -1362,6 +1451,7 @@ function Chart({
         const newest = plan.bars[plan.bars.length - 1]!.row;
         if (!lastBar.current || newest.timestamp >= lastBar.current.timestamp) lastBar.current = newest;
         if (!hovering.current) setLegendBar(lastBar.current);
+        confirmed(lastBar.current?.timestamp ?? null);
         log.info('gap filled at the right edge', { key: s.key, bars: plan.bars.length, newBars: plan.newBars });
         return plan.newBars > 0 ? 'caught-up' : 'current';
       }
@@ -1374,6 +1464,8 @@ function Chart({
         log.warn('gap repair produced no bars; keeping the bars on screen', { key: s.key, reason: plan.reason });
         return 'failed';
       }
+      if (plan.reason === 'too-far') unverifiedFrom.current = null;
+      confirmed(null);
       log.info('gap repair: reloading the series from merged bars', { key: s.key, reason: plan.reason, bars: rows.length });
       // Keep the user where they were if they had scrolled back into history.
       const range = c.getVisibleRange();
@@ -1384,6 +1476,215 @@ function Chart({
       return 'caught-up';
     };
     recoverRef.current = recover;
+
+    /**
+     * A fresh series' bars go on the chart - a network load's, or a kept series' (showKept).
+     * `more`: older history exists. `replay`: the ticks kept while it loaded go on now (a kept
+     * series replays them once its right edge is in).
+     */
+    const landSeries = (s: Series, rows: KLineData[], callback: DataLoaderGetBarsParams['callback'], more: boolean, replay: boolean) => {
+      const key = s.key;
+      // All the bars go in at once - scale, layout and axes are final before
+      // the plot is unmasked - and the candle layer takes them over from the
+      // skeleton. Batched with applyHistory's setFeed, so the commit that
+      // unmasks the plot is the one that starts the morph.
+      const mode = !rows.length
+        ? null
+        : morphable(candleStyleRef.current) && !prefersReducedMotion()
+          ? 'morph'
+          : 'fade';
+      if (mode === 'morph' && chart.current) {
+        // Hidden in the same tick the bars go in, so klinecharts never draws
+        // them before the morph layer does; CandleMorph hands them back.
+        // The grid goes too: the layer draws it UNDER its candles, where the
+        // finished chart has it (morph.ts, MORPH_HIDDEN).
+        chart.current.setStyles(gridLines(chart.current) ? MORPH_HIDDEN : MORPH_HIDDEN_CANDLES);
+        hiddenCandles.current = key;
+      }
+      setArrival(mode ? { key, mode } : null);
+      // A switch held the frame: indicators and overlays come back with the
+      // new bars, over the first part of the morph.
+      releaseFrame();
+      applyHistory(s, rows);
+      if (rows.length) {
+        // A reload the invariant guard asked for has answered.
+        guardCount.current = 0;
+        setGuard((g) => (g === key ? null : g));
+      }
+      callback(rows, { forward: more, backward: false });
+      if (replay) replayTicks();
+      // klinecharts sizes the price range to the visible bars BEFORE it
+      // re-measures the price axis for the new labels, and a first load
+      // widens that axis (from "10" to "84,000"): fewer bars fit, and the
+      // range can still include some that are gone. The next forced layout
+      // corrects it - which used to be the morph's landing restyle, so every
+      // candle jumped at the hand-over (measured at 390px). resize() asks for
+      // the library's second measuring pass, folded into this same pending
+      // layout, so the range is final before the first frame is drawn.
+      if (rows.length) chart.current?.resize();
+      // A timeframe or market switch kept the old axis labels up. Ease the
+      // price scale from the span they showed, and crossfade the time labels.
+      // Precision reloads and gap repair return above, so they never start this.
+      const pending = handoff.current;
+      const gen = handoffGen.current;
+      if (pending && handoffUsed.current !== gen && rows.length) {
+        handoffUsed.current = gen;
+        const startGlide = () => {
+          if (handoff.current !== pending || handoffGen.current !== gen) return;
+          const c2 = chart.current;
+          const tw = tween.current;
+          const fitY = fit.current;
+          if (!c2 || !tw || !fitY) {
+            pending.clear();
+            if (handoff.current === pending) handoff.current = null;
+            return;
+          }
+          const settle = () => {
+            if (gen !== handoffGen.current) return;
+            if (!autoRef.current) {
+              const axis = priceAxis(c2);
+              if (axis) holdRange(axis);
+            }
+            pinAfterLoad.current = false;
+          };
+          fitY.prime(pending.span);
+          tw.start(readView(c2), {
+            ms: MORPH_MS,
+            fitY: true,
+            onEnd: (completed) => {
+              if (gen !== handoffGen.current) return;
+              if (!completed) pending.clear();
+              settle();
+              if (handoff.current === pending) handoff.current = null;
+            },
+          });
+          const reveal = () => {
+            if (handoffGen.current !== gen || handoff.current !== pending) return;
+            pending.releasePrice();
+            pending.fadeTime(MORPH_MS);
+          };
+          if (tw.running) requestAnimationFrame(reveal);
+          else {
+            // Already on the new fit, or the move could not start. onEnd is
+            // not called then. Drop a prime begin() never saw.
+            fitY.prime({ from: Number.NaN, to: Number.NaN });
+            reveal();
+            settle();
+            if (handoff.current === pending) handoff.current = null;
+          }
+        };
+        queueMicrotask(() => requestAnimationFrame(startGlide));
+      } else if (pending && handoffUsed.current !== gen) {
+        handoffUsed.current = gen;
+        pending.clear();
+        if (handoff.current === pending) handoff.current = null;
+      }
+    };
+
+    /** The right offset back to the default once a kept series' bars are in (or it is left). */
+    const giveOffsetBack = (c: KChart | null) => {
+      if (!offsetHeld.current) return;
+      offsetHeld.current = false;
+      c?.setOffsetRightDistance(DEFAULT_OFFSET_RIGHT);
+    };
+
+    /** A kept series still waiting for its right edge is left (a switch, a fresh reload). */
+    const dropKept = () => {
+      if (keptFill.current === null && !offsetHeld.current) return;
+      keptFill.current = null;
+      giveOffsetBack(chart.current);
+      setKeptAsOf(null);
+    };
+
+    /** Load the series on the chart again from nothing, as the invariant guard does. */
+    const reloadFresh = () => {
+      series.current = null;
+      primed.current = null;
+      loadHandle.current?.cancel();
+      loadHandle.current = null;
+      loadingKey.current = '';
+      applied.current = { period: '', symbol: '' };
+      setReload((n) => n + 1);
+    };
+
+    /**
+     * What can be shown for a new series at once (chart/seriesCache.ts): a kept copy of it, or an
+     * early read's answer older than the candles' cache lifetime - its closed bars only, the
+     * newest may have moved since. Null: load it (an early read answered within EARLY_FRESH_MS,
+     * or still on its way with nothing kept, is that load). The kept copy stays in the cache
+     * until showKept puts it on the chart.
+     */
+    const keptToShow = (key: string, iv: string, early: EarlyRead | null): KeptShow | null => {
+      const ivMs = intervalMs(iv);
+      const now = Date.now();
+      if (!ivMs) return null;
+      if (early && early.answeredAt !== null && now - early.answeredAt <= EARLY_FRESH_MS) return null;
+      const fromEarly = early && early.rows && early.answeredAt !== null ? keepOf(key, toRows(early.rows), null, true, early.answeredAt) : null;
+      const entry = fromEarly ?? keptCache.peek(key);
+      if (!entry) return null;
+      const plan = restorePlan(entry, now, ivMs);
+      if (!plan) {
+        log.debug('kept series too far behind to show; loading it', { key, newest: entry.bars[entry.bars.length - 1]?.timestamp, asOf: entry.at });
+        return null;
+      }
+      // An early read still on its way holds the whole first load: it is the right edge's read.
+      return { entry, plan, early, edge: early && early.answeredAt === null ? early.promise : null, cached: !fromEarly };
+    };
+
+    /**
+     * A kept series on screen at once (chart/seriesCache.ts, and the owner's rule for anything
+     * shown before its fresh answer): its closed bars, the footer reading "As of" in place of
+     * "Live", room held free at the right edge for the bars on their way, the live ticks held -
+     * until the right edge's read lands and goes in through recover() like any gap fill, which
+     * also re-checks every bar the stream had written. Then "Live", and the ticks replay. A read
+     * that fails loads the series afresh, under the mask.
+     */
+    const showKept = async (s: Series, k: KeptShow, seq: number, callback: DataLoaderGetBarsParams['callback']): Promise<void> => {
+      const c = chart.current;
+      if (!c) return;
+      keptFill.current = k.entry;
+      // One frame first: a switch's morph out draws the candles it starts from, and the morph in
+      // takes over from those (CandleMorph) instead of from grey placeholders.
+      await nextFrame();
+      if (seq !== loadSeq.current || disposed || chart.current !== c || keptFill.current !== k.entry) {
+        // Superseded before it showed (the same series asked for again, or another): the copy
+        // and the early read are still there for that load.
+        if (keptFill.current === k.entry) keptFill.current = null;
+        if (k.early) returnEarly(k.early);
+        return;
+      }
+      if (k.cached) keptCache.take(s.key);
+      const edge = k.edge ?? fetchKlineRows({ engine: s.engine, symbol: s.symbol, interval: s.interval, limit: k.plan.limit }, { timeoutMs: LOAD_TIMEOUT_MS });
+      edge.catch(() => undefined);
+      log.info('kept series shown at once; its right edge is on its way', {
+        key: s.key,
+        bars: k.entry.bars.length,
+        behind: k.plan.gap,
+        limit: k.plan.limit,
+        asOf: new Date(k.entry.at).toISOString(),
+        earlyRead: k.edge !== null,
+      });
+      c.setOffsetRightDistance(DEFAULT_OFFSET_RIGHT + k.plan.gap * c.getBarSpace().bar);
+      offsetHeld.current = true;
+      unverifiedFrom.current = k.entry.unverifiedFrom;
+      setKeptAsOf({ key: s.key, at: k.entry.at });
+      landSeries(s, k.entry.bars.slice(), callback, k.entry.more, false);
+      const res = await recover('kept', edge);
+      if (seq !== loadSeq.current || disposed || keptFill.current !== k.entry) return;
+      keptFill.current = null;
+      // In the same task as recover's pushes: the bars take exactly the room that was held.
+      giveOffsetBack(c);
+      setKeptAsOf(null);
+      if (res === 'failed') {
+        log.warn('a kept series\' right edge did not load; loading the series afresh', { key: s.key });
+        reloadFresh();
+        return;
+      }
+      watchdog.current?.noteHistory(lastBar.current?.timestamp ?? null);
+      replayTicks();
+      keptChanged();
+      log.debug('kept series: right edge in, live again', { key: s.key, result: res });
+    };
 
     /**
      * v10's single data seam. `getBars` is deliberately a pure function of its
@@ -1446,7 +1747,13 @@ function Chart({
         }
 
         let handle = loadHandle.current;
+        /** The read the trade code started as it arrived, for this series (chart/earlyBars.ts). */
+        let early: EarlyRead | null = null;
+        /** A kept copy of this series that can be shown at once (chart/seriesCache.ts). */
+        let kept: KeptShow | null = null;
         if (!handle || loadingKey.current !== key) {
+          // The series being left is kept for a switch back to it.
+          keptCache.put(keptNow());
           // A new series. Whatever was loading for the previous one is
           // cancelled - its request aborted, its retries stopped - and the
           // mask goes up.
@@ -1470,6 +1777,32 @@ function Chart({
           lastBar.current = null;
           if (!hovering.current) setLegendBar(null);
           handle = null;
+          // A kept series still waiting for its right edge was the one being left.
+          dropKept();
+          early = takeEarly(key);
+          kept = keptToShow(key, iv, early);
+          // The page's first load, with its candles still on their way and the series kept
+          // across the reload still being read (IndexedDB took ~190 ms on a throttled phone,
+          // the chart can ask before that): wait for that read, a moment at most, so a reload
+          // draws the kept candles instead of waiting for the network. The early read goes
+          // back meanwhile, for a newer ask of this series to take.
+          const seeding = !kept && early && early.answeredAt === null ? keptSeeded() : null;
+          if (seeding && early) {
+            returnEarly(early);
+            early = null;
+            await Promise.race([seeding, new Promise((r) => setTimeout(r, SEED_WAIT_MS))]);
+            if (seq !== loadSeq.current || disposed) return;
+            early = takeEarly(key);
+            kept = keptToShow(key, iv, early);
+          }
+          // The kept show owns the early read now (its right edge's read); an early answer
+          // older than the candles' cache lifetime is never this load as it is.
+          if (kept || (early && early.answeredAt !== null && Date.now() - early.answeredAt > EARLY_FRESH_MS)) early = null;
+        }
+
+        if (kept) {
+          await showKept({ key, engine: eng, symbol: info.ticker, interval: iv }, kept, seq, callback);
+          return;
         }
 
         /*
@@ -1488,6 +1821,20 @@ function Chart({
           handle = loadWithRetry({
             attempt: async (signal) => {
               const t0 = performance.now();
+              // The early read, once: still on its way, or answered within the
+              // gateway's own cache lifetime for candles (EARLY_FRESH_MS).
+              const pre = early;
+              early = null;
+              if (pre) {
+                log.debug('klines: the early read is this load', { key, sentMsAgo: Math.round(Date.now() - pre.startedAt), answered: pre.answeredAt !== null });
+                try {
+                  const rows = await pre.promise;
+                  log.debug('klines response (early read)', { key, bars: rows.length, ms: Math.round(performance.now() - t0) });
+                  return rows;
+                } catch (error) {
+                  log.debug('the early read failed; reading again', { key, error });
+                }
+              }
               log.debug('klines request', { key, limit: KLINE_LIMIT });
               const rows = await fetchKlineRows({ engine: eng, symbol: info.ticker, interval: iv, limit: KLINE_LIMIT }, { signal });
               log.debug('klines response', { key, bars: rows.length, ms: Math.round(performance.now() - t0) });
@@ -1528,110 +1875,22 @@ function Chart({
         const rows = toRows(raw);
         if (!rows.length) log.warn('klines response is empty', { key, rows: raw.length });
         else if (rows.length < raw.length) log.warn('klines response had unusable rows', { key, rows: raw.length, usable: rows.length });
-        // All the bars go in at once - scale, layout and axes are final before
-        // the plot is unmasked - and the candle layer takes them over from the
-        // skeleton. Batched with applyHistory's setFeed, so the commit that
-        // unmasks the plot is the one that starts the morph.
-        const mode = !rows.length
-          ? null
-          : morphable(candleStyleRef.current) && !prefersReducedMotion()
-            ? 'morph'
-            : 'fade';
-        if (mode === 'morph' && chart.current) {
-          // Hidden in the same tick the bars go in, so klinecharts never draws
-          // them before the morph layer does; CandleMorph hands them back.
-          // The grid goes too: the layer draws it UNDER its candles, where the
-          // finished chart has it (morph.ts, MORPH_HIDDEN).
-          chart.current.setStyles(gridLines(chart.current) ? MORPH_HIDDEN : MORPH_HIDDEN_CANDLES);
-          hiddenCandles.current = key;
-        }
-        setArrival(mode ? { key, mode } : null);
-        // A switch held the frame: indicators and overlays come back with the
-        // new bars, over the first part of the morph.
-        releaseFrame();
-        applyHistory({ key, engine: eng, symbol: info.ticker, interval: iv }, rows);
-        if (rows.length) {
-          // A reload the invariant guard asked for has answered.
-          guardCount.current = 0;
-          setGuard((g) => (g === key ? null : g));
-        }
-        callback(rows, { forward: rows.length > 0, backward: false });
-        replayTicks();
-        // klinecharts sizes the price range to the visible bars BEFORE it
-        // re-measures the price axis for the new labels, and a first load
-        // widens that axis (from "10" to "84,000"): fewer bars fit, and the
-        // range can still include some that are gone. The next forced layout
-        // corrects it - which used to be the morph's landing restyle, so every
-        // candle jumped at the hand-over (measured at 390px). resize() asks for
-        // the library's second measuring pass, folded into this same pending
-        // layout, so the range is final before the first frame is drawn.
-        if (rows.length) chart.current?.resize();
-        // A timeframe or market switch kept the old axis labels up. Ease the
-        // price scale from the span they showed, and crossfade the time labels.
-        // Precision reloads and gap repair return above, so they never start this.
-        const pending = handoff.current;
-        const gen = handoffGen.current;
-        if (pending && handoffUsed.current !== gen && rows.length) {
-          handoffUsed.current = gen;
-          const startGlide = () => {
-            if (handoff.current !== pending || handoffGen.current !== gen) return;
-            const c2 = chart.current;
-            const tw = tween.current;
-            const fitY = fit.current;
-            if (!c2 || !tw || !fitY) {
-              pending.clear();
-              if (handoff.current === pending) handoff.current = null;
-              return;
-            }
-            const settle = () => {
-              if (gen !== handoffGen.current) return;
-              if (!autoRef.current) {
-                const axis = priceAxis(c2);
-                if (axis) holdRange(axis);
-              }
-              pinAfterLoad.current = false;
-            };
-            fitY.prime(pending.span);
-            tw.start(readView(c2), {
-              ms: MORPH_MS,
-              fitY: true,
-              onEnd: (completed) => {
-                if (gen !== handoffGen.current) return;
-                if (!completed) pending.clear();
-                settle();
-                if (handoff.current === pending) handoff.current = null;
-              },
-            });
-            const reveal = () => {
-              if (handoffGen.current !== gen || handoff.current !== pending) return;
-              pending.releasePrice();
-              pending.fadeTime(MORPH_MS);
-            };
-            if (tw.running) requestAnimationFrame(reveal);
-            else {
-              // Already on the new fit, or the move could not start. onEnd is
-              // not called then. Drop a prime begin() never saw.
-              fitY.prime({ from: Number.NaN, to: Number.NaN });
-              reveal();
-              settle();
-              if (handoff.current === pending) handoff.current = null;
-            }
-          };
-          queueMicrotask(() => requestAnimationFrame(startGlide));
-        } else if (pending && handoffUsed.current !== gen) {
-          handoffUsed.current = gen;
-          pending.clear();
-          if (handoff.current === pending) handoff.current = null;
-        }
+        // Every bar is REST's; the newest may be a snapshot taken mid-bar.
+        unverifiedFrom.current = rows[rows.length - 1]?.timestamp ?? null;
+        landSeries({ key, engine: eng, symbol: info.ticker, interval: iv }, rows, callback, rows.length > 0, true);
+        // The copy kept across a reload follows (chart/earlyBars.ts).
+        keptChanged();
       },
       // klinecharts calls these around every reload (setSymbol/setPeriod both
       // reset the store). We do not open a socket here — the app's hub already
       // owns that — we just park the callback the live tick will be fed into.
       subscribeBar: ({ callback }) => {
-        pushBar.current = callback;
+        held.current.bind(callback);
+        pushBar.current = (d) => held.current.push(d);
         replayTicks();
       },
       unsubscribeBar: () => {
+        held.current.unbind();
         pushBar.current = null;
       },
     };
@@ -1660,8 +1919,17 @@ function Chart({
       setLegendBar(bar ?? lastBar.current);
     };
 
+    /** The view came near the oldest bar held without a touch on the plot (the
+     *  toolbar's zoom out): the runway a narrow plot left for later is fetched. */
+    const onRange = (data?: unknown) => {
+      const from = (data as { realFrom?: number } | undefined)?.realFrom;
+      if (typeof from === 'number' && nearOldest(from)) pager.current?.prefetch();
+    };
+
     (async () => {
-      const kc = await import('klinecharts');
+      // Started when this module evaluated (chart/klineLib.ts); a failed
+      // download was forgotten there, so a retry here asks for it again.
+      const kc = await loadKlineLib();
       if (disposed || !holder.current) return;
 
       // Global, name-keyed and idempotent. Must happen before the first order
@@ -1772,6 +2040,7 @@ function Chart({
 
       c.setDataLoader(loader);
       c.subscribeAction('onCrosshairChange', onCrosshair);
+      c.subscribeAction('onVisibleRangeChange', onRange);
 
       lib.current = kc;
       chart.current = c;
@@ -1822,6 +2091,10 @@ function Chart({
     });
 
     return () => {
+      // Leaving the trade page unmounts the chart: what it showed is kept for the way back.
+      keptCache.put(keptNow());
+      keptFill.current = null;
+      offsetHeld.current = false;
       disposed = true;
       window.clearTimeout(initRetryTimer);
       loadHandle.current?.cancel();
@@ -1844,6 +2117,7 @@ function Chart({
       const c = chart.current;
       if (c) {
         c.unsubscribeAction('onCrosshairChange');
+        c.unsubscribeAction('onVisibleRangeChange', onRange);
         layer.current?.removeAll();
         lib.current?.dispose(c);
       }
@@ -1851,6 +2125,7 @@ function Chart({
       onReady.current?.(null);
       chart.current = null;
       lib.current = null;
+      held.current.unbind();
       pushBar.current = null;
       lastBar.current = null;
       // A new instance starts with nothing applied, whatever this one had,
@@ -1861,6 +2136,27 @@ function Chart({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initAttempt]);
+
+  // What a press on a market elsewhere reads for this chart (chart/press.ts: the order book's
+  // chips, the search's market rows), and its series on screen, for the copy kept across a reload
+  // (chart/earlyBars.ts, seriesStore.ts).
+  useEffect(() => {
+    if (bare || src !== 'latest') return;
+    return setMarketPrefetch((e, s) => prefetchSeries(e, s, interval));
+  }, [bare, interval, src]);
+  useEffect(() => {
+    if (bare) return;
+    installKeptPersistence();
+    return setLiveSeries(keptNow);
+  }, [bare, keptNow]);
+  /** The ticker a timeframe would show (Mark and Index exist from 5m up, perps only). */
+  const tickerFor = (iv: string): string =>
+    !bare && priceSource !== 'latest' && engine === 'perps' && !NO_MARK_INDEX.has(iv) ? `${symbol}@${priceSource}` : symbol;
+  /** A press on a timeframe: its candles are read before the click (chart/seriesPrefetch.ts). */
+  const pressInterval = (e: ReactPointerEvent, iv: string) => {
+    if (iv === interval) return;
+    onPress(e, () => prefetchSeries(engine, tickerFor(iv), iv));
+  };
 
   // --- market / timeframe ----------------------------------------------------
   // setPeriod and setSymbol EACH reset the store and trigger a fresh getBars, so
@@ -1987,10 +2283,16 @@ function Chart({
   const streamTs = useRef<number | null>(null);
   /** Ticks that arrived while the history was loading, kept for that series and replayed once it lands. */
   const pendingTicks = useRef<Array<{ key: string; d: any }>>([]);
-  useEffect(() => {
-    if (!ready) return;
-    return hub.subscribe(engine, { channel: 'candle', symbol, interval }, (d) => onCandle.current(d));
-  }, [ready, chartGen, engine, symbol, interval, resub]);
+  // From mount, not from the moment klinecharts is ready: the library's chunk
+  // and the first history read take a round trip or more on a phone, and the
+  // ticks of that time are kept (pendingTicks) and replayed once the history
+  // lands, so the forming bar is current from its first frame. Not tied to the
+  // klinecharts instance either (the ticks go through onCandle, which reads the
+  // one on screen): a new instance does not drop and re-ask the subscription.
+  useEffect(
+    () => hub.subscribe(engine, { channel: 'candle', symbol, interval }, (d) => onCandle.current(d)),
+    [engine, symbol, interval, resub],
+  );
 
   onCandle.current = (d) => {
     // The hub's fan-out matches engine, channel and interval but NOT symbol
@@ -2001,8 +2303,9 @@ function Chart({
     const want = feedKey(engine, seriesTicker, interval);
     // A tick for this series while its history is still loading (no store yet, or the old series'):
     // kept and replayed once the history lands, never dropped - the bar the load caught half-way
-    // gets its later values, and no trade between the snapshot and the first push is lost.
-    if (series.current?.key !== want || !pushBar.current) {
+    // gets its later values, and no trade between the snapshot and the first push is lost. A kept
+    // series waits the same way until its right edge is in: no live bar beside a gap.
+    if (series.current?.key !== want || !pushBar.current || keptFill.current?.key === want) {
       if (d?.t) pendingTicks.current = [...pendingTicks.current.filter((x) => x.key === want).slice(-50), { key: want, d }];
       return;
     }
@@ -2039,11 +2342,30 @@ function Chart({
     layer.current?.notePrice(bar.close);
     pushBar.current(bar);
     streamTs.current = bar.timestamp;
+    // The stream wrote this bar: a kept copy of the series re-reads it (chart/seriesCache.ts).
+    unverifiedFrom.current = unverifiedFrom.current === null ? bar.timestamp : Math.min(unverifiedFrom.current, bar.timestamp);
     watchdog.current?.noteTick(bar.timestamp);
     if (settle) window.setTimeout(() => void recoverRef.current?.('settle'), 1_500);
     // The first trade on a market that had no candles: there is a chart now.
     setFeed((f) => (f.phase === 'empty' && f.key === series.current?.key ? { ...f, phase: 'ready' } : f));
   };
+
+  // On a phone the chart is a carousel page that stays mounted: while MobileCarousel marks it
+  // `data-off` (no pixel in view) klinecharts is not redrawn for every tick; the held bars land in
+  // one task as soon as a pixel of the page is back (chart/heldPush.ts). Elsewhere there is no page.
+  useEffect(() => {
+    const page = holder.current?.closest('.mcarousel__page');
+    if (!page) return;
+    const h = held.current;
+    const sync = () => h.setOff(page.hasAttribute('data-off'));
+    sync();
+    const mo = new MutationObserver(sync);
+    mo.observe(page, { attributes: true, attributeFilter: ['data-off'] });
+    return () => {
+      mo.disconnect();
+      h.setOff(false);
+    };
+  }, []);
 
   // --- feed watchdog signals (chart/feedHealth.ts) ---------------------------
   // The hub's reconnection signal, and the venue-side stream status it relays.
@@ -2291,9 +2613,17 @@ function Chart({
       }
       holdRange(axis, pannedRange(axis, pan.from.range, dy - pan.from.dy, pan.height));
     };
+    /** The user reached for the plot: older bars are fetched ahead now, if a
+     *  narrow plot left that for this moment (historyPager.ts). */
+    const warmHistory = () => pager.current?.prefetch();
     /** Mouse presses are judged by their click count, in onDown. */
     const onPointerDown = (e: PointerEvent) => {
+      warmHistory();
       if (e.pointerType !== 'mouse') stop();
+    };
+    const onKey = () => {
+      warmHistory();
+      stop();
     };
     const onUp = (e: MouseEvent) => {
       held?.setScrollEnabled(true);
@@ -2311,6 +2641,7 @@ function Chart({
       if (wasPressed) syncSoon();
     };
     const onWheel = () => {
+      warmHistory();
       stop();
       syncSoon();
     };
@@ -2319,7 +2650,7 @@ function Chart({
     el.addEventListener('touchstart', stop, passive);
     el.addEventListener('touchend', syncSoon, passive);
     el.addEventListener('pointerdown', onPointerDown, true);
-    el.addEventListener('keydown', stop, true);
+    el.addEventListener('keydown', onKey, true);
     el.addEventListener('mousedown', onDown, true);
     window.addEventListener('mousemove', onMove, true);
     window.addEventListener('mouseup', onUp, true);
@@ -2328,7 +2659,7 @@ function Chart({
       el.removeEventListener('touchstart', stop, passive);
       el.removeEventListener('touchend', syncSoon, passive);
       el.removeEventListener('pointerdown', onPointerDown, true);
-      el.removeEventListener('keydown', stop, true);
+      el.removeEventListener('keydown', onKey, true);
       el.removeEventListener('mousedown', onDown, true);
       window.removeEventListener('mousemove', onMove, true);
       window.removeEventListener('mouseup', onUp, true);
@@ -4310,6 +4641,7 @@ function Chart({
               key={i}
               className={`kc-tf${i === interval ? ' on' : ''}`}
               aria-pressed={i === interval}
+              onPointerDown={(e) => pressInterval(e, i)}
               onClick={() => setIntervalValue(i)}
             >
               {intervalLabel(i)}
@@ -4339,6 +4671,7 @@ function Chart({
                           key={i}
                           role="menuitem"
                           className={i === interval ? 'on' : ''}
+                          onPointerDown={(e) => pressInterval(e, i)}
                           onClick={() => {
                             setIntervalValue(i);
                             setOpenMenu(null);
@@ -4860,7 +5193,13 @@ function Chart({
          * drawn in. The scale (`% A L`) and the price source are no switches on
          * the chart any more: they are in its right-click menu (owner 2026-11-02). */}
         <div className="kc-status">
-          {!masked && <FeedBadge health={health.health} why={health.why} />}
+          {!masked && (
+            <FeedBadge
+              health={health.health}
+              why={health.why}
+              asOf={keptAsOf && keptAsOf.key === wantKey ? asOfInZone(keptAsOf.at, tz) : null}
+            />
+          )}
           {/* mousedown stays inside: the outside-click close would otherwise
               shut the menu and the same click reopen it. */}
           <div className="menu kc-tz" onMouseDown={(e) => e.stopPropagation()}>

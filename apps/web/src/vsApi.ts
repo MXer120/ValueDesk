@@ -34,8 +34,11 @@ import type {
   WhaleTrade,
   Window,
 } from '@sign/valuedesk/types.js';
-import { VenueError, venues } from './exchange/venues';
+import { VenueError } from './exchange/venueError';
+/* The venue reads load on demand (exchange/venuesLazy.ts): pages that need them first bind them. */
+import { venues } from './exchange/venuesLazy';
 import { serverGetJson } from './serverFetch';
+import { qs, vsPaths, type FlowAskQuery, type LeaderboardQuery } from './vsPaths';
 import { fillsWithIndex, type IndexFillsAnswer } from './indexFills';
 import type { SodexOiExcluded } from './sodexOi';
 import type { CalendarEvent, CalendarSource } from '@sign/valuedesk/calendar.js';
@@ -43,7 +46,6 @@ import type { CardPeek } from '@sign/valuedesk/hyperliquid/trader.js';
 import type { LiqAt, LiqHeatmap, LiqHistory, LiqHistoryFine, LiqWallets, WalletLiq } from '@sign/indexer/liqRead.js';
 import type { LiqTile, LiqTileIndex, TileAsk } from '@sign/indexer/liqTiles.js';
 import type { FlowWindow, WalletFillsBody } from '@sign/flow/read.js';
-import type { FlowRole, FlowSide, FlowSort } from '@sign/flow/codec.js';
 import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuedesk/cohorts/model.js';
 
 export type { CalendarEvent, CalendarSource, CardPeek };
@@ -69,8 +71,8 @@ export type {
 } from '@sign/valuedesk/types.js';
 
 export const VS_VENUES: readonly Venue[] = ['sodex', 'hyperliquid'];
-/** Venues Scan can open an address on (a profile and fills each). */
-export const SCAN_VENUES: readonly Venue[] = ['sodex', 'hyperliquid', 'tradexyz', 'lighter', 'arcus'];
+/* The index's paths, and Scan's venues, live in vsPaths.ts (pure: the build's first-read registry reads them too). */
+export { SCAN_VENUES, vsPaths, type FlowAskQuery, type LeaderboardQuery } from './vsPaths';
 /** A wallet left out of the cohorts and the heatmap (server internalWallets.ts), as /api/vs/excluded answers. */
 export interface ExcludedWallet {
   venue: Venue;
@@ -100,17 +102,11 @@ export const VENUE_LABEL: Record<Venue, string> = {
 };
 
 export class VsError extends Error {
-  constructor(message: string, readonly code?: string) {
+  /** `body`: the answer as sent (e.g. the tile index's `building` progress, done / of). */
+  constructor(message: string, readonly code?: string, readonly body?: unknown) {
     super(message);
   }
 }
-
-const qs = (o: Record<string, string | number | undefined>): string => {
-  const p = new URLSearchParams(
-    Object.entries(o).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]),
-  ).toString();
-  return p ? `?${p}` : '';
-};
 
 /**
  * One index read, through serverFetch.ts: identical reads in flight share one
@@ -121,7 +117,7 @@ async function unwrap<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await serverGetJson<T & { ok?: boolean; error?: string; code?: string }>(path, signal);
   const body = res.body;
   if (!res.ok || !body || body.ok === false) {
-    throw new VsError(body?.error ?? `HTTP ${res.status} from ${path}`, body?.code);
+    throw new VsError(body?.error ?? `HTTP ${res.status} from ${path}`, body?.code, body);
   }
   return body as T;
 }
@@ -180,39 +176,23 @@ function direct<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
   });
 }
 
-export type FlowAskQuery = { coin: string; venues: readonly Venue[]; kind?: 'perp' | 'spot'; from: number; to: number; role: FlowRole; side: FlowSide; sort: FlowSort; limit?: number; q?: string };
-
-/**
+/*
  * The paths (and queries) of the reads that are also pushed over the live socket (live/liveSocket.ts, server
- * routes/liveHub.ts): the socket subscribes to the very string the HTTP read fetches, so both give the route's own answer.
+ * routes/liveHub.ts) are vsPaths' (vsPaths.ts): the socket subscribes to the very string the HTTP read fetches, so both
+ * give the route's own answer.
  */
-export const vsPaths = {
-  flow: (ask: FlowAskQuery) =>
-    `/api/vs/flow${qs({ coin: ask.coin, venues: ask.venues.join(','), kind: ask.kind, from: ask.from, to: ask.to, role: ask.role, side: ask.side, sort: ask.sort, limit: ask.limit, q: ask.q })}`,
-  cohorts: (venues: readonly Venue[], f: CohortFilter) =>
-    `/api/vs/cohorts${qs({ venues: venues.join(','), sector: f.sector ?? undefined, coin: f.coin ?? undefined })}`,
-  cohortDetail: (venues: readonly Venue[], cohort: CohortId, range: CohortRange, f: CohortFilter) =>
-    `/api/vs/cohorts/detail${qs({ venues: venues.join(','), cohort, range, sector: f.sector ?? undefined, coin: f.coin ?? undefined })}`,
-  cohortMap: (venues: readonly Venue[], cohort: CohortId | null) =>
-    `/api/vs/cohorts/map${qs({ venues: venues.join(','), cohort: cohort ?? undefined })}`,
-  cohortFocus: (venues: readonly Venue[], f: CohortFilter, range: CohortRange) =>
-    `/api/vs/cohorts/focus${qs({ venues: venues.join(','), sector: f.sector ?? undefined, coin: f.coin ?? undefined, range })}`,
-};
-
 export const vsApi = {
   /** What the server has read of a SoDEX wallet's own history, for the browser's walk to start from. */
   walletHistory: (address: string, kind: 'trades-perps' | 'trades-spot' | 'funding', signal?: AbortSignal) =>
     unwrap<{ state: ScopeState | null; rows: Array<[string, number, string | null, string | null, string | null, string | null, string | null, string | null, string | null, 0 | 1 | null]> }>(`/api/vs/wallet-history?address=${address}&kind=${kind}`, signal),
-  leaderboard: (
-    o: { venue?: Venue | 'all'; venues?: string; view?: 'net' | 'single'; window?: BoardWindow; sort?: LeaderboardSort; limit?: number; offset?: number; q?: string; side?: 'top' | 'worst'; curves?: 1; minTrades?: 2 },
-    signal?: AbortSignal,
-  ) => unwrap<LeaderboardResponse & { partial?: Venue[] }>(`/api/vs/leaderboard${qs(o)}`, signal),
+  leaderboard: (o: LeaderboardQuery, signal?: AbortSignal) =>
+    unwrap<LeaderboardResponse & { partial?: Venue[] }>(vsPaths.leaderboard(o), signal),
 
   explore: (signal?: AbortSignal) => unwrap<ExploreResponse>('/api/vs/explore', signal),
 
   /** Hyperliquid markets (default dex and xyz), including the hourly funding rate. */
   assets: (signal?: AbortSignal) =>
-    unwrap<{ assets?: unknown }>('/api/vs/screener?view=assets', signal),
+    unwrap<{ assets?: unknown }>(vsPaths.screenerAssets, signal),
 
   // --- one trader on one venue: straight from the venue, in this browser -----
   // Shared for a moment (sharedRead): a card's hover starts the read the copy setup then takes (prefetchCopy).
@@ -275,10 +255,11 @@ export const vsApi = {
   /**
    * A coin's liquidation levels over a set of venues (the cohort books, priced: server indexer/liqRead.ts).
    * `fine`: buckets of `step` over [from, to), exact from the books (liqHeatmapFine; the side and leverage
-   * filters stay the widget's, so viewers of one coin share the edge's answer).
+   * filters stay the widget's, so viewers of one coin share the edge's answer). `bar`: summed to that bar on the server,
+   * the levels past the price left out (server bars.ts barHeatmap) - what the trade chart's map draws.
    */
-  liquidations: (coin: string, venues: readonly Venue[], res: 'fine' | 'medium' | 'coarse', signal?: AbortSignal, wallets: readonly string[] = [], fine?: { step: number; from: number; to: number }) =>
-    unwrap<LiqHeatmap>(`/api/vs/liquidations${qs({ coin, venues: venues.join(','), res, wallets: wallets.length ? wallets.join(',') : undefined, ...(fine ? { step: fine.step, from: fine.from, to: fine.to } : {}) })}`, signal),
+  liquidations: (coin: string, venues: readonly Venue[], res: 'fine' | 'medium' | 'coarse', signal?: AbortSignal, wallets: readonly string[] = [], fine?: { step: number; from: number; to: number }, bar?: 'fine' | 'medium' | 'coarse') =>
+    unwrap<LiqHeatmap>(`/api/vs/liquidations${qs({ coin, venues: venues.join(','), res, wallets: wallets.length ? wallets.join(',') : undefined, ...(fine ? { step: fine.step, from: fine.from, to: fine.to } : {}), bar })}`, signal),
   /** The wallets whose longs (or shorts) liquidate in [from, to); `lev`: only those leverage bands (all three or none: every position). */
   liquidationWallets: (coin: string, venues: readonly Venue[], side: 'long' | 'short', from: number, to: number, signal?: AbortSignal, wallets: readonly string[] = [], lev: readonly string[] = []) =>
     unwrap<LiqWallets>(`/api/vs/liquidations/wallets${qs({ coin, venues: venues.join(','), side, from, to, wallets: wallets.length ? wallets.join(',') : undefined, lev: lev.length && lev.length < 3 ? lev.join(',') : undefined })}`, signal),
@@ -288,9 +269,12 @@ export const vsApi = {
   /** The history in tiles (server indexer/liqTiles.ts): its index - every snapshot's time, price and step, and the colour scales. */
   liquidationTiles: (coin: string, venues: readonly Venue[], signal?: AbortSignal, wallets: readonly string[] = []) =>
     unwrap<LiqTileIndex>(`/api/vs/liquidations/tiles${qs({ coin, venues: venues.join(','), wallets: wallets.length ? wallets.join(',') : undefined })}`, signal),
-  /** One tile of it: the snapshots of a time slot, their rows in a price band (`v`: up to that snapshot, for the slot still filling). */
+  /**
+   * One tile of it: the snapshots of a time slot, their rows in a price band (`v`: up to that snapshot, for the slot still
+   * filling; `at`: that one snapshot; `fields: 'ls'`: [bucket, long, short] rows; `every`/`off`: the newest snapshot a bar).
+   */
   liquidationTile: (coin: string, venues: readonly Venue[], ask: TileAsk, signal?: AbortSignal, wallets: readonly string[] = []) =>
-    unwrap<LiqTile>(`/api/vs/liquidations/tiles${qs({ coin, venues: venues.join(','), wallets: wallets.length ? wallets.join(',') : undefined, tl: ask.tl, tt: ask.tt, pl: ask.pl, band: ask.band, bw: ask.bw, v: ask.v })}`, signal),
+    unwrap<LiqTile>(`/api/vs/liquidations/tiles${qs({ coin, venues: venues.join(','), wallets: wallets.length ? wallets.join(',') : undefined, tl: ask.tl, tt: ask.tt, pl: ask.pl, band: ask.band, bw: ask.bw, v: ask.v, at: ask.at, fields: ask.fields, every: ask.every, off: ask.every ? ask.off : undefined })}`, signal),
   /** The history at a step finer than its snapshots keep, for a price window and a time window (the snapshots' fine layers). */
   liquidationHistoryFine: (coin: string, venues: readonly Venue[], ask: { step: number; from: number; to: number; t0: number; t1: number; every?: number; off?: number; pool?: number; side?: 'long' | 'short' | 'both'; lev?: readonly string[]; v?: number; wallets?: readonly string[] }, signal?: AbortSignal) =>
     unwrap<LiqHistoryFine>(`/api/vs/liquidations/history${qs({ coin, venues: venues.join(','), step: ask.step, from: ask.from, to: ask.to, t0: ask.t0, t1: ask.t1, every: ask.every, off: ask.off, pool: ask.pool, side: ask.side === 'both' ? undefined : ask.side, lev: ask.lev && ask.lev.length && ask.lev.length < 3 ? ask.lev.join(',') : undefined, v: ask.v, wallets: ask.wallets && ask.wallets.length ? ask.wallets.join(',') : undefined })}`, signal),
@@ -310,7 +294,7 @@ export const vsApi = {
   /** The wallets left out of the cohorts and the liquidation heatmap, with why and what they hold. */
   excluded: (signal?: AbortSignal) => unwrap<{ wallets: ExcludedWallet[] }>('/api/vs/excluded', signal),
   /** Per SoDEX market, the size of SoDEX's internal pair (sodexOi.ts). */
-  sodexOiExcluded: (signal?: AbortSignal) => unwrap<SodexOiExcluded>('/api/vs/sodex/oi-excluded', signal),
+  sodexOiExcluded: (signal?: AbortSignal) => unwrap<SodexOiExcluded>(vsPaths.sodexOiExcluded, signal),
   /** Every cohort for a set of venues (netted over them), under a sector / coin filter. */
   cohorts: (venues: readonly Venue[], f: CohortFilter, signal?: AbortSignal) =>
     unwrap<CohortsResponse>(vsPaths.cohorts(venues, f), signal),
@@ -330,5 +314,5 @@ export const vsApi = {
     /** `range`: what `pnlRange` and the win rate cover (the server's default is 30d). */
     o: { sort: WalletSort; dir: 'asc' | 'desc'; offset: number; limit: number; range?: CohortRange }, signal?: AbortSignal,
   ) =>
-    unwrap<CohortWalletsResponse>(`/api/vs/cohorts/wallets${qs({ venues: venues.join(','), cohort, sector: f.sector ?? undefined, coin: f.coin ?? undefined, ...o })}`, signal),
+    unwrap<CohortWalletsResponse>(vsPaths.cohortWallets(venues, cohort, f, o), signal),
 };

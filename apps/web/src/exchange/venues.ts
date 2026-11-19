@@ -28,16 +28,9 @@ import { gwGet } from './sodexGateway';
 import { RequestGate } from './gate';
 import { lastTradeHints } from './lastTradeHints';
 
-/** A venue failure, as the server's `{ok:false, code, error}` answered it. */
-export class VenueError extends Error {
-  constructor(
-    message: string,
-    readonly code: 'not_available' | 'upstream' | 'bad_request',
-  ) {
-    super(message);
-    this.name = 'VenueError';
-  }
-}
+/* A venue failure: its own module (vsApi.ts maps it without loading this one); still exported from here. */
+import { VenueError } from './venueError';
+export { VenueError };
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 

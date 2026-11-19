@@ -70,6 +70,8 @@ research_notes/
 # Vercel: the link of `vercel link` and the Build Output of deploy/vercel/build.sh
 .vercel/
 apps/web/public/models/
+# The speech model as build.sh keeps it between Vercel builds (deploy/vercel/package.mjs MODEL_CACHE).
+/.cache/valuedesk-model/
 
 # The owner's films and pictures: on this PC only (marketing/video/capture/gallery.mjs).
 /desk/

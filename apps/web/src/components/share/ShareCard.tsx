@@ -9,6 +9,7 @@ import { Modal } from '../Modal';
 import { DlgFoot, DlgRow, DlgSeg, DlgSwitch } from '../dialogParts';
 import { track } from '../../analytics/usage';
 import { cardPng, xIntent, type CardData, type CardOpts, type Ratio } from './card';
+import { prefersNativeShare, shareNative } from '../../share/nativeShare';
 import './share.css';
 
 const NOUN: Record<CardData['kind'], string> = { trade: 'trade', position: 'position', portfolio: 'portfolio', copy: 'copy', bot: 'bot', botvol: 'bot' };
@@ -20,8 +21,8 @@ const ICON = {
   share: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>,
 };
 
-/** A phone (a touch screen that can hand files to the share sheet): Save and Share instead of Copy and X. */
-const isPhone = (): boolean => typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true && typeof navigator.share === 'function';
+/** A phone with the share sheet (share/nativeShare.ts): Save and Share instead of Copy and X. */
+const isPhone = (): boolean => prefersNativeShare();
 
 export function ShareCard({ card, code, onClose }: { card: CardData; code: string | null; onClose: () => void }) {
   const [ratio, setRatio] = useState<Ratio>('wide');
@@ -84,16 +85,13 @@ export function ShareCard({ card, code, onClose }: { card: CardData; code: strin
     say(ok ? 'Image copied: paste it into your post.' : 'Download the image and add it to your post.');
     did('x');
   };
+  /* The sheet, with the picture where the browser hands files on (WhatsApp, Telegram take it as an image). */
   const share = async () => {
     if (!file) return;
-    try {
-      const data: ShareData = { text: card.post({ amounts }), url: card.link };
-      if (navigator.canShare?.({ files: [file] })) data.files = [file];
-      await navigator.share(data);
-      did('share');
-    } catch {
-      /* closed */
-    }
+    const r = await shareNative({ text: card.post({ amounts }), url: card.link, file });
+    if (r === 'shared' || r === 'shared-text') did('share');
+    if (r === 'shared-text') say('This browser shared the link only: Save adds the picture.');
+    if (r === 'failed' || r === 'unsupported') { download('save'); say('Sharing was not allowed here: the picture was saved instead.'); }
   };
 
   const foot = (

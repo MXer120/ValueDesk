@@ -20,7 +20,7 @@
  */
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { usePresence } from './motion';
+import { usePresence, useSheetDrag } from './motion';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -53,11 +53,23 @@ export interface ModalProps {
    */
   dock?: ReactNode;
   dockOpen?: boolean;
+  /**
+   * A phone sheet (the tab bar's More): up to 760px it comes from the bottom edge and leaves the same way, on the
+   * chart's curve (styles.css .modal.is-sheet), and a grip over its head drags it down to dismiss (useSheetDrag).
+   * Wider, it is the centred dialog it always was.
+   */
+  sheet?: boolean;
+  /**
+   * Focus the dialog itself on open, not its first control. For a dialog that opens by itself rather than from a
+   * press (the welcome gate): focusing its close button there drew a focus ring on it for every first visit, before
+   * anything was touched. Tab still starts at the first control, Shift+Tab at the last.
+   */
+  focusDialog?: boolean;
 }
 
 export function Modal({
   open, title, onClose, children, footer, size = 'sm', dismissOnBackdrop = true, className, onBack, aside,
-  dock, dockOpen = false,
+  dock, dockOpen = false, sheet = false, focusDialog = false,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   /* Its own id: two modals open at once (the copy window and the terms it asks for) each keep their name. */
@@ -93,8 +105,8 @@ export function Modal({
     const node = dialogRef.current;
     // Prefer the first real control; fall back to the dialog itself so focus
     // never stays behind on the page underneath.
-    const first = node?.querySelector<HTMLElement>(FOCUSABLE);
-    (first ?? node)?.focus();
+    const first = focusDialog ? null : node?.querySelector<HTMLElement>(FOCUSABLE);
+    (first ?? node)?.focus(focusDialog ? { preventScroll: true } : undefined);
 
     return () => {
       const now = document.activeElement as HTMLElement | null;
@@ -128,7 +140,8 @@ export function Modal({
       const first = items[0]!;
       const last = items[items.length - 1]!;
       // Wrap manually; otherwise Tab walks out into the page behind the modal.
-      if (e.shiftKey && document.activeElement === first) {
+      // From the dialog itself (focusDialog), Shift+Tab goes to the last control, not out of the dialog.
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {
@@ -140,8 +153,12 @@ export function Modal({
     return () => document.removeEventListener('keydown', onKey, true);
   }, [open, onClose]);
 
-  // Closing plays the exit (motion.css) before the sheet unmounts.
-  const presence = usePresence(open, 220);
+  /* A phone sheet follows a finger on its grip or head down, and goes when let go far enough or fast enough. */
+  useSheetDrag(dialogRef, { enabled: sheet && open, onDismiss: onClose });
+
+  // Closing plays the exit (motion.css) before the sheet unmounts; a phone sheet's exit is its slide down
+  // (styles.css vs-sheet-out, 200ms), so its fallback waits longer than the dialog's fade.
+  const presence = usePresence(open, sheet ? 320 : 220);
   if (!presence.mounted) return null;
 
   /*
@@ -159,13 +176,14 @@ export function Modal({
   const dialog = (
     <div
       ref={dialogRef}
-      className={`modal modal-${size}${className ? ` ${className}` : ''}`}
+      className={`modal modal-${size}${sheet ? ' is-sheet' : ''}${className ? ` ${className}` : ''}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
     >
-      <div className="modal-head">
+      {sheet && <span className="sheet-grip" aria-hidden="true" />}
+      <div className="modal-head" data-sheet-handle={sheet || undefined}>
         {onBack && (
           <button type="button" className="modal-back" onClick={onBack} aria-label="Back">
             <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -191,12 +209,14 @@ export function Modal({
 
   return createPortal(
     <div
-      className={`modal-scrim${presence.closing ? ' is-closing' : ''}`}
+      className={`modal-scrim${sheet ? ' is-sheet-scrim' : ''}${presence.closing ? ' is-closing' : ''}`}
       onMouseDown={(e) => {
         if (open && dismissOnBackdrop && e.target === e.currentTarget) onClose();
       }}
       onAnimationEnd={(e) => {
-        if (presence.closing && e.animationName === 'mo-scrim-out') presence.done();
+        // A sheet leaves by its own slide only up to 760px (styles.css .modal.is-sheet); wider it is the centred dialog.
+        const sheetOut = sheet && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 760px)').matches;
+        if (presence.closing && e.animationName === (sheetOut ? 'vs-sheet-out' : 'mo-scrim-out')) presence.done();
       }}
     >
       {withAside ? (

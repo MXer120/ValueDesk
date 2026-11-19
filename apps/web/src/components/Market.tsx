@@ -66,6 +66,7 @@ import { CoinIcon } from './CoinIcon';
 import { MENU_ICONS } from '../dashboard/tabExtras';
 import { usePrivacy } from '../privacy';
 import { logger } from '../log';
+import { pressMarket } from '../chart/press';
 
 /**
  * The order book's log namespace. warn/error always print; `?debug=book`
@@ -440,7 +441,15 @@ export function MarketStrip({
         const last = t?.lastPx;
         return (
           <div key={s} className={`mkt-favchip${s === symbol ? ' is-active' : ''}`}>
-            <button type="button" className="mkt-favchip__open" aria-pressed={s === symbol} onClick={() => onSelect?.(s)} title={label}>
+            <button
+              type="button"
+              className="mkt-favchip__open"
+              aria-pressed={s === symbol}
+              // The chart's candles for this market are read on the press (chart/press.ts).
+              onPointerDown={s === symbol ? undefined : (e) => pressMarket(e, engine, s)}
+              onClick={() => onSelect?.(s)}
+              title={label}
+            >
               <span className="mkt-favchip__ic"><CoinIcon coin={meta?.baseCoin ?? s} size={20} /></span>
               <span className="mkt-favchip__t">
                 <b>{label}</b>

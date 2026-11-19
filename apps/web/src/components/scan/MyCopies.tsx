@@ -13,6 +13,7 @@ import { Card, Group, Row } from '../portfolio/parts';
 import { DASH, fmt, fmtUsd, signClass } from '../../format';
 import { copyRows, getLiveCopy, subscribeLiveCopy } from '../../copy/live';
 import { lazyChunk } from '../../lazyPage';
+import { openPath } from '../../nav';
 
 const CopiesDialog = lazyChunk(() => import('../copy/CopiesDialog'));
 
@@ -41,7 +42,7 @@ export function MyCopiesCard() {
             Manage copies
           </button>
         )}
-        <button type="button" className="pf-btn" onClick={() => { window.location.href = '/copy'; }}>
+        <button type="button" className="pf-btn" onClick={() => openPath('/copy')}>
           Find traders to copy
         </button>
       </div>

@@ -40,6 +40,7 @@ import {
   useState,
   type AnimationEvent,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type UIEvent,
 } from 'react';
@@ -180,6 +181,8 @@ export interface CommandPaletteProps {
   onClose?: () => void;
   /** Pick a market to trade (Assets tab). */
   onSelectSymbol: (engine: Engine, symbolName: string) => void;
+  /** The press on a market row, before its click: the trade chart reads that market's candles (chart/press.ts). */
+  onPressSymbol?: (e: ReactPointerEvent, engine: Engine, symbolName: string) => void;
   favorites: string[];
   onToggleFavorite: (key: string) => void;
   /** Open a trader's Scan page. venue omitted = let Scan decide. */
@@ -1152,8 +1155,15 @@ function PaletteDialog(
     </div>
   );
 
+  /** A SoDEX market row's press reads its candles for the trade chart before the click (chart/press.ts). */
+  const pressAsset = (a: AssetRow) => (a.engine && p.onPressSymbol ? (e: ReactPointerEvent) => {
+    // A press on a control inside the row (the grid's favourite star) opens no market: no candles fetched ahead.
+    if (e.target instanceof Element && e.target.closest('button')) return;
+    p.onPressSymbol?.(e, a.engine!, a.symbol);
+  } : undefined);
+
   const compactAsset = (a: AssetRow) => (
-    <NavRow key={a.key} {...nav(`a:${a.key}`, () => selectAsset(a))} className="cp-row cp-row--asset">
+    <NavRow key={a.key} {...nav(`a:${a.key}`, () => selectAsset(a))} onPress={pressAsset(a)} className="cp-row cp-row--asset">
       <AssetMark a={a} size={28} />
       <div className="cp-row__main">
         <div className="cp-row__title"><span className="cp-row__name">{a.display}</span></div>
@@ -1416,7 +1426,7 @@ function PaletteDialog(
             const chg = fmtChangePct(a.changePct);
             const vol = fmtUsdCompact(a.volume24h);
             return (
-              <NavRow key={a.key} {...nav(`a:${a.key}`, () => selectAsset(a))} className="cp-grow" role="row">
+              <NavRow key={a.key} {...nav(`a:${a.key}`, () => selectAsset(a))} onPress={pressAsset(a)} className="cp-grow" role="row">
                 <div role="gridcell" className="cp-gcell cp-gcell--lead">
                   <button
                     type="button"

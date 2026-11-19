@@ -13,6 +13,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { useTickers } from '../hooks';
 import { pollEvery } from '../exchange/visibility';
+import { revalidating, serverGetJson } from '../serverFetch';
+import { vsPaths } from '../vsPaths';
 
 export interface BotMarket {
   /** Hours of the window the trade recorder holds for this market (absent from servers before 2026-11-09). */
@@ -73,6 +75,16 @@ export interface BotLatencyResponse { at: number; bucketMs: number; regions: Lat
 
 interface Read<T> { data: T | null; error: string | null; loading: boolean; refresh: () => void }
 
+/**
+ * A public index read (no session) goes through serverFetch.ts like every other: shared with an identical one in flight,
+ * started ahead of the page as a first read (the build's defaults for /bots), and its polls ask the server.
+ */
+async function getJson(url: string, token: string | null): Promise<{ status: number; ok: boolean; body: unknown }> {
+  if (!token && url.startsWith('/api/vs/')) return serverGetJson(url);
+  const r = await fetch(url, { headers: token ? { Accept: 'application/json', Authorization: `Bearer ${token}` } : { Accept: 'application/json' } });
+  return { status: r.status, ok: r.ok, body: r.ok ? ((await r.json()) as unknown) : null };
+}
+
 function usePolled<T>(url: string | null, everyMs: number, check: (x: unknown) => x is T, token: string | null = null): Read<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,9 +93,9 @@ function usePolled<T>(url: string | null, everyMs: number, check: (x: unknown) =
   const read = useCallback(async () => {
     if (!url) return;
     try {
-      const r = await fetch(url, { headers: token ? { Accept: 'application/json', Authorization: `Bearer ${token}` } : { Accept: 'application/json' } });
+      const r = await getJson(url, token);
       if (!r.ok) throw new Error(r.status === 404 ? 'not available yet' : r.status === 401 ? 'sign in again' : `HTTP ${r.status}`);
-      const body: unknown = await r.json();
+      const body = r.body;
       if (!check(body)) throw new Error('an answer this page cannot read');
       if (alive.current) {
         setData(body);
@@ -100,7 +112,8 @@ function usePolled<T>(url: string | null, everyMs: number, check: (x: unknown) =
     if (!url) return;
     setLoading(true);
     void read();
-    const stop = pollEvery(everyMs, () => void read());
+    // A poll asks the server for its current answer (a 304 when unchanged), not the copy the HTTP cache holds.
+    const stop = pollEvery(everyMs, () => void revalidating(read));
     return () => {
       alive.current = false;
       stop();
@@ -131,12 +144,12 @@ export interface BotRegimeResponse {
 const isRegime = (x: unknown): x is BotRegimeResponse => !!x && typeof x === 'object' && Array.isArray((x as BotRegimeResponse).hours) && Array.isArray((x as BotRegimeResponse).markets);
 /** The regime board (Explore): who takes and how volatile, bucket by bucket over the window, one market or 'ALL'. */
 export const useBotRegime = (symbol: string, window: BotWindow = '7d'): Read<BotRegimeResponse> =>
-  usePolled(`/api/vs/bots/regime?symbol=${encodeURIComponent(symbol)}&window=${window}`, 60_000, isRegime);
+  usePolled(vsPaths.botRegime(symbol, window), 60_000, isRegime);
 
 /** The estimate's windows (server flow/botMarkets.ts; 1h and 6h from 2026-11-09). */
 export type BotWindow = '1h' | '6h' | '24h' | '7d';
 const rawBotMarkets = (window: BotWindow, enabled: boolean): Read<BotMarketsResponse> =>
-  usePolled(enabled ? `/api/vs/bots/markets?window=${window}` : null, 5 * 60_000, isMarkets);
+  usePolled(enabled ? vsPaths.botMarkets(window) : null, 5 * 60_000, isMarkets);
 
 /**
  * The markets' activity (volume per hour) from SoDEX's own figures (owner 2026-11-08: "activity per h needs to be

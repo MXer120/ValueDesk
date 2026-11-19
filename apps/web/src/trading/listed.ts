@@ -44,3 +44,26 @@ export function linkedMarket(search: string): { engine: 'perps' | 'spot'; symbol
   if (!symbol || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,39}$/.test(symbol)) return null;
   return { engine: symbol.includes('_') ? 'spot' : 'perps', symbol };
 }
+
+/** The market each book opens on when nothing else names one (App.tsx; the chart's early read, chart/earlyBars.ts). */
+export const DEFAULT_SYMBOL: Record<'perps' | 'spot', string> = { perps: 'BTC-USD', spot: 'vBTC_vUSDC' };
+
+/**
+ * The market the trade page will open on, read before it renders: a link's, else the one stored
+ * (App.tsx's `ot.engine` / `ot.symbol`, JSON as useStored writes them), else the default.
+ */
+export function bootMarket(search: string, read: (key: string) => string | null): { engine: 'perps' | 'spot'; symbol: string } {
+  const linked = linkedMarket(search);
+  if (linked) return linked;
+  const parse = (key: string): unknown => {
+    try {
+      const raw = read(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+  const engine = parse('ot.engine') === 'spot' ? 'spot' : 'perps';
+  const stored = parse('ot.symbol');
+  return { engine, symbol: typeof stored === 'string' && stored ? stored : DEFAULT_SYMBOL.perps };
+}

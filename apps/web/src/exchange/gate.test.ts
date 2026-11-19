@@ -83,3 +83,18 @@ test('gate: lanes separate only the request in flight - the answer and the last 
   assert.equal(await b, 'second');
   assert.deepEqual(g.lastGood('k'), { at: 1_000, value: 'second' });
 });
+
+test('gate: fresh answers past their TTL are dropped, not kept until newer ones push them out', async () => {
+  let now = 0;
+  const g = new RequestGate(2_000, () => now);
+  for (let i = 0; i < 50; i++) await g.run(`page${i}`, 2_000, async () => i, false);
+  assert.equal(g.size, 50, 'all fresh');
+  now = 20_000;
+  await g.run('later', 60_000, async () => 'x', false);
+  assert.equal(g.size, 1, 'the expired pages went when the next answer came in');
+  // A key still inside its TTL survives the sweep.
+  now = 40_000;
+  await g.run('short', 2_000, async () => 's', false);
+  assert.equal(g.size, 2, '"later" is still within its 60 s');
+  assert.equal(await g.run('later', 60_000, async () => 'refetched', false), 'x', 'and is still answered from memory');
+});

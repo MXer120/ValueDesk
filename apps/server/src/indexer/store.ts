@@ -571,6 +571,8 @@ const SCHEMA_TABLES: readonly string[] = [...SCHEMA.matchAll(/CREATE TABLE IF NO
  * the schema); the two indexes are one pass over each table at the first start.
  */
 const COHORT_REV_META = 'cohort_rev';
+/** The version of one venue's trader_win rows for a window (writeTraderWin moves it; traderWinVersion reads it). */
+const TRADER_WIN_META = (venue: Venue, window: BoardWindow): string => `tw|${venue}|${window}`;
 /** A new number whenever the sequence starts over (a fresh file, a restored one): a reader then loads in full. */
 const COHORT_REV_EPOCH_META = 'cohort_rev_epoch';
 /** The newest tombstone pruned: a reader whose last load is older has missed removals and loads in full. */
@@ -3789,7 +3791,11 @@ export class IndexStore {
 
   // --- netting ---------------------------------------------------------------------------
 
-  /** Replace one venue's rows for a window. */
+  /**
+   * Replace one venue's rows for a window. In the same transaction its version (meta `tw|venue|window`, TRADER_WIN_META)
+   * moves on: the API keeps the netted ranking it builds from these rows until one of their versions moves
+   * (read.ts netPage), so a reader never answers from rows this replaced.
+   */
   writeTraderWin(venue: Venue, window: BoardWindow, rows: readonly TraderWin[]): void {
     this.tx(() => {
       this.q('DELETE FROM trader_win WHERE venue = ? AND win = ?').run(venue, window);
@@ -3803,17 +3809,39 @@ export class IndexStore {
           r.accountValue, r.label, JSON.stringify(r.assets.slice(0, 3)), r.winExact ? 1 : 0,
         );
       }
+      // Never the same value twice, across restarts too: one more than the last, or the clock when that is later.
+      const key = TRADER_WIN_META(venue, window);
+      this.setMeta(key, String(Math.max((Number(this.getMeta(key)) || 0) + 1, Date.now())));
     });
+  }
+
+  /**
+   * The version of these venues' trader_win rows for a window (and of the file's schema), as one text: it moves whenever
+   * writeTraderWin replaces any of them. Null when one has none yet (a file an older writer filled): nothing is kept then.
+   */
+  traderWinVersion(venues: readonly Venue[], window: BoardWindow): string | null {
+    if (!venues.length) return null;
+    const keys = ['schema', ...venues.map((v) => TRADER_WIN_META(v, window))];
+    const rows = this.q(`SELECT key, value FROM meta WHERE key IN (${keys.map(() => '?').join(', ')})`).all(...keys) as Array<{ key: string; value: string | null }>;
+    const by = new Map(rows.map((r) => [r.key, r.value]));
+    const out: string[] = [];
+    for (const k of keys) {
+      const v = by.get(k);
+      if (typeof v !== 'string') return null;
+      out.push(v);
+    }
+    return out.join('|');
   }
 
   /**
    * Every address in a selected venue's `side` pool, with its figures summed
    * over the selected venues (an address has one row per venue it trades on).
+   * One statement per number of venues, compiled once (it was compiled on every leaderboard read).
    */
   netCandidates(venues: readonly Venue[], window: BoardWindow, side: Side): NetRow[] {
     if (!venues.length) return [];
     const inList = venues.map(() => '?').join(', ');
-    const rows = this.db.prepare(
+    const rows = this.q(
       `SELECT t.address, t.venue, t.pnl, t.volume, t.trades, t.exact, t.wins, t.closes, t.account_value, t.label, t.assets,
          t.win_exact, a.account_id
        FROM trader_win t
@@ -4170,6 +4198,15 @@ export class IndexStore {
   /** One coin's snapshot at `t` (data as written), or null. */
   liqHistAt(coin: string, t: number): string | null {
     return (this.q('SELECT data FROM liq_hist WHERE coin = ? AND t = ?').get(coin, t) as { data: string } | undefined)?.data ?? null;
+  }
+
+  /**
+   * One coin's snapshots in [fromT, toT] (inclusive), oldest first: one range scan of the primary key (coin, t), not a
+   * point lookup per snapshot (liqTiles.ts reads a run of listed snapshots at once: 979 ETH snapshots in 42 ms against
+   * 160 ms point by point, page cache warm, 2026-11-17).
+   */
+  liqHistRange(coin: string, fromT: number, toT: number): Array<{ t: number; data: string }> {
+    return this.q('SELECT t, data FROM liq_hist WHERE coin = ? AND t >= ? AND t <= ? ORDER BY t').all(coin, fromT, toT) as Array<{ t: number; data: string }>;
   }
 
   /** Fine layers of the snapshots at `t` (deflated JSON, levels.ts FineSnap). */
@@ -4745,11 +4782,33 @@ export class IndexStore {
     });
   }
 
-  readBoard(venue: Venue, window: BoardWindow, side: Side, filter: BoardFilter): { meta: BoardMeta; rows: BoardRow[] } | null {
+  /**
+   * A board's meta row alone (no rows): what a netted page shows of each board, and what tells a reader whether the board
+   * it kept is still the one written (writeBoard replaces both in one transaction and sets a new updated_at).
+   */
+  readBoardMeta(venue: Venue, window: BoardWindow, side: Side, filter: BoardFilter): BoardMeta | null {
     const m = this.q('SELECT * FROM board_meta WHERE venue = ? AND win = ? AND side = ? AND filter = ?').get(venue, window, side, filter) as
       | Record<string, unknown>
       | undefined;
     if (!m) return null;
+    return {
+      venue,
+      window,
+      side,
+      filter,
+      updatedAt: m.updated_at as number,
+      sourceAt: m.source_at as number,
+      complete: m.complete === 1,
+      pending: m.pending as number,
+      scanned: m.scanned as number,
+      note: typeof m.note === 'string' ? m.note : null,
+      rankSince: num(m.rank_since),
+    };
+  }
+
+  readBoard(venue: Venue, window: BoardWindow, side: Side, filter: BoardFilter): { meta: BoardMeta; rows: BoardRow[] } | null {
+    const meta = this.readBoardMeta(venue, window, side, filter);
+    if (!meta) return null;
     const rows = (this.q(
       'SELECT * FROM boards WHERE venue = ? AND win = ? AND side = ? AND filter = ? ORDER BY rank',
     ).all(venue, window, side, filter) as Array<Record<string, unknown>>).map((r): BoardRow => {
@@ -4777,22 +4836,7 @@ export class IndexStore {
         assets,
       };
     });
-    return {
-      meta: {
-        venue,
-        window,
-        side,
-        filter,
-        updatedAt: m.updated_at as number,
-        sourceAt: m.source_at as number,
-        complete: m.complete === 1,
-        pending: m.pending as number,
-        scanned: m.scanned as number,
-        note: typeof m.note === 'string' ? m.note : null,
-        rankSince: num(m.rank_since),
-      },
-      rows,
-    };
+    return { meta, rows };
   }
 
   // --- rows a stop did not write (engine.ts spillUnwritten / replaySpill) --------------------------

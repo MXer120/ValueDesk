@@ -35,18 +35,19 @@ async function connect(page: Page): Promise<void> {
   await (wide ? rail : page.getByRole('banner')).getByRole('button', { name: 'Connect wallet' }).click();
   const dialog = page.getByRole('dialog', { name: 'Connect' });
   await dialog.waitFor({ state: 'visible' });
-  await dialog.getByRole('button', { name: 'MetaMask Installed' }).click();
+  // A phone with the wallet injected is the wallet's own browser: the dialog asks it at once (harness.ts connectWallet).
+  if (wide) await dialog.getByRole('button', { name: 'MetaMask Installed' }).click();
   await dialog.waitFor({ state: 'hidden', timeout: 30_000 });
 }
 
 const stored = (page: Page, key: string) => page.evaluate((k) => localStorage.getItem(k), key);
 const profileOf = (page: Page, a: string) => page.evaluate((x) => fetch(`/api/vs/profile?address=${x}`).then((r) => r.json()), a) as Promise<{ username: string | null }>;
-/* The wallet on the rail carries the green dot, Settings in its menu; a phone has no rail and keeps the gear. */
-const settingsIcon = (page: Page) => page.locator('.side__addr, .settings__btn').first();
+/* The wallet carries the green dot, Settings in its menu: the rail's wallet, or on a phone the bar's address (its
+   one-row bar has no gear, NavBar.tsx). */
+const settingsIcon = (page: Page) => page.locator('.side__addr:visible, .navaddr__btn:visible').first();
 const openSettingsRow = async (page: Page) => {
-  const rail = await page.locator('.side__addr').first().isVisible();
   await settingsIcon(page).click();
-  if (rail) await page.getByRole('menuitem', { name: /^Settings/ }).click();
+  await page.getByRole('menuitem', { name: /^Settings/ }).click();
 };
 
 /** The pictures on screen arrived. */

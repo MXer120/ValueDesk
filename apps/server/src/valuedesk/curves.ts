@@ -139,3 +139,36 @@ export function attachPodiumCurves(rows: TraderRow[], window: Window): Promise<v
   const job = Promise.all(rows.slice(0, 3).map((row) => fillOne(row, window).catch(() => undefined))).then(() => undefined);
   return within(job, CURVE_BUDGET_MS, undefined);
 }
+
+/** When each podium row was last read ahead (warmPodium), so one that yields no curve is not asked every round. */
+const warmTried = new Map<string, number>();
+
+/**
+ * The podium of a page visited lately, read ahead (routes/valuedesk.ts warmPodiums): each of the first three rows whose
+ * kept curve has lapsed - or was never read - is read now, as a `curves=1` request would read it, so the next plain
+ * read paints all three (applyCachedCurves). Once its kept curve lapsed, not before: the venues' own reads are kept as
+ * long (Hyperliquid's portfolio TTL), so an earlier read would hand back the same old points and keep them ten more
+ * minutes. At most one read per row per TTL. Returns how many rows were read.
+ */
+export async function warmPodium(rows: readonly TraderRow[], window: Window, now = Date.now()): Promise<number> {
+  const due: TraderRow[] = [];
+  for (const row of rows.slice(0, 3)) {
+    const k = keyOf(row, window);
+    const hit = cache.get(k);
+    if (hit && now - hit.at <= TTL) continue;
+    if (now - (warmTried.get(k) ?? Number.NEGATIVE_INFINITY) < TTL) continue;
+    warmTried.delete(k);
+    warmTried.set(k, now);
+    due.push({ ...row, spark: undefined });
+  }
+  while (warmTried.size > 1_000) warmTried.delete(warmTried.keys().next().value!);
+  if (!due.length) return 0;
+  await within(Promise.all(due.map((row) => fillOne(row, window).catch(() => undefined))).then(() => undefined), CURVE_BUDGET_MS, undefined);
+  return due.length;
+}
+
+/** Tests: forget every kept curve and warm-up try. */
+export function clearCurves(): void {
+  cache.clear();
+  warmTried.clear();
+}

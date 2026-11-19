@@ -13,7 +13,7 @@ import { useCallback, useState } from 'react';
 import { LiveChart } from './livePrice';
 import { TickerBar } from '../components/Market';
 import { AccountTabs } from '../components/AccountTabs';
-import { FOMC_ODDS_ON } from '../components/macro/FedWatch';
+import { FOMC_ODDS_ON } from '../components/macro/fomcFlag';
 import { useStored } from '../hooks';
 import type { PanelTab } from './Panel';
 import {
@@ -23,6 +23,8 @@ import {
 import type { TradeContext } from './registry';
 import { tabWidgetIds, faceFor } from './widgetCatalog';
 import { widgetBody, widgetIdOf } from './widgetBodies';
+/* The widget list opening is the intent to add one: every widget's code starts loading then (lazyWidgets.tsx). */
+import { preloadAllWidgets, preloadWidgets } from './lazyWidgets';
 
 /** One widget as a tab body (widgetBodies.tsx, as on a panel); a duplicate keeps its own settings (`instance`). */
 function widgetTab(id: string, c: TradeContext): { content: PanelTab['content']; scroll: PanelTab['scroll'] } {
@@ -85,7 +87,7 @@ export function TradeAccountBand({ c }: { c: TradeContext }) {
         onPositionCount={c.onPositionCount}
         onOrderCount={c.onOrderCount}
         extraTabs={tabs}
-        tabsAfter={<AddTabButton open={side} onOpen={() => setSide((v) => !v)} label="Add a tab to this panel" />}
+        tabsAfter={<AddTabButton open={side} onOpen={() => { void preloadAllWidgets(); setSide((v) => !v); }} label="Add a tab to this panel" />}
         onTabMenu={(key, e) => setMenu({ at: menuAt(e), key })}
         select={select}
       />
@@ -165,6 +167,7 @@ export function ChartCard({ c }: { c: TradeContext }) {
               role="tab"
               aria-selected={on === id}
               className={`chart-tab${on === id ? ' is-on' : ''}`}
+              onPointerDown={() => { void preloadWidgets([id]); }}
               onClick={() => setActive(id)}
               onContextMenu={(e) => setMenu({ at: menuAt(e), id })}
             >
@@ -173,7 +176,7 @@ export function ChartCard({ c }: { c: TradeContext }) {
           ))}
         </>
       )}
-      <AddTabButton open={side} onOpen={() => setSide((v) => !v)} label="Add a chart or a widget tab" />
+      <AddTabButton open={side} onOpen={() => { void preloadAllWidgets(); setSide((v) => !v); }} label="Add a chart or a widget tab" />
     </div>
   );
 

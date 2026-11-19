@@ -36,8 +36,9 @@ import { CohortIcon } from './CohortIcon';
 import { LeanChart, bandsOf } from './LeanChart';
 import { Treemap } from './Treemap';
 import { SectorIcon } from './SectorIcon';
-import { BiasPill, LeanPill, Meter, POLL_MS, Picker, Split, VenueMarks, pctText, usePolled, OverOiNote } from './parts';
+import { BiasPill, HeldNote, LeanPill, Meter, POLL_MS, Picker, Split, VenueMarks, pctText, usePolled, OverOiNote } from './parts';
 import { CrossFade, FadeView } from '../../motion';
+import { scrollPageTop } from '../../../nav';
 import { FocusPage, MarketMapPage } from './MarketSection';
 import { ExcludedButton } from '../../excluded/ExcludedPage';
 import { AllHidden, CohortViewButton, CohortViewProvider, useCohortView, useCohortViewState, type ViewPage } from './view';
@@ -247,7 +248,9 @@ function WalletsTable({ venues, id, filter, range, onScan }: { venues: readonly 
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
   const [pages, setPages] = useState(1);
   const key = `${venues.join(',')}|${id}|${filter.sector ?? ''}|${filter.coin ?? ''}|${range}|${sort}|${dir}|${pages}`;
-  const r = usePolled<CohortWalletsResponse>(key, (signal) => vsApi.cohortWallets(venues, id, filter, { sort, dir, offset: 0, limit: pages * PAGE, range }, signal), 0);
+  const ask = { sort, dir, offset: 0, limit: pages * PAGE, range };
+  // Its last answer, while the route's cache allows it, under its own as-of line (below) until the current one is in.
+  const r = usePolled<CohortWalletsResponse>(key, (signal) => vsApi.cohortWallets(venues, id, filter, ask, signal), 0, vsPaths.cohortWallets(venues, id, filter, ask));
   const [kept, setKept] = useState<CohortWalletsResponse | null>(null);
   useEffect(() => { if (r.data) setKept(r.data); }, [r.data]);
   useEffect(() => { setPages(1); }, [venues, id, filter.sector, filter.coin]);
@@ -394,7 +397,7 @@ function Detail({
   const [tab, setTab] = useState<'wallets' | 'markets'>('wallets');
   const key = `${venues.join(',')}|${id}|${range}|${filter.sector ?? ''}|${filter.coin ?? ''}`;
   // Pushed with each new cohort load while the live socket is up (live/useLiveRead.ts); else polled every minute.
-  const r = useLiveRead<CohortDetailResponse>(key, vsPaths.cohortDetail(venues, id, range, filter), (signal) => vsApi.cohortDetail(venues, id, range, filter, signal), POLL_MS);
+  const r = useLiveRead<CohortDetailResponse>(key, vsPaths.cohortDetail(venues, id, range, filter), (signal) => vsApi.cohortDetail(venues, id, range, filter, signal), POLL_MS, undefined, true);
   const [total, setTotal] = useState<number | null>(null);
   const st = r.data?.cohort ?? null;
   const points = useMemo(
@@ -490,6 +493,7 @@ function Detail({
           </section>}
         </>
       )}
+      <HeldNote at={r.heldAt} />
     </div>
   );
 }
@@ -559,14 +563,14 @@ export function Cohorts({ onScan, onOpenSymbol, embedded = false }: { onScan: (a
     setSection('cohorts');
     setFocus(null);
     write({ cohort: id, section: null, focus: null });
-    if (!embedded) window.scrollTo({ top: 0 });
+    if (!embedded) scrollPageTop();
   };
   /** The market map, or one of its asset / sector pages. */
   const openMap = (f: CohortFilter | null) => {
     setSection('map');
     setFocus(f);
     write({ section: 'map', focus: focusParam(f), cohort: null });
-    if (!embedded) window.scrollTo({ top: 0 });
+    if (!embedded) scrollPageTop();
   };
   /** From an asset page: that cohort, filtered to the asset. */
   const openCohortOn = (id: CohortId, f: CohortFilter) => {
@@ -575,7 +579,7 @@ export function Cohorts({ onScan, onOpenSymbol, embedded = false }: { onScan: (a
     setSection('cohorts');
     setFocus(null);
     write({ cohort: id, section: null, focus: null, sector: f.sector ?? null, coin: f.coin ?? null });
-    if (!embedded) window.scrollTo({ top: 0 });
+    if (!embedded) scrollPageTop();
   };
   const setRange = (r: CohortRange) => {
     setRangeState(r);
@@ -588,7 +592,8 @@ export function Cohorts({ onScan, onOpenSymbol, embedded = false }: { onScan: (a
 
   const listKey = `${venues.join(',')}|${filter.sector ?? ''}|${filter.coin ?? ''}`;
   // Pushed with each new cohort load while the live socket is up (live/useLiveRead.ts); else polled every minute.
-  const list = useLiveRead<CohortsResponse>(listKey, vsPaths.cohorts(venues, filter), (signal) => vsApi.cohorts(venues, filter, signal), POLL_MS);
+  // A kept answer (serverFetch.ts) is drawn at once on reopening, with its as-of line, until the current one is in.
+  const list = useLiveRead<CohortsResponse>(listKey, vsPaths.cohorts(venues, filter), (signal) => vsApi.cohorts(venues, filter, signal), POLL_MS, undefined, true);
   // The asset list outlives a filter change (it is the scope's, unfiltered).
   const [coins, setCoins] = useState<CohortsResponse['coins']>([]);
   useEffect(() => { if (list.data?.coins.length) setCoins(list.data.coins); }, [list.data]);

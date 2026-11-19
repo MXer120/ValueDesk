@@ -49,6 +49,8 @@ import { Button, EmptyState, Icon, IconButton, Panel, Shell, Skeleton } from './
 import { listBotsOn } from '../../algo/executorAlgos';
 import { ExecutorError, hostedExecutor, meBots } from '../../copy/executor';
 import { requestDeposit } from '../account/actions';
+import { BotsNavSeg } from './BotsNavSeg';
+import { useMediaQuery } from '../../hooks';
 import './bots.css';
 import './botsPages.css';
 
@@ -229,6 +231,7 @@ export function BotsPage({ address, provider }: { address: string | null; provid
 
 function BotsPageOpen({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
   const view = useBotsView();
+  const phone = !useMediaQuery('(min-width: 761px)');
   const live = useLiveCopy(address, provider);
   const signedIn = readiness(live, 'hosted').connected;
   const { bots: read, loading, error, start, act, stopAll, update, focus } = useBots(address, signedIn);
@@ -539,6 +542,9 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   return (
     <div className="tf bots-page" aria-busy={loading}>
       <div className="bots-col">
+        {/* A phone: the section's pages at the top of the page, in the switch the rail's bar carries (BotsNavSeg) - the
+            phone's bar is one row (NavBar.tsx). Never both: one "Bots pages" switch at any width. */}
+        {phone && <div className="bots-phoneseg"><BotsNavSeg active /></div>}
         {/* One section failing never takes the Bots pages down (owner 2026-11-08): the page has its own boundary, reset
             when another page is opened, and the Overview one per panel. */}
         {notice && <BotsNoticeBar n={notice} onClose={() => setNotice(null)} />}

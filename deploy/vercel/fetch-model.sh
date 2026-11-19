@@ -4,21 +4,56 @@
 # in the visitor's browser, nothing to add to the CSP. Moonshine tiny, 8-bit, at a
 # pinned revision of onnx-community/moonshine-tiny-ONNX (~30 MB).
 #
-#   bash deploy/vercel/fetch-model.sh <dir>   writes <dir>/models/onnx-community/moonshine-tiny-ONNX/
+#   bash deploy/vercel/fetch-model.sh <dir> [<cache>]   writes <dir>/models/onnx-community/moonshine-tiny-ONNX/
 #
 # build.sh runs it into apps/web/dist; for `npm run dev`, run it once into apps/web/public
 # (apps/web/public/models is ignored by git).
+#
+# EVERY FILE IS CHECKED against its sha256 at the pinned revision (deploy/vercel/model.sha256;
+# the two .onnx files are Hugging Face's own LFS ids, the rest checked against its git blob ids,
+# 2026-11-18): a file that does not match is fetched again, and one that still does not match
+# fails the build - the site never serves weights nobody checked.
+#
+# <cache>: a directory kept between builds. Vercel re-populates it on the next build of the
+# project (package.mjs config.json `cache`: .cache/valuedesk-model), so the ~32 MB come from
+# Hugging Face once per revision instead of on every build. A file is taken from the cache
+# only when its checksum matches; what is fetched goes into the cache first, then into <dir>.
 set -euo pipefail
-dest="${1:?usage: fetch-model.sh <dir>}"
+dest="${1:?usage: fetch-model.sh <dir> [<cache dir>]}"
+cache="${2:-}"
 repo=onnx-community/moonshine-tiny-ONNX
 rev=a6da1241cd305dcd64eab1edbd615f2bb9aabb95
+sums="${VS_MODEL_SUMS:-$(dirname "${BASH_SOURCE[0]}")/model.sha256}"
+base="${VS_MODEL_BASE_URL:-https://huggingface.co/$repo/resolve/$rev}"
 out="$dest/models/$repo"
-mkdir -p "$out/onnx"
-for f in config.json generation_config.json preprocessor_config.json special_tokens_map.json tokenizer.json tokenizer_config.json \
-         onnx/encoder_model_quantized.onnx onnx/decoder_model_merged_quantized.onnx; do
-  [ -s "$out/$f" ] && continue
-  curl -fsSL --retry 3 -o "$out/$f" "https://huggingface.co/$repo/resolve/$rev/$f"
-done
+[ -s "$sums" ] || { echo "error: no checksum list at $sums" >&2; exit 1; }
+sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
+# Where a file is fetched to and checked: the cache (one folder per revision) when there is one.
+store="$out"
+[ -n "$cache" ] && store="$cache/$repo@$rev"
+mkdir -p "$out/onnx" "$store/onnx"
+fetched=0
+reused=0
+while read -r want f; do
+  f="${f%$'\r'}"
+  [ -n "$f" ] || continue
+  mkdir -p "$(dirname "$store/$f")" "$(dirname "$out/$f")"
+  if [ -s "$store/$f" ] && [ "$(sha "$store/$f")" = "$want" ]; then
+    reused=$((reused + 1))
+  else
+    curl -fsSL --retry 3 -o "$store/$f.part" "$base/$f"
+    got="$(sha "$store/$f.part")"
+    if [ "$got" != "$want" ]; then
+      rm -f "$store/$f.part"
+      echo "error: $f does not match its checksum at $rev (got $got, want $want) - not served" >&2
+      exit 1
+    fi
+    mv -f "$store/$f.part" "$store/$f"
+    fetched=$((fetched + 1))
+  fi
+  [ "$store" = "$out" ] || cp -f "$store/$f" "$out/$f"
+done < "$sums"
+echo "speech model: $reused file(s) from ${cache:-$out} as they were, $fetched fetched from Hugging Face" >&2
 # MIT asks for its notice with every copy, and the site serves the weights: the licence goes
 # next to them (served as /models/onnx-community/moonshine-tiny-ONNX/LICENSE.txt, named on /licenses; .txt because the Vercel packaging refuses a file without an extension).
 # The English Tiny model is MIT (github.com/moonshine-ai/moonshine LICENSE, section 1; read 2026-10-28).

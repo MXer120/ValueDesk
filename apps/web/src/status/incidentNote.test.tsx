@@ -82,6 +82,27 @@ test('the data service not answering: a red card of its own, to the status page'
   assert.doesNotMatch(html, /mn-note__parts|mn-note__eta/);
 });
 
+test("offline, or both ValueDesk and SoDEX silent: the visitor's connection is named, never the service", () => {
+  assert.equal(I.connectionView({ online: false, down: false, sodexDown: false }), I.OFFLINE_VIEW, 'the browser says offline: at once');
+  assert.equal(I.connectionView({ online: false, down: true, sodexDown: true }), I.OFFLINE_VIEW);
+  assert.equal(I.connectionView({ online: true, down: false, sodexDown: true }), null, 'SoDEX reconnecting alone is the chart\'s notice, not a card');
+  assert.equal(I.connectionView({ online: true, down: true, sodexDown: true }), I.LINK_VIEW, 'both silent: the link');
+  assert.equal(I.connectionView({ online: true, down: true, sodexDown: false }), I.DOWN_VIEW, 'SoDEX answers, ValueDesk does not: the service');
+  assert.equal(I.OFFLINE_VIEW.tone, 'warn');
+  assert.equal(I.LINK_VIEW.tone, 'warn');
+});
+
+test('the offline card: no status page link (it would not load), what to check instead', () => {
+  const html = render(createElement(IncidentCard, { v: I.OFFLINE_VIEW, href: '/status', onDismiss: () => {} }));
+  assert.match(html, /mn-note--warn/);
+  assert.match(html, /You(&#x27;|')re offline/);
+  assert.match(html, /Check Wi-Fi or mobile data/);
+  assert.ok(!html.includes('href="/status"'));
+  const link = render(createElement(IncidentCard, { v: I.LINK_VIEW, href: '/status', onDismiss: () => {} }));
+  assert.match(link, /slow or offline/);
+  assert.ok(link.includes('href="/status"'), 'the slow link may still be an outage: the status page stays');
+});
+
 test('one X on a minor indexer-only incident quiets the next ones for a day; major or other services still show', async () => {
   const { indexerMinor, quietUntil, QUIET_MS } = await import('./incidentState');
   assert.equal(indexerMinor({ impact: 'minor', components: ['indexer'] }), true);

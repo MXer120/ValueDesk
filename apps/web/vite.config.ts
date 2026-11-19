@@ -8,6 +8,10 @@ import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { fromAppOrigin } from './src/devOrigin';
 import { thirdPartyLicences } from './tools/licenses.mjs';
+import { i18nParts } from './tools/i18n-parts.mjs';
+import { routePreload } from './tools/route-preload.mjs';
+import { bootShell } from './tools/boot-shell.mjs';
+import { hoverMedia } from './tools/hover-media.mjs';
 
 /**
  * The local API token, injected into proxied requests from the app itself.
@@ -70,53 +74,9 @@ const trackAppOrigin = (): Plugin => ({
 const mayCarryToken = (headers: IncomingHttpHeaders): boolean => fromAppOrigin(headers, appPorts);
 
 /*
- * THE PALETTE'S CHUNKS, ANNOUNCED UP FRONT.
- *
- * App.tsx holds the first render until the landing page's chunk AND the Cmd+K
- * palette's are in (a key pressed the moment the page appears must open the
- * palette as fast as it always did). The palette is needed on every page, so
- * its chunks are listed in the built index.html as modulepreload links: they
- * download alongside the entry instead of after it has run, and the wait costs
- * nothing. Page chunks are not listed - which one is needed depends on the URL.
+ * THE PALETTE'S CHUNKS are announced by the built theme-boot.js now, on a device with a keyboard only (App.tsx
+ * holds the first render for them there, not on a touch phone): tools/boot-shell.mjs.
  */
-const preloadPalette = (): Plugin => {
-  let base = '/';
-  return {
-    name: 'valuedesk:preload-palette',
-    apply: 'build',
-    configResolved(cfg) {
-      base = cfg.base;
-    },
-    transformIndexHtml: {
-      order: 'post',
-      handler(_html, ctx) {
-        const bundle = ctx.bundle;
-        if (!bundle) return [];
-        const chunks = Object.values(bundle).filter((c) => c.type === 'chunk');
-        const byName = new Map(chunks.map((c) => [c.fileName, c]));
-        const entry = chunks.find((c) => c.isEntry);
-        const palette = chunks.find((c) => c.isDynamicEntry && /[\\/]palette[\\/]CommandPalette\.tsx$/.test(c.facadeModuleId ?? ''));
-        if (!entry || !palette) return [];
-        const closure = (root: string): Set<string> => {
-          const seen = new Set<string>();
-          const stack = [root];
-          while (stack.length) {
-            const f = stack.pop()!;
-            if (seen.has(f)) continue;
-            seen.add(f);
-            const c = byName.get(f);
-            if (c && c.type === 'chunk') stack.push(...c.imports);
-          }
-          return seen;
-        };
-        const already = closure(entry.fileName);
-        return [...closure(palette.fileName)]
-          .filter((f) => !already.has(f))
-          .map((f) => ({ tag: 'link', attrs: { rel: 'modulepreload', crossorigin: true, href: base + f }, injectTo: 'head' as const }));
-      },
-    },
-  };
-};
 
 // `npm run dev` starts the backend and this dev server together, so every
 // startup - and every tsx-watch restart after an edit - opens a window where
@@ -337,10 +297,25 @@ function botsFixtures(): Plugin {
   };
 }
 
+/**
+ * The site build's own two: the catalogues in parts, and the landing page's chunks, text and first index reads asked for
+ * at once (the reads a page makes in its default view: src/firstReadDefaults.ts, built from the pages' own builders and
+ * loaded by the plugin when a build starts - not imported here, so the dev server does not restart on every edit of
+ * the modules it uses).
+ */
+function siteBuildPlugins(): Plugin[] {
+  const i18n = i18nParts({ webRoot: fileURLToPath(new URL('.', import.meta.url)) });
+  return [i18n, routePreload({ i18n, firstReadsModule: fileURLToPath(new URL('./src/firstReadDefaults.ts', import.meta.url)) })];
+}
+
 export default defineConfig({
   customLogger: logger,
-  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), botsFixtures()],
+  // bootShell after routePreload: it rewrites the theme-boot.js tag routePreload places its own script after.
+  plugins: [react(), trackAppOrigin(), ...(ADMIN_PAGE ? [] : siteBuildPlugins()), bootShell({ webRoot: fileURLToPath(new URL('.', import.meta.url)) }), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), botsFixtures()],
   define: { __VS_BUILD__: JSON.stringify(buildId()) },
+  /* No sticky hover on a touch screen: every rule styling a hovered element is behind @media (hover: hover)
+     (tools/hover-media.mjs says which are left as they are, and why). Identical wherever a pointer can hover. */
+  css: { postcss: { plugins: [hoverMedia()] } },
   /*
    * The EIP-712 signing layer is SHARED with the backend, not copied.
    *
@@ -364,6 +339,14 @@ export default defineConfig({
        * self-hosted executors run (packages/copy-engine), from source.
        */
       '@copy-engine': fileURLToPath(new URL('../../packages/copy-engine/src/index.ts', import.meta.url)),
+      /*
+       * ONE ONNX RUNTIME BUILD (the Fed live widget's speech worker, components/fedlive/stt.worker.ts). The
+       * model runs on the CPU; transformers.js imports ONNX Runtime's WebGPU bundle, which pulled its 26.9 MB
+       * asyncify build into every deployment (and the worker was handed the 28.4 MB jsep build on top).
+       * The CPU-only bundle has the same API and runs the model with the same results (stt.worker.ts header);
+       * its runtime is 14.3 MB. transformers.js is the only importer of this path.
+       */
+      'onnxruntime-web/webgpu': 'onnxruntime-web/wasm',
     },
     /*
      * ONE React, whatever npm decides to hoist.

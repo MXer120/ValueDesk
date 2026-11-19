@@ -37,8 +37,15 @@ else; the headers of every other path from `deploy/smoke/prod-headers.mjs` - the
 table `edge.yaml` is validated against - one route per path class, so a header is
 never set twice; `/scan/` to the legacy redirect page; the files; any path whose
 last segment has no dot to `/index.html`. All case-sensitive, like CloudFront's
-path patterns. The test walks 35 paths through a model of Vercel's routing and
-compares each with `headersFor()` and `rewrite()`.
+path patterns. The test walks 59 paths through a model of Vercel's routing and
+compares each with `headersFor()` and `rewrite()`. Cache-Control per class
+(`cacheControlFor`): `/assets/*` and the content-hashed translation parts
+(`/i18n/<code>/<id>.json`, `p-<id>.json`) a year, immutable; html `no-cache`; logos a day;
+a whole catalogue (`/i18n/<code>.json`) 10 min; the speech model (`/models/*`) a day; the rest
+an hour - each unhashed one with a stale-while-revalidate window, except unhashed scripts
+(`*.js`, `*.mjs` outside `/assets/`: `/theme-boot.js`, the Fed live widget's
+`/fedlive/tap-worklet.js`) and the legacy `/scan/` folder: an hour without one, so a browser
+never runs a script older than an hour against a newer app.
 
 **The function** forwards GET, HEAD and OPTIONS (405 otherwise), the path and query
 unchanged, and only `Accept`, `Accept-Encoding`, `If-None-Match`,
@@ -60,8 +67,19 @@ not forwarded: only a self-hosted executor uses it. The answer is streamed back 
 A `200` with `public, max-age=N` also gets `Vercel-CDN-Cache-Control:
 max-age=min(N,60)` (and the API's `stale-while-revalidate`, at most 60): Vercel's
 CDN does not cache a function's answer on `max-age` alone, and this is what
-CloudFront's API cache policy does with the same header. No origin answer in two
+CloudFront's API cache policy does with the same header. An edge copy is then at most
+max-age + stale old, on top of how old the data was when the origin built the answer (a
+cohort answer may come from a load the API already held 120 s); longer stale windows are
+`apps/server/src/perf.ts`'s to set, once every screen of the route shows the answer's time.
+The browser keeps the API's own header. No origin answer in two
 5-second connection attempts: 502; none in 30 s: 504.
+
+Reads go to the origin over kept-alive connections (one closed meanwhile is asked once more on
+a new one); a POST over a connection of its own. Every forwarded answer carries `Server-Timing`:
+the origin's entries, then `fn` (in the function), `oc` (connecting, `reused` with keep-alive),
+`ot` (the origin's answer), `retry` and `cold` (an instance's first request). GET
+`/api/copy/v1/algos/stream` and `/api/copy-vip/v1/algos/stream` are answered `204` here: the
+app streams straight to the instance, and only an old tab still asks it through the function.
 
 **Settings.** `VALUESCAN_ORIGIN_URL` is written into the function's `.vc-config.json`
 by `package.mjs` (not secret). `VALUESCAN_ORIGIN_SECRET` is a Vercel environment

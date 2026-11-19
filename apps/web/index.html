@@ -10,7 +10,256 @@
          detached node: prices freeze. The app translates itself (src/i18n, 17 languages, the browser's
          language by default), in place, without touching the tree. -->
     <meta name="google" content="notranslate" />
+    <!-- Android Chrome's toolbar in the page's own --bg; theme-boot.js and src/theme.ts set it for the light theme. -->
+    <meta name="theme-color" content="#0e0e0e" />
     <script src="/theme-boot.js"></script>
+    <!--
+      THE STATIC SHELL'S LOOK (the markup is the first thing in <body>; src/bootShell.ts takes both down).
+      It paints before the stylesheet and the code have arrived: the built page has its stylesheet after the shell
+      (tools/boot-shell.mjs), and nothing in <head> holds rendering back but theme-boot.js. Its own tokens (--vb-*),
+      the values of styles.css / theme-light.css / appearance.css, so the bars, the tab bar and the page behind
+      them are drawn as the app draws them; the page's cards are neutral blocks. The light theme from theme-boot.js's
+      data-theme; the page from its data-boot. No text but the Beta pill, so nothing to translate.
+    -->
+    <style id="vs-boot-css">
+      :root {
+        --vb-bg: #0e0e0e; --vb-text: #f7f7f7; --vb-muted: #bcbcbc; --vb-ink: #f4f4f4; --vb-accent: #e6e6e6;
+        --vb-fill: #1a1a1b; --vb-bone: rgba(247, 247, 247, 0.08); --vb-line: rgba(78, 78, 78, 0.4);
+        --vb-page: radial-gradient(55% 60% at 12% 8%, rgba(28, 31, 33, 0.08), transparent 70%), radial-gradient(50% 55% at 92% 95%, rgba(47, 74, 107, 0.15), transparent 70%), #0e0e0e;
+        --vb-card: radial-gradient(90% 60% at 20% 0%, rgba(224, 224, 224, 0.05), transparent 70%), rgba(28, 31, 33, 0.49);
+        --vb-card-edge: rgba(255, 255, 255, 0.07);
+        --vb-card-shadow: 0 0 0 1px rgba(255, 255, 255, 0.043), 0 2px 6px rgba(0, 0, 0, 0.36);
+        --vb-bar: linear-gradient(rgba(14, 14, 14, 0.78), rgba(14, 14, 14, 0.58));
+        --vb-tabs: rgba(14, 14, 14, 0.82);
+        --vb-seg: #18181a; --vb-seg-ring: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+        --vb-thumb: #2b2b2e; --vb-thumb-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 2px 6px rgba(0, 0, 0, 0.4);
+        --vb-chip: #262628; --vb-chip-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 2px 6px rgba(0, 0, 0, 0.32);
+        --vb-btn-edge: linear-gradient(rgba(188, 188, 188, 0.25), rgba(78, 78, 78, 0.25));
+        --vb-font: "IBM Plex Sans Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      :root[data-theme="light"] {
+        --vb-bg: #efefed; --vb-text: #141414; --vb-muted: #505050; --vb-ink: #141414; --vb-accent: #1f1f1f;
+        --vb-fill: #ffffff; --vb-bone: rgba(20, 20, 20, 0.08); --vb-line: rgba(0, 0, 0, 0.09);
+        --vb-page: radial-gradient(55% 60% at 12% 8%, rgba(207, 220, 240, 0.6), transparent 70%), radial-gradient(50% 55% at 92% 95%, rgba(217, 207, 232, 0.55), transparent 70%), #efefed;
+        --vb-card: radial-gradient(90% 60% at 20% 0%, rgba(255, 255, 255, 0.4), transparent 70%), rgba(255, 255, 255, 0.58);
+        --vb-card-edge: rgba(255, 255, 255, 0.6);
+        --vb-card-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 4px 18px rgba(40, 50, 70, 0.06);
+        --vb-bar: linear-gradient(rgba(239, 239, 237, 0.78), rgba(239, 239, 237, 0.58));
+        --vb-tabs: rgba(239, 239, 237, 0.82);
+        --vb-seg: #e4e4e2; --vb-seg-ring: none;
+        --vb-thumb: #ffffff; --vb-thumb-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.05);
+        --vb-chip: #ffffff; --vb-chip-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.08);
+        --vb-btn-edge: linear-gradient(rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.08));
+      }
+      /* The page under it, until styles.css has it (html body: kept over styles.css's plain body until the glass is on). */
+      html body { margin: 0; background: var(--vb-page); background-attachment: fixed; }
+      /* The Beta pill's face: Arial sized to IBM Plex Sans 500 (styles.css "fallback faces"; ASCII only here). Not
+         Plex itself: once the stylesheet declares it, asking for it here downloaded it ahead of the app's code. */
+      @font-face { font-family: "IBM Plex Sans Fallback"; src: local("Arial"), local("ArialMT"), local("Liberation Sans"); font-weight: 500; size-adjust: 102.67%; ascent-override: 99.84%; descent-override: 26.79%; line-gap-override: 0.00%; unicode-range: U+0020-007E; }
+
+      .vsb { position: fixed; inset: 0; z-index: 95; overflow: hidden; pointer-events: none; background: var(--vb-page); color: var(--vb-text); font: 400 14px/1.45 var(--vb-font); letter-spacing: 0.01em; transition: opacity 200ms cubic-bezier(0.2, 0, 0, 1); }
+      .vsb.is-out { opacity: 0; will-change: opacity; }
+      .vsb *, .vsb *::before { box-sizing: border-box; }
+      .vsb svg { display: block; flex: none; }
+      /* A bone: a neutral block where text or a figure will be. :where() - every rule below may reshape one. */
+      :where(.vsb) b { display: block; border-radius: 1000px; background: var(--vb-bone); }
+      .vsb-main b, .vsb-btn b, .vsb-tab b { animation: vsb-pulse 1.4s ease-in-out infinite; }
+      @keyframes vsb-pulse { 50% { opacity: 0.5; } }
+
+      /* --- the bars: a phone's one row (the mark, Beta, the bell, search, Connect wallet), else the rail and one row */
+      .vsb-bar { position: absolute; top: 0; left: 0; right: 0; height: 56px; background: var(--vb-bar); }
+      .vsb-row { position: absolute; top: 0; left: 12px; right: 12px; height: 56px; display: flex; align-items: center; }
+      .vsb-row--pages { justify-content: flex-end; }
+      .vsb-brand { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; line-height: 21px; font-weight: 500; white-space: nowrap; }
+      .vsb-mark { border-radius: 5px; }
+      .vsb-mark rect { fill: var(--vb-ink); }
+      .vsb-mark rect.g { fill: #00b481; }
+      .vsb-beta { margin-left: 8px; padding: 0 7px; border-radius: 1000px; background: rgba(76, 141, 255, 0.18); color: #4c8dff; font-size: 11px; line-height: 18px; font-weight: 500; }
+      .vsb-seg { position: relative; display: none; margin-left: auto; height: 48px; border-radius: 12px; background: var(--vb-seg); box-shadow: var(--vb-seg-ring); }
+      .vsb-seg i { position: absolute; top: 2px; left: 2px; height: 44px; border-radius: 9px; background: var(--vb-thumb); box-shadow: var(--vb-thumb-shadow); }
+      .vsb-seg--market { width: 132.6px; }
+      .vsb-seg--market i { width: 73px; }
+      [data-boot-spot] .vsb-seg--market i { left: 77px; width: 53.6px; }
+      .vsb-seg--pages { width: 317.8px; }
+      .vsb-seg--pages i { width: 84px; }
+      /* On a phone the market switch sits in the market card, the Bots pages' switch at the top of the page. */
+      [data-boot="trade"] .vsb-tick .vsb-seg--market { display: block; position: absolute; top: 13px; right: 12px; }
+      .vsb-seg--bots { flex: none; height: 50px; margin: 0; }
+      .vsb-seg--bots i { top: 3px; left: 3px; width: 80.8px; height: 44px; }
+      [data-boot="bots"] .vsb-seg--bots { display: block; }
+      .vsb-tools { position: absolute; top: 6px; right: 12px; height: 44px; display: flex; gap: 4px; color: var(--vb-muted); }
+      .vsb-ico { display: grid; place-items: center; width: 44px; height: 44px; }
+      .vsb-ico--wide { display: none; }
+      .vsb-btn { display: grid; place-items: center; width: 127.6px; height: 44px; border: 1px solid transparent; border-radius: 6px; background: linear-gradient(var(--vb-bg), var(--vb-bg)) padding-box, var(--vb-btn-edge) border-box; }
+      .vsb-btn b { width: 92px; height: 10px; }
+      .vsb-rail { display: none; }
+
+      /* --- the phone's tab bar (PhoneTabBar.css): the page's tab lit, by colour and a filled icon ------------- */
+      .vsb-tabs { position: absolute; left: 0; right: 0; bottom: 0; height: calc(56px + env(safe-area-inset-bottom, 0px)); padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: 1px solid var(--vb-line); background: var(--vb-tabs); }
+      .vsb-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; height: 56px; color: var(--vb-muted); }
+      .vsb-tab .f { fill: none; }
+      .vsb-tab b { height: 8px; margin: 2px 0; }
+      [data-boot-tab="trade"] .vsb-tab--trade, [data-boot-tab="bots"] .vsb-tab--bots, [data-boot-tab="points"] .vsb-tab--points,
+      [data-boot-tab="portfolio"] .vsb-tab--portfolio, [data-boot-tab="more"] .vsb-tab--more { color: var(--vb-accent); }
+      [data-boot-tab="trade"] .vsb-tab--trade .f, [data-boot-tab="bots"] .vsb-tab--bots .f, [data-boot-tab="points"] .vsb-tab--points .f,
+      [data-boot-tab="portfolio"] .vsb-tab--portfolio .f, [data-boot-tab="more"] .vsb-tab--more .f { fill: color-mix(in srgb, var(--vb-accent) 30%, transparent); }
+
+      /* --- the page: cards as the landing page lays them out ---------------------------------------------------- */
+      .vsb-main { position: absolute; top: 64px; left: 8px; right: 8px; bottom: calc(56px + env(safe-area-inset-bottom, 0px)); overflow: hidden; }
+      .vsb-card { position: relative; border-radius: 12px; background: var(--vb-card); border: 1px solid var(--vb-card-edge); box-shadow: var(--vb-card-shadow); }
+      .vsb-card > b, .vsb-chip > b { position: absolute; }
+      .vsb-page, .vsb-trade { display: none; }
+      [data-boot="trade"] .vsb-trade { display: block; }
+      [data-boot="bots"] .vsb-page, [data-boot="points"] .vsb-page, [data-boot="portfolio"] .vsb-page, [data-boot="explore"] .vsb-page, [data-boot="page"] .vsb-page { display: flex; }
+
+      /* The trade page: favourites, the market header, the chart (dashboard/layout.ts at a phone's width). */
+      .vsb-strip { display: flex; gap: 8px; height: 56px; padding: 5px 2px; overflow: hidden; }
+      .vsb-chip { position: relative; flex: none; width: 152px; height: 46px; border-radius: 14px; background: var(--vb-chip); box-shadow: var(--vb-chip-shadow); }
+      .vsb-chip .c { left: 12px; top: 10px; width: 26px; height: 26px; }
+      .vsb-chip .t { left: 50px; top: 12px; width: 58px; height: 10px; }
+      .vsb-chip .s { left: 50px; top: 27px; width: 40px; height: 8px; }
+      .vsb-tick { height: 116px; margin-top: 4px; }
+      .vsb-tick .c { left: 12px; top: 22px; width: 30px; height: 30px; }
+      .vsb-tick .p { left: 52px; top: 27px; width: 84px; height: 20px; border-radius: 6px; }
+      .vsb-stats { position: absolute; left: 12px; right: 0; top: 67px; display: flex; gap: 20px; overflow: hidden; }
+      .vsb-stats span { flex: none; width: 54px; }
+      .vsb-stats span:nth-child(2) { width: 57.5px; }
+      .vsb-stats span:nth-child(3) { width: 72px; }
+      .vsb-stats span:nth-child(4) { width: 61px; }
+      .vsb-stats b { height: 8px; width: 80%; }
+      .vsb-stats b + b { height: 12px; width: 100%; margin-top: 8px; }
+      .vsb-chart { height: 716px; margin-top: 4px; }
+      .vsb-head { display: none; }
+      .vsb-head > b { position: absolute; }
+      .vsb-tabsrow { position: absolute; left: 0; right: 0; top: 0; height: 44px; display: flex; align-items: center; gap: 24px; padding: 0 16px; border-bottom: 1px solid var(--vb-line); }
+      .vsb-tabsrow b { height: 12px; width: 36px; }
+      .vsb-tabsrow b:nth-child(2) { width: 72px; }
+      .vsb-ivals { position: absolute; left: 16px; right: 16px; top: 62px; display: flex; gap: 18px; }
+      .vsb-ivals b { width: 20px; height: 10px; }
+      .vsb-book, .vsb-ticket, .vsb-drawer, .vsb-acct { display: none; }
+
+      /* The other landing pages: their heads and first cards. */
+      .vsb-page { flex-direction: column; gap: 9px; padding: 8px 8px 0; }
+      .vsb-page .vsb-card { flex: none; border-radius: 18px; }
+      .vsb-page .k { left: 18px; top: 20px; width: 120px; height: 12px; }
+      .vsb-h, .vsb-sub, .vsb-pt, .vsb-acts, .vsb-c3, .vsb-c4 { display: none; }
+      .vsb-c1 { height: 120px; }
+      .vsb-c2 { height: 400px; }
+      [data-boot="points"] .vsb-c1 { height: 76px; }
+      [data-boot="points"] .vsb-c2 { height: 405px; border-radius: 12px; }
+      [data-boot="points"] .vsb-c3 { display: block; height: 222px; border-radius: 12px; }
+      [data-boot="portfolio"] .vsb-page { gap: 0; padding-top: 16px; }
+      [data-boot="portfolio"] .vsb-h { display: block; width: 80px; height: 22px; border-radius: 6px; }
+      [data-boot="portfolio"] .vsb-pt, [data-boot="explore"] .vsb-pt { display: flex; gap: 24px; padding: 25px 16px 14px; }
+      .vsb-pt b { width: 36px; height: 12px; }
+      .vsb-pt b + b { width: 45px; }
+      [data-boot="portfolio"] .vsb-acts { display: flex; gap: 4px; margin: 1px 0 0 8px; }
+      .vsb-acts b { width: 69.4px; height: 44px; border-radius: 8px; }
+      .vsb-acts b:last-child { width: 86.8px; }
+      [data-boot="portfolio"] .vsb-c1 { height: 373px; margin-top: 20px; border-radius: 12px; }
+      [data-boot="portfolio"] .vsb-c2 { margin-top: 12px; border-radius: 12px; }
+      [data-boot="bots"] .vsb-page { gap: 0; padding: 16px 12px 0; }
+      [data-boot="bots"] .vsb-h { display: block; width: 52px; height: 24px; margin: 19px 0 0 4px; border-radius: 6px; }
+      [data-boot="bots"] .vsb-sub { display: block; width: 276px; max-width: calc(100% - 8px); height: 10px; margin: 10px 0 0 4px; }
+      [data-boot="bots"] .vsb-sub + .vsb-sub { width: 52px; margin-top: 10px; }
+      [data-boot="bots"] .vsb-page .vsb-card { border-radius: 12px; }
+      [data-boot="bots"] .vsb-c1 { height: 241px; margin-top: 26px; }
+      [data-boot="bots"] .vsb-c2 { height: 426px; margin-top: 24px; }
+      [data-boot="explore"] .vsb-page { gap: 0; padding: 0; }
+      [data-boot="explore"] .vsb-pt { padding: 16px 12px 12px; gap: 16px; border-bottom: 1px solid var(--vb-line); border-radius: 8px; }
+      [data-boot="explore"] .vsb-pt b { width: 51px; }
+      [data-boot="explore"] .vsb-pt b + b { width: 50px; }
+      [data-boot="explore"] .vsb-c1 { height: 209px; margin: 16px 12px 0; }
+      [data-boot="explore"] .vsb-c2 { margin: 12px 12px 0; border-radius: 12px; }
+
+      /* --- the rail and one bar, from 761px (App.tsx `rail`) ---------------------------------------------------- */
+      @media (min-width: 761px) {
+        .vsb-rail { display: block; position: absolute; left: 0; top: 0; bottom: 0; width: 68px; background: var(--vb-bg); }
+        .vsb-rail .vsb-mark { position: absolute; left: 20px; top: 14px; }
+        .vsb-rail .vsb-beta { position: absolute; left: 34px; top: 47px; margin: 0; padding: 1px 6px; transform: translateX(-50%); font-size: 10px; line-height: 13px; font-weight: 600; letter-spacing: 0.02em; }
+        .vsb-bar { left: 68px; }
+        .vsb-row { top: 9px; left: 8px; right: auto; height: 38px; }
+        .vsb-brand, .vsb-tabs, .vsb-ico--phone, .vsb-btn, [data-boot] .vsb-seg--bots { display: none; }
+        .vsb-ico--wide { display: grid; }
+        [data-boot="trade"] .vsb-row .vsb-seg--market, [data-boot="bots"] .vsb-seg--pages { display: block; }
+        .vsb-seg { height: 38px; margin: 0; }
+        .vsb-seg i { top: 3px; left: 3px; height: 32px; }
+        .vsb-seg--market { width: 150.6px; }
+        .vsb-seg--market i { width: 81px; }
+        [data-boot-spot] .vsb-seg--market i { left: 86px; width: 61.6px; }
+        .vsb-seg--pages { width: 351.8px; }
+        .vsb-seg--pages i { width: 92px; }
+        .vsb-tools { top: 16px; right: 20px; height: 24px; gap: 20px; }
+        .vsb-ico { width: 24px; height: 24px; }
+        .vsb-main { top: 0; left: 68px; right: 0; bottom: 0; }
+
+        /* The terminal at lg (dashboard/layout.ts: 48 columns, the default 90 rows fitted to the window). */
+        .vsb-trade { position: absolute; top: 60px; left: 4px; right: 4px; height: max(764px, calc(100vh - 72px)); }
+        [data-boot="trade"] .vsb-trade { display: grid; grid-template-columns: repeat(48, minmax(0, 1fr)); grid-template-rows: repeat(90, minmax(0, 1fr)); gap: 4px; }
+        .vsb-strip { grid-area: 1 / 1 / span 6 / span 28; height: auto; padding: 1px 2px; }
+        .vsb-chip { height: auto; }
+        .vsb-tick { display: none; }
+        .vsb-chart { grid-area: 7 / 1 / span 54 / span 28; height: auto; margin: 0; }
+        .vsb-book { display: block; grid-area: 1 / 29 / span 60 / span 10; }
+        .vsb-ticket { display: block; grid-area: 1 / 39 / span 60 / span 10; }
+        .vsb-drawer { display: block; grid-area: 61 / 1 / span 30 / span 38; }
+        .vsb-acct { display: block; grid-area: 61 / 39 / span 30 / span 10; }
+        .vsb-head { display: block; }
+        .vsb-head .c { left: 14px; top: 17px; width: 28px; height: 28px; }
+        .vsb-head .p { left: 56px; top: 21px; width: 80px; height: 20px; border-radius: 6px; }
+        .vsb-head .vsb-stats { left: 165px; top: 20px; }
+        .vsb-chart .vsb-tabsrow { display: none; }
+        .vsb-chart .vsb-ivals { top: 72px; }
+        .vsb-book .vsb-tabsrow, .vsb-ticket .vsb-tabsrow, .vsb-drawer .vsb-tabsrow, .vsb-acct .vsb-tabsrow { height: 40px; gap: 20px; }
+        .vsb-rows { position: absolute; left: 16px; right: 16px; top: 64px; bottom: 16px; background: repeating-linear-gradient(to bottom, var(--vb-bone) 0 8px, transparent 8px 20px); border-radius: 4px; animation: vsb-pulse 1.4s ease-in-out infinite; }
+        .vsb-field { position: absolute; left: 8px; right: 8px; height: 40px; border: 1px solid var(--vb-line); border-radius: 8px; }
+        .vsb-field.a { top: 207px; } .vsb-field.b { top: 259px; }
+        .vsb-cta { position: absolute; left: 8px; right: 8px; top: 430px; height: 40px; border-radius: 8px; }
+        .vsb-acct .vsb-tabsrow b + b, .vsb-drawer .vsb-tabsrow b + b + b + b { display: none; }
+
+        /* The other pages: a centred column, as each page sets it. */
+        .vsb-page { position: absolute; left: 0; right: 0; top: 72px; margin: 0 auto; max-width: 1228px; padding: 0 24px; gap: 9px; }
+        [data-boot="points"] .vsb-c1 { height: 84px; }
+        [data-boot="points"] .vsb-c2 { height: 236px; }
+        [data-boot="points"] .vsb-c3, [data-boot="points"] .vsb-c4 { display: block; height: 200px; }
+        [data-boot="points"] .vsb-page { flex-flow: row wrap; gap: 10px 8px; }
+        [data-boot="points"] .vsb-c1, [data-boot="points"] .vsb-c2 { width: 100%; }
+        [data-boot="points"] .vsb-c3, [data-boot="points"] .vsb-c4 { width: calc(50% - 4px); }
+        [data-boot="portfolio"] .vsb-page { top: 88px; max-width: 1244px; padding-top: 0; flex-flow: row wrap; gap: 0 12px; }
+        [data-boot="portfolio"] .vsb-h { width: 100%; max-width: 110px; flex-basis: 100%; height: 24px; }
+        [data-boot="portfolio"] .vsb-pt { padding: 26px 16px 12px; }
+        [data-boot="portfolio"] .vsb-acts { margin: 15px 0 0 auto; }
+        [data-boot="portfolio"] .vsb-acts b { width: 70px; height: 32px; border-radius: 8px; }
+        [data-boot="portfolio"] .vsb-acts b:last-child { width: 92px; }
+        [data-boot="portfolio"] .vsb-c1 { width: 320px; height: 398px; margin-top: 8px; }
+        [data-boot="portfolio"] .vsb-c2 { flex: 1 1 0; height: 398px; margin-top: 8px; }
+        [data-boot="bots"] .vsb-page { top: 84px; max-width: 1296px; padding: 0 28px; }
+        [data-boot="bots"] .vsb-h { width: 90px; height: 26px; margin: 5px 0 0 4px; }
+        [data-boot="bots"] .vsb-sub { width: 360px; margin-top: 18px; }
+        [data-boot="bots"] .vsb-sub + .vsb-sub { display: none; }
+        [data-boot="bots"] .vsb-c1 { height: 145px; margin-top: 26px; }
+        [data-boot="bots"] .vsb-c2 { height: 177px; margin-top: 24px; }
+        [data-boot="explore"] .vsb-page { top: 60px; max-width: none; padding: 0 4px; }
+        [data-boot="explore"] .vsb-pt { margin: 0; padding: 14px 16px 14px; gap: 28px; border-radius: 0; }
+        [data-boot="explore"] .vsb-pt b { width: 38px; }
+        [data-boot="explore"] .vsb-pt b + b { width: 46px; }
+        [data-boot="explore"] .vsb-c1 { height: 93px; margin: 16px 16px 0; }
+        [data-boot="explore"] .vsb-c2 { height: 500px; margin: 16px 16px 0; }
+      }
+      @media (min-width: 761px) and (max-width: 1275px) {
+        /* md: the chart across, the book and the ticket under it (fixed 26px rows, the page scrolls). */
+        [data-boot="trade"] .vsb-trade { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: 56px 566px 536px; height: auto; }
+        .vsb-strip { grid-area: 1 / 1 / 2 / 3; }
+        .vsb-chart { grid-area: 2 / 1 / 3 / 3; }
+        .vsb-book { grid-area: 3 / 1 / 4 / 2; }
+        .vsb-ticket { grid-area: 3 / 2 / 4 / 3; }
+        .vsb-drawer, .vsb-acct { display: none; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .vsb { transition: none; }
+        .vsb-main b, .vsb-btn b, .vsb-tab b, .vsb-rows { animation: none; }
+      }
+    </style>
     <!-- IBM Plex Sans is self-hosted via @fontsource, imported in main.tsx.
          The Google Fonts CDN link that used to sit here was doing three bad
          things: a render-blocking round trip to a third party on every load,
@@ -143,6 +392,61 @@
     <title>ValueDesk</title>
   </head>
   <body>
+    <!-- The static shell (styles in <head>, src/bootShell.ts). Its icons are the app's own (BrandMark.tsx,
+         NavBar.tsx, PhoneTabBar.tsx), copied: nothing here runs. -->
+    <div id="vs-boot" class="vsb" aria-hidden="true" data-no-i18n="">
+      <div class="vsb-rail"><svg class="vsb-mark" width="28" height="28" viewBox="0 0 32 32"><rect x="0" y="4.2" width="5.6" height="7.2" rx="1.5"/><rect x="26.4" y="4.2" width="5.6" height="7.2" rx="1.5"/><rect x="6.6" y="12.4" width="5.6" height="7.2" rx="1.5"/><rect x="19.8" y="12.4" width="5.6" height="7.2" rx="1.5"/><rect class="g" x="13.2" y="20.6" width="5.6" height="7.2" rx="1.5"/></svg><span class="vsb-beta">Beta</span></div>
+      <div class="vsb-bar">
+        <div class="vsb-row">
+          <span class="vsb-brand"><svg class="vsb-mark" width="20" height="20" viewBox="0 0 32 32"><rect x="0" y="4.2" width="5.6" height="7.2" rx="1.5"/><rect x="26.4" y="4.2" width="5.6" height="7.2" rx="1.5"/><rect x="6.6" y="12.4" width="5.6" height="7.2" rx="1.5"/><rect x="19.8" y="12.4" width="5.6" height="7.2" rx="1.5"/><rect class="g" x="13.2" y="20.6" width="5.6" height="7.2" rx="1.5"/></svg><span class="vsb-beta">Beta</span></span>
+          <span class="vsb-seg vsb-seg--market"><i></i></span>
+        </div>
+        <div class="vsb-row vsb-row--pages"><span class="vsb-seg vsb-seg--pages"><i></i></span></div>
+        <div class="vsb-tools">
+          <span class="vsb-ico vsb-ico--wide"><svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="8"/><path d="M2 10h16M10 2c2.4 2.2 3.6 4.9 3.6 8s-1.2 5.8-3.6 8c-2.4-2.2-3.6-4.9-3.6-8s1.2-5.8 3.6-8Z"/></svg></span>
+          <span class="vsb-ico"><svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 2.2a5.2 5.2 0 0 0-5.2 5.2v2.4L3.2 12.6a1 1 0 0 0 .8 1.6h12a1 1 0 0 0 .8-1.6L15.2 9.8V7.4A5.2 5.2 0 0 0 10 2.2Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.2 15.6a1.8 1.8 0 0 0 3.6 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+          <span class="vsb-ico vsb-ico--phone"><svg viewBox="0 0 20 20" width="20" height="20"><circle cx="8.6" cy="8.6" r="6.4" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M13.3 13.3L18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+          <span class="vsb-btn"><b></b></span>
+        </div>
+      </div>
+      <div class="vsb-main">
+        <div class="vsb-trade">
+          <div class="vsb-strip">
+            <span class="vsb-chip"><b class="c"></b><b class="t"></b><b class="s"></b></span>
+            <span class="vsb-chip"><b class="c"></b><b class="t"></b><b class="s"></b></span>
+            <span class="vsb-chip"><b class="c"></b><b class="t"></b><b class="s"></b></span>
+            <span class="vsb-chip"><b class="c"></b><b class="t"></b><b class="s"></b></span>
+          </div>
+          <div class="vsb-card vsb-tick"><b class="c"></b><b class="p"></b><span class="vsb-seg vsb-seg--market"><i></i></span><div class="vsb-stats"><span><b></b><b></b></span><span><b></b><b></b></span><span><b></b><b></b></span><span><b></b><b></b></span><span><b></b><b></b></span></div></div>
+          <div class="vsb-card vsb-chart">
+            <div class="vsb-head"><b class="c"></b><b class="p"></b><div class="vsb-stats"><span><b></b><b></b></span><span><b></b><b></b></span><span><b></b><b></b></span><span><b></b><b></b></span><span><b></b><b></b></span></div></div>
+            <div class="vsb-tabsrow"><b></b><b></b><b></b></div>
+            <div class="vsb-ivals"><b></b><b></b><b></b><b></b><b></b><b></b></div>
+          </div>
+          <div class="vsb-card vsb-book"><div class="vsb-tabsrow"><b></b><b></b></div><b class="vsb-rows"></b></div>
+          <div class="vsb-card vsb-ticket"><div class="vsb-tabsrow"><b></b><b></b></div><span class="vsb-field a"></span><span class="vsb-field b"></span><b class="vsb-cta"></b></div>
+          <div class="vsb-card vsb-drawer"><div class="vsb-tabsrow"><b></b><b></b><b></b><b></b><b></b><b></b></div></div>
+          <div class="vsb-card vsb-acct"><div class="vsb-tabsrow"><b></b><b></b></div></div>
+        </div>
+        <div class="vsb-page">
+          <span class="vsb-seg vsb-seg--bots"><i></i></span>
+          <b class="vsb-h"></b><b class="vsb-sub"></b><b class="vsb-sub"></b>
+          <div class="vsb-pt"><b></b><b></b></div>
+          <div class="vsb-acts"><b></b><b></b><b></b><b></b></div>
+          <div class="vsb-card vsb-c1"><b class="k"></b></div>
+          <div class="vsb-card vsb-c2"><b class="k"></b></div>
+          <div class="vsb-card vsb-c3"><b class="k"></b></div>
+          <div class="vsb-card vsb-c4"><b class="k"></b></div>
+        </div>
+      </div>
+      <div class="vsb-tabs">
+        <span class="vsb-tab vsb-tab--trade"><svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v14M10 2v16M15 4v12"/><rect class="f" x="3.5" y="6" width="3" height="6" rx="0.8"/><rect class="f" x="8.5" y="5" width="3" height="8" rx="0.8"/><rect class="f" x="13.5" y="7" width="3" height="5" rx="0.8"/></svg><b style="width:28px"></b></span>
+        <span class="vsb-tab vsb-tab--bots"><svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect class="f" x="4" y="6" width="12" height="9" rx="2.4"/><path d="M10 3.2V6M7.5 10.2h.01M12.5 10.2h.01M7.8 12.8h4.4"/></svg><b style="width:22px"></b></span>
+        <span class="vsb-tab vsb-tab--points"><svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path class="f" d="M10 2.8 12.2 7.3l5 .7-3.6 3.5.9 4.9L10 14.1l-4.5 2.3.9-4.9L2.8 8l5-.7L10 2.8Z"/></svg><b style="width:31px"></b></span>
+        <span class="vsb-tab vsb-tab--portfolio"><svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path class="f" d="M10 2.5a7.5 7.5 0 1 0 7.5 7.5H10Z"/><path d="M12.5 2.9A7.5 7.5 0 0 1 17.1 7.5h-4.6Z"/></svg><b style="width:42px"></b></span>
+        <span class="vsb-tab vsb-tab--more"><svg viewBox="0 0 20 20" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle class="f" cx="4.5" cy="10" r="1.4"/><circle class="f" cx="10" cy="10" r="1.4"/><circle class="f" cx="15.5" cy="10" r="1.4"/></svg><b style="width:24px"></b></span>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

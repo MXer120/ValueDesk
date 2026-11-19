@@ -12,7 +12,7 @@
  * step. While a page still holds an `[[OWNER: ...]]` placeholder it says
  * "Draft - not yet legally reviewed", and the placeholders are highlighted.
  */
-import { useLayoutEffect, useRef, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react';
+import { useRef, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react';
 import { LEGAL_LABELS, LEGAL_PAGES, legalForPath, type LegalPage } from '../router';
 import { ANALYTICS_SECTION_TITLE, EMBED_SECTION_TITLE, REOWN_SECTION_TITLE } from './cookies';
 import { LEGAL_DOCS } from './docs';
@@ -36,12 +36,8 @@ export function LegalView({ page, onOpen }: LegalViewProps) {
   const draft = isDraft(doc);
   const root = useRef<HTMLElement>(null);
 
-  /* A new page starts at its top: the page scrolls inside `.appcontent`, which
-     another legal page left wherever its reader was. */
-  useLayoutEffect(() => {
-    const scroller = root.current?.closest('.appcontent');
-    if (scroller) scroller.scrollTop = 0;
-  }, [page]);
+  /* A new page starts at its top, and Back returns to where its reader was: the app's one scroll manager does both
+     for every page, this one included (scrollMemory.ts, App.tsx). */
 
   return (
     <main className="legal" ref={root}>

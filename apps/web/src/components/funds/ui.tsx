@@ -7,7 +7,6 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { createPortal } from 'react-dom';
 import { usePresence } from '../motion';
 import { brandLogo } from '../../logos';
-import { walletLogoForName } from './addrbook/ContactAvatar';
 import type { FundsStep } from '../../trading/funds';
 import { useWalletSnapshot } from '../account/useWallet';
 import { CoinIcon } from '../CoinIcon';
@@ -308,14 +307,39 @@ export const Info = ({ title }: { title: string }) => (
   </span>
 );
 
+/* The address-book match (addrbook/walletLogo.ts) needs the whole catalogue: loaded the first time a fallback is wanted. */
+type WalletLogoFor = (name: string | null | undefined) => string | null;
+let walletLogoFor: WalletLogoFor | null = null;
+let loadingWalletLogos: Promise<WalletLogoFor> | null = null;
+const loadWalletLogos = (): Promise<WalletLogoFor> =>
+  (loadingWalletLogos ??= import('./addrbook/walletLogo').then(
+    (m) => (walletLogoFor = m.walletLogoForName),
+    (e: unknown) => {
+      loadingWalletLogos = null;
+      throw e;
+    },
+  ));
+
+/** The address book's logo for this wallet name while `wanted`; null until the catalogue is in (a moment, once). */
+function useWalletLogoFallback(name: string, wanted: boolean): string | null {
+  const [, loaded] = useState(0);
+  useEffect(() => {
+    if (!wanted || !name.trim() || walletLogoFor) return;
+    let live = true;
+    loadWalletLogos().then(() => { if (live) loaded((n) => n + 1); }, () => {});
+    return () => { live = false; };
+  }, [wanted, name]);
+  return wanted && walletLogoFor ? walletLogoFor(name) : null;
+}
+
 /**
  * The icon the connected wallet announced. The address-book logo is only used
  * when the wallet did not provide one, or that image failed to load.
  */
 export function ConnectedWalletLogo({ size = 18, className = '' }: { size?: number; className?: string }) {
   const wallet = useWalletSnapshot();
-  const local = walletLogoForName(wallet.walletName);
   const [remoteOk, setRemoteOk] = useState(true);
+  const local = useWalletLogoFallback(wallet.walletName, !(remoteOk && wallet.walletIcon));
   useEffect(() => setRemoteOk(true), [wallet.walletIcon, wallet.walletName]);
   const src = (remoteOk && wallet.walletIcon) || local || '';
   if (!src) return <WalletIcon />;

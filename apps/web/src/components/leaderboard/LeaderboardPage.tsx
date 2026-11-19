@@ -18,8 +18,11 @@
  * list. Those cells stay a dash, or the venue mark, until a row actually
  * carries the figure. Nothing here is invented.
  */
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useAsync } from '../../hooks';
+import { asOfText } from '../../asOf';
+import { mayReadAhead, peekAnswer, peekJson, readingAhead, revalidating } from '../../serverFetch';
+import { vsPaths } from '../../vsPaths';
 import { fmtUsd, marketName, shortAddr, signClass } from '../../format';
 import { PlatformSelect } from '../PlatformSelect';
 import { LoadFailed, useLoadFailedToast } from '../LoadFailed';
@@ -37,6 +40,7 @@ import {
   DEFAULT_VIEW,
   LB_VENUES,
   LB_WINDOWS,
+  lbQuery,
   parseView,
   rankMove,
   rankMoveText,
@@ -281,6 +285,37 @@ type Loaded = { ok: true; key: string; res: Page } | { ok: false; key: string; c
 
 const SEARCH_DEBOUNCE_MS = 200;
 
+/** The windows a visitor switches to most (the venues' own), read ahead once the first board is drawn. */
+const AHEAD_WINDOWS: readonly BoardWindow[] = ['1d', '7d', '30d', 'all'];
+
+/**
+ * Once this page's first board is drawn, read the same hundred's other windows in idle time, so a tap on 24h, 7d or
+ * All time draws at once (their answers are kept: serverFetch.ts). Once per visit to the page; not for a visitor who
+ * asked to save data. ~8-10 KB on the wire each (2026-11-18).
+ */
+function useOtherWindows(view: LbView, minTrades: 0 | 2, ready: boolean): void {
+  const done = useRef(false);
+  const latest = useRef({ view, minTrades });
+  latest.current = { view, minTrades };
+  useEffect(() => {
+    if (!ready || done.current || !mayReadAhead()) return;
+    const run = () => {
+      if (done.current) return;
+      done.current = true;
+      const { view: v, minTrades: m } = latest.current;
+      for (const w of AHEAD_WINDOWS) {
+        const q = lbQuery({ ...v, window: w }, m);
+        // Its answer still kept (read ahead on an earlier visit to the page): nothing to read.
+        if (w === v.window || peekAnswer(vsPaths.leaderboard(q))) continue;
+        readingAhead(() => vsApi.leaderboard(q)).catch(() => { /* the tap reads it then */ });
+      }
+    };
+    const idle = typeof window.requestIdleCallback === 'function';
+    const h = idle ? window.requestIdleCallback(run, { timeout: 4_000 }) : window.setTimeout(run, 1_000);
+    return () => { if (idle) window.cancelIdleCallback(h); else window.clearTimeout(h); };
+  }, [ready]);
+}
+
 export interface LeaderboardPageProps {
   address: string | null;
   onScan: (address: string, venue?: Venue) => void;
@@ -340,30 +375,40 @@ export function LeaderboardPage({ address, onScan, embedded = false }: Leaderboa
 
   const mode: LbMode = multi ? view.mode : 'single';
   const key = `${view.venues.join(',')}|${view.side}|${mode}|${view.window}|${minTrades}`;
-  const query = {
-    venues: view.venues.join(','),
-    view: multi ? mode : undefined,
-    window: view.window,
-    sort: 'pnl' as const,
-    limit: 100,
-    offset: 0,
-    side: view.side,
-    minTrades: minTrades === 2 ? (2 as const) : undefined,
-  };
+  const query = lbQuery(view, minTrades);
+  const path = vsPaths.leaderboard(query);
+  /* This board's last answer, while the route's cache policy allows it (serverFetch.ts KEPT ANSWERS): drawn at once with
+     its as-of time, then replaced by the read below, which asks the server for the current one. */
+  const [keptTick, setKeptTick] = useState(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const kept = useMemo(() => peekJson<Page>(path), [path, keptTick]);
+  const keptShown = useRef(false);
   const { data, error, loading, refresh } = useAsync<Loaded>(
-    () => vsApi.leaderboard(query).then(
-      (res): Loaded => ({ ok: true, key, res }),
-      (e: unknown): Loaded => {
-        if (e instanceof VsError) return { ok: false, key, code: e.code, message: e.message };
-        throw e;
-      },
-    ),
+    () => {
+      const read = () => vsApi.leaderboard(query).then(
+        (res): Loaded => ({ ok: true, key, res }),
+        (e: unknown): Loaded => {
+          if (e instanceof VsError) return { ok: false, key, code: e.code, message: e.message };
+          throw e;
+        },
+      );
+      return keptShown.current ? revalidating(read) : read();
+    },
     [key],
     { pollMs: 15_000 },
   );
 
-  const top = data?.ok && data.key === key ? data.res : null;
-  const missing = !!top && needsCurves(top.rows);
+  const fresh = data?.ok && data.key === key ? data.res : null;
+  const held = !fresh && !(data && data.key === key) && kept ? kept : null;
+  keptShown.current = !!held;
+  const top = fresh ?? held?.body ?? null;
+  // Off screen the moment no cache may hand it out any more, should the new answer still be on its way.
+  useEffect(() => {
+    if (!held) return;
+    const t = window.setTimeout(() => setKeptTick((n) => n + 1), Math.max(0, held.until - Date.now()));
+    return () => window.clearTimeout(t);
+  }, [held]);
+  const missing = !!fresh && needsCurves(fresh.rows);
   const { data: curves } = useAsync<Loaded | null>(
     () => vsApi.leaderboard({ ...query, curves: 1 }).then(
       (res): Loaded => ({ ok: true, key, res }),
@@ -372,12 +417,14 @@ export function LeaderboardPage({ address, onScan, embedded = false }: Leaderboa
     [key],
     { enabled: missing },
   );
+  useOtherWindows(view, minTrades, !!fresh);
 
   const failure = data && !data.ok && data.key === key && data.code !== 'not_available' ? data.message : null;
   useLoadFailedToast(failure ?? error, 'Leaderboard', refresh);
 
   const sort = statSort ?? sortKeyOf(view.sort);
-  const curveRows = curves?.ok && curves.key === key ? curves.res.rows : undefined;
+  // Only on the current answer: a kept board is never mixed with a newer one's curves.
+  const curveRows = fresh && curves?.ok && curves.key === key ? curves.res.rows : undefined;
   // The inverse board is worst first: ascending by PnL, descending by the rest.
   const dir = view.side === 'worst' && sort === 'pnl' ? 'asc' : 'desc';
   const shaped = top
@@ -514,6 +561,8 @@ export function LeaderboardPage({ address, onScan, embedded = false }: Leaderboa
           empty={minTrades === 2 ? 'No indexed trader has more than one trade in this window yet.' : view.q || board !== 'all' ? 'No trader in this hundred matches.' : 'No traders in this hundred.'}
         />
       )}
+      {/* The board's last answer, drawn while the current one comes: when it was made, as the cohort pages say theirs. */}
+      {held && asOfText(held.at) && <p className="lbp-note coh-asof">{asOfText(held.at)}</p>}
     </section>
   );
 }

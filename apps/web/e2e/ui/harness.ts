@@ -225,6 +225,9 @@ export async function newUiContext(browser: Browser, wallet: TestWallet, storage
     },
   );
   await wallet.install(ctx);
+  /* A phone with the test wallet injected is a wallet's own browser to the app (walletLinks.ts), which connects by
+     itself once a tab: the specs connect when they mean to (connectWallet below), so every tab counts as tried. */
+  if (o.phone) await ctx.addInitScript(() => { try { sessionStorage.setItem('vs.wallet.hereTried', '1'); } catch { /* none */ } });
   const seed = { 'vs.numberFormat': NUM_STYLE, ...storage };
   await ctx.addInitScript((s: Record<string, string>) => {
     // Only on the first load of each origin: a later reload keeps what the app wrote.
@@ -262,8 +265,9 @@ export async function connectWallet(page: Page, o: { settle?: boolean } = {}): P
   await (wide ? rail : header).getByRole('button', { name: 'Connect wallet' }).click();
   const dialog = page.getByRole('dialog', { name: 'Connect' });
   await dialog.waitFor({ state: 'visible' });
-  // The test wallet announced itself over EIP-6963 as io.metamask: the row says so.
-  await dialog.getByRole('button', { name: 'MetaMask Installed' }).click();
+  // The test wallet announced itself over EIP-6963 as io.metamask: on a desktop the row says so. On a phone the page
+  // is in the wallet's own browser, and the dialog asks the wallet at once (ConnectDialog.tsx chooseHere).
+  if (wide) await dialog.getByRole('button', { name: 'MetaMask Installed' }).click();
   const connected = wide ? rail.getByRole('button', { name: /^Wallet / }) : header.getByRole('button', { name: /0x[0-9a-f]{2,}/i });
   await connected.first().waitFor({ state: 'visible', timeout: 30_000 });
   if (o.settle === false) return; // a spec about what shows the moment a wallet connects

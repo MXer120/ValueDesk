@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COPY_TERMS_VERSION, copyTermsDoc, copyTermsHash, type CopyTermsServed, type TermsDoc } from '@copy-engine';
 import type { ExecutorClient } from './executor';
-import { COPY_TERMS_HASH, activeCopyTerms, adoptRecordedTerms, followExecutorTerms, onActiveCopyTerms } from './terms';
+import { copyTermsHashOfBuild, activeCopyTerms, adoptRecordedTerms, followExecutorTerms, onActiveCopyTerms } from './terms';
 
 const OLDER = '2026-11-02';
 const fakeClient = (served: CopyTermsServed | Error) => {
@@ -24,7 +24,7 @@ const fakeClient = (served: CopyTermsServed | Error) => {
 
 test('before the executor answers, the terms in force are this build\'s own', () => {
   assert.equal(activeCopyTerms().termsVersion, COPY_TERMS_VERSION);
-  assert.equal(activeCopyTerms().termsHash, COPY_TERMS_HASH);
+  assert.equal(activeCopyTerms().termsHash, copyTermsHashOfBuild());
 });
 
 test('web newer than the executor: the setup signs the executor\'s older version, from the text this build keeps', async () => {
@@ -40,7 +40,7 @@ test('web newer than the executor: the setup signs the executor\'s older version
   assert.equal(a.termsHash, copyTermsHash(copyTermsDoc(OLDER)!));
   // The executor's record of that version counts as accepted here; one of another version does not.
   assert.ok(adoptRecordedTerms('0x' + '11'.repeat(20), { termsVersion: OLDER, termsHash: a.termsHash, country: 'SG', acceptedAt: 1 } as never));
-  assert.equal(adoptRecordedTerms('0x' + '11'.repeat(20), { termsVersion: COPY_TERMS_VERSION, termsHash: COPY_TERMS_HASH, country: 'SG', acceptedAt: 1 } as never), null);
+  assert.equal(adoptRecordedTerms('0x' + '11'.repeat(20), { termsVersion: COPY_TERMS_VERSION, termsHash: copyTermsHashOfBuild(), country: 'SG', acceptedAt: 1 } as never), null);
   // Same version again: nothing changes.
   assert.equal(await followExecutorTerms({ termsVersion: OLDER, features: [] }, f.client), false);
 });
@@ -68,5 +68,5 @@ test('an executor that cannot serve an unknown version leaves the terms as they 
   assert.equal(activeCopyTerms(), before);
   // Back to this build's version.
   assert.equal(await followExecutorTerms({ termsVersion: COPY_TERMS_VERSION, features: [] }, noDoc.client), true);
-  assert.equal(activeCopyTerms().termsHash, COPY_TERMS_HASH);
+  assert.equal(activeCopyTerms().termsHash, copyTermsHashOfBuild());
 });

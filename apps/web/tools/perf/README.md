@@ -19,6 +19,11 @@ out of the repo.
 | `early-keys.mjs` | keys typed the moment the page appears: does the palette open with all of them |
 | `smoke.mjs` | every page loads, with its console errors and failed requests |
 | `preview.config.mjs` | serves one built `dist` on its own port, API proxied |
+| `serve-br.mjs` | serves one built `dist` the way Vercel does (brotli, immutable `/assets`), `/api` and `/ws` to a dev server |
+| `phone-load.mjs` | cold phone loads (375x812, Android) under DevTools' "Slow 4G" + 4x CPU: first and largest paint, when the chosen language shows, bytes and requests before them, the catalogue files (docs/PHONE.md) |
+| `tap-audit.mjs` | tap targets under 44x44 px at 375x812, per page |
+| `touch-chart.mjs` | does the trade chart pan with one finger and zoom with two (real touch events), without scrolling the page |
+| `chart-switch.mjs` | on a phone at 4x CPU: a real-touch tap on a timeframe, and the tab bar's way back to Trade, to the first frame with the new candles - for a series not shown yet and one shown seconds ago (chart/seriesCache.ts) - with the chart's own log steps and every candle read (`--profile=slow4g` throttles the switches, not the page load) |
 
 `cdp.mjs`, `pages.mjs`, `traffic.mjs` and `png.mjs` are their shared parts: the
 Chrome launcher and protocol client, the page list, the request recorder (which

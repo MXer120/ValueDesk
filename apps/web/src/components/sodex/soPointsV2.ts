@@ -13,6 +13,8 @@
  */
 import { useEffect, useState } from 'react';
 import { authed, fetchVenueDaily, type BoostConfig, type DailyPoint, type VolumeWeights } from '../../points';
+import { serverGetJson } from '../../serverFetch';
+import { vsPaths } from '../../vsPaths';
 
 const BIZ = 'https://alpha-biz.sodex.dev';
 
@@ -244,12 +246,16 @@ export interface MmWeek { volume: number | null; oi: number | null }
 
 export interface MmDay { date: string; volume: number | null; internalOi: number | null }
 
-/** Server 1's /api/vs/sodex/mm-daily (valuedesk/sodex/mmDaily.ts). Null on any failure: the platform then includes them. */
+/**
+ * Server 1's /api/vs/sodex/mm-daily (valuedesk/sodex/mmDaily.ts). Null on any failure: the platform then includes them.
+ * `from` is asked as its UTC day start (vsPaths.mmDaily): the server keys its answer by that day, so the bytes are the
+ * same, and one URL a day lets the edge and the browser answer it (a millisecond `from` made every load a new URL).
+ */
 export async function fetchMmDaily(fromMs: number): Promise<{ days: MmDay[] } | null> {
   try {
-    const r = await fetch(`/api/vs/sodex/mm-daily?from=${fromMs}`, { headers: { Accept: 'application/json' } });
-    const j = (await r.json()) as { ok?: boolean; days?: MmDay[] };
-    return r.ok && j.ok && Array.isArray(j.days) ? { days: j.days } : null;
+    const r = await serverGetJson<{ ok?: boolean; days?: MmDay[] }>(vsPaths.mmDaily(fromMs));
+    const j = r.body;
+    return r.ok && j?.ok && Array.isArray(j.days) ? { days: j.days } : null;
   } catch {
     return null;
   }

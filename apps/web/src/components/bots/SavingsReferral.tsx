@@ -8,6 +8,7 @@ import { CREDIT_FEE, TIER_SHARES, type InviteMe } from '@sign/invites/claim';
 import { DASH, fmtUsd } from '../../format';
 import { notify } from '../../toast';
 import { track } from '../../analytics/usage';
+import { prefersNativeShare, shareNative } from '../../share/nativeShare';
 import { inviteLink, inviteLinkShown, useOwnCode } from '../../invites/invites';
 import { Button, Panel, ProgressBar, Shell, ShellHeader, StatusPill } from './kit/kit';
 
@@ -28,6 +29,14 @@ export function SavingsReferral({ address, me, onOpen }: { address: string; me: 
       notify('warn', 'This browser did not allow copying. Open Referrals to copy the link.');
     }
   };
+  /* A phone: its share sheet (share/nativeShare.ts) first; refused or missing, the link is copied. */
+  const phone = prefersNativeShare();
+  const share = async () => {
+    if (!code) return;
+    const r = await shareNative({ url: inviteLink(code), text: 'Trade on ValueDesk with my link.' });
+    if (r === 'shared') track('invite.copy', { how: 'savings-share' });
+    else if (r === 'failed' || r === 'unsupported') void copy();
+  };
   const now = w ? { fee: '0 bp', words: 'Welcome' } : c?.paying ? { fee: `${CREDIT_FEE / 10} bp`, words: 'Credits pay the rest' } : null;
   return (
     <Shell className="bots-listcard">
@@ -37,7 +46,8 @@ export function SavingsReferral({ address, me, onOpen }: { address: string; me: 
           <span className="sv-ref__k">Your link</span>
           <code>{code ? inviteLinkShown(code) : own.state === 'loading' ? 'Reading your SoDEX code…' : own.state === 'none' ? 'Your link appears once this wallet has a SoDEX account' : DASH}</code>
           <span className="sv-ref__act">
-            <Button variant="primary" size="sm" disabled={!code} onClick={() => void copy()}>Copy link</Button>
+            {phone && <Button variant="primary" size="sm" icon="share" disabled={!code} onClick={() => void share()}>Share</Button>}
+            <Button variant={phone ? 'secondary' : 'primary'} size="sm" disabled={!code} onClick={() => void copy()}>Copy link</Button>
             <Button variant="secondary" size="sm" onClick={onOpen}>Referrals</Button>
           </span>
         </div>

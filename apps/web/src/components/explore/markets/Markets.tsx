@@ -30,11 +30,11 @@ import {
   MARKET_KINDS, buildMarkets, filterMarkets, fundingApr, headline, heldLong, pulseOf, sectorStats, sortMarkets,
   type HeldAsset, type HlAsset, type MarketKind, type MarketRow, type MarketSort,
 } from './model';
+import { MAP_VENUES, TRADERS_WINDOW, tradersBoard } from './reads';
 import '../cohorts/Cohorts.css';
 import './Markets.css';
 
 const POLL_MS = 30_000;
-const MAP_VENUES: readonly Venue[] = ['sodex', 'hyperliquid', 'tradexyz', 'lighter', 'arcus'];
 const PAGE = 50;
 const DEFAULT_WATCH = ['BTC', 'ETH', 'HYPE', 'SOL'];
 const SECTOR_LABEL = Object.fromEntries(SECTORS.map((s) => [s.id, s.label])) as Record<Sector, string>;
@@ -113,7 +113,6 @@ export function Markets({ enabled, onOpenSymbol, onOpenCopy, onOpenCopyPage }: {
 
 /* --- traders to copy ------------------------------------------------------------------------ */
 
-const TRADERS_WINDOW: BoardWindow = '30d';
 const TRADERS_SHOWN = 4;
 
 /** The best traders to copy right now, as the Copy page scores them: profitable over 30 days, best score first. */
@@ -124,7 +123,7 @@ function TradersToCopy({ enabled, onOpenCopy, onOpenCopyPage }: {
 }) {
   const boards = useAsync(
     () => Promise.all(COPY_VENUES.map((venue) =>
-      vsApi.leaderboard({ venue, window: TRADERS_WINDOW, sort: 'pnl', limit: 100 }).then((b) => b.rows, () => [] as TraderRow[]))),
+      vsApi.leaderboard(tradersBoard(venue)).then((b) => b.rows, () => [] as TraderRow[]))),
     [],
     { pollMs: 5 * 60_000, enabled },
   );

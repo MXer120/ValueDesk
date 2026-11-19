@@ -12,9 +12,12 @@ import { test, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { setTradingConfig, type BuilderConfig } from './config';
 import {
+  TERMS_IDLE_MS,
+  TERMS_LEAD_MS,
   TERMS_PATH,
   TERMS_REFRESH_MS,
   TERMS_TTL_CAP_MS,
+  termsRefreshDelay,
   _resetTermsForTests,
   configureTerms,
   currentTerms,
@@ -645,8 +648,23 @@ test('ensureTerms: asks when nothing is held, waits a bounded time, and never th
   assert.equal(feeNow('perps', WALLET), 20);
 });
 
-test('followTerms: asked at once, then every few minutes; sooner while a verification is pending; stopped with null', async () => {
+test('termsRefreshDelay: held terms are asked for again three minutes before they run out, never before half their time', () => {
+  assert.equal(TERMS_LEAD_MS, 180_000);
+  assert.equal(termsRefreshDelay(600_000), 420_000, 'the server\'s 10 min: after 7 (it was 4)');
+  assert.equal(termsRefreshDelay(TERMS_TTL_CAP_MS), TERMS_REFRESH_MS);
+  assert.equal(TERMS_REFRESH_MS, 12 * 60_000, 'the 15 min cap less the lead');
+  assert.equal(termsRefreshDelay(24 * 3_600_000), TERMS_REFRESH_MS, 'a longer ttl than the cap: the cap counts');
+  assert.equal(termsRefreshDelay(240_000), 120_000, 'a short ttl: at half its time');
+  assert.equal(termsRefreshDelay(120_000), 60_000);
+  assert.equal(termsRefreshDelay(10_000), 30_000, 'never more often than every 30 s');
+  assert.equal(termsRefreshDelay(0), 30_000);
+  assert.equal(termsRefreshDelay(Number.NaN), 30_000);
+  for (const v of [60_000, 120_000, 300_000, 600_000, 900_000]) assert.ok(termsRefreshDelay(v) < v, `${v}: asked before they run out`);
+});
+
+test('followTerms: asked at once, then shortly before they run out; sooner while a verification is pending; stopped with null', async () => {
   mock.timers.enable({ apis: ['setTimeout'] });
+  const PACE = termsRefreshDelay(600_000);
   followTerms(WALLET);
   await settle(() => server.requests.length === 1 && feeNow('perps', WALLET) === 15);
   assert.equal(server.requests.length, 1, 'asked when trading is enabled or restored');
@@ -654,15 +672,15 @@ test('followTerms: asked at once, then every few minutes; sooner while a verific
   followTerms(WALLET);
   await settle();
   assert.equal(server.requests.length, 1, 'following the same wallet again starts nothing new');
-  mock.timers.tick(TERMS_REFRESH_MS - 1);
+  mock.timers.tick(PACE - 1);
   await settle();
   assert.equal(server.requests.length, 1);
   mock.timers.tick(1);
   await settle(() => server.requests.length === 2);
-  assert.equal(server.requests.length, 2, 'again after the refresh interval');
+  assert.equal(server.requests.length, 2, 'again three minutes before the terms run out');
   // The server says a verification is running: look again in 30 s.
   server.volume = { totalUsd: 12.4, pending: true };
-  mock.timers.tick(TERMS_REFRESH_MS);
+  mock.timers.tick(PACE);
   await settle(() => server.requests.length === 3);
   mock.timers.tick(30_000);
   await settle(() => server.requests.length === 4);
@@ -677,7 +695,7 @@ test('followTerms: asked at once, then every few minutes; sooner while a verific
   await settle();
   assert.equal(server.requests.length, n, 'no longer pending: back to the normal pace');
   followTerms(null);
-  mock.timers.tick(10 * TERMS_REFRESH_MS);
+  mock.timers.tick(10 * PACE);
   await settle();
   assert.equal(server.requests.length, n, 'stopped');
 });
@@ -715,9 +733,68 @@ test('followTerms: a short ttl is refreshed in time, but never more often than e
   mock.timers.tick(60_000);
   await settle();
   assert.equal(server.requests.length, 8, 'after three failures: every few minutes');
-  mock.timers.tick(TERMS_REFRESH_MS - 60_000);
+  mock.timers.tick(TERMS_IDLE_MS - 60_000);
   await settle(() => server.requests.length === 9);
   assert.equal(server.requests.length, 9);
+  followTerms(null);
+});
+
+test("followTerms: an error answer to the ask before held terms run out (the function's 502, the server's {ok:false}) is retried a minute later, and the lowered fee never lapses", async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  // The terms' own clocks move with the timers: held terms run out by them (alive) as well as by their timer.
+  const advance = (ms: number) => {
+    clock.mono += ms;
+    clock.wall += ms;
+    mock.timers.tick(ms);
+  };
+  const PACE = termsRefreshDelay(600_000);
+  followTerms(WALLET);
+  await settle(() => server.requests.length === 1 && feeNow('perps', WALLET) === 15);
+  // The origin is down: the /api function answers with its own 502 JSON.
+  server.status = 502;
+  server.rewrite = () => ({ error: 'bad_gateway', message: 'The origin did not answer.' });
+  advance(PACE);
+  await settle(() => server.requests.length === 2);
+  assert.equal(server.requests.length, 2, 'asked three minutes before they run out');
+  assert.equal(feeNow('perps', WALLET), 15, 'an error answer leaves the held terms alone');
+  advance(59_999);
+  await settle();
+  assert.equal(server.requests.length, 2);
+  // The server's own "not now" ({ok:false} in a 200): a failure too.
+  server.status = 200;
+  server.rewrite = () => ({ ok: false, code: 'unavailable' });
+  advance(1);
+  await settle(() => server.requests.length === 3);
+  assert.equal(server.requests.length, 3, 'a minute later, not after TERMS_IDLE_MS');
+  assert.equal(feeNow('perps', WALLET), 15);
+  server.rewrite = null;
+  advance(60_000);
+  await settle(() => server.requests.length === 4 && currentTerms(WALLET)?.nonce === server.requests[3]!.nonce);
+  assert.equal(server.requests.length, 4);
+  assert.ok(PACE + 120_000 < 600_000, 'the renewing ask came before the held terms ran out');
+  assert.equal(feeNow('perps', WALLET), 15, 'renewed in time: the lowered fee never lapsed');
+  // Renewed: the normal pace again, from the new answer.
+  advance(PACE - 1);
+  await settle();
+  assert.equal(server.requests.length, 4);
+  advance(1);
+  await settle(() => server.requests.length === 5);
+  assert.equal(server.requests.length, 5);
+  followTerms(null);
+});
+
+test('followTerms: with no terms held, an error answer waits the idle pace (nothing to keep alive)', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  server.status = 503;
+  followTerms(WALLET);
+  await settle(() => server.requests.length === 1);
+  assert.equal(currentTerms(WALLET), null);
+  mock.timers.tick(TERMS_IDLE_MS - 1);
+  await settle();
+  assert.equal(server.requests.length, 1, 'no quick retries for a wallet without terms');
+  mock.timers.tick(1);
+  await settle(() => server.requests.length === 2);
+  assert.equal(server.requests.length, 2);
   followTerms(null);
 });
 

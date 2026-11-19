@@ -75,6 +75,15 @@ async function toWebp(png, name, width, quality = 0.82) {
   console.log(name, `${Math.round(statSync(file).size / 1024)} KB`);
 }
 
+/**
+ * A feature's main picture: 1680 px, and a 1200 px copy (`-1200`) that Onboarding.tsx offers in its srcset - what a
+ * desktop at 1x and most phones need for it (phone pass, 2026-11-18).
+ */
+async function toWebpMain(png, name) {
+  await toWebp(png, name, 1680);
+  await toWebp(png, `${name}-1200`, 1200);
+}
+
 /** The terminal without the empty account tables under it (no wallet is connected here). */
 const TERMINAL_TOP = { x: 0, y: 0, width: 1680, height: 740 };
 
@@ -95,7 +104,7 @@ for (const theme of THEMES) {
     await page.waitForTimeout(4000);
     await page.evaluate(() => document.querySelector('.cpy-grid, [class*="cpy-grid"]')?.scrollIntoView({ block: 'start' }));
     await page.waitForTimeout(2500);
-    await toWebp(await page.screenshot(), `copy-main-${theme}`, 1680);
+    await toWebpMain(await page.screenshot(), `copy-main-${theme}`);
     await page.locator('.cpy-card .cpy-copybtn--copy').first().click();
     await page.waitForTimeout(6000);
     const dialog = page.locator('.modal.cpy-modal').first();
@@ -121,7 +130,7 @@ for (const theme of THEMES) {
     await page.waitForTimeout(3000);
     await page.locator('.lqm').first().getByText('1H', { exact: true }).first().click().catch(() => {});
     await page.waitForTimeout(15000);
-    await toWebp(await page.screenshot({ clip: TERMINAL_TOP }), `heatmap-main-${theme}`, 1680);
+    await toWebpMain(await page.screenshot({ clip: TERMINAL_TOP }), `heatmap-main-${theme}`);
     await done();
   }
 
@@ -133,7 +142,7 @@ for (const theme of THEMES) {
     const canvas = await page.locator('.kc-panel canvas').first().boundingBox();
     if (canvas) await page.mouse.click(canvas.x + canvas.width * 0.55, canvas.y + canvas.height * 0.4);
     await page.waitForTimeout(6000);
-    await toWebp(await page.screenshot({ clip: TERMINAL_TOP }), `flow-main-${theme}`, 1680);
+    await toWebpMain(await page.screenshot({ clip: TERMINAL_TOP }), `flow-main-${theme}`);
     const side = page.locator('.kc-flow-wrap').first();
     await toWebp(await side.screenshot(), `flow-front-${theme}`, 760);
     const chart = page.locator('.kc-panel').first();

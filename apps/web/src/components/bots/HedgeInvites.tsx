@@ -15,6 +15,7 @@ import { goBots } from '../../bots/routes';
 import { PRACTICE_BOTS, refusalOf } from '../../bots/presets';
 import { PENDING_EVENT, dropPending, pendingFor, type PendingPair } from '../../bots/hedge';
 import { hedgeInvitesOn } from '../../algo/executorAlgos';
+import { pollWhileShown } from '../../exchange/visibility';
 import { mustTakeCode } from '../../bots/hedgeRules';
 import { REFERRAL_CODE, REFERRAL_URL, useReferral } from '../../onboarding/referral';
 import { offerReferral } from '../../onboarding/referralRules';
@@ -37,7 +38,15 @@ function usePending(wallet: string | null): PendingPair[] {
   return (JSON.parse(key) as string[]).map((id) => pendingFor(wallet).find((p) => p.pairId === id)!).filter(Boolean);
 }
 
-/** The executor's invitations for this wallet, read every 15 s while the Bots page is open. */
+/**
+ * How often the executor's invitations are read while the Bots page is shown. Each read is a call of the site's /api
+ * function (billed per call: 581 a day at 15 s on 2026-11-17, the cost map); an invite is made in another wallet's tab or
+ * app, and the visitor switching over from there is read at once (pollWhileShown), so the interval only covers a
+ * page left open and in view.
+ */
+const INVITES_POLL_MS = 60_000;
+
+/** The executor's invitations for this wallet: on opening, every minute while the page is in view, and on coming back. */
 function useServerInvites(wallet: string | null, ready: boolean): PendingPair[] {
   const [list, setList] = useState<PendingPair[]>([]);
   useEffect(() => {
@@ -48,8 +57,8 @@ function useServerInvites(wallet: string | null, ready: boolean): PendingPair[] 
       if (on) setList(xs.map((x) => ({ pairId: x.pairId, main: x.main, partner: wallet.toLowerCase(), symbol: x.symbol, spec: x.spec, at: x.at })));
     });
     read();
-    const t = window.setInterval(read, 15_000);
-    return () => { on = false; window.clearInterval(t); };
+    const stop = pollWhileShown(INVITES_POLL_MS, read);
+    return () => { on = false; stop(); };
   }, [wallet, ready]);
   return list;
 }

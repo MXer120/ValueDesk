@@ -92,9 +92,18 @@ async function fetchAll(info: InfoLike): Promise<HlAsset[]> {
 }
 
 export async function hlAssets(info: InfoLike, now: () => number = Date.now): Promise<HlAsset[]> {
-  if (cached && now() - cached.at < ASSETS_TTL_MS) return cached.rows;
-  if (!pending) {
-    pending = fetchAll(info)
+  return (await hlAssetsAt(info, now)).rows;
+}
+
+/**
+ * The markets with when they were read (`at`, ms): the screener sends that time as its `updatedAt`, so an answer is the
+ * same text until the markets are read again - a 30 s poll then revalidates to a 304 - and says how old it is.
+ */
+export async function hlAssetsAt(info: InfoLike, now: () => number = Date.now): Promise<{ at: number; rows: HlAsset[] }> {
+  if (cached && now() - cached.at < ASSETS_TTL_MS) return cached;
+  let p = pending;
+  if (!p) {
+    p = pending = fetchAll(info)
       .then((rows) => {
         cached = { at: now(), rows };
         return rows;
@@ -104,8 +113,9 @@ export async function hlAssets(info: InfoLike, now: () => number = Date.now): Pr
       });
   }
   if (cached) {
-    pending.catch(() => { /* keep serving the last answer */ });
-    return cached.rows;
+    p.catch(() => { /* keep serving the last answer */ });
+    return cached;
   }
-  return pending;
+  await p;
+  return cached!;
 }

@@ -30,6 +30,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { slotRef, useSlot } from './slots';
 import { CoinIcon } from './components/CoinIcon';
 import { logger } from './log';
 
@@ -265,17 +266,10 @@ export function useErrorToast(error: unknown, source: string, retry?: () => void
 function ToastRail({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
   /* Docked in the navbar's notification lane when the bar offers one (NavBar.tsx
      #vs-notify-slot, the rail layout); else the floating stack, top right. */
-  const [slot, setSlot] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    const find = () => setSlot(document.getElementById('vs-notify-slot'));
-    find();
-    const mo = new MutationObserver(find);
-    mo.observe(document.body, { childList: true, subtree: true });
-    return () => mo.disconnect();
-  }, []);
+  const slot = useSlot('vs-notify-slot');
   const rail = (
     <div className={`toasts${slot ? ' is-docked' : ''}`}>
-      <div id="vs-toast-pin" />
+      <div id="vs-toast-pin" ref={slotRef('vs-toast-pin')} />
       {toasts.length > 0 && (
         <div className="toasts__live" aria-live="polite">
           {/* Docked, the newest sits at the lane's right end: the lane runs right to left. */}

@@ -256,15 +256,28 @@ svg.coh-lean.is-empty { height: 52px; }
 }
 .coh-chart__empty b { color: var(--text); font-size: var(--fs-base); font-weight: 500; }
 .coh-chart__empty span { max-width: 44ch; color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-xs); }
+/* The sweep runs on the compositor (motion.css says how): a layer wider than the box, painted with the same tile,
+   slides by whole tiles - the same picture every frame as the background-position it replaces, which repainted
+   on the main thread and stood still through every long task, exactly while the page was loading. */
 .coh-chart__skel {
   position: absolute;
   inset: 12px 58px 30px 14px;
+  overflow: hidden;
   border-radius: 8px;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 6%, transparent), transparent);
-  background-size: 200% 100%;
-  animation: coh-shimmer 1.2s linear infinite;
 }
-@keyframes coh-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.coh-chart__skel::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -300%;
+  width: 400%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 6%, transparent), transparent) 0 0 / 50% 100% repeat-x;
+  transform: translate3d(25%, 0, 0);
+  animation: coh-shimmer 1.2s linear infinite;
+  pointer-events: none;
+}
+@keyframes coh-shimmer { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(50%, 0, 0); } }
 .coh-tables { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .coh-table { min-width: 0; overflow-x: auto; }
 .coh-table h3 { margin: 0 0 6px; font-size: var(--fs-base); font-weight: 600; }

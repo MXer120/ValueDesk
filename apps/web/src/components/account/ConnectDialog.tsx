@@ -47,10 +47,12 @@ import {
   FEATURED_WALLETS,
   WALLETCONNECT_IMAGE_ID,
   closeWalletModal,
+  connectHere,
   connectVia,
   connectorImageUrl,
   findInstalled,
   initWallet,
+  isMobileDevice,
   isWalletConnected,
   isWalletModalUp,
   onWalletModalClosed,
@@ -59,9 +61,11 @@ import {
   type ConnectChoice,
   type ConnectRoute,
 } from '../../walletconnect';
+import { PHONE_RDNS, PHONE_WALLETS, pageForWallet, walletBrowser, type PhoneWallet, type PhoneWalletKey, type WalletBrowser } from '../../walletLinks';
 import { getAccountPending, setAccountPending } from './actions';
 import { closeConnectDialog, useConnectDialogOpen } from './connect';
 import { useWalletSnapshot } from './useWallet';
+import { useSheetDrag } from '../motion';
 import './ConnectDialog.css';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -84,8 +88,11 @@ interface Stage {
 }
 const NO_SESSION: Stage = { scrim: 'off', card: 'away' };
 
+/** A row's key: a connect route, the wallet this page runs in, or a phone row that opens a wallet's app. */
+type DialogChoice = ConnectChoice | 'here' | `app-${PhoneWalletKey}`;
+
 interface Attempt {
-  choice: ConnectChoice;
+  choice: ConnectChoice | 'here';
   route: ConnectRoute;
 }
 
@@ -104,6 +111,12 @@ export function ConnectDialog() {
   const [busy, setBusy] = useState<Attempt | null>(null);
   const [note, setNote] = useState('');
   const [discovered, setDiscovered] = useState<readonly WalletInfo[]>([]);
+  /* A phone (walletLinks.ts): wallet rows open this page in the wallet's own browser. Inside one: connect at once. */
+  const [phone, setPhone] = useState(false);
+  const [here, setHere] = useState<WalletBrowser | null>(null);
+  const [opening, setOpening] = useState<PhoneWalletKey | null>(null);
+  const [pasteFor, setPasteFor] = useState<PhoneWalletKey | null>(null);
+  const [copied, setCopied] = useState(false);
   const titleId = useId();
 
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -112,7 +125,7 @@ export function ConnectDialog() {
   activeRef.current = active;
   const busyRef = useRef<Attempt | null>(null);
   const restoreTo = useRef<HTMLElement | null>(null);
-  const lastChoice = useRef<ConnectChoice | null>(null);
+  const lastChoice = useRef<DialogChoice | null>(null);
   /** Bumped whenever an in-flight attempt stops mattering (closed, or superseded). */
   const attemptSeq = useRef(0);
   const offModal = useRef<(() => void) | null>(null);
@@ -194,10 +207,19 @@ export function ConnectDialog() {
     setAttempt(null);
     go({ scrim: 'on', card: 'shown' });
     discoverWallets();
+    const onPhone = isMobileDevice();
+    const inWallet = walletBrowser(window as unknown as Parameters<typeof walletBrowser>[0], navigator.userAgent, onPhone);
+    setPhone(onPhone);
+    setHere(inWallet);
+    setOpening(null);
+    setPasteFor(null);
+    setCopied(false);
     /* Warm-up: loading and starting AppKit is most of the wait after a row is
        pressed, and the user asked to connect by opening this. A failure (no
-       project id, offline) is reported by the row that needs it, not here. */
-    void initWallet().catch(() => {});
+       project id, offline) is reported by the row that needs it, not here.
+       Not on a phone outside a wallet: its rows open the wallet's app by a
+       link, and AppKit (~1 MB of script) is needed only by WalletConnect. */
+    if (!onPhone || inWallet) void initWallet().catch(() => {});
   }, [active, go, setAttempt]);
 
   /* A lost `animationend` must not leave an invisible sheet catching clicks, or
@@ -335,6 +357,72 @@ export function ConnectDialog() {
     }
   }, [discovered, onModalLeft, setAttempt, stepAside]);
 
+  /* Inside a wallet's browser: its injected provider, straight away. */
+  const chooseHere = useCallback(async (w: WalletBrowser) => {
+    if (busyRef.current) return;
+    const seq = ++attemptSeq.current;
+    lastChoice.current = 'here';
+    setNote('');
+    setAttempt({ choice: 'here', route: 'extension' });
+    setAccountPending('connect');
+    try {
+      await connectHere(w, w.key ? PHONE_RDNS[w.key] : []);
+    } catch (e) {
+      if (seq !== attemptSeq.current) return;
+      if (e instanceof ConnectRejectedError) setNote(e.message);
+      else notifyError('Connect wallet', e);
+    } finally {
+      if (seq === attemptSeq.current) {
+        setAttempt(null);
+        if (getAccountPending() === 'connect') setAccountPending(null);
+      }
+    }
+  }, [setAttempt]);
+
+  /* The session's first frame inside a wallet: no list to pick from, the prompt comes up. */
+  const startedHere = useRef(false);
+  useEffect(() => {
+    if (!cardUp) { if (stage.scrim === 'off') startedHere.current = false; return; }
+    if (!here || startedHere.current) return;
+    startedHere.current = true;
+    void chooseHere(here);
+  }, [cardUp, here, chooseHere, stage.scrim]);
+
+  /* A phone row: the wallet's documented link, which opens this page in its browser (or its store page). */
+  const openApp = useCallback((w: PhoneWallet) => {
+    setNote('');
+    if (!w.open) {
+      setPasteFor((now) => (now === w.key ? null : w.key));
+      setCopied(false);
+      return;
+    }
+    setPasteFor(null);
+    setOpening(w.key);
+    lastChoice.current = `app-${w.key}`;
+    window.location.assign(w.open(pageForWallet(window.location.href)));
+  }, []);
+
+  /* Back from the wallet app without it taking the page (cancelled, or not installed): the row is a row again. */
+  useEffect(() => {
+    if (!opening) return;
+    const back = () => { if (document.visibilityState === 'visible') setOpening(null); };
+    const t = window.setTimeout(() => setOpening(null), 6000);
+    document.addEventListener('visibilitychange', back);
+    return () => { window.clearTimeout(t); document.removeEventListener('visibilitychange', back); };
+  }, [opening]);
+
+  /* On a phone the card is a sheet: pulled down by its grip or head, it closes the session (motion.tsx). */
+  useSheetDrag(sheetRef, { enabled: stage.scrim === 'on' && stage.card === 'shown', onDismiss: close });
+
+  const copyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(pageForWallet(window.location.href));
+      setCopied(true);
+    } catch {
+      setNote('This browser did not allow copying. Copy the address from the address bar instead.');
+    }
+  }, []);
+
   if (stage.scrim === 'off') return null;
   const ending = stage.scrim === 'leaving';
 
@@ -378,18 +466,98 @@ export function ConnectDialog() {
             if (e.target === e.currentTarget) onCardLeft();
           }}
         >
-          <div className="cdlg-head">
+          {/* A phone sheet (ConnectDialog.css, up to 760px): pulled down by this grip or the head, it goes. */}
+          <span className="sheet-grip" aria-hidden="true" />
+          <div className="cdlg-head" data-sheet-handle>
             <h2 id={titleId} className="cdlg-title">Connect</h2>
             <button type="button" className="cdlg-close" aria-label="Close" onClick={close}>
               <CloseGlyph />
             </button>
           </div>
+          {here ? (
+            <div className="cdlg-list">
+              <p className="cdlg-lead">You are in {here.label}&rsquo;s browser: approve the connection there.</p>
+              <button
+                type="button"
+                className="cdlg-row"
+                data-choice="here"
+                aria-busy={busy?.choice === 'here' ? true : undefined}
+                onClick={() => { void chooseHere(here); }}
+              >
+                <span className="cdlg-row__body">
+                  {here.key && <WalletIcon sources={[walletImageUrl(PHONE_WALLETS.find((w) => w.key === here.key)!.imageId)].filter((x): x is string => !!x)} label={here.label} />}
+                  <span className="cdlg-row__label">{here.key ? here.label : 'Connect this wallet'}</span>
+                </span>
+                <span className="cdlg-row__aside">
+                  {busy?.choice === 'here' ? (
+                    <>
+                      <span className="cdlg-wait">Confirm in {here.key ? here.label : 'the wallet'}</span>
+                      <span className="cdlg-spin" aria-hidden="true" />
+                    </>
+                  ) : (
+                    <span className="cdlg-wait">Try again</span>
+                  )}
+                </span>
+              </button>
+            </div>
+          ) : phone ? (
+            <>
+              <p className="cdlg-lead">Pick your wallet: ValueDesk opens in its app, ready to connect.</p>
+              <div className="cdlg-list">
+                {PHONE_WALLETS.map((w) => {
+                  const icon = walletImageUrl(w.imageId);
+                  const isOpening = opening === w.key;
+                  const expanded = pasteFor === w.key;
+                  return (
+                    <div key={w.key} className="cdlg-group">
+                      <button
+                        type="button"
+                        className="cdlg-row"
+                        data-choice={`app-${w.key}`}
+                        aria-busy={isOpening ? true : undefined}
+                        aria-expanded={w.open ? undefined : expanded}
+                        onClick={() => openApp(w)}
+                      >
+                        <span className="cdlg-row__body">
+                          <WalletIcon sources={icon ? [icon] : []} label={w.label} />
+                          <span className="cdlg-row__label">{w.label}</span>
+                        </span>
+                        <span className="cdlg-row__aside">
+                          {isOpening ? (
+                            <>
+                              <span className="cdlg-wait">Opening {w.label}…</span>
+                              <span className="cdlg-spin" aria-hidden="true" />
+                            </>
+                          ) : (
+                            <span className="cdlg-wait">{w.open ? 'Open app' : 'Copy link'}</span>
+                          )}
+                          {w.open ? <OutGlyph /> : <ChevronGlyph open={expanded} />}
+                        </span>
+                      </button>
+                      {expanded && (
+                        <div className="cdlg-paste">
+                          <p className="cdlg-paste__text">{w.label} has no link that opens a page in its app. {w.pasteHint}</p>
+                          <div className="cdlg-paste__actions">
+                            <button type="button" className={copied ? undefined : 'btn-primary'} onClick={() => { void copyLink(); }}>
+                              {copied ? 'Link copied' : 'Copy link'}
+                            </button>
+                            {w.key === 'safepal' && (
+                              <button type="button" onClick={() => { void choose('safepal'); }}>Use WalletConnect</button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="cdlg-or" aria-hidden="true">or stay in this browser</div>
+            </>
+          ) : null}
 
-
-          <div className="cdlg-or" aria-hidden="true">or</div>
-
+          {!here && (
           <div className="cdlg-list">
-            {rows.map((row) => {
+            {rows.filter((row) => !phone || row.choice === 'walletconnect' || row.choice === 'other').map((row) => {
               const mine = busy?.choice === row.choice ? busy : null;
               return (
                 <button
@@ -422,6 +590,7 @@ export function ConnectDialog() {
               );
             })}
           </div>
+          )}
 
           <p className="cdlg-note" role="status" aria-live="polite">{note}</p>
         </div>
@@ -463,6 +632,19 @@ function WalletIcon({ sources, label }: { sources: string[]; label: string }) {
     />
   );
 }
+
+/** "Leaves this page": the wallet's app opens. */
+const OutGlyph = () => (
+  <svg className="cdlg-glyph" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <path d="M6.5 3.5h-3v9h9v-3M9.5 3.5h3v3M12.5 3.5 7.5 8.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const ChevronGlyph = ({ open }: { open: boolean }) => (
+  <svg className="cdlg-glyph" data-open={open ? 'true' : undefined} viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+    <path d="M4.5 6.5 8 10l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 const CloseGlyph = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">

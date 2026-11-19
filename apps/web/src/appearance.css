@@ -248,3 +248,46 @@ html .cpy .cpy-num { border-color: var(--line); border-radius: var(--radius-md);
 
 /* Primary buttons: Settings' go button. */
 html .scanv button.scan-find__go { height: 32px; border-radius: 8px; font-weight: 500; }
+
+/* --- phones: no blur where nothing passes behind (nav pass, 2026-11-18) -----------------------------------------
+   Up to 760px nothing scrolls under the bars (the page scroller ends above the tab bar and below the navbar, shell
+   padding) and behind every panel and card there is only the page's own fixed light - two wide radial gradients.
+   A Gaussian blur of a smooth ramp is the ramp itself, so the blur passes changed at most 0.4/255 on dark and 2/255
+   on light (computed, then checked as screenshots per theme), while each one re-ran on the GPU whenever anything in
+   or under it redrew: on /trade six of them covered the whole screen at every book tick, on Portfolio, Explore, Copy
+   and Bots one per visible card on every frame of a scroll. Here the blur goes; the colour stays: a saturate() that
+   is not 1 (light's 1.7) is kept on its own, a single cheap pass, and with saturation 1 (dark's) nothing is left at
+   all (data-glass-sat1, appearance.ts). The bars' tint and hairline are their own backgrounds and stay. Sheets,
+   menus and dialogs keep their blur: real content moves under those. The desktop is untouched. */
+@media (max-width: 760px) {
+  .ptabs { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .navbar:not(.navbar--rail) .navbar__glass { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  html[data-theme='light'] .navbar:not(.navbar--rail) .navbar__glass { -webkit-backdrop-filter: saturate(140%); backdrop-filter: saturate(140%); }
+  html[data-glass] .dash-panel:not([data-panel="markets"]):not([data-panel="livefeed"])::before,
+  html[data-glass] .dash-panel[data-panel="livefeed"]:has(.lf.is-docked)::before,
+  html[data-glass] .dash-panel[data-panel="livefeed"]:has(.lf.is-empty)::before,
+  html[data-glass] :is(.cpy-card, .cpy-replay, .lbp-card, .lbp-sheet, .mk-sec, .mk-feat, .mk-rail, .pf-card),
+  html[data-glass] .bots-page .tf-shell:not(.bots-stgshell)::before,
+  .bots-stgshell.tf-shell {
+    -webkit-backdrop-filter: saturate(var(--stg-sat));
+    backdrop-filter: saturate(var(--stg-sat));
+  }
+  html[data-glass][data-glass-sat1] .dash-panel:not([data-panel="markets"]):not([data-panel="livefeed"])::before,
+  html[data-glass][data-glass-sat1] .dash-panel[data-panel="livefeed"]:has(.lf.is-docked)::before,
+  html[data-glass][data-glass-sat1] .dash-panel[data-panel="livefeed"]:has(.lf.is-empty)::before,
+  html[data-glass][data-glass-sat1] :is(.cpy-card, .cpy-replay, .lbp-card, .lbp-sheet, .mk-sec, .mk-feat, .mk-rail, .pf-card),
+  html[data-glass][data-glass-sat1] .bots-page .tf-shell:not(.bots-stgshell)::before,
+  html[data-glass-sat1] .bots-stgshell.tf-shell {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  /* A pane on a layer (inset -1px) lies over its panel's hairline, and the blur spread that 1px line into the pane:
+     it never showed (screenshots: the edge equal to the inside). Unblurred it would come through as a light outline
+     (+8 levels, measured), so on a phone the line is not drawn - the same edge as before. */
+  html[data-glass] .dash-panel:not([data-panel="markets"]):not([data-panel="livefeed"]),
+  html[data-glass] .dash-panel[data-panel="livefeed"]:has(.lf.is-docked),
+  html[data-glass] .dash-panel[data-panel="livefeed"]:has(.lf.is-empty),
+  html[data-glass] .bots-page .tf-shell:not(.bots-stgshell) {
+    border-color: transparent;
+  }
+}

@@ -1077,12 +1077,24 @@
 .cp-heat__state .cp-empty { align-items: center; text-align: center; padding: 0; }
 .cp-failed { padding: var(--sp-3); }
 
-.cp-shimmer {
-  background: linear-gradient(90deg, var(--tint) 0%, var(--tint-strong) 50%, var(--tint) 100%);
-  background-size: 200% 100%;
+/* The sweep runs on the compositor (motion.css says how): a layer wider than the box, painted with the same tile,
+   slides by whole tiles - the same picture every frame as the background-position it replaces, which repainted
+   on the main thread and stood still through every long task, exactly while the page was loading. */
+.cp-shimmer { overflow: hidden; }
+.cp-shimmer:not(.cp-heat__skel) { position: relative; }
+.cp-shimmer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -300%;
+  width: 400%;
+  background: linear-gradient(90deg, var(--tint) 0%, var(--tint-strong) 50%, var(--tint) 100%) 0 0 / 50% 100% repeat-x;
+  transform: translate3d(25%, 0, 0);
   animation: cp-shimmer 1.2s linear infinite;
+  pointer-events: none;
 }
-@keyframes cp-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@keyframes cp-shimmer { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(50%, 0, 0); } }
 .cp-skel { display: flex; flex-direction: column; }
 .cp-skel__row { display: flex; align-items: center; gap: var(--sp-3); min-height: 52px; padding: 6px var(--sp-2); }
 .cp-skel__av { flex: none; width: 32px; height: 32px; border-radius: 50%; }
@@ -1287,7 +1299,7 @@
   .cp.is-closing,
   .cp-menu.is-closing,
   .cp-fpop.is-closing { animation-name: cp-fade-out; }
-  .cp-shimmer { animation: none; }
+  .cp-shimmer::after { animation: none; }
   .cp-ink.is-ready,
   .cp-slider__fill,
   .cp-row,

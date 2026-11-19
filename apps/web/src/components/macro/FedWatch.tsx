@@ -14,6 +14,7 @@ import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
 import { macroApi, type FedOutcome } from './api';
 import { fmtFixed, localize } from '../../numStyle';
 import './macro.css';
+import { FOMC_ODDS_ON } from './fomcFlag';
 
 const RANGES = [['7d', '7D'], ['30d', '30D'], ['90d', '3M']] as const;
 
@@ -37,8 +38,9 @@ function meetingLabel(day: string): string {
  * showing their prices on a commercial site without written permission. The
  * server answers `not_available` unless FOMC_ODDS=on; this switch also hides
  * the widget from the dashboard (registry.tsx) and keeps saved copies quiet.
+ * It lives in ./fomcFlag.ts, so reading it does not load this widget.
  */
-export const FOMC_ODDS_ON = false;
+export { FOMC_ODDS_ON };
 
 export function FedWatch({ instance }: { instance?: string }) {
   if (!FOMC_ODDS_ON) return <div className="mc"><EmptyState icon="news" title="FOMC rate odds are off" line="The prediction markets have not licensed their prices for display here, so this widget shows nothing for now." /></div>;

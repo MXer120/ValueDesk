@@ -290,7 +290,7 @@ instance itself (numbers and booleans, no secret needed); it never opens the ind
 file, so its unit has no write access to the index directory. During a rotation it
 sends the first value of `VALUESCAN_ORIGIN_SECRET`.
 
-| `peer:<name>` | the other server or the public site does not answer 2xx, or answers `ok:false` (the cross-watch: `HEALTH_PEERS_GATED` get the origin secret over https, `HEALTH_PEERS_PUBLIC` never) |
+| `peer:<name>` | the other server or the public site does not answer 2xx, or answers `ok:false` (the cross-watch: `HEALTH_PEERS_GATED` get the origin secret over https, `HEALTH_PEERS_PUBLIC` never; a public peer under `/api/` - a billed call of the site's Vercel function - is asked every `HEALTH_PUBLIC_API_EVERY_S`, 300, while it answers and every pass while it does not, its last answer standing in between) |
 
 **Roles.** `/etc/valuescan/health.env` (`deploy/contabo/server*/health.env`) picks the
 checks (`HEALTH_CHECKS`), the units (`HEALTH_UNITS`), the peers and the backup markers

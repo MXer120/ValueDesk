@@ -24,7 +24,7 @@ for (let c = 0; c < arg('coins', 120); c++) {
     const byT = new Map();
     for (let k = 0; k < arg('snaps', 2_880); k++) {
       const t = 1_760_000_000_000 + k * 900_000;
-      byT.set(t, { t, n: 70_000 + k, p: 100 + k, st: 0.02, sc: Float64Array.from({ length: W }, (_, j) => j + k) });
+      byT.set(t, { t, n: 70_000 + k, p: 100 + k, st: 0.02, vm: 3, sc: Float64Array.from({ length: W }, (_, j) => j + k) });
       n++;
     }
     T._liqMetasHeld.set(`C${c}|${s ? 'hyperliquid' : 'hyperliquid,sodex'}`, byT);

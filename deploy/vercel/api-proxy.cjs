@@ -1,6 +1,6 @@
 'use strict';
-// The Vercel Function behind /api/* (Node.js, region hnd1, Tokyo - next to the
-// instance in ap-northeast-1): the edge in front of the ValueDesk instance, as
+// The Vercel Function behind /api/* (Node.js, region fra1, Frankfurt - next to server 1
+// in France; package.mjs FUNCTION_REGION): the edge in front of the ValueDesk instance, as
 // CloudFront is in deploy/aws/edge.yaml.
 //
 //   browser -> Vercel (/api/... routed here by deploy/vercel/package.mjs)
@@ -48,7 +48,9 @@
 //     minutes for the calendar and the heatmap history, a day for its final tiles:
 //     EDGE_MAX_TTL_BY_PATH), with the
 //     API's stale-while-revalidate (at most 60), through Vercel-CDN-Cache-Control,
-//     which Vercel never passes on. The browser keeps the API's own Cache-Control.
+//     which Vercel never passes on. An edge copy is then at most max-age + stale
+//     old, on top of how old the data was when the origin built the answer (EDGE
+//     STALE WINDOWS below). The browser keeps the API's own Cache-Control.
 //     /api/copy/* is NEVER cached: its answers belong to one
 //     follower. They go out with Cache-Control: no-store (the origin's
 //     own value), and any CDN cache header from the origin is dropped.
@@ -59,6 +61,12 @@
 //     reaches the origin at most once - and a GET or HEAD that Caddy answered 502
 //     because the API was restarting past its hold (13 of 79 restarts outlasted the 15 s),
 //     once, as reading twice changes nothing and the function has the time.
+//   - Reads go over kept-alive connections to the origin (AGENTS; a closed one is asked
+//     again once on a new one); a POST over a connection of its own.
+//   - Server-Timing: the origin's entries, then this function's own (fn, oc, ot, retry,
+//     cold: serverTiming below) - timings only.
+//   - GET /api/copy/v1/algos/stream and its VIP twin: 204 here, never forwarded (only a tab
+//     on a bundle from before 2026-11-13 asks it here; OLD_STREAM_PATHS).
 //   - Never logs the secret, a query string, a body or a header; an error line names
 //     the path and the reason only.
 //   - GET /api/edge/geo is answered HERE, never by the origin (so also in a preview, and
@@ -124,7 +132,54 @@ const EDGE_MAX_TTL_BY_PATH = new Map([
   // Who traded a window: one that has passed never changes (apps/server/src/flow/read.ts).
   ['/api/vs/flow', 86400],
   ['/api/vs/flow/wallet', 86400],
+  // One heatmap cell at a past time: the origin keeps it 5 min + 5 min stale (apps/server/src/perf.ts); snapshots are
+  // written every 15 minutes.
+  ['/api/vs/liquidations/at', 300],
 ]);
+/*
+ * EDGE STALE WINDOWS are the origin's own (apps/server/src/perf.ts), capped as above: at most 60 s, longer only on the
+ * paths of EDGE_MAX_TTL_BY_PATH and only as far as the origin itself says (a past heatmap cell 5 min + 5 min - its
+ * page shows the cell's "As of" time). How old a copy can be when a visitor gets it is the edge's max-age + stale ON
+ * TOP of the age of what the origin built the answer from: a board 10 + 20 s, of data the process rebuilds about once
+ * a minute (Explore longer while a rebuild runs: explore.ts EXPLORE_STALE_MAX_MS); a cohort answer 30 + 30 s, from a load
+ * the API answers from until it is 120 s old (indexer/read.ts STALE_MAX_MS).
+ * Not longer here (tried on the perf/edge branch, taken back on review 2026-11-18): the stale-data rule lets a kept
+ * answer show only with the app's as-of treatment and never older than the route's own max-age + stale window, and
+ * the boards and most cohort screens show no as-of time (the leaderboard, the market map, Explore > Markets, Home's
+ * map, the terminal heatmap, the cohort focus and detail charts); the copy cards' `age` and `fresh` are set when the
+ * origin answers, so an older edge copy would read too young. A longer window is a perf.ts change (the server's), once
+ * every screen of that route shows the answer's time.
+ */
+/**
+ * The bots page's live stream through this function - only a tab still running a bundle from before 2026-11-13 asks it
+ * here (the app streams straight to the instance: apps/web/src/copy/executor.ts streamUrlOf, VITE_COPY_STREAM_ORIGIN in
+ * production.settings and inherited by beta). Held open it cost the function its memory for as long as the tab stayed
+ * open (0.953 GB-hr on 2026-11-15 from a few stale tabs, 49.5 GB-hr on 11-12 before the move). Answered here with 204 No
+ * Content: an EventSource stops reconnecting on it, and the old fetch reader (bots/useBots.ts readStream) finds no body
+ * and backs off to about a minute between tries (1 s x 2^n, at most 64 s; also while hidden) - each try a few
+ * milliseconds instead of a held function. Not free: with no stream such a tab runs the polls it runs whenever its
+ * stream is down, through this function and only while it is visible (pollEvery) - the bots list every 5 s and an
+ * open bot every second (old useBots.ts BOTS_POLL_MS, BOT_LIVE_MS), up to 72 short calls a minute. Still far less than
+ * a stream held for as long as the tab stays open, hidden or not.
+ */
+const OLD_STREAM_PATHS = new Set(['/api/copy/v1/algos/stream', '/api/copy-vip/v1/algos/stream']);
+
+/**
+ * KEEP-ALIVE TO THE ORIGIN. Reads go over pooled connections, so an edge miss pays no DNS lookup, TCP and TLS handshake
+ * to the origin (and Caddy no handshake CPU) when this instance asked a moment ago. Under Fluid compute one instance
+ * serves many requests, and the pool is this module's. A free connection is closed after FREE_SOCKET_MS - well under
+ * Caddy's idle timeout (5 min, its default; deploy/server/caddy/Caddyfile.template sets none) - and one the origin closed
+ * meanwhile (or that went stale while the instance was frozen) fails at once with ECONNRESET/EPIPE: such a read is asked
+ * once more on a new connection (Node's `reusedSocket` rule), which the "only a connection that never stood is retried"
+ * rule below would otherwise refuse. A POST never takes a pooled connection: it reaches the origin at most once, as before.
+ */
+const FREE_SOCKET_MS = 60000;
+const AGENT_OPTIONS = { keepAlive: true, keepAliveMsecs: 1000, maxFreeSockets: 16, timeout: FREE_SOCKET_MS, scheduling: 'lifo' };
+const AGENTS = { 'https:': new https.Agent(AGENT_OPTIONS), 'http:': new http.Agent(AGENT_OPTIONS) };
+/** The errors of a pooled connection the origin had already closed. */
+const STALE_SOCKET_CODES = new Set(['ECONNRESET', 'EPIPE', 'ECONNABORTED']);
+/** Whether this instance has answered anything yet (Server-Timing `cold`). */
+let servedBefore = false;
 /** The function's own path: never forwarded (it is only ever reached through the /api rewrite). */
 const SELF = '/api/__vs_proxy';
 /** Answered here: where the viewer is, as Vercel's edge sees it. */
@@ -327,10 +382,21 @@ function readBody(req, limit) {
   });
 }
 
-/** One request to the origin; resolves with the response, rejects with a reason. */
-function ask(origin, method, path, headers, body) {
+/** Close the pool's idle connections to the origin (one of them was found closed: the others are as old). */
+function dropFreeSockets(agent) {
+  for (const list of Object.values(agent.freeSockets ?? {})) for (const s of [...(list ?? [])]) s.destroy();
+}
+
+/**
+ * One request to the origin; resolves with the response and its timings, rejects with a reason. `pooled`: over a
+ * kept-alive connection of AGENTS (reads); otherwise a connection of its own (POST). The rejection says whether a
+ * connection ever stood (`connected`) and whether it was a reused one (`reused`); the timings are milliseconds:
+ * `connectMs` to a usable connection (0 when reused), `originMs` from then to the answer's head.
+ */
+function ask(origin, method, path, headers, body, pooled = false) {
   return new Promise((resolve, reject) => {
     const client = origin.protocol === 'https:' ? https : http;
+    const t0 = performance.now();
     const req = client.request({
       protocol: origin.protocol,
       hostname: origin.hostname.replace(/^\[|\]$/g, ''),
@@ -339,25 +405,62 @@ function ask(origin, method, path, headers, body) {
       method,
       path,
       headers,
-      agent: false,
+      agent: pooled ? AGENTS[origin.protocol] : false,
     });
     let connected = false;
+    let reused = false;
+    let connectedAt = t0;
     const connectTimer = setTimeout(() => {
       if (!connected) req.destroy(Object.assign(new Error('connect timeout'), { code: 'CONNECT_TIMEOUT' }));
     }, CONNECT_TIMEOUT_MS);
     req.on('socket', (socket) => {
-      const done = () => { connected = true; clearTimeout(connectTimer); };
+      const done = () => { connected = true; connectedAt = performance.now(); clearTimeout(connectTimer); };
+      reused = req.reusedSocket === true;
       if (!socket.connecting) done();
       else socket.once(origin.protocol === 'https:' ? 'secureConnect' : 'connect', done);
     });
     req.setTimeout(READ_TIMEOUT_MS, () => req.destroy(Object.assign(new Error('read timeout'), { code: 'READ_TIMEOUT' })));
-    req.on('response', (r) => { clearTimeout(connectTimer); resolve({ res: r, connected: true }); });
-    req.on('error', (e) => { clearTimeout(connectTimer); reject(Object.assign(e, { connected })); });
+    req.on('response', (r) => {
+      clearTimeout(connectTimer);
+      const at = performance.now();
+      resolve({ res: r, connected: true, reused, connectMs: reused ? 0 : connectedAt - t0, originMs: at - connectedAt });
+    });
+    req.on('error', (e) => { clearTimeout(connectTimer); reject(Object.assign(e, { connected, reused })); });
     req.end(body);
   });
 }
 
+/** A Server-Timing duration: milliseconds with one decimal. */
+const ms = (v) => Math.max(0, Math.round(v * 10) / 10);
+
+/**
+ * SERVER-TIMING (maps F11): the origin's own entries pass through, and this function adds its part, so a phone's read can
+ * be split into its pieces in the browser (PerformanceResourceTiming.serverTiming: same origin, no Timing-Allow-Origin
+ * needed) or with curl -D:
+ *   fn;dur=      in this function until the answer's head went out (body read, connection, origin, retries)
+ *   oc;dur=      to a usable connection to the origin: DNS + TCP + TLS; 0 with desc="reused" (keep-alive)
+ *   ot;dur=      from that connection to the origin's answer head: the round trip, Caddy and the API's handler
+ *   retry;desc=  how many times the origin was asked again (a refused connection, a 502 while it restarted, a closed one)
+ *   cold;desc=1  the first request this instance served (its start-up is in fn)
+ * Timings only, nothing about the viewer or the data. An answer the CDN kept (x-vercel-cache: HIT or STALE) carries
+ * the timings of the request that filled it.
+ */
+function serverTiming(originValue, t) {
+  const own = [
+    `fn;dur=${ms(t.fn)}`,
+    `oc;dur=${ms(t.connectMs)}${t.reused ? ';desc="reused"' : ''}`,
+    `ot;dur=${ms(t.originMs)}`,
+    ...(t.retries ? [`retry;desc="${t.retries}"`] : []),
+    ...(t.cold ? ['cold;desc="1"'] : []),
+  ].join(', ');
+  const from = (Array.isArray(originValue) ? originValue.join(', ') : String(originValue ?? '')).trim();
+  return from ? `${from}, ${own}` : own;
+}
+
 async function handler(req, res) {
+  const startedAt = performance.now();
+  const cold = !servedBefore;
+  servedBefore = true;
   const method = String(req.method ?? 'GET').toUpperCase();
   const url = String(req.url ?? '');
   const path = url.split('?')[0];
@@ -385,6 +488,12 @@ async function handler(req, res) {
   const methods = priv ? COPY_METHODS : ALLOWED_METHODS;
   if (!methods.has(method)) {
     return sendJson(res, 405, { error: 'method not allowed', source: 'edge' }, { allow: [...methods].join(', ') });
+  }
+  // A tab still on a bundle from before the stream moved to the instance: stop it here (OLD_STREAM_PATHS).
+  if (OLD_STREAM_PATHS.has(path) && (method === 'GET' || method === 'HEAD')) {
+    res.writeHead(204, { 'cache-control': 'no-store' });
+    res.end();
+    return;
   }
   const origin = originFrom(process.env);
   const secret = String(process.env.VALUESCAN_ORIGIN_SECRET ?? '').split(',')[0].trim();
@@ -422,21 +531,36 @@ async function handler(req, res) {
   if (body !== undefined) headers['content-length'] = String(body.length);
 
   let upstream;
+  let asked;
   const askedAt = Date.now();
   let readAgain = method === 'GET' || method === 'HEAD';
+  // Reads over the kept-alive pool; a POST on a connection of its own (it reaches the origin at most once).
+  const pooled = method !== 'POST';
+  let staleAsked = false;
+  let retries = 0;
   for (;;) {
     try {
-      upstream = (await ask(origin.url, method, url, headers, body)).res;
+      asked = await ask(origin.url, method, url, headers, body, pooled);
+      upstream = asked.res;
       if (upstream.statusCode === 502 && readAgain && Date.now() - askedAt < READ_RETRY_BEFORE_MS) {
         readAgain = false;
+        retries++;
         upstream.resume();
         await new Promise((r) => setTimeout(r, RETRY_WAIT_MS));
         continue;
       }
       break;
     } catch (e) {
+      // A pooled connection the origin had already closed: the read never reached it. Once more, at once, on a new one.
+      if (pooled && e.reused && !staleAsked && STALE_SOCKET_CODES.has(e.code)) {
+        staleAsked = true;
+        retries++;
+        dropFreeSockets(AGENTS[origin.url.protocol]);
+        continue;
+      }
       // Only a connection that never stood is retried: a request may have reached the origin otherwise.
       if (!e.connected && Date.now() - askedAt < CONNECT_BUDGET_MS) {
+        retries++;
         await new Promise((r) => setTimeout(r, RETRY_WAIT_MS));
         continue;
       }
@@ -444,7 +568,8 @@ async function handler(req, res) {
       console.error(`api-proxy: ${method} ${path} failed: ${code}`);
       const timeout = code === 'READ_TIMEOUT';
       const what = copy ? 'the copy executor' : 'the index API';
-      return sendJson(res, timeout ? 504 : 502, { error: timeout ? `${what} did not answer in time` : `${what} is not reachable`, source: 'edge' });
+      return sendJson(res, timeout ? 504 : 502, { error: timeout ? `${what} did not answer in time` : `${what} is not reachable`, source: 'edge' },
+        { 'server-timing': `fn;dur=${ms(performance.now() - startedAt)}${retries ? `, retry;desc="${retries}"` : ''}` });
     }
   }
 
@@ -453,8 +578,12 @@ async function handler(req, res) {
     const lower = name.toLowerCase();
     if (DROPPED_RESPONSE_HEADERS.has(lower)) continue;
     if (priv && CDN_CACHE_HEADERS.has(lower)) continue;
+    if (lower === 'server-timing') continue;
     out[name] = value;
   }
+  out['server-timing'] = serverTiming(upstream.headers['server-timing'], {
+    fn: performance.now() - startedAt, connectMs: asked.connectMs, originMs: asked.originMs, reused: asked.reused, retries, cold,
+  });
   if (priv) {
     // One follower's or one wallet's answers: never kept by the CDN, nor by the browser.
     for (const k of Object.keys(out)) if (k.toLowerCase() === 'cache-control') delete out[k];
@@ -470,6 +599,8 @@ async function handler(req, res) {
     return;
   }
   upstream.on('error', () => res.destroy());
+  // The viewer went away mid-answer: let the origin connection go too (a half-read one can never be reused).
+  res.on('close', () => { if (!upstream.complete) upstream.destroy(); });
   upstream.pipe(res);
 }
 
@@ -482,6 +613,9 @@ module.exports.viewerRegion = viewerRegion;
 module.exports.geoBlockFrom = geoBlockFrom;
 module.exports.geoBlocked = geoBlocked;
 module.exports.edgeCacheControl = edgeCacheControl;
+module.exports.serverTiming = serverTiming;
+module.exports.AGENTS = AGENTS;
+module.exports.OLD_STREAM_PATHS = OLD_STREAM_PATHS;
 module.exports.originFrom = originFrom;
 module.exports.oddPath = oddPath;
 module.exports.BODY_LIMIT = BODY_LIMIT;

@@ -11,12 +11,14 @@
 import { useSyncExternalStore } from 'react';
 import { getLiveCopy, subscribeLiveCopy } from '../../copy/live';
 import type { Venue } from '../../vsApi';
+import { openPath } from '../../nav';
 import { Modal } from '../Modal';
 import { CopiesManager } from './panels';
 import './Copy.css';
 
+/* In place (nav.ts openPath): the dialog closes with the page it sits on, no reload. */
 const openTrader = (address: string, venue?: Venue) => {
-  window.location.href = venue ? `/scan?address=${encodeURIComponent(address)}&venue=${venue}` : `/scan?find=${encodeURIComponent(address)}`;
+  openPath(venue ? `/scan?address=${encodeURIComponent(address)}&venue=${venue}` : `/scan?find=${encodeURIComponent(address)}`);
 };
 
 export default function CopiesDialog({ open, onClose }: { open: boolean; onClose: () => void }) {

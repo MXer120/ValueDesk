@@ -121,6 +121,8 @@ function apply(shown: Appearance): void {
   s.setProperty('--pg-glow2', a.pageGlow2);
   s.setProperty('--pg-glow2-a', `${a.pageGlow2Alpha}%`);
   document.documentElement.toggleAttribute('data-glass', a.trade);
+  /* Saturation 1 changes nothing: on a phone such a pane drops its filter altogether (appearance.css, the phone block). */
+  document.documentElement.toggleAttribute('data-glass-sat1', a.saturate === 1);
 }
 apply(current);
 onTheme(() => apply(current));

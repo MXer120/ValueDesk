@@ -23,6 +23,7 @@ globalThis.fetch = (async (input: string | URL) => {
   }
   if (url.pathname.endsWith('/orderbook')) return ok({ s: url.pathname.split('/')[5], b: [['1', '1']], a: [['2', '1']] });
   if (url.pathname.endsWith('/trades')) return ok([]);
+  if (url.pathname.endsWith('/klines')) return ok([{ t: 60_000, o: '1', h: '2', l: '1', c: '2', v: '3' }]);
   return new Response(JSON.stringify({ code: 404, message: 'not found' }), { status: 404 });
 }) as typeof fetch;
 
@@ -57,6 +58,16 @@ test('market: a name that is not safe in a URL path never reaches one', async ()
   calls.length = 0;
   await assert.rejects(market.orderbook('perps', '../accounts/0xabc/trades', 20));
   assert.ok(calls.every((c) => !c.path.includes('accounts')), calls.map((c) => c.path).join(', '));
+});
+
+test('market: candle pages stay out of the gateway\'s last-good copies', async () => {
+  const { gateway } = await import('./sodexGateway');
+  const r = await market.klines('perps', 'BTC-USD', '1m', 5);
+  assert.equal(r.klines.length, 1);
+  assert.equal(gateway.lastGood('/api/v1/perps/markets/BTC-USD/klines?interval=1m&limit=5'), null);
+  // A read that may be fallen back to still is kept.
+  await market.orderbook('perps', 'BTC-USD', 20);
+  assert.ok(gateway.lastGood('/api/v1/perps/markets/BTC-USD/orderbook?limit=20'));
 });
 
 const staleBase = { symbol: 'vADA_vUSDC', lastPx: '0.5', openPx: '0.4', highPx: '0.6', lowPx: '0.3', volume: '10', quoteVolume: '727', change: '0.1', changePct: 2.45, askPx: '0.51', bidPx: '0.49' };

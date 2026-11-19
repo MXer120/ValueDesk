@@ -23,7 +23,8 @@
  *   <AnalyticsSwitch>   the Cookies page: allow or withdraw ValueDesk's own usage analytics.
  *   openLegalPage()     any component: show a legal page in place (App listens).
  */
-import { Suspense, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { dropBootShell } from '../bootShell';
 import { Modal } from '../components/Modal';
 import { countryName } from '../copy/countries';
 import { LEGAL_LABELS, LEGAL_PAGES, legalForPath, pathForLegal, type LegalPage } from '../router';
@@ -109,6 +110,8 @@ export function SiteGate({ children }: { children: ReactNode }) {
 
 function BlockedShell({ reason }: { reason: string }) {
   const [page, setPage] = useState<LegalPage | null>(() => legalForPath(window.location.pathname));
+  /* The notice takes the screen: index.html's static shell (a picture of the app, bootShell.ts) goes at once. */
+  useLayoutEffect(() => dropBootShell({ fade: false }), []);
   useEffect(() => {
     const onPop = () => setPage(legalForPath(window.location.pathname));
     window.addEventListener('popstate', onPop);
@@ -249,20 +252,24 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
 
 
       {error && <p className="lg-err" role="alert">{error}</p>}
-      {offerOptional ? (
-        <>
-          <p className="lg-small lg-extras">
-            &ldquo;Accept all&rdquo; also allows ValueDesk&rsquo;s own usage analytics (on its own server, no third party), the Live Feed&rsquo;s video players and usage reports to Reown. <LegalLink page="cookies" onOpen={onOpen}>Details</LegalLink>
-          </p>
-          <div className="lg-pair">
-            <button type="button" className="lg-cta lg-cta--secondary" disabled={!ready} aria-busy={busy === 'necessary' || undefined} onClick={() => void accept(false)}>{label(false)}</button>
-            <button type="button" className="lg-cta" disabled={!ready} aria-busy={busy === 'all' || undefined} onClick={() => void accept(true)}>{label(true)}</button>
-          </div>
-        </>
-      ) : (
-        <button type="button" className="lg-cta" disabled={!ready} aria-busy={!!busy || undefined} onClick={() => void accept(false)}>{label(false)}</button>
-      )}
-      {signer && <p className="lg-hint">Your wallet signs once - free: not a transaction, no gas, no funds move.</p>}
+      {/* The answer as one block - what "Accept all" adds, the two buttons, what the wallet signs - so on a phone it
+          stays at the sheet's foot (gate.css .lg-act) with its words always beside the buttons they explain. */}
+      <div className="lg-act">
+        {offerOptional ? (
+          <>
+            <p className="lg-small lg-extras">
+              &ldquo;Accept all&rdquo; also allows ValueDesk&rsquo;s own usage analytics (on its own server, no third party), the Live Feed&rsquo;s video players and usage reports to Reown. <LegalLink page="cookies" onOpen={onOpen}>Details</LegalLink>
+            </p>
+            <div className="lg-pair">
+              <button type="button" className="lg-cta lg-cta--secondary" disabled={!ready} aria-busy={busy === 'necessary' || undefined} onClick={() => void accept(false)}>{label(false)}</button>
+              <button type="button" className="lg-cta" disabled={!ready} aria-busy={busy === 'all' || undefined} onClick={() => void accept(true)}>{label(true)}</button>
+            </div>
+          </>
+        ) : (
+          <button type="button" className="lg-cta" disabled={!ready} aria-busy={!!busy || undefined} onClick={() => void accept(false)}>{label(false)}</button>
+        )}
+        {signer && <p className="lg-hint">Your wallet signs once - free: not a transaction, no gas, no funds move.</p>}
+      </div>
     </>
   );
 }
@@ -363,7 +370,9 @@ export function TermsGate({ hidden, onOpen, address, provider }: {
     ? accepted ? 'Sign the terms to continue' : 'Accept the terms to continue'
     : changed ? 'Our terms have changed' : 'Welcome to ValueDesk';
   return (
-    <Modal open={!hidden} size="sm" title={title} className="lg-sheet" onClose={close} dismissOnBackdrop={false}>
+    /* The first visit's popup opens by itself: the dialog takes the focus, not its X (a ring on it before anything was
+       touched). Asked for by an action, the X is where focus goes, as in every other dialog. */
+    <Modal open={!hidden} size="sm" title={title} className="lg-sheet" onClose={close} dismissOnBackdrop={false} focusDialog={!pending}>
       <p className="lg-lead">
         {pending
           ? `To ${pending.reason}, ${signer ? 'your wallet signs' : 'please accept'} the terms once.${accepted ? '' : ' Perpetual futures are high-risk: you can lose everything you put in.'}`
