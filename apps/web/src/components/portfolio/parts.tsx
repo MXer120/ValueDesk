@@ -1,8 +1,9 @@
 /**
- * The design system's pieces - Card, Group, Row, Stat, Tag - the equity curve
- * every chart surface draws through, and the two formatters they share.
+ * The design system's pieces - Card, Group, Row, Stat, Tag, PeriodSeg, Meter - the
+ * equity curve every chart surface draws through, and the two formatters they share.
  *
- * Moved here from components/Portfolio.tsx unchanged (2026-10-02). They have no
+ * Moved here from components/Portfolio.tsx unchanged (2026-10-02; PeriodSeg and Meter
+ * 2026-11-18, so /points no longer loads the Portfolio page for them). They have no
  * tie to the Portfolio page: only React, the privacy masks and the number
  * formatters. Styles: Portfolio.css.
  */
@@ -12,6 +13,10 @@ import { DASH, MINUS, fmtUsd, signClass } from '../../format';
 import { dotGrid, timeTicks } from './timeTicks';
 import '../Portfolio.css';
 import { fmtFixed, fmtNum } from '../../numStyle';
+
+/** The portfolio's periods (Portfolio.tsx's period maths takes them). */
+export type Period = '24H' | '7D' | '14D' | '30D' | '90D' | 'ALL';
+const PERIODS: Period[] = ['7D', '30D', '90D', 'ALL'];
 
 export interface CurveWindow {
   /** Cumulative PnL points inside the period, oldest first. */
@@ -746,6 +751,48 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           <span className={`pf-chart__tipval ${clean ? sideOf(h.v) : level ? '' : signClass(h.v)}`}>{hidden ? maskTip(fmtV(h.v)) : fmtV(h.v)}</span>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The period selector, in one place because three headers carry it and they
+ * must not drift apart. Selection is amber text on a filled control - the
+ * label never changes weight, so the group cannot re-flow under the cursor.
+ */
+export function PeriodSeg({ period, onPeriod, label }: {
+  period: Period; onPeriod: (p: Period) => void; label: string;
+}) {
+  return (
+    <div className="pf-seg" role="tablist" aria-label={label}>
+      {PERIODS.map((p) => (
+        <button
+          key={p}
+          type="button"
+          role="tab"
+          aria-selected={p === period}
+          className={`pf-ctl ${p === period ? 'is-on' : ''}`}
+          onClick={() => onPeriod(p)}
+        >
+          {p}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * A meter, animated by TRANSFORM.
+ *
+ * Never width. A width transition re-runs layout on every frame of every tick of
+ * the mark feed, and on this page there can be fifty of these on screen at once;
+ * a transform is composited and costs nothing. `--pf-v` is the 0..1 fraction.
+ */
+export function Meter({ value, tone, label }: { value: number; tone: string; label?: string }) {
+  const v = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+  return (
+    <div className="pf-meter" role="img" aria-label={label ?? `${fmtFixed(v * 100, 1)}%`}>
+      <span className={`pf-meter__fill pf-meter__fill--${tone}`} style={{ transform: `scaleX(${v})` }} />
     </div>
   );
 }

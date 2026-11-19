@@ -55,15 +55,18 @@ import { mmDaily } from '../valuedesk/sodex/mmDaily.js';
 import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuedesk/hyperliquid/index.js';
 import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
-import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
+import { applyCachedCurves, attachPodiumCurves, warmPodium } from '../valuedesk/curves.js';
+import type { BoardFilter, Side } from '../indexer/windows.js';
 import { CARDS_PER_REQUEST, CARD_VENUES, copyCards, isCardWindow } from '../valuedesk/copyCards.js';
-import { attachStats, markSodexTrades, type SodexTradeNote, boardPage, indexerStatus, indexerStatusJudged, netPage } from '../indexer/read.js';
-import { cohortJob, type CohortJob } from '../indexer/cohortThread.js';
+import { attachStats, markSodexTrades, type SodexTradeNote, boardPage, indexerStatus, indexerStatusJudged, keptStats, netPage } from '../indexer/read.js';
+import { cohortAnswer, cohortThreadState, type CohortJob } from '../indexer/cohortThread.js';
+import { sendPrepared, serverTiming } from '../perf.js';
 import { booksOverOi } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
 import { fineAskOf, fineDrawOf, isLiqRange, levFilterOf, liqHeatmap } from '../indexer/liqRead.js';
+import { barHeatmap, isBarRes } from '../valuedesk/liquidations/bars.js';
 import { LiqBusy, liqJob, okJson } from '../indexer/liqHistThread.js';
-import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm, liqTile, liqTileIndex, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
+import { TILE_FINAL_CACHE, TILE_INDEX_CACHE, TILE_WALLET_CACHE, keepLiqMetasWarm, liqTile, liqTileIndex, liqTileIndexIn, liqTileIndexOf, liqTileOf, tileAskOf } from '../indexer/liqTiles.js';
 import { watchAddresses } from '../indexer/host.js';
 import { MAX_WINDOW_MS, activityCoverage, flowWalletFills, flowWindow, type FlowAsk, type MarketKind } from '../flow/read.js';
 import type { FlowRole, FlowSide, FlowSort } from '../flow/codec.js';
@@ -200,12 +203,16 @@ function numOf(v: string | undefined): number | undefined {
 
 /**
  * A cohort job (indexer/cohortThread.ts): the cohorts and the heatmap answers that read the books run on their own
- * thread, and their JSON comes back whole - this thread neither builds nor parses it.
+ * thread, and their JSON comes back whole - this thread neither builds nor parses it. A cohort answer the thread would
+ * give again is handed out from this thread's copy, with its body made once (cohortThread.ts cohortAnswer).
  */
 async function sendCohortJob(reply: FastifyReply, job: CohortJob) {
-  const json = await cohortJob(job);
-  if (json === null) return fail(reply, new NotAvailable('The index is not running yet'));
-  return reply.type('application/json; charset=utf-8').send(json);
+  const a = await cohortAnswer(job);
+  serverTiming(reply, 'thr', a.threadMs);
+  serverTiming(reply, 'memo', undefined, a.memo);
+  if (a.json === null) return fail(reply, new NotAvailable('The index is not running yet'));
+  if (a.body) return sendPrepared(reply, a.body());
+  return reply.type('application/json; charset=utf-8').send(a.json);
 }
 
 function fail(reply: FastifyReply, e: unknown) {
@@ -227,10 +234,52 @@ function sortValue(r: TraderRow, sort: LeaderboardSort, window: Window): number 
   return typeof v === 'number' && Number.isFinite(v) ? v : Number.NEGATIVE_INFINITY;
 }
 
+/**
+ * The leaderboard pages asked lately (a published window's first page, no search), whose podium curves are read again
+ * ahead (curves.ts warmPodium): the page sends a second, serial `curves=1` read whenever the first answer's top three lack
+ * a curve - after each curve's ten minutes, one more round trip for the next visitor. Only pages asked within
+ * PODIUM_ASKED_MS, so nothing is read for a board nobody looks at.
+ */
+export const PODIUM_ASKED_MS = 10 * 60_000;
+const PODIUM_EVERY_MS = 15_000;
+const PODIUM_MAX = 32;
+interface PodiumAsk { set: Venue[]; net: boolean; window: Window; side: Side; filter: BoardFilter; at: number }
+const podiumAsked = new Map<string, PodiumAsk>();
+
+function notePodium(a: Omit<PodiumAsk, 'at'>): void {
+  const key = `${a.set.join(',')}|${a.net ? 'net' : 'single'}|${a.window}|${a.side}|${a.filter}`;
+  podiumAsked.delete(key);
+  podiumAsked.set(key, { ...a, set: [...a.set], at: Date.now() });
+  while (podiumAsked.size > PODIUM_MAX) podiumAsked.delete(podiumAsked.keys().next().value!);
+}
+
+/** One round of the podium warm-up: each page asked lately, its top three read as the route reads them. Exported for tests. */
+export async function warmPodiums(now = Date.now()): Promise<number> {
+  let filled = 0;
+  for (const [key, a] of [...podiumAsked]) {
+    if (now - a.at > PODIUM_ASKED_MS) { podiumAsked.delete(key); continue; }
+    const top = { limit: 3, offset: 0 };
+    const page = a.net ? netPage(a.set, a.window, a.side, a.filter, top) : boardPage(a.set, a.window, a.side, a.filter, top);
+    if (page) filled += await warmPodium(page.rows, a.window, now).catch(() => 0);
+  }
+  return filled;
+}
+
+function keepPodiumWarm(): () => void {
+  let running = false;
+  const timer = setInterval(() => {
+    if (running || !podiumAsked.size) return;
+    running = true;
+    void warmPodiums().finally(() => { running = false; });
+  }, PODIUM_EVERY_MS);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
 /** Explore and the screener's pools built before their first visitor and kept built while visited (index.ts, after the start). */
 export function keepValuedeskWarm(): () => void {
   const core = CORE_VENUES.map((v) => PROVIDERS[v]);
-  const stops = [keepExploreWarm(core), keepScreenerWarm(core), keepLiqMetasWarm(), keepBotMarketsWarm()];
+  const stops = [keepExploreWarm(core), keepScreenerWarm(core), keepLiqMetasWarm(), keepBotMarketsWarm(), keepPodiumWarm()];
   return () => { for (const stop of stops) stop(); };
 }
 
@@ -324,7 +373,9 @@ export async function valuedeskRoutes(app: FastifyInstance) {
         const set: Venue[] = listed.length ? [...new Set(listed)] : venue === 'all' ? [...VENUES] : [venue];
         const net = set.length > 1 && (q.view ?? (listed.length ? 'net' : 'single')) === 'net';
         const opts = { limit: Math.min(limit, 100), offset, q: search };
-        const page = net ? netPage(set, window, side, filter, opts) : boardPage(set, window, side, filter, opts);
+        const seen: { memo?: string } = {};
+        const page = net ? netPage(set, window, side, filter, opts, seen) : boardPage(set, window, side, filter, opts);
+        if (seen.memo) serverTiming(reply, 'memo', undefined, seen.memo);
         if (page) {
           // The rows on screen are read before anything else (indexer WATCH_PRIO).
           for (const v of set) {
@@ -335,6 +386,8 @@ export async function valuedeskRoutes(app: FastifyInstance) {
             // A netted row's curve is its venues' curves summed (curves.ts fillNet).
             applyCachedCurves(page.rows, window as Window);
             if (q.curves === '1') await attachPodiumCurves(page.rows, window as Window);
+            // Its podium's curves are read again ahead while it is visited, so the next visitor needs no curves=1 read.
+            if (!search) notePodium({ set, net, window: window as Window, side, filter });
           }
           return { ok: true, venue, window, sort: 'pnl' as const, ...page };
         }
@@ -586,7 +639,9 @@ export async function valuedeskRoutes(app: FastifyInstance) {
    * indexer publishes, wallet addresses and error text included. Local only: a
    * hosted server answers 404 to every caller (hosted.ts HOSTED_ROUTES).
    */
-  app.get('/api/vs/index/status', async () => ({ ok: true, status: indexerStatus() }));
+  // With this process's own counts: the cohort thread (jobs waiting, the longest, answers kept here) and the boards and
+  // netted pools kept between leaderboard reads.
+  app.get('/api/vs/index/status', async () => ({ ok: true, status: indexerStatus(), cohortThread: cohortThreadState(), kept: { ...keptStats } }));
 
   /**
    * The indexer's health, for monitoring: which streams are up, the loop lag,
@@ -631,6 +686,12 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       if (ws.length) return await sendCohortJob(reply, { op: 'liqOf', coin, venues: cohortVenues(q), wallets: ws });
       const body = await liqHeatmap(coin, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+      // `bar=fine|medium|coarse`: summed to that bar, the levels past the price left out (bars.ts barHeatmap) - the trade
+      // chart's Liquidation map draws at the Fine bar and needs a third of the buckets.
+      if (q.bar !== undefined && q.bar !== '') {
+        if (!isBarRes(q.bar)) throw bad('bar= must be fine, medium or coarse');
+        return { ok: true, ...barHeatmap(body, q.bar), overOi: booksOverOi(cohortVenues(q), coin) };
+      }
       return { ok: true, ...body, overOi: booksOverOi(cohortVenues(q), coin) };
     } catch (e) {
       return fail(reply, e);
@@ -734,8 +795,14 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       // Some wallets: their history rebuilt once and cut into the same tiles (liqTiles.ts liqTileIndexOf).
       const ws = walletsOf(q);
       if (q.tt === undefined) {
-        const body = ws.length ? await liqTileIndexOf(coin, cohortVenues(q), ws) : await liqTileIndex(coin, cohortVenues(q));
+        // Every wallet: an index not ready within a few seconds (a venue set read for the first time) is answered with
+        // how far it is - never cached, the view asks again shortly - and its walk goes on (liqTiles.ts liqTileIndexIn).
+        const body = ws.length ? await liqTileIndexOf(coin, cohortVenues(q), ws) : await liqTileIndexIn(coin, cohortVenues(q));
         if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+        if ('building' in body) {
+          const { done, of } = body.building;
+          return { ok: false, code: 'building', error: `Reading the snapshots: ${done} of ${of}`, done, of };
+        }
         reply.header('Cache-Control', ws.length ? TILE_WALLET_CACHE : TILE_INDEX_CACHE);
         return { ok: true, ...body };
       }

@@ -8,7 +8,7 @@ import { fmt, fmtUsd } from '../format';
 import { Modal } from '../components/Modal';
 import { DlgRow, DlgSection, DlgSwitch } from '../components/dialogParts';
 import { CrossFade } from '../components/motion';
-import { Seg } from '../components/palette/ui';
+import { Seg } from '../components/Seg';
 import { TRADE_DASHBOARD } from '../dashboard/layout';
 import { loadDashboard, saveDashboard } from '../dashboard/storage';
 import { potatoChosenByUser, probeDevice, readPotatoOn, suggestPotato, writePotato, type DeviceProbe } from './device';

@@ -24,17 +24,18 @@
 import type { Engine, Symbol as MarketSymbol } from '../api';
 import { LiveChart, LiveOrderEntry } from './livePrice';
 import { Book, MarketStrip, TickerBar, Trades } from '../components/Market';
+import { MarketTypeSwitch } from '../components/MarketTypeSwitch';
 import { AccountPanel } from '../components/Account';
-import { MobileCarousel } from './MobileCarousel';
+import { MobileCarousel, useCarouselPage } from './MobileCarousel';
+import { useCallback, type ComponentProps } from 'react';
 import { PanelTabs } from './Panel';
-import { Leaderboard } from '../components/Leaderboard';
-import { FeeTier } from '../components/FeeTier';
-import { Stats } from '../components/Stats';
 import type { BreakpointName, PanelDefinition } from './types';
 import { EXTRA_WIDGET_IDS, faceFor } from './widgetCatalog';
-import { FOMC_ODDS_ON } from '../components/macro/FedWatch';
+import { FOMC_ODDS_ON } from '../components/macro/fomcFlag';
 import { widgetBody, widgetBodyShape } from './widgetBodies';
 import { ChartCard, TradeAccountBand } from './tradeTabs';
+/* The opt-in panels draw with code of their own, like the catalog's widgets (lazyWidgets.tsx). */
+import { FeeTier, LazyWidget, Leaderboard, Stats } from './lazyWidgets';
 
 /**
  * The two breakpoints where the terminal has no column to spare for the chart.
@@ -47,6 +48,21 @@ import { ChartCard, TradeAccountBand } from './tradeTabs';
  * a feature that silently does not exist on a phone.
  */
 const isNarrow = (bp: BreakpointName) => bp === 'sm' || bp === 'xs';
+
+/**
+ * The order book, whose rows pick the ticket's price. In the phone carousel the ticket is another page, so a pick
+ * there also opens it - with that price in it - instead of changing a page nobody can see (phone pass, 2026-11-18).
+ * Beside the ticket (a wide screen) there is no carousel and a pick only sets the price, as before.
+ */
+function BookPick(props: ComponentProps<typeof Book>) {
+  const carousel = useCarouselPage();
+  const { onPick } = props;
+  const pick = useCallback((p: string) => {
+    onPick(p);
+    carousel?.goTo('exec');
+  }, [onPick, carousel]);
+  return <Book {...props} onPick={pick} />;
+}
 
 /**
  * Everything the trade panels need, in one object. Adding a field here and
@@ -96,6 +112,13 @@ export interface TradeContext {
    * route to the same place rather than a dead control.
    */
   onSelectSymbol?: (symbol: string) => void;
+  /** Futures or Spot (App.tsx switchEngine). */
+  onEngine?: (e: Engine) => void;
+  /**
+   * The navbar has no Futures / Spot switch (a phone, below the rail: its bar is one row), so the ticker's market
+   * row carries it. Never both: the e2e specs find ONE "Market type" switch at every width.
+   */
+  marketTypeInPage?: boolean;
 }
 
 /** The prop bag the Account.tsx components take. Pulled out once, not six times. */
@@ -162,6 +185,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
         onSymbolClick={() => c.onOpenSearch()}
         favorites={c.favorites}
         onToggleFavorite={c.onToggleFavorite}
+        aside={c.marketTypeInPage && c.onEngine ? <MarketTypeSwitch engine={c.engine} onEngine={c.onEngine} /> : undefined}
       />
     ),
   },
@@ -239,7 +263,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
               // and it grows instead of fitting.
               scroll: 'hidden',
               content: (
-                <Book engine={c.engine} symbol={c.symbol} sym={c.sym} onPick={c.onPrice} showTitle={false} address={c.address} />
+                <BookPick engine={c.engine} symbol={c.symbol} sym={c.sym} onPick={c.onPrice} showTitle={false} address={c.address} />
               ),
             },
             {
@@ -406,7 +430,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     defaultHidden: true,
     minW: 12,
     minH: 8,
-    render: (c) => <Leaderboard address={c.address} />,
+    render: (c) => <LazyWidget><Leaderboard address={c.address} /></LazyWidget>,
   },
   {
     id: 'feetier',
@@ -414,7 +438,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     defaultHidden: true,
     minW: 10,
     minH: 6,
-    render: (c) => <FeeTier address={c.address} engine={c.engine} />,
+    render: (c) => <LazyWidget><FeeTier address={c.address} engine={c.engine} /></LazyWidget>,
   },
   {
     id: 'venue',
@@ -422,7 +446,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     defaultHidden: true,
     minW: 10,
     minH: 6,
-    render: (c) => <Stats address={c.address} showTitle={false} />,
+    render: (c) => <LazyWidget><Stats address={c.address} showTitle={false} /></LazyWidget>,
   },
 
   ...EXTRA_WIDGET_IDS.map((id): PanelDefinition<TradeContext> => {

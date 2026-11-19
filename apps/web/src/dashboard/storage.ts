@@ -253,6 +253,29 @@ export function seedTerminals(state: SavedDashboard, seeds: readonly TerminalSee
   return upgradeSeeded(seedFresh(state, seeds), seeds);
 }
 
+/**
+ * The panels off the canvas: the ones the user hid, and the `defaultHidden` ones until the user has an opinion
+ * (`shown` holds the ids explicitly switched ON). A `blank` canvas is an allow-list: only ids in `shown` are on it,
+ * including ones the registry would otherwise show by default. Dashboard.tsx renders by it; TradeDashboard.tsx reads
+ * it before the first render, to wait for the code of the widgets that render then.
+ */
+export function hiddenPanelIds(
+  s: { hidden?: readonly string[]; shown?: readonly string[]; blank?: boolean },
+  panels: readonly { id: string; defaultHidden?: boolean }[],
+): Set<string> {
+  const set = new Set(s.hidden ?? []);
+  const shown = new Set(s.shown ?? []);
+  for (const p of panels) {
+    if (s.blank) {
+      if (shown.has(p.id)) set.delete(p.id);
+      else set.add(p.id);
+    } else if (p.defaultHidden && !shown.has(p.id)) {
+      set.add(p.id);
+    }
+  }
+  return set;
+}
+
 /** A placement list as data that compares: id, place and size, in id order. */
 const placed = (l: readonly PanelPlacement[] | undefined) => JSON.stringify([...(l ?? [])].map((p) => [p.i, p.x, p.y, p.w, p.h]).sort());
 const sameSet = (a: readonly string[] | undefined, b: readonly string[] | undefined) => JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());

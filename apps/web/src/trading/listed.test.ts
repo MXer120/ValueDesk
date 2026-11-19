@@ -7,7 +7,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { notListedLine } from '@copy-engine';
-import { knownUnlisted, linkedMarket, marketCoin, notListed } from './listed';
+import { DEFAULT_SYMBOL, bootMarket, knownUnlisted, linkedMarket, marketCoin, notListed } from './listed';
+
+test('the market the trade page opens on: a link, else the stored one (useStored JSON), else the default', () => {
+  const store = (o: Record<string, unknown>) => (k: string) => (k in o ? JSON.stringify(o[k]) : null);
+  assert.deepEqual(bootMarket('?symbol=vETH_vUSDC', store({ 'ot.symbol': 'BTC-USD' })), { engine: 'spot', symbol: 'vETH_vUSDC' });
+  assert.deepEqual(bootMarket('', store({ 'ot.engine': 'perps', 'ot.symbol': 'SOL-USD' })), { engine: 'perps', symbol: 'SOL-USD' });
+  assert.deepEqual(bootMarket('', store({ 'ot.engine': 'spot', 'ot.symbol': 'vBTC_vUSDC' })), { engine: 'spot', symbol: 'vBTC_vUSDC' });
+  assert.deepEqual(bootMarket('', store({})), { engine: 'perps', symbol: DEFAULT_SYMBOL.perps });
+  assert.deepEqual(bootMarket('', () => '{not json'), { engine: 'perps', symbol: DEFAULT_SYMBOL.perps });
+  assert.deepEqual(bootMarket('', () => { throw new Error('storage blocked'); }), { engine: 'perps', symbol: DEFAULT_SYMBOL.perps });
+});
 
 test('the line names the coin, in the copy engine\'s own words', () => {
   assert.equal(notListed('PURR-USD'), "PURR is not listed on SoDEX, so it can't be traded here.");

@@ -21,7 +21,10 @@
  * file you can read end to end - a page whose job is to let you audit this app
  * should not be built out of this app.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
+import { cancelNav, isLatestNav, navTicket } from './nav';
+import { scrollMemory } from './scrollMemory';
 
 /**
  * Every page the SPA itself serves, IN NAV ORDER.
@@ -187,6 +190,58 @@ export function tabForPath(pathname: string, soon: ReadonlySet<Tab> = SOON_TABS)
 }
 
 /**
+ * One name for the page a URL shows, whatever kind it is: 'tab:trade', 'sodex:points', 'legal:terms', 'status',
+ * 'excluded', 'limits' - or null for a path that is none of ours (it lands on the default page). The nav bars light
+ * the item of a navigation still on its way by it (nav.ts), and App.tsx tells by it when that navigation landed.
+ */
+export function routeKeyForPath(pathname: string): string | null {
+  const legal = legalForPath(pathname);
+  if (legal) return `legal:${legal}`;
+  if (isStatusPath(pathname)) return 'status';
+  if (isExcludedPath(pathname)) return 'excluded';
+  if (isLimitsPath(pathname)) return 'limits';
+  const sodex = sodexViewForPath(pathname);
+  if (sodex) return `sodex:${sodex}`;
+  const tab = tabForPath(pathname);
+  return tab ? `tab:${tab}` : null;
+}
+
+/** The key of what `useRoute` shows (a legal page over the status page over the rest, as App.tsx renders them). */
+export function routeKeyOf(r: { tab: Tab; legal: LegalPage | null; status: boolean; excluded: boolean; limits: boolean; sodex: SodexView | null }): string {
+  if (r.legal) return `legal:${r.legal}`;
+  if (r.status) return 'status';
+  if (r.excluded) return 'excluded';
+  if (r.limits) return 'limits';
+  if (r.sodex) return `sodex:${r.sodex}`;
+  return `tab:${r.tab}`;
+}
+
+/** What a route key lights in the nav bars: the same props App.tsx passes them for a page on screen. */
+export function litFromKey(key: string): { tab: Tab | null; sodex: SodexView | null; legal: LegalPage | null; status: boolean; excluded: boolean; limits: boolean } {
+  const [kind, name] = key.split(':') as [string, string | undefined];
+  return {
+    tab: kind === 'tab' ? (name as Tab) : null,
+    sodex: kind === 'sodex' ? (name as SodexView) : null,
+    legal: kind === 'legal' ? (name as LegalPage) : null,
+    status: kind === 'status',
+    excluded: kind === 'excluded',
+    limits: kind === 'limits',
+  };
+}
+
+/** Push a URL of this app (a new history entry), and let the scroll memory know a page opens at its top. */
+export function pushPath(url: string): void {
+  scrollMemory().pushed();
+  window.history.pushState(null, '', url);
+}
+
+/**
+ * A page's code (and text) must be in before the router shows it; `useRoute` asks this on Back/Forward. Null when
+ * the page can show now, else a promise for when it can.
+ */
+export type RouteReady = (pathname: string) => Promise<unknown> | null;
+
+/**
  * The current page, and a way to change it.
  *
  * `navigate` pushes, so every page change is a back-button stop. `popstate`
@@ -194,7 +249,7 @@ export function tabForPath(pathname: string, soon: ReadonlySet<Tab> = SOON_TABS)
  * with the default page: pushing would put a URL that renders nothing into the
  * history stack, and going "back" to it would be a dead end.
  */
-export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void, boolean, () => void, boolean, () => void, boolean, () => void, SodexView | null, (view: SodexView) => void] {
+export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void, boolean, () => void, boolean, () => void, boolean, () => void, SodexView | null, (view: SodexView) => void] {
   const [tab, setTab] = useState<Tab>(() => tabForPath(window.location.pathname) ?? DEFAULT_TAB);
   /* A legal page is shown INSTEAD of the tab's page; `tab` keeps the default
      there, so everything keyed on it (the nav, the shortcuts) is unchanged. */
@@ -208,6 +263,8 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
   /* One of SoDEX's products, the same way. */
   const [sodex, setSodex] = useState<SodexView | null>(() => sodexViewForPath(window.location.pathname));
 
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
   useEffect(() => {
     /*
      * Normalise an unknown path to the default page - on ARRIVAL and on every
@@ -217,11 +274,11 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
      * address bar still said /wallet meant copying the URL handed someone a link
      * to a page that no longer exists.
      */
-    const normalise = () => {
+    const apply = () => {
       const path = window.location.pathname;
       if (tabForPath(path) === null && legalForPath(path) === null && !isStatusPath(path) && !isExcludedPath(path) && !isLimitsPath(path) && sodexViewForPath(path) === null) {
         const seg = path.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() ?? '';
-        window.history.replaceState(null, '', pathForTab(MOVED[seg] ?? DEFAULT_TAB));
+        window.history.replaceState(window.history.state, '', pathForTab(MOVED[seg] ?? DEFAULT_TAB));
       }
       setTab(tabForPath(window.location.pathname) ?? DEFAULT_TAB);
       setLegal(legalForPath(window.location.pathname));
@@ -230,16 +287,41 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
       setLimits(isLimitsPath(window.location.pathname));
       setSodex(sodexViewForPath(window.location.pathname));
     };
-    normalise();
-    window.addEventListener('popstate', normalise);
-    return () => window.removeEventListener('popstate', normalise);
+    apply();
+    /*
+     * Back and Forward (a TRUSTED popstate - the browser's): the page shows once its code is in, like a tap's
+     * (App.tsx setTab) - before, a Back to a page not yet fetched suspended the whole shell to a blank screen until
+     * it came - and the scroller returns to where this entry was read to (scrollMemory.ts). A popstate this app
+     * dispatches itself after a push (openPath, openSodex) applies at once: its page was waited for already.
+     */
+    const onPop = (e: PopStateEvent) => {
+      if (!e.isTrusted) {
+        apply();
+        return;
+      }
+      const t = navTicket();
+      const mem = scrollMemory();
+      mem.popped();
+      const landed = () => {
+        if (!isLatestNav(t)) return;
+        flushSync(apply);
+        // Back/Forward settles any pending tap too: one it overtook, or one whose route key equals the page on screen.
+        cancelNav();
+        mem.restore();
+      };
+      const wait = readyRef.current?.(window.location.pathname) ?? null;
+      if (wait) wait.then(landed, landed);
+      else landed();
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
   }, []);
 
   const navigate = useCallback((next: Tab) => {
     // Re-clicking the current tab must not stack duplicate history entries -
     // otherwise five clicks on "Trade" is five presses of Back to leave it.
     if (tabForPath(window.location.pathname) !== next) {
-      window.history.pushState(null, '', pathForTab(next));
+      pushPath(pathForTab(next));
     }
     setTab(next);
     setLegal(null);
@@ -251,7 +333,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
 
   const openLegal = useCallback((page: LegalPage) => {
     if (legalForPath(window.location.pathname) !== page) {
-      window.history.pushState(null, '', pathForLegal(page));
+      pushPath(pathForLegal(page));
     }
     setLegal(page);
     setStatus(false);
@@ -261,7 +343,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
   }, []);
 
   const openStatus = useCallback(() => {
-    if (!isStatusPath(window.location.pathname)) window.history.pushState(null, '', STATUS_PATH);
+    if (!isStatusPath(window.location.pathname)) pushPath(STATUS_PATH);
     setLegal(null);
     setStatus(true);
     setExcluded(false);
@@ -270,7 +352,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
   }, []);
 
   const openExcluded = useCallback(() => {
-    if (!isExcludedPath(window.location.pathname)) window.history.pushState(null, '', EXCLUDED_PATH);
+    if (!isExcludedPath(window.location.pathname)) pushPath(EXCLUDED_PATH);
     setLegal(null);
     setStatus(false);
     setExcluded(true);
@@ -279,7 +361,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
   }, []);
 
   const openLimits = useCallback(() => {
-    if (!isLimitsPath(window.location.pathname)) window.history.pushState(null, '', LIMITS_PATH);
+    if (!isLimitsPath(window.location.pathname)) pushPath(LIMITS_PATH);
     setLegal(null);
     setStatus(false);
     setExcluded(false);
@@ -290,7 +372,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
   const openSodex = useCallback((view: SodexView) => {
     const path = pathForSodexView(view);
     if (window.location.pathname !== path) {
-      window.history.pushState(null, '', path);
+      pushPath(path);
       /* A page already on this view (Wealth on one fund) reads the URL again. */
       window.dispatchEvent(new PopStateEvent('popstate'));
     }

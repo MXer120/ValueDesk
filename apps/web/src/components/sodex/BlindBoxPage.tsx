@@ -12,7 +12,7 @@ import { CoinIcon } from '../CoinIcon';
 import { EmptyState } from '../EmptyState';
 import { usePolled } from '../explore/cohorts/parts';
 import {
-  LEVELS, LEVEL_LABEL, bpsToPct, fetchLotteryFeed, fetchLotteryMeta, isLevel, mergeLadder,
+  LEVELS, LEVEL_LABEL, LOTTERY_FEED_SIZE, bpsToPct, fetchLotteryFeed, fetchLotteryMeta, isLevel, mergeLadder,
   type FeedItem, type Level, type LotteryMeta, type LotteryRules,
 } from '../../blindBox';
 import { DASH } from '../../format';
@@ -22,7 +22,7 @@ import { BoxArt } from './BoxArt';
 import { OnChainBoxes, OpenOnSodex, ProgressPanel } from './BoxVault';
 import { LockedSection, Pill, ProgrammeHero, ProgrammePage, ReadFailed, SegSwitch, SkelRows, SkelTiles, fmtAgo, fmtTokens, fmtUsdTight, useNow } from './parts';
 
-const FEED_SIZE = 24;
+const FEED_SIZE = LOTTERY_FEED_SIZE;
 
 export function BlindBoxPage({ address }: { address: string | null; provider: Eip1193Provider | null }) {
   const meta = usePolled('lottery-meta', (signal) => fetchLotteryMeta(signal), 60_000);

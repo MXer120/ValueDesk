@@ -137,9 +137,11 @@
 /* --- loading ------------------------------------------------------------------ */
 
 .bots-skel { display: flex; flex-direction: column; gap: 8px; }
-.bots-bone { height: 52px; border-radius: 10px; background: linear-gradient(90deg, color-mix(in srgb, var(--text) 4%, transparent), color-mix(in srgb, var(--text) 8%, transparent), color-mix(in srgb, var(--text) 4%, transparent)); background-size: 200% 100%; animation: bots-shimmer 1.4s ease-in-out infinite; }
-@keyframes bots-shimmer { to { background-position: -200% 0; } }
-@media (prefers-reduced-motion: reduce) { .bots-bone { animation: none; } }
+/* On the compositor: a layer of the same tiles slides by one tile (motion.css), as the background-position did. */
+.bots-bone { position: relative; overflow: hidden; height: 52px; border-radius: 10px; }
+.bots-bone::after { content: ''; position: absolute; top: 0; bottom: 0; left: -200%; width: 400%; background: linear-gradient(90deg, color-mix(in srgb, var(--text) 4%, transparent), color-mix(in srgb, var(--text) 8%, transparent), color-mix(in srgb, var(--text) 4%, transparent)) 0 0 / 50% 100% repeat-x; animation: bots-shimmer 1.4s ease-in-out infinite; pointer-events: none; }
+@keyframes bots-shimmer { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(50%, 0, 0); } }
+@media (prefers-reduced-motion: reduce) { .bots-bone::after { animation: none; } }
 
 /* --- strategy cards ------------------------------------------------------------ */
 

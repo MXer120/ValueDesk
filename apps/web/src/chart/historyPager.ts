@@ -53,6 +53,28 @@ export interface HistoryPage {
 /** Backoff after consecutive failures. */
 export const HISTORY_RETRY_MS = [1_000, 2_000, 5_000, 10_000, 15_000] as const;
 
+/**
+ * NARROW PLOTS WAIT FOR THE FIRST TOUCH. A 375 px phone shows about 38 bars, and the first load
+ * already holds 500: some thirteen screens. Fetching two more pages of 1,000 at every load and every
+ * switch cost two reads (61 KB brotli, measured 2026-11-18 on BTC-USD 1m) and 40 of the IP's
+ * 1,200-a-minute weight right when the book and trades load too - for users who mostly never scroll
+ * back. When the bars held are more than this many screens, the runway is fetched at the user's
+ * first touch, wheel or key on the plot instead, or as soon as the view comes within
+ * PREFETCH_NEAR_BARS of the oldest bar (a zoom out from the toolbar); a faster fling still ends at
+ * the late-page path (`next()`, historyReveal.ts). A wide plot keeps fetching it at load.
+ */
+export const PREFETCH_AT_LOAD_SCREENS = 4;
+export const PREFETCH_NEAR_BARS = 250;
+
+/** Whether the runway is fetched as the series loads: `bars` held, `visibleBars` across the plot (null: unknown). */
+export function prefetchAtLoad(bars: number, visibleBars: number | null | undefined): boolean {
+  if (visibleBars === null || visibleBars === undefined || !(visibleBars > 0)) return true;
+  return bars <= visibleBars * PREFETCH_AT_LOAD_SCREENS;
+}
+
+/** The view has come close enough to the oldest bar held (`from`: the first visible index) to fetch the runway. */
+export const nearOldest = (from: number): boolean => Number.isFinite(from) && from < PREFETCH_NEAR_BARS;
+
 export class HistoryPager {
   readonly key: string;
   /** Fetched, not yet handed over; oldest first, all older than `edge`. */

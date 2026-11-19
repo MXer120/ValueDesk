@@ -16,6 +16,18 @@
  * survive a future build that reorders the bundle.
  */
 
+/* FALLBACK FACES (phone pass, 2026-11-18): until IBM Plex Sans, Asap and Space Grotesk are in (font-display:
+   swap), text is drawn in Arial sized and placed like them, so the swap moves almost nothing; only the code points the
+   real faces draw, so nothing differs once they are in. Not on Android (no Arial; Roboto's numbers are still to measure).
+   Measured from the font files and written here by tools/fallback-faces.mjs; its test holds them equal. */
+/* fallback faces: begin */
+@font-face { font-family: "IBM Plex Sans Fallback"; src: local("Arial"), local("ArialMT"), local("Liberation Sans"); font-weight: 400; size-adjust: 100.54%; ascent-override: 101.95%; descent-override: 27.35%; line-gap-override: 0.00%; unicode-range: U+0020-007E,U+00A0-017F,U+018F,U+0192,U+01A0-01A1,U+01AF-01B0,U+01CD-01DC,U+01FA-01FF,U+0218-021B,U+0237,U+0259,U+02BB-02BC,U+02C6-02C7,U+02DA,U+02DC-02DD,U+0304,U+0308,U+1E80-1E85,U+1E9E,U+1EF2-1EF9,U+2002,U+2009,U+200B,U+2013-2014,U+2018-201A,U+201C-201E,U+2020,U+2022,U+2026,U+2032-2033,U+2039-203A,U+2044,U+20A1,U+20A4,U+20A6,U+20A8-20AE,U+20B1-20B2,U+20B4-20B5,U+20B8-20BA,U+20BD,U+20BF,U+2113,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "IBM Plex Sans Fallback"; src: local("Arial"), local("ArialMT"), local("Liberation Sans"); font-weight: 500; size-adjust: 102.67%; ascent-override: 99.84%; descent-override: 26.79%; line-gap-override: 0.00%; unicode-range: U+0020-007E,U+00A0-017F,U+018F,U+0192,U+01A0-01A1,U+01AF-01B0,U+01CD-01DC,U+01FA-01FF,U+0218-021B,U+0237,U+0259,U+02BB-02BC,U+02C6-02C7,U+02DA,U+02DC-02DD,U+0304,U+0308,U+1E80-1E85,U+1E9E,U+1EF2-1EF9,U+2002,U+2009,U+200B,U+2013-2014,U+2018-201A,U+201C-201E,U+2020,U+2022,U+2026,U+2032-2033,U+2039-203A,U+2044,U+20A1,U+20A4,U+20A6,U+20A8-20AE,U+20B1-20B2,U+20B4-20B5,U+20B8-20BA,U+20BD,U+20BF,U+2113,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "Asap Fallback"; src: local("Arial"), local("ArialMT"), local("Liberation Sans"); font-weight: 400; size-adjust: 94.60%; ascent-override: 98.73%; descent-override: 22.41%; line-gap-override: 0.00%; unicode-range: U+0020-007E,U+00A0-00AC,U+00AE-017F,U+018F,U+0192,U+019D,U+01A0-01A1,U+01AF-01B0,U+01C4-01DC,U+01E6-01E7,U+01EA-01EB,U+01F1-01F3,U+01FA-021B,U+022A-022D,U+0230-0233,U+0237,U+0259,U+0272,U+02B9-02BA,U+02BC,U+02C6-02C7,U+02C9,U+02DA,U+02DC-02DD,U+0304,U+0308,U+1E0C-1E0D,U+1E24-1E25,U+1E44-1E45,U+1E5A-1E5B,U+1E62-1E63,U+1E6C-1E6D,U+1E80-1E85,U+1E92-1E93,U+1E9E,U+1EF2-1EF9,U+2002,U+2013-2014,U+2018-201A,U+201C-201E,U+2020,U+2022,U+2026,U+2032-2033,U+2039-203A,U+2044,U+20A1,U+20A3-20A4,U+20A6-20A7,U+20A9,U+20AB-20AD,U+20B1-20B2,U+20B5,U+20B9-20BA,U+20BC-20BD,U+2113,U+2122,U+2191,U+2193,U+2212,U+2215; }
+@font-face { font-family: "Asap Fallback"; src: local("Arial"), local("ArialMT"), local("Liberation Sans"); font-weight: 500; size-adjust: 94.60%; ascent-override: 98.73%; descent-override: 22.41%; line-gap-override: 0.00%; unicode-range: U+0020-007E,U+00A0-00AC,U+00AE-017F,U+018F,U+0192,U+019D,U+01A0-01A1,U+01AF-01B0,U+01C4-01DC,U+01E6-01E7,U+01EA-01EB,U+01F1-01F3,U+01FA-021B,U+022A-022D,U+0230-0233,U+0237,U+0259,U+0272,U+02B9-02BA,U+02BC,U+02C6-02C7,U+02C9,U+02DA,U+02DC-02DD,U+0304,U+0308,U+1E0C-1E0D,U+1E24-1E25,U+1E44-1E45,U+1E5A-1E5B,U+1E62-1E63,U+1E6C-1E6D,U+1E80-1E85,U+1E92-1E93,U+1E9E,U+1EF2-1EF9,U+2002,U+2013-2014,U+2018-201A,U+201C-201E,U+2020,U+2022,U+2026,U+2032-2033,U+2039-203A,U+2044,U+20A1,U+20A3-20A4,U+20A6-20A7,U+20A9,U+20AB-20AD,U+20B1-20B2,U+20B5,U+20B9-20BA,U+20BC-20BD,U+2113,U+2122,U+2191,U+2193,U+2212,U+2215; }
+@font-face { font-family: "Space Grotesk Fallback"; src: local("Arial"), local("ArialMT"), local("Liberation Sans"); font-weight: 600; size-adjust: 108.85%; ascent-override: 90.40%; descent-override: 26.83%; line-gap-override: 0.00%; unicode-range: U+0020-007E,U+00A0-0180,U+018F,U+0192,U+01A0-01A1,U+01AF-01B0,U+01C4-01DC,U+01E6-01E7,U+01EA-01EB,U+01FA-021B,U+022A-022D,U+0230-0233,U+0237,U+0243,U+0251,U+0259,U+02B9-02BC,U+02BE-02BF,U+02C6-02CC,U+02DA,U+02DC-02DD,U+0304,U+0308,U+1E08-1E09,U+1E0C-1E0F,U+1E14-1E17,U+1E1C-1E1D,U+1E20-1E21,U+1E24-1E25,U+1E2A-1E2B,U+1E2E-1E2F,U+1E36-1E3B,U+1E42-1E49,U+1E4C-1E53,U+1E5A-1E69,U+1E6C-1E6F,U+1E78-1E7B,U+1E80-1E85,U+1E8E-1E8F,U+1E92-1E93,U+1E97,U+1E9E,U+1EF2-1EF9,U+2009,U+200B,U+2013-2014,U+2018-201A,U+201C-201E,U+2020,U+2022,U+2026,U+2032-2033,U+2039-203A,U+2044,U+20A1,U+20A3-20A4,U+20A6-20A7,U+20A9,U+20AB-20AD,U+20B1-20B2,U+20B5,U+20B9-20BA,U+20BC-20BD,U+20BF,U+2113,U+2122,U+2191,U+2193,U+2212,U+2215; }
+/* fallback faces: end */
+
 :root {
   /* Surfaces, darkest to lightest. --bg and --bg-panel used to be the SAME
      value, which meant nothing could be visually elevated above the page and
@@ -246,10 +258,10 @@
      headline price and change, header stat VALUES, the funding countdown, strip
      percentages, order-entry readouts and inputs, table numeric cells, chart
      axis labels. Labels and column HEADS stay --font-text. */
-  --font-text: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-num: "Asap", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-text: "IBM Plex Sans", "IBM Plex Sans Fallback", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: "Asap", "Asap Fallback", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   /* Page headlines only (the Copy page hero): Space Grotesk 600, main.tsx. */
-  --font-display: "Space Grotesk", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", "Space Grotesk Fallback", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
 
   /* Glass surfaces. Every floating panel that is not the page itself - menus,
      the leverage/margin popovers, modals - reads as glassmorphism: translucent
@@ -284,14 +296,27 @@
   --navbar-h: 56px;  /* measured. See the note where the body override used to be. */
 
   /* One source of truth for motion, so timings stay consistent as animation
-     work lands instead of drifting into per-rule magic numbers. --ease-out is
-     the neutral "arrive and stop" curve; --ease-spring overshoots slightly at
-     the tail and is meant for things that appear (modals, popovers, the tab
-     indicator). */
+     work lands instead of drifting into per-rule magic numbers.
+       --ease-view  THE travel curve: anything that moves across the screen
+                    (sheets, the incoming page, tab markers, toasts) moves on
+                    the chart's own camera curve, CSS `ease` (chart/viewTween.ts
+                    easeView via src/ease.ts; ease.test.ts keeps the two equal).
+                    It leaves at once - 7% of the way in the first frame of a
+                    200ms move - and lands with zero velocity, so one dropped
+                    first frame never reads as a snap.
+       --ease-out   colour, press and fill changes: "arrive and stop".
+       --ease-spring small pop-ins (menus, popovers). Despite its name it never
+                    overshoots - y(s) = 3s - 3s^2 + s^3 only rises - it is an
+                    expo-out that covers 43% of a 200ms move in its first frame:
+                    fine for a 4px pop, too abrupt for anything that travels. */
   --dur-fast: 140ms;
   --dur-med: 200ms;
+  --dur-page: 200ms;   /* the incoming page's fade (App.tsx) */
+  --dur-sheet: 280ms;  /* a phone sheet's travel, in and out */
+  --dur-view: 420ms;   /* the chart's view move (viewTween.ts TWEEN_MS) */
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-view: cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 * { box-sizing: border-box; }
@@ -1231,7 +1256,7 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
   content: ''; position: absolute; left: 50%; bottom: 0;
   width: 16px; height: 3px; margin-left: -8px;
   background: var(--accent); transform: scaleX(0);
-  transition: transform var(--dur-med) var(--ease-spring);
+  transition: transform var(--dur-med) var(--ease-view);
 }
 .tabbar button:hover:not(.active),
 .navlinks button:hover:not(.active) { color: var(--text); background: none; }
@@ -1634,17 +1659,65 @@ table { border-collapse: collapse; width: 100%; }
   .modal-scrim { background: var(--scrim-solid); }
 }
 @keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
+/* Never taller than the window inside the scrim's own margin: the body (overflow: auto, min-height: 0, below) then
+   scrolls instead of the dialog's top and bottom being cut off with no way to reach them. Measured (phone pass,
+   2026-11-18): the welcome gate is 694px tall, so on a 360x640 Android it ran 27px above and 27px below the window.
+   `dvh` follows a phone browser's toolbar; `vh` is the fallback. */
 .modal {
   background: var(--glass-bg);
   -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
   border: 1px solid var(--line); border-radius: var(--radius-md);
   box-shadow: var(--shadow-modal); width: 100%; display: flex; flex-direction: column; overflow: hidden;
-  animation: modal-in var(--dur-med) var(--ease-spring);
+  max-height: calc(100vh - 2 * var(--sp-4));
+  max-height: calc(100dvh - 2 * var(--sp-4));
+  animation: modal-in var(--dur-med) var(--ease-view);
 }
+/* The dialog itself takes the focus when it opens by itself (Modal focusDialog): it is not a control, so no ring, as
+   the Connect dialog's (.cdlg:focus). Its controls keep theirs. */
+.modal[tabindex="-1"]:focus { outline: none; }
 @keyframes modal-in {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
   to { opacity: 1; transform: none; }
 }
+/* --- phone sheets (Modal `sheet`: the tab bar's More; the Connect dialog) ----
+   Up to 760px - the tab bar's width, one breakpoint for every sheet - a sheet
+   is anchored to the bottom edge, full width, its top corners rounded and the
+   home indicator's safe area kept clear. It travels: in from below the edge
+   over --dur-sheet on --ease-view (the chart's camera curve: 7% of the way in
+   the first frame, where the old 32px slide on --ease-spring jumped 43%), and
+   out the same way, down. Only the sheet moves; its scrim fades under it. The
+   grip says it can be pulled down (motion.tsx useSheetDrag); it and the head
+   take the drag, so the browser must not pan from there. */
+.sheet-grip { display: none; }
+@media (max-width: 760px) {
+  .modal-scrim.is-sheet-scrim { align-items: flex-end; padding: 0; }
+  .modal.is-sheet {
+    position: relative;
+    max-width: none;
+    max-height: calc(100dvh - var(--sp-6) - env(safe-area-inset-top, 0px));
+    border-width: 1px 0 0;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    animation: vs-sheet-in var(--dur-sheet) var(--ease-view) backwards;
+  }
+  .modal-scrim.is-sheet-scrim.is-closing { animation-duration: 200ms; }
+  .modal-scrim.is-closing .modal.is-sheet { animation: vs-sheet-out 200ms var(--ease-view) forwards; }
+  .sheet-grip {
+    display: block;
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    margin-left: -18px;
+    border-radius: var(--radius-full);
+    background: rgb(var(--ink) / 0.18);
+    pointer-events: none;
+  }
+  .modal.is-sheet > .modal-head { touch-action: none; }
+}
+@keyframes vs-sheet-in { from { transform: translate3d(0, 100%, 0); } }
+@keyframes vs-sheet-out { to { transform: translate3d(0, 100%, 0); } }
 /* Modal.tsx renders `modal modal-${size}`, `.modal-head`, `.modal-body` and
    `.modal-foot`, and none of them had a rule - a confirm dialog stretched to
    the full viewport width with its buttons flush against the edge. It is the
@@ -2298,7 +2371,7 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; padding: 0 3px; f
   content: ''; position: absolute; left: 50%; bottom: 0;
   width: 16px; height: 3px; margin-left: -8px;
   background: var(--accent); transform: scaleX(0);
-  transition: transform var(--dur-med) var(--ease-spring);
+  transition: transform var(--dur-med) var(--ease-view);
 }
 .dash .dash-tab.is-active::after { transform: scaleX(1); }
 
@@ -2326,6 +2399,12 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; padding: 0 3px; f
 }
 .shell > .app { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .appcontent { flex: 1 1 auto; min-height: 0; overflow: auto; }
+/* A pull down past the top of a phone page must not chain to the document and start the browser's pull-to-refresh:
+   that is a full reload (5.5-8 s cold on a slow phone link, the streams and any browser algo stopped) for a page whose
+   data is live anyway. The scroller still bounces at its own ends. */
+@media (max-width: 760px) {
+  .appcontent { overscroll-behavior-y: contain; }
+}
 .navbar, .banner, .marketbar, footer { flex: none; }
 
 /* `.dash-scroll` gets a definite height from this column, which is what
@@ -2425,6 +2504,45 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; padding: 0 3px; f
   /* The word before it is what the strip lines up on: snapping to the chevron hid "Trade". */
   .navlinks button.navtrade__chev { scroll-snap-align: none; }
   .navstatus { margin-left: auto; }
+}
+
+/* THE PHONE'S BAR IS ONE 56px ROW (phone pass, 2026-11-18): the mark and its Beta tag,
+ * then search, the bell and the wallet. It was two rows on every page (112px) and three
+ * on Bots (165px) of a 812px phone, above the page. What left the row has a place of its
+ * own: Futures / Spot in the trade page's market row and Bots' pages at the top of the
+ * Bots page (the same switch), the language and Settings in More's sheet and the wallet
+ * menu (NavBar.tsx). The name stays for screen readers. Restricted regions keep the
+ * red strip across the top of the app (RegionBanner), which says what the pill said;
+ * a connection that is not live shows as its dot alone, its words in the dot's title.
+ * Side padding keeps a landscape notch clear (index.html sets viewport-fit=cover). A
+ * screen too narrow even for this row (320px) still wraps rather than clipping. */
+@media (max-width: 760px) {
+  .navbar:not(.navbar--rail) .navbar-inner {
+    min-height: 56px;
+    padding: 6px max(var(--sp-3), env(safe-area-inset-right, 0px)) 6px max(var(--sp-3), env(safe-area-inset-left, 0px));
+    gap: var(--sp-2);
+  }
+  .navbar .brand__name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .navbar .brand { gap: 10px; }
+  .navbar:not(.navbar--rail) .lg-region { display: none; }
+  /* Settings' window only (its gear is not in this bar): no empty slot in the row. */
+  .navbar .navstatus > .settings:empty { display: none; }
+  .navbar .navconn { justify-content: center; width: 28px; padding: 0; gap: 0; font-size: 0; }
+  .navbar .navconn__dot { width: 8px; height: 8px; }
+}
+/* A 320px phone: the same one row, a little tighter - the wallet's logo gives way to its address. */
+@media (max-width: 340px) {
+  .navbar:not(.navbar--rail) .navbar-inner { gap: 6px; padding-left: max(var(--sp-2), env(safe-area-inset-left, 0px)); padding-right: max(var(--sp-2), env(safe-area-inset-right, 0px)); }
+  .navbar .navstatus { gap: 2px; }
+  .navbar .navbtn { padding: 0 var(--sp-3); }
+  .navbar .navaddr__wicon { display: none; }
 }
 
 @media (max-width: 760px) {
@@ -3102,7 +3220,7 @@ input[inputmode="decimal"], input[inputmode="numeric"],
   background: var(--glass-pop-bg);
   -webkit-backdrop-filter: var(--glass-pop-blur);
   backdrop-filter: var(--glass-pop-blur);
-  animation: toast-in 240ms var(--ease-spring);
+  animation: toast-in 240ms var(--ease-view);
 }
 .toast.is-leaving { animation: toast-out 170ms var(--ease-out) forwards; }
 @keyframes toast-in { from { opacity: 0; transform: translateX(14px) scale(0.98); } to { opacity: 1; transform: none; } }

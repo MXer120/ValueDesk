@@ -231,6 +231,12 @@ test('some wallets: their index and tiles are cut from one rebuilt history and g
     }
     for (const q of whole.points) assert.deepEqual((got.get(q.t) ?? []).sort((a, b) => a[0]! - b[0]!), q.b, `pl ${pl}: snapshot ${q.t}`);
   }
+  // Cut as every wallet's tiles are: slim rows, the newest snapshot of each 2 h bar.
+  const tt0 = Math.floor(whole.points.at(-1)!.t / T.tileMs(1)) * T.tileMs(1) - T.tileMs(1);
+  const band0 = T.bandOf(whole.points.at(-1)!.b[0]![0], whole.points.at(-1)!.st, T.bandSpan(idx.bw, 1));
+  const full = (await T.liqTileOf('BTC', venues as never, W, { tl: 1, tt: tt0, pl: 1, band: band0, bw: idx.bw }, now))!;
+  const cut = (await T.liqTileOf('BTC', venues as never, W, { tl: 1, tt: tt0, pl: 1, band: band0, bw: idx.bw, fields: 'ls', every: 2 * H, off: 0 }, now))!;
+  assert.deepEqual(cut.points, T.tileGroups(full.points, { every: 2 * H, off: 0 }).map((g) => { const q = g.at(-1)!; return { ...q, b: q.b.map((r) => r.slice(0, 3)) }; }));
   // Rebuilt once: a new level within WALLET_HIST_MS is not in the answers held; after it, it is.
   s.putLiqLog(listed.at(-1)!.t, [], [{ aid: ids.get(W[1]!)!, coin: 'BTC', venue: 1, side: 1, liq: 50_000, usd: 7_777_777 }], []);
   const held = (await T.liqTileIndexOf('BTC', venues as never, W, now + 1_000))!;
@@ -316,7 +322,7 @@ test('on the snapshot reader thread (production): the index and a tile are the s
   const s = new IndexStore(process.env.VALUESCAN_INDEX_DB!);
   const t0 = Math.floor((Date.now() - 8 * H) / Q) * Q;
   for (let i = 0; i < 5; i++) s.putLiqHist(t0 + i * H, [['APT', JSON.stringify(snapOf(5 + i * 0.02, 0.01, 700 + i))]]);
-  const reads = ['liqHistMeta', 'liqHistMetaSlow', 'liqHistAt', 'liqHistCoins'] as const;
+  const reads = ['liqHistMeta', 'liqHistMetaSlow', 'liqHistAt', 'liqHistRange', 'liqHistCoins'] as const;
   const kept = reads.map((k) => IndexStore.prototype[k]);
   try {
     T.resetLiqTiles();
@@ -331,6 +337,12 @@ test('on the snapshot reader thread (production): the index and a tile are the s
     const threadedTile = (await T.liqTile('APT', ['hyperliquid', 'sodex'], ask))!;
     assert.deepEqual(threaded, inline);
     assert.deepEqual(threadedTile, inlineTile);
+    // Cut on that thread too: slim rows, one snapshot a bar, a snapshot alone.
+    const cut = { ...ask, fields: 'ls' as const, every: 2 * H, off: 0 };
+    const threadedCut = (await T.liqTile('APT', ['hyperliquid', 'sodex'], cut))!;
+    assert.deepEqual(threadedCut.points, T.tileGroups(inlineTile.points, cut).map((g) => { const q = g.at(-1)!; return { ...q, b: q.b.map((r) => r.slice(0, 3)) }; }));
+    const one = (await T.liqTile('APT', ['hyperliquid', 'sodex'], { ...ask, at: inlineTile.points.at(-1)!.t }))!;
+    assert.deepEqual(one.points, [inlineTile.points.at(-1)]);
     assert.equal(threaded.points.length, 5);
     assert.ok(R.liqReadStats.done >= 3, JSON.stringify(R.liqReadStats));
   } finally {
@@ -351,18 +363,18 @@ test('the metas file is written in slices, byte for byte the one-piece write of 
     // Three chunks' worth and more, over several keys.
     const W = 21;
     for (let c = 0; c < 7; c++) {
-      const byT = new Map<number, { t: number; n: number; p: number; st: number; sc: Float64Array }>();
-      for (let k = 0; k < 3_001 + c; k++) byT.set(1e12 + k * 9e5, { t: 1e12 + k * 9e5, n: k, p: c + k / 7, st: 0.01 * (c + 1), sc: Float64Array.from({ length: W }, (_, j) => j * k + c) });
+      const byT = new Map<number, { t: number; n: number; p: number; st: number; sc: Float64Array; vm: number }>();
+      for (let k = 0; k < 3_001 + c; k++) byT.set(1e12 + k * 9e5, { t: 1e12 + k * 9e5, n: k, p: c + k / 7, st: 0.01 * (c + 1), vm: c % 2 ? 3 : -1, sc: Float64Array.from({ length: W }, (_, j) => j * k + c) });
       T._liqMetasHeld.set(`C${c}|hyperliquid,sodex`, byT);
     }
-    // The write before (v0.2.198 saveLiqMetas), into a buffer.
+    // The write in one piece (v0.2.198 saveLiqMetas, version 3's layout: vm after the step, the sets asked), into a buffer.
     const keys: Array<[string, number]> = [];
     let total = 0;
     for (const [vk, byT] of T._liqMetasHeld) { keys.push([vk, byT.size]); total += byT.size; }
-    const nums = new Float64Array(total * (4 + W));
+    const nums = new Float64Array(total * (5 + W));
     let o = 0;
-    for (const byT of T._liqMetasHeld.values()) for (const m of byT.values()) { nums[o] = m.t; nums[o + 1] = m.n; nums[o + 2] = m.p; nums[o + 3] = m.st; nums.set(m.sc, o + 4); o += 4 + W; }
-    const head = Buffer.from(JSON.stringify({ v: 2, w: 4 + W, keys }), 'utf8');
+    for (const byT of T._liqMetasHeld.values()) for (const m of byT.values()) { nums[o] = m.t; nums[o + 1] = m.n; nums[o + 2] = m.p; nums[o + 3] = m.st; nums[o + 4] = m.vm; nums.set(m.sc, o + 5); o += 5 + W; }
+    const head = Buffer.from(JSON.stringify({ v: 3, w: 5 + W, keys, asked: [] }), 'utf8');
     const pre = Buffer.alloc(Math.ceil((4 + head.length) / 8) * 8);
     pre.writeUInt32LE(head.length, 0);
     head.copy(pre, 4);

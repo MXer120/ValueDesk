@@ -11,13 +11,14 @@
  * It asks again every minute and when the tab comes back, so a wallet taken off the list sees why
  * instead of a page of failed loads.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import { BETA_COOKIE, BETA_SIGN_IN_STATEMENT, BETA_SIGN_IN_TTL_MS, betaSignInTypedData, type BetaSignIn } from '@sign/beta/signIn';
 import { getChainId, isUserRejection, signTypedData } from '../wallet';
 import { BrandMark } from '../components/BrandMark';
 import { WalletPicker } from '../admin/WalletPicker';
 import { nonce, type Connected } from '../admin/wallet';
 import { short } from '../admin/format';
+import { dropBootShell } from '../bootShell';
 
 type Me = { channel: 'beta'; wallet: string | null; listed: boolean };
 type State =
@@ -93,6 +94,11 @@ export default function BetaGate({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [check]);
+
+  /* The door takes the screen: index.html's static shell (a picture of the app, bootShell.ts) goes. */
+  useLayoutEffect(() => {
+    if (state.at !== 'in') dropBootShell();
+  }, [state.at]);
 
   if (state.at === 'in') return <>{children}</>;
   return (

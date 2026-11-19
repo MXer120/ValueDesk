@@ -41,6 +41,7 @@ import { liqFeed, type CoinChange } from '../indexer/liqFeed.js';
 import { heatOf, liqHeatmap, liveSrc } from '../indexer/liqRead.js';
 import { marketsNow } from '../valuedesk/liquidations/rules.js';
 import { FINE_MAX_BUCKETS, addRow, trimRow, type LiqRow } from '../valuedesk/liquidations/levels.js';
+import { BAR_MULTIPLES, aggregate } from '../valuedesk/liquidations/bars.js';
 import type { LiveHub } from './liveHub.js';
 
 export const LIQ_WS_PATH = '/ws/liq';
@@ -69,8 +70,8 @@ interface Group {
 /** A fine window holds at most this many streamed cells (it sends only those with levels). */
 const FINE_MAX = FINE_MAX_BUCKETS;
 
-/** Widths a viewer may ask for, in server buckets (the web's groupFor uses the same). */
-const MULTIPLES = new Set([1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]);
+/** Widths a viewer may ask for, in server buckets (bars.ts: the web's groupFor uses the same). */
+const MULTIPLES = new Set(BAR_MULTIPLES);
 /** A streamed bucket goes out again once its USD moved this much (or it appeared or went). */
 const SEND_MOVE = 0.01;
 const near = (a: number, b: number) => Math.abs(a - b) <= SEND_MOVE * Math.max(Math.abs(a), Math.abs(b), 1);
@@ -80,17 +81,8 @@ const nearRow = (y: LiqRow, was: LiqRow) => {
   return true;
 };
 
-/** Buckets summed k at a time: LiqRows at index i / k, bands and all. */
-export function aggregate(rows: ReadonlyArray<LiqRow>, k: number): LiqRow[] {
-  if (k <= 1) return rows.slice();
-  const by = new Map<number, LiqRow>();
-  for (const r of rows) {
-    const j = Math.floor(r[0] / k);
-    const x = by.get(j);
-    if (x) addRow(x, r); else { const y = r.slice() as LiqRow; y[0] = j; by.set(j, y); }
-  }
-  return [...by.values()].sort((a, b) => a[0] - b[0]);
-}
+/** Buckets summed k at a time (bars.ts, shared with the HTTP heatmap's `bar=`). */
+export { aggregate };
 
 const groups = new Map<string, Group>();
 const subOf = new WeakMap<WebSocket, string>();

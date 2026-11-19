@@ -16,6 +16,9 @@ import {
   type CohortFilter, type CohortFocusResponse, type CohortId, type CohortMapResponse, type CohortRange, type Sector,
 } from '@sign/valuedesk/cohorts/model.js';
 import { vsApi, vsPaths, type Venue } from '../../../vsApi';
+/* This view reads venues in its first render: their code comes with its page (exchange/venuesLazy.ts). */
+import * as venuesModule from '../../../exchange/venues';
+import { bindVenues } from '../../../exchange/venuesLazy';
 import { useLiveRead } from '../../../live/useLiveRead';
 import { useStored } from '../../../hooks';
 import { DASH, marketName } from '../../../format';
@@ -26,10 +29,11 @@ import { CohortIcon } from './CohortIcon';
 import { COHORT_COLOR } from './cohortStyle';
 import { MarketMap } from './MarketMap';
 import { MultiLeanChart, shareAt } from './MultiLeanChart';
-import { BiasPill, LeanPill, Meter, OverOiNote, POLL_MS, Picker, pctText, usePolled } from './parts';
+import { BiasPill, HeldNote, LeanPill, Meter, OverOiNote, POLL_MS, Picker, pctText, usePolled } from './parts';
 import { Treemap } from './Treemap';
 import { PriceChart, toCandles, type PriceKind } from './PriceChart';
 import { AllHidden, useCohortView } from './view';
+bindVenues(venuesModule);
 
 const SECTOR_LABEL = Object.fromEntries(SECTORS.map((s) => [s.id, s.label])) as Record<Sector, string>;
 const RANGES: Array<{ id: CohortRange; label: string }> = [
@@ -48,7 +52,7 @@ export function MarketMapPage({
   const [who, setWho] = useState<CohortId | null>(null);
   const key = `${venues.join(',')}|${who ?? 'all'}`;
   // Pushed with each new cohort load while the live socket is up (live/useLiveRead.ts); else polled every minute.
-  const r = useLiveRead<CohortMapResponse>(key, vsPaths.cohortMap(venues, who), (signal) => vsApi.cohortMap(venues, who, signal), POLL_MS);
+  const r = useLiveRead<CohortMapResponse>(key, vsPaths.cohortMap(venues, who), (signal) => vsApi.cohortMap(venues, who, signal), POLL_MS, undefined, true);
   const d = r.data;
   const long = d ? d.sectors.reduce((n, s) => n + s.long, 0) : 0;
   const short = d ? d.sectors.reduce((n, s) => n + s.short, 0) : 0;
@@ -115,6 +119,7 @@ export function MarketMapPage({
           <MarketMap sectors={d?.sectors ?? []} onSector={onSector} onAsset={onAsset} resetKey={key} height={640} />
         )}
       </section>}
+      <HeldNote at={r.heldAt} />
     </div>
   );
 }

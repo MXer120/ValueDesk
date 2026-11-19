@@ -10,7 +10,11 @@
  * rest of the shell and opens exactly as fast as it always did - including for
  * a key pressed the moment the page appears.
  *
- * The stand-in only matters if that load failed (a network drop mid-boot): it
+ * On a touch phone (no Cmd+K to press) App.tsx does not wait for it: the stand-in
+ * below asks for the module as soon as it is mounted, with the app's first
+ * commit, and a tap on search before it is in opens the palette when it lands.
+ *
+ * The stand-in otherwise only matters if that load failed (a network drop mid-boot): it
  * then retries in the background, answers Cmd/Ctrl+K the way the palette does
  * (capture phase, so App's own shortcut handler never sees it), and treats
  * printable keys typed while the open is pending as typing into the search

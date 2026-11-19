@@ -113,16 +113,56 @@ export function policyFor(pathname) {
   return 'site';
 }
 
+/** A file named by its content: the name changes whenever a byte does, so it is kept for good. */
+export const IMMUTABLE = 'public, max-age=31536000, immutable';
+/** A language code as public/i18n names them (de, pt, zh-CN, zh-TW). */
+const LANG = '[a-z]{2,3}(?:-[A-Za-z]{2,4})?';
 /**
- * Cache-Control per published file, as deploy/release/publish-web.sh sets it on the
- * S3 objects (docs/deploy/SECURITY-HEADERS.md 1.1, docs/PERFORMANCE.md "Deployment notes").
- * `file` is the path of the object that is served, e.g. /index.html for an app route.
+ * A translation part (apps/web/tools/i18n-parts.mjs: <id> is 10 characters of a sha256 of the part's keys
+ * and translations) or a landing page's file (tools/route-preload.mjs: p-<10 characters of a sha256 of its
+ * part ids): /i18n/<code>/<id>.json. Exactly that shape, so a file named any other way falls back to the
+ * short rule below - never the other way round.
+ */
+export const I18N_PART_SRC = `/i18n/${LANG}/(?:p-)?[A-Za-z0-9_-]{10}\\.json`;
+/** A language's whole catalogue (/i18n/<code>.json): no hash, the dev server's and an old tab's fallback. */
+export const I18N_WHOLE_SRC = `/i18n/${LANG}\\.json`;
+const I18N_PART = new RegExp(`^${I18N_PART_SRC}$`);
+const I18N_WHOLE = new RegExp(`^${I18N_WHOLE_SRC}$`);
+/** A script by its name (outside /assets/, where Vite names them by content). */
+export const UNHASHED_SCRIPT_SRC = '\\.m?js$';
+const UNHASHED_SCRIPT = new RegExp(UNHASHED_SCRIPT_SRC);
+
+/**
+ * Cache-Control per published file (docs/deploy/SECURITY-HEADERS.md 1.1, docs/PERFORMANCE.md "Deployment
+ * notes"). `file` is the path of the object that is served, e.g. /index.html for an app route. The Vercel
+ * routes (deploy/vercel/package.mjs HEADER_CLASSES) send exactly these; deploy/release/publish-web.sh, the
+ * retired S3 + CloudFront path, still sets the older values (everything unhashed an hour).
+ *
+ *   /assets/*                 content-hashed (Vite)                    a year, immutable
+ *   *.html (the app's shell)  every visit asks (a 304 when unchanged)  no-cache
+ *   /logos/* /addrbook/*      third-party icons, unhashed             a day, stale for a week while it is asked again
+ *   /i18n/<code>/<id>.json    content-hashed translation parts         a year, immutable (phone pass 2026-11-18: an
+ *                             and landing files                        hour sent every return visit after it through a
+ *                                                                      round trip, in English until it came back)
+ *   /i18n/<code>.json         a whole catalogue, unhashed              10 min, stale for a day while it is asked again
+ *   /models/*                 the speech model at a pinned revision    a day, stale for a week (fetch-model.sh: a new
+ *                             (deploy/vercel/fetch-model.sh)           revision is a new release, never a hot swap)
+ *   /theme-boot.js            the shell package's to change            an hour, as before
+ *   other *.js / *.mjs and    unhashed scripts (the Fed live widget's  an hour, NO stale window: a browser never runs
+ *   all of /scan/*            AudioWorklet /fedlive/tap-worklet.js),   a script more than an hour old against a newer
+ *                             the legacy folder                        app (a stale copy could be a day old)
+ *   everything else           favicon, robots, flags, onboarding art   an hour, stale for a day while it is asked again
  */
 export function cacheControlFor(file) {
-  if (file.startsWith('/assets/')) return 'public, max-age=31536000, immutable';
+  if (file.startsWith('/assets/')) return IMMUTABLE;
   if (file.endsWith('.html')) return 'no-cache';
   if (file.startsWith('/logos/') || file.startsWith('/addrbook/')) return 'public, max-age=86400, stale-while-revalidate=604800';
-  return 'public, max-age=3600';
+  if (I18N_PART.test(file)) return IMMUTABLE;
+  if (I18N_WHOLE.test(file)) return 'public, max-age=600, stale-while-revalidate=86400';
+  if (file.startsWith('/models/')) return 'public, max-age=86400, stale-while-revalidate=604800';
+  if (file === '/theme-boot.js') return 'public, max-age=3600';
+  if (UNHASHED_SCRIPT.test(file) || file.startsWith('/scan/')) return 'public, max-age=3600';
+  return 'public, max-age=3600, stale-while-revalidate=86400';
 }
 
 /**

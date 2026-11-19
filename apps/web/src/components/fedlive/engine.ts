@@ -15,8 +15,6 @@
  * with the picture held `REPLAY_LEAD_S` behind the ear.
  */
 import type HlsPlayer from 'hls.js';
-import ortWasm from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url';
-import ortMjs from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url';
 import type { SttIn, SttOut } from './stt.worker';
 
 export interface FedSource {
@@ -175,7 +173,7 @@ export class FedEngine {
         }
       };
       w.onerror = (e) => reject(new Error(e.message || 'The speech worker failed'));
-      w.postMessage({ type: 'load', model: MODEL, wasm: ortWasm, mjs: ortMjs } satisfies SttIn);
+      w.postMessage({ type: 'load', model: MODEL } satisfies SttIn);
     });
   }
 

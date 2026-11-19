@@ -325,7 +325,10 @@ export type RecoverReason =
   | 'visible'
   /** The stream moved on from a bar it never updated (the one the history load caught half-way):
    *  its final open, high, low, close and volume are read so the bar is not left half-made. */
-  | 'settle';
+  | 'settle'
+  /** A kept series was put on the chart at once (seriesCache.ts): its right edge - and every bar
+   *  the stream had written - is read and merged in. Chart.tsx's own call; the watchdog never asks it. */
+  | 'kept';
 
 export interface StaleInput {
   now: number;

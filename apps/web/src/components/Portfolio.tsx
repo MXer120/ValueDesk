@@ -185,14 +185,14 @@ import { Collapse } from './motion';
 import { requestDeposit, requestTransfer, requestWithdraw } from './account/actions';
 import './Portfolio.css';
 import {
-  Card, EquityCurve, Group, Row, Stat, fmtCompactUsd, fmtDay, type CurveWindow,
+  Card, EquityCurve, Group, Meter, PeriodSeg, Row, Stat, fmtCompactUsd, fmtDay, type CurveWindow, type Period,
 } from './portfolio/parts';
 import { fmtFixed } from '../numStyle';
 
 /* The design system and the curve live in ./portfolio/parts (so that using a
    Card does not load this page); they are still exported from here. */
-export { Card, EquityCurve, Group, Row, Stat, Tag, fmtCompactUsd, fmtDay } from './portfolio/parts';
-export type { CurveWindow } from './portfolio/parts';
+export { Card, EquityCurve, Group, Meter, PeriodSeg, Row, Stat, Tag, fmtCompactUsd, fmtDay } from './portfolio/parts';
+export type { CurveWindow, Period } from './portfolio/parts';
 
 // =============================================================================
 //  1. THE MODEL - every derived number on this page is built here, once.
@@ -868,8 +868,6 @@ function useVolume14d(address: string | null): {
 //  3. PERIOD MATHS - everything derived from the venue's daily PnL series.
 // =============================================================================
 
-export type Period = '24H' | '7D' | '14D' | '30D' | '90D' | 'ALL';
-const PERIODS: Period[] = ['7D', '30D', '90D', 'ALL'];
 const PERIOD_DAYS: Record<Period, number | null> = { '24H': 1, '7D': 7, '14D': 14, '30D': 30, '90D': 90, ALL: null };
 
 /* ---------------------------------------------------------------------------
@@ -1328,48 +1326,6 @@ export function fmtCompactSigned(v: number): string {
   // Each step at the figure that would round up into the next ($999.6 is $1.0K, not $1000).
   const body = a >= 999_950 ? `${fmtFixed(a / 1e6, 1)}M` : a >= 999.5 ? `${fmtFixed(a / 1e3, 1)}K` : a >= 99.995 ? fmtFixed(a, 0) : fmtFixed(a, 2);
   return `${sign}$${body}`;
-}
-
-/**
- * The period selector, in one place because three headers carry it and they
- * must not drift apart. Selection is amber text on a filled control - the
- * label never changes weight, so the group cannot re-flow under the cursor.
- */
-export function PeriodSeg({ period, onPeriod, label }: {
-  period: Period; onPeriod: (p: Period) => void; label: string;
-}) {
-  return (
-    <div className="pf-seg" role="tablist" aria-label={label}>
-      {PERIODS.map((p) => (
-        <button
-          key={p}
-          type="button"
-          role="tab"
-          aria-selected={p === period}
-          className={`pf-ctl ${p === period ? 'is-on' : ''}`}
-          onClick={() => onPeriod(p)}
-        >
-          {p}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/**
- * A meter, animated by TRANSFORM.
- *
- * Never width. A width transition re-runs layout on every frame of every tick of
- * the mark feed, and on this page there can be fifty of these on screen at once;
- * a transform is composited and costs nothing. `--pf-v` is the 0..1 fraction.
- */
-export function Meter({ value, tone, label }: { value: number; tone: string; label?: string }) {
-  const v = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
-  return (
-    <div className="pf-meter" role="img" aria-label={label ?? `${fmtFixed(v * 100, 1)}%`}>
-      <span className={`pf-meter__fill pf-meter__fill--${tone}`} style={{ transform: `scaleX(${v})` }} />
-    </div>
-  );
 }
 
 /**

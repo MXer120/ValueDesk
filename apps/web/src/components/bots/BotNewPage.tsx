@@ -11,6 +11,7 @@
  * The receipt on the right: the estimate per $1M with its range, how it adds up (the market's reading, the bot,
  * each safeguard, the wallet's own bots: bots/estimate.ts), what will run, and the balance it needs.
  */
+import { PhoneActionBar } from './PhoneActionBar';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { onWalletPrompting, walletPrompting } from '../../wallet';
 import { GLOSSARY } from '../../bots/glossary';
@@ -753,6 +754,16 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
   useEffect(() => { if (cat === 'market' && noOracle.length && RECIPE[rid].oracle) setD((x) => fromRecipe('touch', x.symbol, x)); }, [cat, noOracle.length, rid]); // eslint-disable-line react-hooks/exhaustive-deps
   const nextLabel = place.step === 3 && place.part !== parts[parts.length - 1] ? `Next: ${PART_NAMES[parts[parts.indexOf(place.part!) + 1]!]}` : 'Next';
 
+  /* Back / Next / Start: in the receipt, and on a phone also in the bar above the tab bar (PhoneActionBar). */
+  const actButtons = (
+    <>
+      {at > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
+      {at < last
+        ? <Button variant="primary" size="md" className="bots-stepper__next" disabled={place.step === 3 && place.part === 'size' && sizeProblems.length > 0} title={place.step === 3 && sizeProblems.length ? sizeProblems[0] : undefined} onClick={place.step === 0 && hedge ? () => goBots({ page: 'new', market: picked[0] ?? d.symbol, kind: 'hedge' }) : next}>{nextLabel}<Icon name="arrowRight" size={14} /></Button>
+        : <Button variant="go" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!can || busy} title={whyNot ?? undefined} onClick={() => void start()}>{startLabel}</Button>}
+    </>
+  );
+
   return (
     <>
       {dialog}
@@ -888,17 +899,13 @@ export function BotNewPage({ ctx, view }: { ctx: BotsCtx; view: Extract<BotsView
         <aside className="bots-newside">
           <Shell className="bots-sidecard">
             <Receipt chosen={place.step >= 1} gEst={gEst} range={range} d={d} eff={eff} picked={picked} markets={markets.data?.markets ?? []} feeBps={feeBps} feeAdj={feeAdj} paper={paper} floor={floor} runs={runs} free={free} need={needAll} ownUsd={alloc.perpsUsd}>
-              <div className="bots-sidepanel__act">
-                {at > 0 && <Button variant="secondary" size="md" icon="arrowLeft" onClick={back}>Back</Button>}
-                {at < last
-                  ? <Button variant="primary" size="md" className="bots-stepper__next" disabled={place.step === 3 && place.part === 'size' && sizeProblems.length > 0} title={place.step === 3 && sizeProblems.length ? sizeProblems[0] : undefined} onClick={place.step === 0 && hedge ? () => goBots({ page: 'new', market: picked[0] ?? d.symbol, kind: 'hedge' }) : next}>{nextLabel}<Icon name="arrowRight" size={14} /></Button>
-                  : <Button variant="go" size="md" className="bots-stepper__next" icon="play" loading={busy} disabled={!can || busy} title={whyNot ?? undefined} onClick={() => void start()}>{startLabel}</Button>}
-              </div>
+              <div className="bots-sidepanel__act">{actButtons}</div>
               {at === last && whyNot && !busy && <p className="bots-fine" role="status">{whyNot}{why && ctx.address ? <> <button type="button" className="bots-link" onClick={() => ctx.setup(paper)}>Set up</button></> : null}</p>}
             </Receipt>
           </Shell>
         </aside>
       </div>
+      <PhoneActionBar step={`Step ${place.step + 1} of ${STEPS.length}${place.part ? ` · ${PART_NAMES[place.part]}` : ''}`} note={at === last && whyNot && !busy ? whyNot : undefined}>{actButtons}</PhoneActionBar>
     </>
   );
 }

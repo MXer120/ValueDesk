@@ -44,7 +44,7 @@ async function api(o = {}) {
       res.writeHead(o.siteStatus ?? 200, { 'content-type': 'text/html' });
       return res.end('<!doctype html><title>site</title>');
     }
-    if (path === '/api/health') return send(200, { ok: true, network: 'mainnet', chainId: 286623, mainnetWritesAllowed: true, ...(o.loop ? { loop: o.loop } : {}) });
+    if (path === '/api/health') return send(o.healthStatus ?? 200, { ok: true, network: 'mainnet', chainId: 286623, mainnetWritesAllowed: true, ...(o.loop ? { loop: o.loop } : {}) });
     if (path === '/api/copy/v1/health') {
       const e = o.executor ?? { status: 200, body: { ok: true, copies: 3, active: 2, feeds: { sodex: true } } };
       return send(e.status, e.body);
@@ -534,6 +534,57 @@ test('cross-watch: a gated peer gets the origin secret, a public one never does;
     await local.close();
     await peer.close();
     await site.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('cross-watch: a public peer under /api/ (a Vercel function call) is asked every 5 min while it answers, every pass while it does not', async () => {
+  const f = fixture();
+  const local = await api();
+  const peer = await api();
+  const site = await api();
+  const bad = await api({ healthStatus: 500 });
+  const asked = (a, path) => a.seen.filter((s) => s.path === path).length;
+  const probes = join(f.dir, 'state', 'peer-probes.json');
+  try {
+    const cfg = {
+      HEALTH_PEERS_GATED: `api@server1=${peer.url}/api/health`,
+      HEALTH_PEERS_PUBLIC: `site=${site.url}/site,site-api=${site.url}/api/health`,
+    };
+    const first = await run(env(f, local, cfg));
+    assert.equal(first.status, 0, JSON.stringify(first.report));
+    assert.equal(asked(site, '/api/health'), 1);
+    const second = await run(env(f, local, cfg));
+    assert.equal(second.status, 0, JSON.stringify(second.report));
+    assert.equal(asked(site, '/api/health'), 1, 'not asked again within 5 min');
+    assert.equal(second.report.checks['peer:site-api'].ok, true);
+    assert.match(second.report.checks['peer:site-api'].note, /\/api\/health 200 \(asked \d+ s ago: every 5 min while it answers\)$/);
+    assert.equal(asked(site, '/site'), 2, 'the site itself (static, no function) every pass');
+    assert.equal(asked(peer, '/api/health'), 2, 'a gated peer (the origin directly) every pass');
+    // Five minutes on: asked again.
+    const kept = JSON.parse(readFileSync(probes, 'utf8'));
+    kept['site-api'].at -= 300_000;
+    writeFileSync(probes, JSON.stringify(kept));
+    await run(env(f, local, cfg));
+    assert.equal(asked(site, '/api/health'), 2);
+    // A failing one is asked on every pass: two failing passes alert as before, and a recovery shows at once.
+    const failing = { ...cfg, HEALTH_PEERS_PUBLIC: `site=${site.url}/site,site-api=${bad.url}/api/health` };
+    const f1 = await run(env(f, local, failing));
+    const f2 = await run(env(f, local, failing));
+    assert.equal(asked(bad, '/api/health'), 2, 'a new address is asked at once, and a failing one every pass');
+    assert.deepEqual([f1.status, f2.status], [1, 1]);
+    assert.ok(f2.report.failed.includes('peer:site-api'));
+    const back = await run(env(f, local, cfg));
+    assert.equal(asked(site, '/api/health'), 3, 'after a failure: asked at once');
+    assert.equal(back.status, 0);
+    // Every pass, if the owner wants it so.
+    await run(env(f, local, { ...cfg, HEALTH_PUBLIC_API_EVERY_S: '60' }));
+    assert.equal(asked(site, '/api/health'), 4);
+  } finally {
+    await local.close();
+    await peer.close();
+    await site.close();
+    await bad.close();
     rmSync(f.dir, { recursive: true, force: true });
   }
 });

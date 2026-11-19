@@ -25,7 +25,8 @@ import {
   type Window, type YourShare,
 } from '../points';
 import { SODEX_POINTS_SIGNIN_LIVE } from '../sodexProgrammes';
-import { Card, Group, Meter, Row, PeriodSeg, fmtCompactUsd } from './Portfolio';
+/* Not './Portfolio': that would bring the whole Portfolio page (tables, history, share cards) into /points. */
+import { Card, Group, Meter, Row, PeriodSeg, fmtCompactUsd } from './portfolio/parts';
 import { DASH, fmt, fmtUsd } from '../format';
 import { useMask } from '../privacy';
 import { PointsAuthError, signInToPoints } from '../pointsAuth';

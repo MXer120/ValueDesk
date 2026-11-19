@@ -32,8 +32,14 @@ import { ExecutorError, hostedExecutor, signCopy, type ExecutorClient } from './
 
 const log = logger('copy');
 
+/**
+ * This build's own terms (version, text and hash), hashed on first use: keccak256 over the canonical text of ~45 KB
+ * is not work for module load on every page that links the copy code (phone pass, 2026-11-18).
+ */
+let own: CopyTermsServed | null = null;
+const ownTerms = (): CopyTermsServed => (own ??= currentCopyTerms());
 /** keccak256 of THIS build's terms text as shown: any change to the text is a new hash. */
-export const COPY_TERMS_HASH = currentCopyTerms().termsHash;
+export const copyTermsHashOfBuild = (): string => ownTerms().termsHash;
 
 /**
  * The copy terms in force: the version ValueDesk's executor runs (its /info termsVersion), with that version's text
@@ -42,9 +48,9 @@ export const COPY_TERMS_HASH = currentCopyTerms().termsHash;
  * signs a version the executor refuses (owner 2026-11-09: never "reload the page"). This build's own until the
  * executor answers.
  */
-let active: CopyTermsServed = currentCopyTerms();
+let active: CopyTermsServed | null = null;
 const activeListeners = new Set<() => void>();
-export const activeCopyTerms = (): CopyTermsServed => active;
+export const activeCopyTerms = (): CopyTermsServed => (active ??= ownTerms());
 export function onActiveCopyTerms(fn: () => void): () => void {
   activeListeners.add(fn);
   return () => activeListeners.delete(fn);
@@ -57,7 +63,7 @@ export function onActiveCopyTerms(fn: () => void): () => void {
  */
 export async function followExecutorTerms(info: Pick<ExecutorInfo, 'termsVersion' | 'features'> | null, client: ExecutorClient = hostedExecutor): Promise<boolean> {
   const v = info?.termsVersion;
-  if (!v || v === active.termsVersion) return false;
+  if (!v || v === activeCopyTerms().termsVersion) return false;
   let doc = copyTermsDoc(v);
   if (!doc && info.features?.includes('terms-doc')) {
     try {
@@ -99,7 +105,8 @@ export function localTerms(owner: string | null | undefined): LocalTerms | null 
     const raw = localStorage.getItem(key(owner));
     if (!raw) return null;
     const t = JSON.parse(raw) as LocalTerms;
-    return t.termsVersion === active.termsVersion && t.termsHash === active.termsHash ? t : null;
+    const a = activeCopyTerms();
+    return t.termsVersion === a.termsVersion && t.termsHash === a.termsHash ? t : null;
   } catch {
     return null;
   }
@@ -120,7 +127,7 @@ export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: str
   const owner = o.owner.toLowerCase();
   const country = normaliseCountry(o.country);
   if (!country) throw new Error('Choose your country of residence.');
-  const terms = active;
+  const terms = activeCopyTerms();
   const payload: AcceptTermsPayload = {
     termsVersion: terms.termsVersion,
     termsHash: terms.termsHash,
@@ -141,7 +148,7 @@ export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: str
     if (e instanceof ExecutorError && e.code === 'terms-version') {
       const info = await hostedExecutor.info().catch(() => null);
       if (await followExecutorTerms(info)) {
-        throw new TermsChangedError(`ValueDesk's copy terms were updated a moment ago (version ${active.termsVersion}). The new version is shown: read it and sign again to accept it.`);
+        throw new TermsChangedError(`ValueDesk's copy terms were updated a moment ago (version ${activeCopyTerms().termsVersion}). The new version is shown: read it and sign again to accept it.`);
       }
     }
     // A refusal for the region is final: say it. Unreachable is not: the record is sent again later.
@@ -157,7 +164,8 @@ export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: str
  * or on another of our addresses): keep it here, so the setup does not ask for the same signature twice.
  */
 export function adoptRecordedTerms(owner: string, r: TermsRecord | null): LocalTerms | null {
-  if (!r || r.termsVersion !== active.termsVersion || r.termsHash !== active.termsHash) return null;
+  const a = activeCopyTerms();
+  if (!r || r.termsVersion !== a.termsVersion || r.termsHash !== a.termsHash) return null;
   const t: LocalTerms = { termsVersion: r.termsVersion, termsHash: r.termsHash, country: r.country, acceptedAt: r.acceptedAt, recorded: true, request: null };
   save(owner.toLowerCase(), t);
   return t;

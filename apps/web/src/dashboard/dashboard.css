@@ -1033,3 +1033,17 @@
 .dash-edit-wcard.tabside__card { padding: 8px; border-color: rgb(var(--ink) / 0.06); background: rgb(var(--ink) / 0.025); }
 .dash-edit-wcard.tabside__card:hover { background: rgb(var(--ink) / 0.05); transform: none; }
 .tabside__hint { padding-top: 12px; border-top-color: rgb(var(--ink) / 0.07); font-size: 12px; }
+
+/* A part whose code is still coming (components/LazyWait.tsx: a terminal widget, an Explore view): its own box,
+   empty for the first 250 ms, then the app's spinner (.pf-spin, Portfolio.css) in its middle. Fills a flex body
+   and a block one; a page view keeps the height of a screenful, so the footer does not jump up and back. */
+.dash-wait {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 48px;
+}
+.dash-wait--page { min-height: 60vh; }

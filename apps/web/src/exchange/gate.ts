@@ -14,10 +14,23 @@ interface Hit {
   value: unknown;
 }
 
+/** A fresh answer, with the end of its TTL. */
+interface FreshHit extends Hit {
+  until: number;
+}
+
+/**
+ * How often expired fresh answers are dropped. Without it an expired answer stayed in memory until
+ * `maxEntries` newer ones pushed it out - every chart history page (its own endTime URL, 500-1,000
+ * parsed rows) among them.
+ */
+const SWEEP_MS = 10_000;
+
 export class RequestGate {
-  private fresh = new Map<string, Hit>();
+  private fresh = new Map<string, FreshHit>();
   private inflight = new Map<string, Promise<unknown>>();
   private good = new Map<string, Hit>();
+  private sweptAt = 0;
 
   constructor(
     private readonly maxEntries = 1_000,
@@ -44,8 +57,12 @@ export class RequestGate {
     if (running) return running as Promise<T>;
     const p = load()
       .then((value) => {
-        const hit = { at: this.now(), value };
-        if (ttlMs > 0) this.remember(this.fresh, key, hit);
+        const at = this.now();
+        const hit = { at, value };
+        if (ttlMs > 0) {
+          this.sweep(at);
+          this.remember(this.fresh, key, { at, value, until: at + ttlMs });
+        }
         if (keep) this.remember(this.good, key, hit);
         return value;
       })
@@ -69,7 +86,14 @@ export class RequestGate {
     return this.fresh.size;
   }
 
-  private remember(map: Map<string, Hit>, key: string, hit: Hit): void {
+  /** Drop the fresh answers past their TTL (at most once every SWEEP_MS). */
+  private sweep(now: number): void {
+    if (now - this.sweptAt < SWEEP_MS) return;
+    this.sweptAt = now;
+    for (const [k, hit] of this.fresh) if (hit.until <= now) this.fresh.delete(k);
+  }
+
+  private remember<H extends Hit>(map: Map<string, H>, key: string, hit: H): void {
     map.delete(key);
     map.set(key, hit);
     while (map.size > this.maxEntries) {

@@ -81,8 +81,11 @@ function route(path, staticFiles, requestHeaders = {}) {
   return { headers, matchedHeaderRoutes, served: dest, notFound: !dest };
 }
 
+const MODEL = '/models/onnx-community/moonshine-tiny-ONNX';
 const STATIC = new Set(['/index.html', '/favicon.svg', '/favicon.ico', '/robots.txt', '/third-party-licenses.txt','/assets/index-abc.js', '/assets/index-abc.css',
-  '/assets/sw-worker-1.js', '/logos/btc.svg', '/addrbook/a.png', '/scan/index.html', '/scan/legacy.js']);
+  '/assets/sw-worker-1.js', '/logos/btc.svg', '/addrbook/a.png', '/scan/index.html', '/scan/legacy.js',
+  '/i18n/pt.json', '/i18n/zh-CN.json', '/i18n/pt/0f-nAhXkzf.json', '/i18n/zh-TW/p-V4DFGKUuWI.json', '/theme-boot.js', '/fedlive/tap-worklet.js',
+  `${MODEL}/config.json`, `${MODEL}/onnx/encoder_model_quantized.onnx`, `${MODEL}/LICENSE.txt`, '/flags/br.svg', '/onboarding/copy-main-dark.webp']);
 
 const PATHS = [
   '/', '/trade', '/explore', '/scan', '/scan/', '/scan/x', '/scan/index.html', '/scan/legacy.js', '/index.html',
@@ -90,6 +93,10 @@ const PATHS = [
   '/assets/missing.js', '/assets/', '/assets/noext', '/logos/btc.svg', '/logos/', '/logos/x', '/logos/x.html',
   '/addrbook/a.png', '/a.b/c', '/deep/path/route', '/deep/file.txt', '/page.html', '/apix', '/api', '/LOGOS/btc.svg',
   '/Assets/x.js', '/scanner', '/scan.html', '/favicon.ico', '/impressum', '/privacy', '/third-party-licenses.txt',
+  '/i18n/pt.json', '/i18n/zh-CN.json', '/i18n/pt/0f-nAhXkzf.json', '/i18n/zh-TW/p-V4DFGKUuWI.json', '/i18n/pt/short.json',
+  '/i18n/pt/0f-nAhXkzf.json.bak', '/i18n/', '/i18n/pt', '/i18n/x.html', '/theme-boot.js', '/theme-boot.js.map', '/a/theme-boot.js',
+  `${MODEL}/config.json`, `${MODEL}/onnx/encoder_model_quantized.onnx`, `${MODEL}/LICENSE.txt`, '/models/x.html', '/models/',
+  '/flags/br.svg', '/onboarding/copy-main-dark.webp', '/fedlive/tap-worklet.js', '/fedlive/tap-worklet.js.map', '/x.mjs', '/scan/x.png',
 ];
 
 test('every path gets exactly the headers of prod-headers.mjs, from exactly one route', () => {
@@ -98,6 +105,28 @@ test('every path gets exactly the headers of prod-headers.mjs, from exactly one 
     assert.equal(r.matchedHeaderRoutes.length, 1, `${path}: ${r.matchedHeaderRoutes.length} header routes matched (${r.matchedHeaderRoutes.join(' | ')})`);
     assert.deepEqual(r.headers, headersFor(path), path);
   }
+});
+
+test('the cache rule per file: hashed names for good, a whole catalogue and the unhashed files briefly with a stale copy, the theme script untouched', () => {
+  const cc = (path) => route(path, STATIC).headers['Cache-Control'];
+  const IMMUTABLE = 'public, max-age=31536000, immutable';
+  // Content-hashed: Vite's assets, the translation parts (i18n-parts.mjs) and the landing files (route-preload.mjs).
+  for (const p of ['/assets/index-abc.js', '/i18n/pt/0f-nAhXkzf.json', '/i18n/zh-TW/p-V4DFGKUuWI.json', '/i18n/de/-qVd_VN3fD.json']) assert.equal(cc(p), IMMUTABLE, p);
+  // A name that is not exactly a part's shape is never kept for good.
+  for (const p of ['/i18n/pt/short.json', '/i18n/pt/0f-nAhXkzf.json.bak', '/i18n/pt/p-0f-nAhXkzf1.json', '/i18n/PT/0f-nAhXkzf.json']) assert.notEqual(cc(p), IMMUTABLE, p);
+  assert.equal(cc('/i18n/pt.json'), 'public, max-age=600, stale-while-revalidate=86400', 'a whole catalogue: unhashed');
+  assert.equal(cc('/i18n/zh-CN.json'), 'public, max-age=600, stale-while-revalidate=86400');
+  assert.equal(cc(`${MODEL}/onnx/encoder_model_quantized.onnx`), 'public, max-age=86400, stale-while-revalidate=604800', 'the speech model at its pinned revision');
+  assert.equal(cc('/models/x.html'), 'no-cache', 'an html file is always the html rule');
+  assert.equal(cc('/theme-boot.js'), 'public, max-age=3600', 'the theme script keeps its rule (the shell package owns it)');
+  // Unhashed scripts (the Fed live AudioWorklet module) and the legacy /scan/ folder: no stale window, a browser never
+  // runs a script more than an hour old against a newer app.
+  for (const p of ['/fedlive/tap-worklet.js', '/a/theme-boot.js', '/x.mjs', '/scan/legacy.js', '/scan/x.png']) assert.equal(cc(p), 'public, max-age=3600', p);
+  for (const p of ['/favicon.svg', '/robots.txt', '/flags/br.svg', '/onboarding/copy-main-dark.webp', '/theme-boot.js.map', '/fedlive/tap-worklet.js.map']) {
+    assert.equal(cc(p), 'public, max-age=3600, stale-while-revalidate=86400', p);
+  }
+  assert.equal(cc('/index.html'), 'no-cache');
+  assert.equal(cc('/trade'), 'no-cache', 'an app route is the shell');
 });
 
 test('/api/* goes to the function and nowhere else, without the site headers', () => {
@@ -480,7 +509,126 @@ test('the edge cache follows the API: public max-age only, at most 60 s, never a
   assert.equal(e('OPTIONS', 200, 'public, max-age=10'), null);
   assert.equal(e('GET', 200, undefined), null);
   assert.equal(e('GET', 200, 'public, max-age=10', '/api/vs/leaderboard'), 'max-age=10');
+  assert.equal(e('GET', 200, 'public, max-age=10', '/api/health'), 'max-age=10');
   assert.equal(e('GET', 200, 'public, max-age=10', '/api/copy/v1/info'), null, 'the copy executor is never cached at the edge');
+});
+
+test("the edge stale window is the origin's own on every route: the boards and the cohort pages show no older copy than the API allows", () => {
+  const e = proxy.edgeCacheControl;
+  const BOARD = 'public, max-age=10, stale-while-revalidate=20';
+  const COHORT = 'public, max-age=30, stale-while-revalidate=30';
+  // apps/server/src/perf.ts BOARD and COHORT: 30 s and 60 s in all, at the edge as in the browser (the stale-data rule).
+  for (const p of ['/api/vs/leaderboard', '/api/vs/explore', '/api/vs/excluded', '/api/vs/copy/cards', '/api/vs/screener',
+    '/api/vs/wallet-history', '/api/vs/lbrow', '/api/vs/last-trades', '/api/vs/liquidations/positions', '/api/vs/liquidations/wallets']) {
+    assert.equal(e('GET', 200, BOARD, p), 'max-age=10, stale-while-revalidate=20', p);
+  }
+  for (const p of ['/api/vs/cohorts', '/api/vs/cohorts/map', '/api/vs/cohorts/detail', '/api/vs/cohorts/focus', '/api/vs/cohorts/wallets']) {
+    assert.equal(e('GET', 200, COHORT, p), 'max-age=30, stale-while-revalidate=30', p);
+  }
+  assert.equal(e('GET', 200, 'public, max-age=60', '/api/vs/cohorts'), 'max-age=60', 'no stale window the origin did not give');
+  assert.equal(e('GET', 200, 'public, max-age=300, stale-while-revalidate=300', '/api/vs/cohorts'), 'max-age=60, stale-while-revalidate=60', 'the 60 s cap stands');
+  assert.equal(e('GET', 200, 'public, max-age=10', '/api/vs/sodex/oi-excluded'), 'max-age=10', 'no older copy on top: the pages subtract it');
+  assert.equal(e('GET', 200, 'public, max-age=5, stale-while-revalidate=5', '/api/vs/liquidations'), 'max-age=5, stale-while-revalidate=5');
+  // Never where the origin says no.
+  for (const cc of ['public, no-cache', 'no-store', 'private, max-age=30', 'max-age=30']) assert.equal(e('GET', 200, cc, '/api/vs/cohorts'), null, cc);
+  assert.equal(e('GET', 200, COHORT, '/api/copy/v1/cohorts'), null);
+  // A past heatmap cell (its page shows the cell's "As of" time): kept as long as the origin says, 5 min + 5 min.
+  assert.equal(e('GET', 200, 'public, max-age=300, stale-while-revalidate=300', '/api/vs/liquidations/at'), 'max-age=300, stale-while-revalidate=300');
+});
+
+test('Server-Timing: the origin\'s entries first, then the function\'s own - timings only', () => {
+  const st = proxy.serverTiming;
+  assert.equal(st('app;dur=3.2, memo;desc="hit"', { fn: 12.345, connectMs: 0, originMs: 8.04, reused: true, retries: 0, cold: false }),
+    'app;dur=3.2, memo;desc="hit", fn;dur=12.3, oc;dur=0;desc="reused", ot;dur=8');
+  assert.equal(st(undefined, { fn: 40, connectMs: 21.06, originMs: 9, reused: false, retries: 1, cold: true }),
+    'fn;dur=40, oc;dur=21.1, ot;dur=9, retry;desc="1", cold;desc="1"');
+  assert.equal(st(['a;dur=1', 'b;dur=2'], { fn: 1, connectMs: 0, originMs: 0, reused: false, retries: 0, cold: false }), 'a;dur=1, b;dur=2, fn;dur=1, oc;dur=0, ot;dur=0');
+});
+
+test('the function keeps its connections to the origin alive for reads; a POST takes one of its own', async () => {
+  const sockets = new Set();
+  const seen = [];
+  const origin = await listen((req, res) => {
+    sockets.add(req.socket);
+    req.resume();
+    req.on('end', () => {
+      seen.push(req.method);
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=10', 'server-timing': 'app;dur=1.5' });
+      res.end('{"ok":true}');
+    });
+  });
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (port) => {
+      const first = await request(port, '/api/vs/leaderboard');
+      const second = await request(port, '/api/vs/explore');
+      const third = await request(port, '/api/health', { method: 'HEAD' });
+      assert.deepEqual([first.status, second.status, third.status], [200, 200, 200]);
+      assert.equal(sockets.size, 1, 'three reads, one connection');
+      assert.match(first.headers['server-timing'], /^app;dur=1\.5, fn;dur=[\d.]+, oc;dur=[\d.]+, ot;dur=[\d.]+/, 'the origin\'s entry, then the function\'s');
+      assert.match(second.headers['server-timing'], /oc;dur=0;desc="reused"/);
+      assert.equal((second.headers['server-timing'].match(/app;dur/g) ?? []).length, 1, 'the origin\'s entry once, not twice');
+      for (let i = 0; i < 2; i++) assert.equal((await request(port, '/api/copy/v1/x', { method: 'POST', body: '{}' })).status, 200);
+      assert.equal(sockets.size, 3, 'each POST on a connection of its own: it reaches the origin at most once');
+    });
+  } finally {
+    proxy.AGENTS['http:'].destroy();
+    await origin.close();
+  }
+});
+
+test('a read on a kept connection the origin had closed is asked once more on a new one; a POST is never asked twice', async () => {
+  const perSocket = new WeakMap();
+  let hits = 0;
+  const origin = await listen((req, res) => {
+    hits++;
+    const n = perSocket.get(req.socket) ?? 0;
+    perSocket.set(req.socket, n + 1);
+    req.resume();
+    // The second request on any connection: the origin drops the connection without an answer.
+    if (n === 1) { req.socket.destroy(); return; }
+    req.on('end', () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); });
+  });
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (port, errors) => {
+      assert.equal((await request(port, '/api/vs/leaderboard')).status, 200);
+      const again = await request(port, '/api/vs/leaderboard');
+      assert.equal(again.status, 200, 'the closed connection is not the visitor\'s problem');
+      assert.match(again.headers['server-timing'], /retry;desc="1"/);
+      assert.equal(hits, 3, 'the dropped ask and the one on a new connection');
+      assert.deepEqual(errors, [], 'nothing to log');
+    });
+  } finally {
+    proxy.AGENTS['http:'].destroy();
+    await origin.close();
+  }
+});
+
+test('the bots stream through the function (an old tab) is stopped with 204, never forwarded; the rest of /api/copy/ as before', async () => {
+  const seen = [];
+  const origin = await listen((req, res) => { seen.push(req.url); req.resume(); req.on('end', () => { res.writeHead(200); res.end('{}'); }); });
+  try {
+    for (const env of [{ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, { VALUESCAN_ORIGIN_URL: undefined, VALUESCAN_ORIGIN_SECRET: undefined }]) {
+      await withProxy(env, async (port) => {
+        for (const p of ['/api/copy/v1/algos/stream', '/api/copy-vip/v1/algos/stream', '/api/copy/v1/algos/stream?x=1']) {
+          for (const method of ['GET', 'HEAD']) {
+            const r = await request(port, p, { method, headers: { authorization: 'Bearer t', accept: 'text/event-stream' } });
+            assert.equal(r.status, 204, `${method} ${p}`);
+            assert.equal(r.body.length, 0);
+            assert.equal(r.headers['cache-control'], 'no-store');
+          }
+        }
+      });
+    }
+    assert.deepEqual(seen, [], 'the origin never sees them');
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (port) => {
+      assert.equal((await request(port, '/api/copy/v1/algos', { headers: { authorization: 'Bearer t' } })).status, 200);
+      assert.equal((await request(port, '/api/copy/v1/algos/streams')).status, 200, 'exact paths only');
+    });
+    assert.deepEqual(seen, ['/api/copy/v1/algos', '/api/copy/v1/algos/streams']);
+  } finally {
+    proxy.AGENTS['http:'].destroy();
+    await origin.close();
+  }
 });
 
 test('/api/edge/geo is answered by the function itself: the country and region Vercel saw, never cached, also without an origin', async () => {

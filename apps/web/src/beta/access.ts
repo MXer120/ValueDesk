@@ -11,7 +11,7 @@
  * minute and asked again when the tab comes back.
  */
 import { useEffect, useSyncExternalStore } from 'react';
-import { FEEDBACK_URL } from '../feedback/feedback';
+import { FEEDBACK_URL } from '../feedback/url';
 
 const env = (import.meta as { env?: { VITE_CHANNEL?: string } }).env;
 /** beta.valuedesk.so: its door admits listed wallets only. */

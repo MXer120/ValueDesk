@@ -4,6 +4,7 @@
  * and writes the manifest the app resolves them with (src/logoManifest.ts).
  *
  *   node apps/web/tools/fetch-logos.mjs
+ *   node apps/web/tools/heavy-logos.mjs   (then: a coin logo heavier than it is drawn, brought to 128 px)
  *
  * This is a maintenance tool, not a runtime dependency: the app only ever
  * loads the files this writes, from our own origin. Re-run it when SoDEX lists

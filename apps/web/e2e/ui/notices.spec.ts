@@ -1,5 +1,5 @@
 /**
- * The notifications bell (components/Notices.tsx): the unread mark, and the View
+ * The notifications bell (components/Notices.tsx, its panel NoticesPanel.tsx): the unread mark, and the View
  * pop-up's filters - Grade (all / warnings + errors / errors) and About (algos +
  * copies / account / other) - which are kept across a reload and reset together.
  *
@@ -95,10 +95,9 @@ h.test('toasts never lie over the bar: docked in its lane, or (a phone) under it
   // A tap on a page link reaches it (trial: every actionability check, nothing clicked).
   await page.getByRole('link', { name: 'Portfolio', exact: true }).first().click({ trial: true, timeout: 5_000 });
   // An open dialog is above the toasts: on a phone the indexing card lay over the terms' "I confirm" box.
-  if (await page.locator('.side__addr').first().isVisible()) {
-    await page.locator('.side__addr').first().click();
-    await page.getByRole('menuitem', { name: /^Settings/ }).click();
-  } else await page.locator('.settings__btn').first().click();
+  // Settings sit in the wallet's menu: the rail's wallet, or the phone bar's address (it has no gear).
+  await page.locator('.side__addr:visible, .navaddr__btn:visible').first().click();
+  await page.getByRole('menuitem', { name: /^Settings/ }).click();
   await page.getByRole('dialog', { name: 'Settings' }).waitFor({ state: 'visible' });
   const c = (await card.boundingBox())!;
   const top = await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.toasts'), [c.x + c.width / 2, c.y + c.height / 2]);

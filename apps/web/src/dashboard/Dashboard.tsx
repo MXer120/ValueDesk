@@ -30,7 +30,7 @@ import { PanelChrome } from './Panel';
 import { breakpointFor, resolveLayout, samePlacements, toPlacements } from './resolve';
 import {
   activateSlot, addEmptySlot, clearDashboard, ensureEditSlots, loadDashboard, mirrorIntoActiveSlot, remember, rememberEdits, removeSlot,
-  historyLabel, resetSlot, restoreFromHistory, saveDashboard, seedTerminals, setSlotOff, slotName, type LayoutSlot, type ResetMode, type SavedDashboard,
+  hiddenPanelIds, historyLabel, resetSlot, restoreFromHistory, saveDashboard, seedTerminals, setSlotOff, slotName, type LayoutSlot, type ResetMode, type SavedDashboard,
 } from './storage';
 import { ResetDialog } from './ResetDialog';
 import { publishTerminals, registerTerminals, snapshotOf, takeLayoutsAsk } from './terminals';
@@ -88,6 +88,8 @@ export interface DashboardProps<C> {
    *  this file stays domain-agnostic (see the header comment) by not knowing
    *  WHAT that item does, only that something outside it might want one. */
   onNotificationSettings?: () => void;
+  /** Edit mode opened (its palette is where any widget can be dropped): the trade page loads every widget's code then. */
+  onEditing?: () => void;
 }
 
 interface Box { width: number; height: number }
@@ -136,7 +138,7 @@ function useBox(): [RefObject<HTMLDivElement>, Box] {
   return [ref, box];
 }
 
-export function Dashboard<C>({ config, panels, context, className }: DashboardProps<C>) {
+export function Dashboard<C>({ config, panels, context, className, onEditing }: DashboardProps<C>) {
   const [scrollRef, box] = useBox();
   const [saved, setSaved] = useState<SavedDashboard>(() => {
     const base = loadDashboard(config) ?? { v: config.version, layouts: {}, locked: true };
@@ -183,19 +185,11 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
   /* A blank slot is an allow-list: only ids in `shown` are on the canvas,
      including ones the registry would otherwise show by default. */
   const activeBlank = saved.slots?.find((s) => s.id === saved.activeSlot)?.blank === true;
-  const hiddenSet = useMemo(() => {
-    const set = new Set(saved.hidden ?? []);
-    const shown = new Set(saved.shown ?? []);
-    for (const p of panels) {
-      if (activeBlank) {
-        if (shown.has(p.id)) set.delete(p.id);
-        else set.add(p.id);
-      } else if (p.defaultHidden && !shown.has(p.id)) {
-        set.add(p.id);
-      }
-    }
-    return set;
-  }, [saved.hidden, saved.shown, panels, activeBlank]);
+  // storage.ts hiddenPanelIds: the same answer TradeDashboard.tsx reads before the first render (which widgets' code to wait for).
+  const hiddenSet = useMemo(
+    () => hiddenPanelIds({ hidden: saved.hidden, shown: saved.shown, blank: activeBlank }, panels),
+    [saved.hidden, saved.shown, panels, activeBlank],
+  );
   const eligible = panels.filter((p) => !p.when || p.when(context, bp));
   const visible = eligible.filter((p) => !hiddenSet.has(p.id));
   const visibleKey = visible.map((p) => p.id).join('|');
@@ -433,6 +427,7 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
    * Escape leaves. A hold on Preview is momentary; a short press latches.
    */
   const [editing, setEditing] = useState(false);
+  useEffect(() => { if (editing) onEditing?.(); }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
   const [sticky, setSticky] = useState(false);
   const [holding, setHolding] = useState(false);
   const [ghost, setGhost] = useState<{ name: string; x: number; y: number } | null>(null);

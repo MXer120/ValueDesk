@@ -74,9 +74,10 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
 
 // A build without the section: Bots is a "coming soon" name in the nav and no page (router.ts SOON_TABS).
 const comingSoon = async (page: Page) => {
-  await page.locator('.navlinks').first().waitFor();
+  // On a phone the navbar's strip is hidden and the tab bar carries the pages (PhoneTabBar.tsx): it is in the tree either way.
+  await page.locator('.navlinks').first().waitFor({ state: 'attached' });
   // Bots is coming soon only when the nav has no link to it (a beta pill on the link is not that).
-  return (await page.locator('.navlinks a[href="/bots"]').count()) === 0;
+  return (await page.locator('.navlinks a[href="/bots"], .ptabs a[href="/bots"]').count()) === 0;
 };
 const pages = (page: Page) => page.getByRole('navigation', { name: 'Bots pages' });
 const go = async (page: Page, name: 'Overview' | 'New bot' | 'Explore' | 'Savings', heading: string) => {
@@ -88,7 +89,7 @@ const headState = async (page: Page) => (await page.locator('.bots-head .bots-st
 
 h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and New bot read without one', async ({ page }) => {
   if (await comingSoon(page)) {
-    assert.equal(await page.locator('.navlinks a[href="/bots"]').count(), 0, 'no link to a page that is not there');
+    assert.equal(await page.locator('.navlinks a[href="/bots"], .ptabs a[href="/bots"]').count(), 0, 'no link to a page that is not there');
     await shot(page, 'soon');
     return;
   }

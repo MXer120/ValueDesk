@@ -15,29 +15,38 @@ import { Book, MarketStrip, TickerBar, Trades } from '../components/Market';
 import { AccountPanel, History, OpenOrders, Positions } from '../components/Account';
 import { AccountLedger, AllBalances } from '../components/AccountHistory';
 import { Private } from '../privacy';
-import { Leaderboard } from '../components/Leaderboard';
-import { LeaderboardPage } from '../components/leaderboard/LeaderboardPage';
-import { FeeTier } from '../components/FeeTier';
-import { Stats } from '../components/Stats';
-import { LiveFeed } from '../components/livefeed/LiveFeed';
-import { FedLive } from '../components/fedlive/FedLive';
-import { FedWatch } from '../components/macro/FedWatch';
-import { IndicatorWidget } from '../components/macro/IndicatorView';
-import { EtfFlows } from '../components/macro/EtfFlows';
-import { NewsFeed } from '../components/news/NewsFeed';
-import { LiqHeatmap } from '../components/liqmap/LiqHeatmap';
-import { FundingScanner } from '../components/explore/FundingScanner';
-import { Cohorts } from '../components/explore/cohorts/Cohorts';
 import { MarketHeatmap } from '../components/palette/Heatmap';
 import { MARKET_MAP_PATH, cohortAssetPath } from '../components/palette/model';
-import { MyCopiesCard } from '../components/scan/MyCopies';
+/* The widgets no default layout places: each in a chunk of its own (lazyWidgets.tsx says when each loads). */
+import {
+  Cohorts, EtfFlows, FedLive, FedWatch, FeeTier, FundingScanner, IndicatorWidget, LazyWidget, Leaderboard, LeaderboardPage,
+  LiqHeatmap, LiveFeed, MyCopiesCard, NewsFeed, Stats,
+} from './lazyWidgets';
 import { MarketHeat, Watchlist, WhaleTrades } from './terminalWidgets';
 import { newsProps } from './newsProps';
 import type { TradeContext } from './registry';
 import type { BreakpointName } from './types';
 import { lazyChunk } from '../lazyPage';
+import { openPath as goTo } from '../nav';
 
 const AlgoTable = lazyChunk(() => import('../components/algo/AlgoTable'));
+/* The Liq. heatmap widget (~51 KB raw of liqmap code) mounts only when its tab or a layout cell shows it, so it is
+   split out of the trade dashboard's first render. Once the page's load event has passed, it is fetched in idle time
+   (not with Save-Data), so a tap on its tab renders it at once: lazyPage renders synchronously once the code is in.
+   Its chunk is lazyWidgets.tsx's; on a phone that file preloads only widgets already added as tabs, the chart's
+   liquidation tab is always one tap away, so it is fetched here on every screen. */
+if (typeof window !== 'undefined') {
+  const conn = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+  if (conn?.saveData !== true) {
+    const fetchIt = () => {
+      const go = () => { LiqHeatmap.preload().catch(() => {}); };
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(go, { timeout: 3000 });
+      else window.setTimeout(go, 1000);
+    };
+    if (document.readyState === 'complete') fetchIt();
+    else window.addEventListener('load', fetchIt, { once: true });
+  }
+}
 
 export interface WidgetBody {
   content: ReactNode;
@@ -51,10 +60,10 @@ export interface WidgetBody {
 const LEGACY: Record<string, string> = { trades: 'tape' };
 export const widgetIdOf = (id: string): string => LEGACY[id] ?? id;
 
-// A wallet or a page elsewhere in the app: what App.tsx's own links do.
-const scanWallet = (address: string) => { window.location.href = `/scan?find=${encodeURIComponent(address)}`; };
-const copyTrader = (address: string, venue: string) => { window.location.href = `/copy?address=${encodeURIComponent(address)}&venue=${venue}`; };
-const openPath = (path: string) => { window.location.href = path; };
+// A wallet or a page elsewhere in the app: what App.tsx's own links do - in place (nav.ts), not a reload.
+const scanWallet = (address: string) => { goTo(`/scan?find=${encodeURIComponent(address)}`); };
+const copyTrader = (address: string, venue: string) => { goTo(`/copy?address=${encodeURIComponent(address)}&venue=${venue}`); };
+const openPath = (path: string) => { goTo(path); };
 
 const accountCtx = (c: TradeContext) => ({
   engine: c.engine,
@@ -81,6 +90,8 @@ export const widgetBodyShape = (id: string): Omit<WidgetBody, 'content'> => SHAP
 export function widgetBody(id: string, c: TradeContext, o: { instance?: string; bp?: BreakpointName } = {}): WidgetBody | null {
   const { instance } = o;
   const body = (content: ReactNode): WidgetBody => ({ content, ...widgetBodyShape(id) });
+  /** A widget drawn with code of its own (lazyWidgets.tsx): waits in its panel, never the page, until that is in. */
+  const lazy = (content: ReactNode): WidgetBody => body(<LazyWidget>{content}</LazyWidget>);
   const select = (s: string) => (c.onSelectSymbol ? c.onSelectSymbol(s) : c.onOpenSearch(s));
   const ticket = (
     <LiveOrderEntry
@@ -128,29 +139,29 @@ export function widgetBody(id: string, c: TradeContext, o: { instance?: string; 
       return body(
         <Suspense fallback={null}><AlgoTable address={c.address} initialShow={widgetIdOf(id) === 'twaplive' ? 'running' : 'all'} /></Suspense>);
     // Its cards are the portfolio's (pf-card): the `.pf` scope carries their tokens.
-    case 'copy': return body(<div className="pf tw-scope"><MyCopiesCard /></div>);
+    case 'copy': return body(<div className="pf tw-scope"><LazyWidget><MyCopiesCard /></LazyWidget></div>);
     case 'sizecalc': return body(<LiveSizeCalc price={c.price} />);
-    case 'feetier': return body(<FeeTier address={c.address} engine={c.engine} />);
-    case 'venue': return body(<Stats address={c.address} showTitle={false} />);
+    case 'feetier': return lazy(<FeeTier address={c.address} engine={c.engine} />);
+    case 'venue': return lazy(<Stats address={c.address} showTitle={false} />);
 
     // Market-wide.
-    case 'liqmap': return body(<LiqHeatmap symbol={c.symbol} engine={c.engine} instance={instance} address={c.address} />);
-    case 'funding': return body(<FundingScanner enabled mode="compact" onOpenSymbol={select} />);
+    case 'liqmap': return lazy(<LiqHeatmap symbol={c.symbol} engine={c.engine} instance={instance} address={c.address} />);
+    case 'funding': return lazy(<FundingScanner enabled mode="compact" onOpenSymbol={select} />);
     case 'poschg': return body(<WhaleTrades id={instance ? `poschg#${instance}` : 'poschg'} onScan={scanWallet} />);
     case 'heatmap': return body(<MarketHeat onOpenSymbol={select} />);
     case 'cohort':
       return body(
         <MarketHeatmap enabled onAsset={(coin) => openPath(cohortAssetPath(coin))} onOpenMap={() => openPath(MARKET_MAP_PATH)} />);
-    case 'cohorts': return body(<div className="pf ex-cohorts tw-scope"><Cohorts embedded onScan={scanWallet} onOpenSymbol={select} /></div>);
-    case 'leaderboard': return body(<Leaderboard address={c.address} />);
-    case 'toptraders': return body(<LeaderboardPage embedded address={c.address} onScan={scanWallet} onOpenCopy={copyTrader} />);
+    case 'cohorts': return body(<div className="pf ex-cohorts tw-scope"><LazyWidget><Cohorts embedded onScan={scanWallet} onOpenSymbol={select} /></LazyWidget></div>);
+    case 'leaderboard': return lazy(<Leaderboard address={c.address} />);
+    case 'toptraders': return lazy(<LeaderboardPage embedded address={c.address} onScan={scanWallet} onOpenCopy={copyTrader} />);
 
-    case 'news': return body(<NewsFeed {...newsProps(c)} instance={instance} />);
-    case 'livefeed': return body(<LiveFeed instance={instance} />);
-    case 'fedlive': return body(<FedLive />);
-    case 'fedwatch': return body(<FedWatch instance={instance} />);
-    case 'indicator': return body(<IndicatorWidget instance={instance} />);
-    case 'etfflows': return body(<EtfFlows instance={instance} />);
+    case 'news': return lazy(<NewsFeed {...newsProps(c)} instance={instance} />);
+    case 'livefeed': return lazy(<LiveFeed instance={instance} />);
+    case 'fedlive': return lazy(<FedLive />);
+    case 'fedwatch': return lazy(<FedWatch instance={instance} />);
+    case 'indicator': return lazy(<IndicatorWidget instance={instance} />);
+    case 'etfflows': return lazy(<EtfFlows instance={instance} />);
     default: return null;
   }
 }

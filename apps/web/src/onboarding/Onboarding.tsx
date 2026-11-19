@@ -15,7 +15,7 @@ import { VenueLogo } from '../components/VenueLogo';
 import { LB_VENUES } from '../components/leaderboard/lbState';
 import { LS_WATCHLIST, readList, readTraderRefs, traderKey, writeList, type TraderRef } from '../components/palette/model';
 import { DASH, fmtUsd, shortAddr } from '../format';
-import { useAsync } from '../hooks';
+import { useAsync, useMediaQuery } from '../hooks';
 import { setTheme, useTheme, type Theme } from '../theme';
 import { VENUE_LABEL, vsApi, type TraderRow, type Venue } from '../vsApi';
 import { USERNAME_MAX } from '@sign/profiles/claim';
@@ -359,18 +359,36 @@ const FEATURES: Record<FeatureId, { title: string; line: string; alt: { main: st
 
 const picture = (id: string, part: 'main' | 'back' | 'front', theme: Theme): string => `/onboarding/${id}-${part}-${theme}.webp`;
 
-/* Each picture is fetched once, the first time the flow comes near it. */
+/*
+ * THE MAIN PICTURE AT THE WIDTH IT IS DRAWN (phone pass, 2026-11-18). It is 74% of a stage of at most 1440 px, and on
+ * a phone 170% of the stage (onboarding.css): a 1200 px copy (tools/capture-onboarding.mjs) covers a desktop at 1x
+ * and a phone at 2x, the 1680 px file the rest. `sizes` says those widths, so the browser takes the copy only where
+ * it has at least one image pixel per screen pixel - nothing drawn gets softer.
+ */
+const MAIN_SIZES = '(max-width: 760px) calc(170vw - 54px), min(1066px, 74vw)';
+const mainSrcSet = (id: string, theme: Theme): string =>
+  `/onboarding/${id}-main-${theme}-1200.webp 1200w, ${picture(id, 'main', theme)} 1680w`;
+/** The phone layout (onboarding.css @media max-width 760px) hides the back picture: it is neither drawn nor fetched there. */
+const PHONE_STAGE = '(max-width: 760px)';
+const phoneStage = (): boolean => typeof window.matchMedia === 'function' && window.matchMedia(PHONE_STAGE).matches;
+
+/* Each picture is fetched once, the first time the flow comes near it - the main one at the width this screen takes. */
 const preloaded = new Set<string>();
 function preloadAround(step: Step): void {
   const order: FeatureId[] = ['copy', 'heatmap', 'flow'];
   const want = step === 'traders' ? order.slice(0, 1) : step === 'copy' ? order.slice(1, 2) : step === 'heatmap' ? order.slice(2) : [];
   const theme: Theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  const parts = phoneStage() ? (['main', 'front'] as const) : (['main', 'back', 'front'] as const);
   for (const id of want) {
-    for (const part of ['main', 'back', 'front'] as const) {
+    for (const part of parts) {
       const src = picture(id, part, theme);
       if (preloaded.has(src)) continue;
       preloaded.add(src);
       const img = new Image();
+      if (part === 'main') {
+        img.sizes = MAIN_SIZES;
+        img.srcset = mainSrcSet(id, theme);
+      }
       img.src = src;
     }
   }
@@ -379,13 +397,14 @@ function preloadAround(step: Step): void {
 function FeatureStep({ feature, onNext }: { feature: FeatureId; onNext: () => void }) {
   const f = FEATURES[feature];
   const theme = useTheme();
+  const phone = useMediaQuery(PHONE_STAGE);
   return (
     <div className="onb-feature">
       <Head title={f.title} line={f.line} />
       <button type="button" className="onb-go" onClick={onNext}>Continue</button>
       <div className={`onb-stage onb-stage--${feature}`}>
-        <img className="onb-stage__back" src={picture(feature, 'back', theme)} alt={f.alt.back} />
-        <img className="onb-stage__main" src={picture(feature, 'main', theme)} alt={f.alt.main} />
+        {!phone && <img className="onb-stage__back" src={picture(feature, 'back', theme)} alt={f.alt.back} />}
+        <img className="onb-stage__main" src={picture(feature, 'main', theme)} srcSet={mainSrcSet(feature, theme)} sizes={MAIN_SIZES} alt={f.alt.main} />
         <img className="onb-stage__front" src={picture(feature, 'front', theme)} alt={f.alt.front} />
       </div>
     </div>

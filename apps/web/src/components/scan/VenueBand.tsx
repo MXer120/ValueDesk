@@ -16,6 +16,9 @@ import { PanelTabs, type PanelTab } from '../../dashboard/Panel';
 import { DASH, fmtDateTime, fmtPrice, fmtQty, fmtUsd } from '../../format';
 import { Private, usePrivacy } from '../../privacy';
 import { vsApi, type Venue, type VsBalance, type VsFill, type VsFunding, type VsOrder, type VsPosition } from '../../vsApi';
+/* This view reads venues in its first render: their code comes with its page (exchange/venuesLazy.ts). */
+import * as venuesModule from '../../exchange/venues';
+import { bindVenues } from '../../exchange/venuesLazy';
 import { LoadFailed, Updating } from '../LoadFailed';
 import { readShown } from '../readState';
 import { Card } from '../portfolio/parts';
@@ -30,6 +33,7 @@ import { SortTh, sortRows, useTableSort } from '../accountTables/sort';
 import type { HlState } from './HlCards';
 import { useVsRead, type VsRead } from './useVs';
 import { fmtFixed, fmtPlain } from '../../numStyle';
+bindVenues(venuesModule);
 
 const POLL_MS = 30_000;
 

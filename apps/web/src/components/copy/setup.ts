@@ -8,7 +8,7 @@
  */
 import { COPY_FEE_MAX, type CopySettings, type LeaderVenue } from '@copy-engine';
 import { FEE_TIERS } from '../../fees';
-import { DASH, MINUS, fmtUsd } from '../../format';
+import { DASH, fmtUsd } from '../../format';
 import { formatNumber } from '../../intlCache';
 import type { TraderProfile, Venue, VsPosition, Window } from '../../vsApi';
 import type { CopyConfig, CopySizingMode } from './sim/types';
@@ -45,20 +45,8 @@ export const MIN_ORDER_USD = 10;
 /** 0.0004 -> "0.040%". Three places, because fee rates differ in the third. */
 export const fmtRate = (rate: number): string => `${fmtFixed(rate * 100, 3)}%`;
 
-/** Fraction -> signed percent with a true minus sign: 0.1234 -> "+12.34%". */
-export function fmtSignedPct(frac: number | null | undefined, dp = 2): string {
-  if (frac === null || frac === undefined || !Number.isFinite(frac)) return DASH;
-  const v = frac * 100;
-  const en = Math.abs(v).toFixed(dp);
-  if (Number(en) === 0) return `${fmtFixed(0, dp)}%`;
-  return `${v > 0 ? '+' : MINUS}${localize(en)}%`;
-}
-
-/** USD with an explicit + on gains; fmtUsd already signs losses with a minus sign. */
-export function fmtSignedUsd(v: number | null | undefined, dp = 2): string {
-  if (v === null || v === undefined || !Number.isFinite(v)) return DASH;
-  return `${v > 0 ? '+' : ''}${fmtUsd(v, dp)}`;
-}
+/* "+12.34%" and "+$1,240": a leaf module (./fmtSigned), so the trader cards print them without this one. */
+export { fmtSignedPct, fmtSignedUsd } from './fmtSigned';
 
 /** A base-unit size at a precision that suits its magnitude: 2.5, 0.0213, 18,420. */
 export function fmtSize(v: number): string {

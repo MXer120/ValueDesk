@@ -12,7 +12,7 @@ import { Identicon } from '../../Identicon';
 import { COIN_LOGOS } from '../../../logoManifest';
 import type { Contact } from '../contacts';
 import { CATALOG, CHAIN_LOGOS, PLATFORM_LOGOS } from './catalogData';
-import { detectFromName, resolveLook, type CatalogChain, type Look } from './detect';
+import { resolveLook, type CatalogChain, type Look } from './detect';
 
 const BASE = (() => {
   const b = import.meta.env?.BASE_URL;
@@ -27,13 +27,8 @@ export const platformById = (id: string | null | undefined) => (id ? CATALOG.pla
 export const chainById = (id: string | null | undefined) => (id ? CATALOG.chains.find((c) => c.id === id) ?? null : null);
 export const platformLogo = (id: string | null | undefined): string | null => (id ? own(PLATFORM_LOGOS[id]) : null);
 
-/** The address book's logo for a connected wallet, matched on its name ("Rabby Wallet", "MetaMask"). */
-export function walletLogoForName(name: string | null | undefined): string | null {
-  const trimmed = name?.trim();
-  if (!trimmed) return null;
-  const hit = platformById(detectFromName(trimmed, CATALOG, new Set()).platform);
-  return hit?.kind === 'wallet' ? platformLogo(hit.id) : null;
-}
+/** The address book's logo for a connected wallet, matched on its name ("Rabby Wallet", "MetaMask"): ./walletLogo.ts. */
+export { walletLogoForName } from './walletLogo';
 /** SoDEX's own chain icon where SoDEX routes there (the rest of the app uses it too), else ours. */
 export const catalogChainLogo = (c: CatalogChain | null): string | null => (c ? (c.sodexKey && chainLogo(c.sodexKey)) || own(CHAIN_LOGOS[c.id]) : null);
 

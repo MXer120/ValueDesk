@@ -5,11 +5,21 @@
  * leaves the machine. The model (~30 MB, kept in the browser's cache after the
  * first start) and the ONNX runtime are both served from this site's own origin
  * (deploy/vercel/fetch-model.sh puts the model under /models/), never a CDN's.
+ *
+ * ONE RUNTIME BUILD, THE CPU ONE (2026-11-18). The model runs on the CPU (`device: 'wasm'`), so the
+ * WebGPU builds were never used: transformers.js imports ONNX Runtime's WebGPU bundle, which brought
+ * its asyncify build (26.9 MB) into every deployment, and this worker was handed the jsep build (28.4 MB)
+ * on top. vite.config.ts points transformers at the CPU-only bundle (`onnxruntime-web/wasm`), whose
+ * own glue is in this worker; its runtime is `ort-wasm-simd-threaded.wasm` (14.3 MB), the one file below.
+ * The same three test clips gave the same text, word for word, with the jsep and asyncify builds and the
+ * shipped CPU bundle, and it starts no slower: 1,191 ms for the shipped bundle against 1,475 ms with jsep
+ * (asyncify 1,177 ms), one run each in the same loopback harness.
  */
 import { env, pipeline, type AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers';
+import ortWasm from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 
 export type SttIn =
-  | { type: 'load'; model: string; wasm: string; mjs: string }
+  | { type: 'load'; model: string }
   | { type: 'chunk'; id: number; samples: Float32Array };
 export type SttOut =
   | { type: 'progress'; loaded: number; total: number }
@@ -25,7 +35,8 @@ async function load(m: Extract<SttIn, { type: 'load' }>) {
   env.allowLocalModels = true;
   env.localModelPath = '/models/';
   const wasm = env.backends.onnx.wasm as unknown as { wasmPaths: unknown; numThreads: number; proxy: boolean };
-  wasm.wasmPaths = { wasm: m.wasm, mjs: m.mjs };
+  // The runtime from this site (transformers.js would otherwise point ONNX Runtime at a CDN), its glue the bundle's own.
+  wasm.wasmPaths = { wasm: ortWasm };
   wasm.numThreads = 1;
   wasm.proxy = false;
   const files = new Map<string, { loaded: number; total: number }>();

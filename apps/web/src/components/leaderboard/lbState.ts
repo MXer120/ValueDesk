@@ -11,6 +11,7 @@
  * `npx tsx --test` without a DOM.
  */
 import type { BoardWindow, LeaderboardSort, TraderRow, Venue, Window } from '../../vsApi';
+import type { LeaderboardQuery } from '../../vsPaths';
 import { formatNumber } from '../../intlCache';
 import { fmtNum, localize } from '../../numStyle';
 
@@ -92,6 +93,28 @@ export const DEFAULT_VIEW: LbView = {
   page: 1,
   rows: 50,
 };
+
+/** The "more than one trade" filter the page starts with (View > Trades in this window). */
+export const DEFAULT_MIN_TRADES = 2 as const;
+
+/**
+ * The board read for a view: the hundred on the bar's choices (venues, side, net or single, window, the trades filter).
+ * Sort, search and asset group only reorder or narrow that hundred on the page, so they are not in it. The build's
+ * first-read registry (firstReadDefaults.ts) asks the same for the default view.
+ */
+export function lbQuery(view: Pick<LbView, 'venues' | 'side' | 'mode' | 'window'>, minTrades: 0 | 2): LeaderboardQuery {
+  const multi = view.venues.length > 1;
+  return {
+    venues: view.venues.join(','),
+    view: multi ? view.mode : undefined,
+    window: view.window,
+    sort: 'pnl',
+    limit: 100,
+    offset: 0,
+    side: view.side,
+    minTrades: minTrades === 2 ? 2 : undefined,
+  };
+}
 
 /** Upper bound on a search string carried in a URL. Addresses are 42. */
 const MAX_Q = 64;

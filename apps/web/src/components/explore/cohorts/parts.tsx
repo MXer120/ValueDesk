@@ -14,6 +14,8 @@ import { fmtUsdShort } from '../model';
 import { fmtFixed } from '../../../numStyle';
 import { pollEvery } from '../../../exchange/visibility';
 import { revalidating } from '../../../serverFetch';
+import { useHeld } from '../../../live/useHeld';
+import { asOfText } from '../../../asOf';
 
 export const POLL_MS = 60_000;
 
@@ -27,14 +29,30 @@ export interface Read<T> {
   error: string | null;
   loading: boolean;
   retry: () => void;
+  /** `data` is the path's kept answer (serverFetch.ts), made at this time: the page says so until the current one is in. */
+  heldAt?: number;
 }
 
-/** One polled read; an answer for an older key is never shown under a newer one. */
-export function usePolled<T>(key: string | null, fetcher: (signal: AbortSignal) => Promise<T>, pollMs = POLL_MS): Read<T> {
+/** The as-of line under a panel drawn from a kept answer, as the overview says its own (asOf.ts). */
+export function HeldNote({ at }: { at: number | undefined }) {
+  const text = at === undefined ? null : asOfText(at);
+  return text ? <p className="lbp-note coh-asof">{text}</p> : null;
+}
+
+/**
+ * One polled read; an answer for an older key is never shown under a newer one. `keepPath`: the HTTP path `fetcher`
+ * reads, for a page that may show its kept answer (serverFetch.ts KEPT ANSWERS) - as `stale`, until the first read,
+ * which then asks the server for the current one, replaces it.
+ */
+export function usePolled<T>(key: string | null, fetcher: (signal: AbortSignal) => Promise<T>, pollMs = POLL_MS, keepPath: string | null = null): Read<T> {
   const [state, setState] = useState<{ key: string | null; data: T | null; error: string | null }>({ key: null, data: null, error: null });
   const [tick, setTick] = useState(0);
   const f = useRef(fetcher);
   f.current = fetcher;
+  const mine = state.key === key;
+  const held = useHeld<T>(key, keepPath, mine, keepPath !== null);
+  const heldNow = useRef(false);
+  heldNow.current = !!held;
   useEffect(() => {
     if (!key) return;
     let alive = true;
@@ -48,19 +66,22 @@ export function usePolled<T>(key: string | null, fetcher: (signal: AbortSignal) 
         },
       );
     };
-    run();
+    // A kept answer is on screen: the first read asks the server for the current one.
+    if (heldNow.current) revalidating(run);
+    else run();
     // Paused while the tab is hidden; a tick missed then runs the moment it is shown again.
     // A poll asks the server; the first read may be answered by the HTTP cache (serverFetch.ts).
     const stop = pollMs > 0 ? pollEvery(pollMs, () => revalidating(run)) : null;
     return () => { alive = false; ac.abort(); stop?.(); };
   }, [key, tick, pollMs]);
-  const mine = state.key === key;
+  const retry = useCallback(() => setTick((n) => n + 1), []);
+  if (!mine && held) return { data: held.body, stale: true, error: null, loading: true, retry, heldAt: held.at };
   return {
     data: state.data,
     stale: !mine && state.data !== null,
     error: mine ? state.error : null,
     loading: !!key && (!mine || (state.data === null && state.error === null)),
-    retry: useCallback(() => setTick((n) => n + 1), []),
+    retry,
   };
 }
 

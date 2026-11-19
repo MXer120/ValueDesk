@@ -14,7 +14,7 @@
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const web = resolve(here, '..');
@@ -62,12 +62,18 @@ export function readsAsText(s) {
 }
 
 const found = new Map(); // text -> first file
+/** text -> every file it is written in (absolute, forward slashes): tools/i18n-parts.mjs splits the catalogues by them. */
+const where = new Map();
 
 function add(text, file, shown = false) {
   const t = tidy(text);
   // `shown`: on the page for certain (JSX text, a word put into a sentence), so a short lower-case word counts.
   const ok = readsAsText(t) || (shown && t.length >= 2 && t.length < 40 && /\p{L}{2}/u.test(t) && !/[{}=<>\[\]]|^[:.&#]|^(https?:|\/|var\()|^\d|[a-z][A-Z]|[_]|^[a-z]+(-[a-z]+)+$/.test(t));
-  if (ok && !found.has(t)) found.set(t, relative(web, file).replace(/\\/g, '/'));
+  if (!ok) return;
+  if (!found.has(t)) found.set(t, relative(web, file).replace(/\\/g, '/'));
+  const at = where.get(t) ?? new Set();
+  at.add(file.replace(/\\/g, '/'));
+  where.set(t, at);
 }
 
 /** `Hello ${a} and ${b}` -> Hello {0} and {1}; a bare `${a}` has no words of its own. */
@@ -99,27 +105,38 @@ function scan(file) {
   visit(src, false);
 }
 
-for (const root of ROOTS) (statSync(root).isDirectory() ? files(root) : [root]).forEach(scan);
-/* The one line around the legal documents, whose folder is otherwise left out. */
-found.set('This document is available in English only, and the English text is what counts.', 'src/legal/LegalView.tsx');
-/* What the code builds from parts at run time, seen by the audit (e2e/ui/themeAudit.ts --lang), listed by hand. */
-for (const s of JSON.parse(readFileSync(join(web, 'i18n/extra.json'), 'utf8'))) if (!found.has(s)) found.set(s, 'i18n/extra.json');
-
-const list = [...found.keys()].sort((a, b) => a.localeCompare(b, 'en'));
-const path = join(web, 'i18n/en.json');
-const json = `${JSON.stringify(list, null, 0).replace(/","/g, '",\n"')}\n`;
-
-if (process.argv.includes('--check')) {
-  let now = '';
-  try { now = readFileSync(path, 'utf8'); } catch { /* none yet */ }
-  if (now !== json) {
-    console.error('i18n/en.json is out of date: run node tools/i18n-extract.mjs');
-    process.exit(1);
+/**
+ * Every piece of English, sorted, and the files each is written in. Text that no file of the app holds (the line
+ * around the legal documents, i18n/extra.json, the server's feedback areas) has no entry in `where`: a split
+ * catalogue gives it to the part every page loads.
+ */
+export function collectStrings() {
+  if (!found.size) {
+    for (const root of ROOTS) (statSync(root).isDirectory() ? files(root) : [root]).forEach(scan);
+    /* The one line around the legal documents, whose folder is otherwise left out. */
+    found.set('This document is available in English only, and the English text is what counts.', 'src/legal/LegalView.tsx');
+    /* What the code builds from parts at run time, seen by the audit (e2e/ui/themeAudit.ts --lang), listed by hand. */
+    for (const s of JSON.parse(readFileSync(join(web, 'i18n/extra.json'), 'utf8'))) if (!found.has(s)) found.set(s, 'i18n/extra.json');
   }
-} else {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, json);
-  const words = list.reduce((a, s) => a + s.split(/\s+/).length, 0);
-  console.log(`${list.length} strings, ${words} words, ${(json.length / 1024).toFixed(0)} KB -> i18n/en.json`);
-  if (process.argv.includes('--sources')) writeFileSync(join(web, 'i18n/en.sources.json'), JSON.stringify(Object.fromEntries(found), null, 0));
+  return { list: [...found.keys()].sort((a, b) => a.localeCompare(b, 'en')), where };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const { list } = collectStrings();
+  const path = join(web, 'i18n/en.json');
+  const json = `${JSON.stringify(list, null, 0).replace(/","/g, '",\n"')}\n`;
+  if (process.argv.includes('--check')) {
+    let now = '';
+    try { now = readFileSync(path, 'utf8'); } catch { /* none yet */ }
+    if (now !== json) {
+      console.error('i18n/en.json is out of date: run node tools/i18n-extract.mjs');
+      process.exit(1);
+    }
+  } else {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, json);
+    const words = list.reduce((a, s) => a + s.split(/\s+/).length, 0);
+    console.log(`${list.length} strings, ${words} words, ${(json.length / 1024).toFixed(0)} KB -> i18n/en.json`);
+    if (process.argv.includes('--sources')) writeFileSync(join(web, 'i18n/en.sources.json'), JSON.stringify(Object.fromEntries(found), null, 0));
+  }
 }

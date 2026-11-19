@@ -113,7 +113,11 @@ export const market = {
     const params = new URLSearchParams({ interval, limit: String(limit) });
     if (o.startTime !== undefined) params.set('startTime', String(o.startTime));
     if (o.endTime !== undefined) params.set('endTime', String(o.endTime));
-    const { sym, data: klines } = await withMarket(e, symbol, (name) => gwGet<Kline[]>(`${ep(e)}/markets/${name}/klines?${params}`));
+    // Out of the gateway's last-good copies: nothing falls back to an old candle page (the chart
+    // keeps the series it has seen itself, chart/seriesCache.ts), and every history page has its
+    // own endTime URL, so they piled up there - up to 2,000 parsed pages of 500-1,000 rows.
+    const { sym, data: klines } = await withMarket(e, symbol, (name) =>
+      gwGet<Kline[]>(`${ep(e)}/markets/${name}/klines?${params}`, { keepLastGood: false }));
     return { engine: e, symbol: sym.name, interval, klines };
   },
 

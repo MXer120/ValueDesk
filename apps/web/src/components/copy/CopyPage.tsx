@@ -60,13 +60,20 @@ export function CopyPage(props: CopyPageProps) {
     setModal({ open: true, row });
   }, [c]);
 
-  /* Arrived with a trader in the link (Scan's Copy / Counter-trade): their setup, over the grid. */
+  /* Arrived with a trader in the link (Scan's Copy / Counter-trade): their setup, over the grid. And again when an
+     in-place link (nav.ts openPath, which dispatches popstate) or Back brings another trader to this page. */
   const opened = useRef(false);
   useEffect(() => {
-    if (opened.current) return;
-    opened.current = true;
-    const t = setupFromUrl();
-    if (t) copyTrader(t.direction, null, t.address, t.venue);
+    const open = () => {
+      const t = setupFromUrl();
+      if (t) copyTrader(t.direction, null, t.address, t.venue);
+    };
+    if (!opened.current) {
+      opened.current = true;
+      open();
+    }
+    window.addEventListener('popstate', open);
+    return () => window.removeEventListener('popstate', open);
   }, [copyTrader]);
 
   /** A trader opens on Scan: the universal trader page. */

@@ -41,7 +41,7 @@ import { hlInfo } from './hyperliquid/index.js';
 import { backgroundBacklog } from './sodex/data.js';
 import { coolingDown } from './sodex/util.js';
 import { NotAvailable, type CoreVenue, type TraderRow, type Venue, type VenueProvider } from './types.js';
-import { hlAssets } from './screener/assets.js';
+import { hlAssets, hlAssetsAt } from './screener/assets.js';
 import { Enricher, type EnricherOptions } from './screener/enrich.js';
 import {
   isDormant,
@@ -188,19 +188,40 @@ export function wireRow(r: ScreenerRow): ScreenerRow {
  * 60 s provider cache) and a page or two more.
  */
 export const SCREENER_WARM_MS = 2 * 3_600_000;
+/**
+ * Past SCREENER_WARM_MS without a request, a pool is still read once it is this old (2026-11-18): it was left to age past
+ * POOL_STALE_MAX_MS (20 min), and the first search after a quiet night waited for a whole build (6.8 s measured, 20.5 s
+ * once). Under that limit with a build's time to spare, so the first request after any quiet spell is answered at once
+ * from a pool at most this old (today's stale rule) while a fresh one is built behind it. Four builds an hour while idle.
+ */
+export const SCREENER_IDLE_EVERY = 15 * MIN;
 let screenerAskedAt = 0;
+
+/**
+ * Whether a look of keepScreenerWarm reads a pool: always while the screener was asked within SCREENER_WARM_MS (the pool
+ * cache's own TTL then decides whether anything is read), else once the pool is SCREENER_IDLE_EVERY old (or there is none).
+ */
+export function screenerLookDue(now: number, askedAt: number, builtAt: number | null): boolean {
+  if (now - askedAt <= SCREENER_WARM_MS) return true;
+  return builtAt === null || now - builtAt >= SCREENER_IDLE_EVERY;
+}
 
 /**
  * The core venues' pools read before the screener's first visitor and kept read while it is
  * visited (index.ts, after the start): a cold pool is every venue's leaderboard slices, 6.8 s
  * measured on www (2026-11-01). The pool cache's own TTL decides whether a look reads anything.
- * Returns the stop.
+ * The Hyperliquid markets (view=assets) are read at the start as well: after a release the first
+ * Markets page waited for two background-priority Hyperliquid reads. Returns the stop.
  */
 export function keepScreenerWarm(providers: readonly VenueProvider[], firstMs = 30_000): () => void {
   const core = providers.filter((p) => isCore(p.venue));
   const look = (boot: boolean) => {
-    if (!boot && Date.now() - screenerAskedAt > SCREENER_WARM_MS) return;
-    for (const p of core) pools.get(p).catch(() => { /* kept in the cache entry */ });
+    const now = Date.now();
+    for (const p of core) {
+      if (!boot && !screenerLookDue(now, screenerAskedAt, pools.builtAt(p.venue))) continue;
+      pools.get(p).catch(() => { /* kept in the cache entry */ });
+    }
+    if (boot && core.some((p) => p.venue === 'hyperliquid')) hlAssets(hlInfo).catch(() => { /* the first request asks again */ });
   };
   const first = setTimeout(() => look(true), firstMs);
   const every = setInterval(() => look(false), 60_000);
@@ -218,8 +239,11 @@ export async function buildScreener(
 
   if (q.view === 'assets') {
     const hl = providers.some((p) => p.venue === 'hyperliquid');
-    const assets = hl ? await hlAssets(hlInfo) : [];
-    return { assets, rows: [], total: assets.length, updatedAt: Date.now(), venues: hl ? ['hyperliquid'] : [] };
+    // `updatedAt`: when the markets were read (screener/assets.ts), not this request's time - which made every answer new
+    // text, so no 30 s poll was ever a 304 and its compressed body was never reused. No page reads the field.
+    const got = hl ? await hlAssetsAt(hlInfo) : null;
+    const assets = got?.rows ?? [];
+    return { assets, rows: [], total: assets.length, updatedAt: got?.at ?? Date.now(), venues: hl ? ['hyperliquid'] : [] };
   }
 
   const got = await Promise.allSettled(providers.map((p) => pools.get(p)));

@@ -49,6 +49,7 @@ else
 fi
 
 WEB_ENV_FILE="$SETTINGS" bash deploy/release/build-web.sh "$name" --checkout
-# The Fed live widget's speech model, served from the site itself.
-bash deploy/vercel/fetch-model.sh apps/web/dist
+# The Fed live widget's speech model, served from the site itself - from the build cache Vercel
+# restores (package.mjs MODEL_CACHE), fetched from Hugging Face only when it is not there.
+bash deploy/vercel/fetch-model.sh apps/web/dist .cache/valuedesk-model
 node deploy/vercel/package.mjs --dist=apps/web/dist "--origin=https://$VALUESCAN_ORIGIN" --out=. "--channel=$CHANNEL"

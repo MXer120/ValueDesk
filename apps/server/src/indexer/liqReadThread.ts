@@ -7,24 +7,38 @@
  * 16:45 5 s and 17:19 28 s, all in liqHistMeta's statement). A statement cannot be sliced, so it ran on the API's one
  * thread in one piece and the health check timed out behind it.
  *
- * Here those statements run on a worker with its own read-only connection; the API thread only gets the answers (times
- * and lengths, or the snapshots' JSON text) and parses them in its slices. VALUESCAN_LIQ_THREAD=0, and the tests unless
- * they ask for it, read inline as before.
+ * Here those statements run on a worker with its own read-only connection; the API thread only gets the answers: times
+ * and lengths, the snapshots' metas (parsed and scaled here), or a tile's band of rows (summed and cut here, the parsed
+ * rows kept in this thread's LRU - liqTiles.ts tileRowsOf). A run of listed snapshots is one range scan (readSnaps).
+ * VALUESCAN_LIQ_THREAD=0, and the tests unless they ask for it, read inline as before.
  */
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import type { CohortBookRow, IndexStore, WalletFillRow } from './store.js';
 import { heldSpan } from './heldSpan.js';
 import type { Venue } from '../valuedesk/types.js';
+import type { SnapRow } from '../valuedesk/liquidations/levels.js';
 
-/** A snapshot's meta without its time and length (liqTiles.ts metaOfData). */
-export type MetaWire = { p: number; st: number; sc: Float64Array };
+/**
+ * A snapshot's meta without its time and length (liqTiles.ts metaOfData): its price, step, which venues hold rows in it
+ * (`vm`, a bit per types.ts VENUES), and the scales of each venue set asked, in the order asked.
+ */
+export type MetaWire = { p: number; st: number; vm: number; sc: Float64Array[] };
+/** One snapshot of a tile, cut where it was read (liqTiles.ts tileRowsOf): price, step and the rows in the band. */
+export type TileRowsWire = { p: number; st: number; b: SnapRow[] };
+/** What a tile asks of each snapshot: the rows of `venues` in band `band` of width `span`, `slim`: [bucket, long, short] only. */
+export type TileRowsAsk = { op: 'tileRows'; coin: string; venues: Venue[]; ts: number[]; ns: number[]; span: number; band: number; slim: boolean; range: boolean };
 
 export type LiqRead =
   | { op: 'list'; coin: string; from: number; to: number }
   | { op: 'coins' }
   | { op: 'snaps'; coin: string; ts: number[] }
-  /** Only the metas, parsed where read: the snapshots' JSON never reaches the asking thread. */
-  | { op: 'metas'; coin: string; venues: Venue[]; ts: number[] }
+  /**
+   * Only the metas, parsed where read: the snapshots' JSON never reaches the asking thread. Each snapshot parsed once
+   * for every venue set in `sets`. `range`: the times are a run of the listing, read in one range scan.
+   */
+  | { op: 'metas'; coin: string; sets: Venue[][]; ts: number[]; range?: boolean }
+  /** A tile's rows, cut here (2026-11-17: a 4-day tile moved ~31 MB of JSON text to the API thread and parsed it there). */
+  | TileRowsAsk
   // The copy page's fills (walletFills.ts, 2026-11-08: a busy wallet's rows not in the page cache held the API thread
   // 4-11 s, about 200 stalls an hour with the copy warmer on). They run on their own thread ('fills' lane), not behind
   // the heatmap's reads.
@@ -43,6 +57,7 @@ export type LiqRead =
 type Answer<R extends LiqRead> = R extends { op: 'list' } ? Array<{ t: number; n: number }>
   : R extends { op: 'coins' } ? string[]
   : R extends { op: 'metas' } ? Array<MetaWire | null>
+  : R extends { op: 'tileRows' } ? Array<TileRowsWire | null>
   : R extends { op: 'fillRows' } ? WalletFillRow[]
   : R extends { op: 'fillsNet' } ? Array<{ symbol: string; net: number }>
   : R extends { op: 'heldSpan' } ? { lo: number; hi: number } | null
@@ -51,9 +66,27 @@ type Answer<R extends LiqRead> = R extends { op: 'list' } ? Array<{ t: number; n
   : R extends { op: 'activeAccounts' } ? Array<{ acct: string; trades: number; volume: number }>
   : Array<string | null>;
 
-/** liqTiles.ts registers how a meta is worked out (no import cycle from here). */
-let metaOf: ((data: string, venues: readonly Venue[]) => MetaWire | null) | null = null;
-export function setMetaOf(f: (data: string, venues: readonly Venue[]) => MetaWire | null): void { metaOf = f; }
+/** Snapshots' data by time, read on whichever thread runs the read (null: gone). */
+export type SnapReader = (ts: readonly number[], range: boolean) => Array<string | null>;
+/** liqTiles.ts registers how a meta is worked out and how a tile is cut (no import cycle from here). */
+let metaOf: ((data: string, sets: ReadonlyArray<readonly Venue[]>) => MetaWire | null) | null = null;
+let tileRowsOf: ((r: TileRowsAsk, read: SnapReader) => Array<TileRowsWire | null>) | null = null;
+export function setMetaOf(f: (data: string, sets: ReadonlyArray<readonly Venue[]>) => MetaWire | null): void { metaOf = f; }
+export function setTileRowsOf(f: (r: TileRowsAsk, read: SnapReader) => Array<TileRowsWire | null>): void { tileRowsOf = f; }
+
+/**
+ * A coin's snapshots at `ts`: with `range` (the times are a run of the listing) one range scan from the first to the
+ * last, the rows between not asked dropped; else one point lookup each.
+ */
+export function readSnaps(s: IndexStore, coin: string, ts: readonly number[], range: boolean): Array<string | null> {
+  if (!range || ts.length < 2) return ts.map((t) => s.liqHistAt(coin, t));
+  let lo = Number.POSITIVE_INFINITY;
+  let hi = Number.NEGATIVE_INFINITY;
+  for (const t of ts) { if (t < lo) lo = t; if (t > hi) hi = t; }
+  const by = new Map<number, string>();
+  for (const r of s.liqHistRange(coin, lo, hi)) by.set(r.t, r.data);
+  return ts.map((t) => by.get(t) ?? null);
+}
 
 /** One read longer than this: refused, and the thread started again (a statement cannot be stopped any other way). */
 export const READ_MS = 60_000;
@@ -79,7 +112,11 @@ export function runRead(s: IndexStore, r: LiqRead): unknown {
     case 'metas': {
       if (!metaOf) throw new Error('liqTiles.ts is not loaded');
       const f = metaOf;
-      return r.ts.map((t) => { const d = s.liqHistAt(r.coin, t); return d === null ? null : f(d, r.venues); });
+      return readSnaps(s, r.coin, r.ts, r.range === true).map((d) => (d === null ? null : f(d, r.sets)));
+    }
+    case 'tileRows': {
+      if (!tileRowsOf) throw new Error('liqTiles.ts is not loaded');
+      return tileRowsOf(r, (ts, range) => readSnaps(s, r.coin, ts, range));
     }
     // Plain objects: node:sqlite rows have a null prototype, which posts fine but is spread to be safe.
     case 'fillRows': return s.walletFillRows(r.venue, r.address, r.fromT, r.toT, r.limit, r.beforeId).map((x) => ({ ...x }));
@@ -100,7 +137,7 @@ if (!isMainThread && (workerData as { liqReadThread?: boolean } | null)?.liqRead
   let tiles: Promise<unknown> | null = null;
   parentPort!.on('message', async (m: { id: number; read: LiqRead }) => {
     try {
-      if (m.read.op === 'metas' && !metaOf) await (tiles ??= import('./liqTiles.js'));
+      if ((m.read.op === 'metas' && !metaOf) || (m.read.op === 'tileRows' && !tileRowsOf)) await (tiles ??= import('./liqTiles.js'));
       const s = reader();
       parentPort!.postMessage({ id: m.id, rows: s ? runRead(s, m.read) : null });
     } catch (e) {

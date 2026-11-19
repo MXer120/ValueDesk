@@ -10,14 +10,15 @@
  *
  * Every button carries its name as a tooltip and an accessible name.
  */
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import { Suspense, useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import { Guarded } from './ErrorBoundary';
 import { BrandMark } from './BrandMark';
 import { SettingsMenu, useSettingsBadge } from './SettingsMenu';
-import { AddressMenu } from './NavBar';
 import { ConnectedWalletLogo } from './funds/ui';
 import { usePresence } from './motion';
 import { openConnectDialog } from './account/connect';
-import { prefetchAccountTotals } from './account/useAccountTotals';
+/* The address menu and its figures load once there is an address (account/addressMenuLazy.ts). */
+import { AddressMenu, warmAddressMenu, warmAddressMenuAfterLoad } from './account/addressMenuLazy';
 import { WALLET_EVENTS, requestDeposit, requestTransfer, requestWithdrawFrom, useAccountPending } from './account/actions';
 import { useAddressMask } from '../privacy';
 import { warmWalletModal } from '../walletconnect';
@@ -140,8 +141,8 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
 
 /**
  * The wallet, at the foot of the rail: Connect in the app's green while there
- * is none; with one, its logo, which opens the address menu (NavBar.tsx's
- * AddressMenu) beside the rail.
+ * is none; with one, its logo, which opens the address menu
+ * (account/AddressMenu.tsx) beside the rail.
  */
 function SideWallet({ address, onPortfolio }: { address: string | null; onPortfolio: () => void }) {
   const [open, setOpen] = useState(false);
@@ -149,9 +150,7 @@ function SideWallet({ address, onPortfolio }: { address: string | null; onPortfo
   const pending = useAccountPending();
   const mask = useAddressMask();
   const hasAddress = !!address;
-  useEffect(() => {
-    if (address) prefetchAccountTotals(address);
-  }, [address]);
+  useEffect(() => (address ? warmAddressMenuAfterLoad(address) : undefined), [address]);
   // `wallet:menu` (actions.ts goToWallet) opens this menu, or Connect with no address.
   useEffect(() => {
     const onMenu = () => {
@@ -208,13 +207,20 @@ function SideWallet({ address, onPortfolio }: { address: string | null; onPortfo
         aria-label={`Wallet ${mask(address)}`}
         title={mask(address)}
         onClick={() => setOpen((v) => !v)}
-        onPointerEnter={() => prefetchAccountTotals(address)}
+        onPointerEnter={() => warmAddressMenu(address)}
+        onPointerDown={() => warmAddressMenu(address)}
       >
         <ConnectedWalletLogo size={22} />
         {/* Settings live in this menu now, so the wallet carries their "your profile is waiting". */}
         {badge.profile && <span className="settings__dot settings__dot--go" aria-hidden="true" />}
       </button>
-      {pres.mounted && <AddressMenu address={address} onClose={() => setOpen(false)} closing={pres.closing} onExited={pres.done} onPortfolio={onPortfolio} />}
+      {pres.mounted && (
+        <Guarded name="Address menu" bare>
+        <Suspense fallback={null}>
+          <AddressMenu address={address} onClose={() => setOpen(false)} closing={pres.closing} onExited={pres.done} onPortfolio={onPortfolio} />
+        </Suspense>
+        </Guarded>
+      )}
     </div>
   );
 }

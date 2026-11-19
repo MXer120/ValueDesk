@@ -125,6 +125,7 @@ export const APP_COVERAGE: Readonly<Record<string, Readonly<Record<string, Cover
     termsMessage: PURE(['builder-terms-signed'], 'signed bytes'),
     termsKeyId: PURE(['builder-terms-signed'], 'key id'),
     termsPossible: PURE(['builder-terms-signed'], 'rule'),
+    termsRefreshDelay: PURE(['builder-fee-lowered'], 'when held terms are asked for again (unit-tested in terms.test.ts)'),
     subscribeTerms: no('UI subscription'),
     termsRevision: no('UI subscription'),
     termsView: no('the fee lines of the order ticket: UI only'),

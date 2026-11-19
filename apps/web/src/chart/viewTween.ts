@@ -38,6 +38,7 @@
 import type { Chart as KChart, Coordinate } from 'klinecharts';
 import { CANDLE_PANE_ID, DEFAULT_BAR_SPACE, DEFAULT_OFFSET_RIGHT } from './theme';
 import { logger } from '../log';
+import { DUR_VIEW_MS, cubicBezier, easeView } from '../ease';
 
 const log = logger('chart');
 
@@ -56,7 +57,7 @@ export interface View {
 
 /** One move, start to rest: long enough to read as one deliberate motion
  *  across a large jump, short enough not to feel like a wait. */
-export const TWEEN_MS = 420;
+export const TWEEN_MS = DUR_VIEW_MS;
 
 /** klinecharts' default `layout.barSpaceLimit`; setBarSpace ignores values
  *  outside it, so targets are clamped here instead of silently stalling. */
@@ -69,53 +70,14 @@ export const easeInOutCubic = (t: number): number => {
   return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 };
 
-/**
- * A CSS cubic-bezier timing function: the same curve a transition with
- * `cubic-bezier(x1, y1, x2, y2)` follows. Newton steps with a bisection
- * fallback; exact 0 and 1 at the ends.
- */
-export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
-  const cx = 3 * x1;
-  const bx = 3 * (x2 - x1) - cx;
-  const ax = 1 - cx - bx;
-  const cy = 3 * y1;
-  const by = 3 * (y2 - y1) - cy;
-  const ay = 1 - cy - by;
-  const X = (s: number) => ((ax * s + bx) * s + cx) * s;
-  const Y = (s: number) => ((ay * s + by) * s + cy) * s;
-  const dX = (s: number) => (3 * ax * s + 2 * bx) * s + cx;
-  return (t: number) => {
-    if (t <= 0) return 0;
-    if (t >= 1) return 1;
-    let s = t;
-    for (let i = 0; i < 8; i++) {
-      const err = X(s) - t;
-      if (Math.abs(err) < 1e-9) return Y(s);
-      const d = dX(s);
-      if (Math.abs(d) < 1e-9) break;
-      s = Math.min(1, Math.max(0, s - err / d));
-    }
-    let lo = 0;
-    let hi = 1;
-    s = t;
-    for (let i = 0; i < 50; i++) {
-      const x = X(s);
-      if (Math.abs(x - t) < 1e-9) break;
-      if (x < t) lo = s;
-      else hi = s;
-      s = (lo + hi) / 2;
-    }
-    return Y(s);
-  };
-}
-
-/**
- * The move's easing: CSS `ease`, cubic-bezier(0.25, 0.1, 0.25, 1). It leaves
- * at once (the first frame covers ~60% of an even frame's distance, where the
- * ease-in-out this replaces covered 1% and read as a pause after the click),
+/*
+ * The curve itself lives in ../ease.ts (no imports there, so the app's entry shares it without the chart): the
+ * UI's sheets and page fade move on the same `--ease-view` (styles.css), one motion language with the chart.
+ * easeView is CSS `ease`, cubic-bezier(0.25, 0.1, 0.25, 1): it leaves at once (the first frame covers ~60% of
+ * an even frame's distance, where the ease-in-out this replaces covered 1% and read as a pause after the click),
  * peaks early, and lands with zero velocity - no jolt at either end.
  */
-export const easeView = cubicBezier(0.25, 0.1, 0.25, 1);
+export { cubicBezier, easeView };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 

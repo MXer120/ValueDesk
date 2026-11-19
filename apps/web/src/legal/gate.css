@@ -194,6 +194,41 @@
 }
 .lg-cta--secondary:hover:not(:disabled) { background: var(--bg-control); }
 .lg-extras { margin: var(--sp-1) 0 0; }
+/* The answer (TermsForm): what "Accept all" adds, the buttons and the wallet's line, spaced as the sheet's body is. */
+.lg-act { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+/* --- the terms sheet on a phone ------------------------------------------------
+   A bottom sheet, as More's (PhoneTabBar.css) and Connect's are: full width, the top
+   corners rounded, sliding up, the home indicator's inset kept clear. Its answer stays
+   at the sheet's foot while the statements scroll above it, in the thumb's reach: the
+   words on what "Accept all" adds, the two equal buttons and the wallet's line move
+   together, exactly as worded, so no button is ever shown without its explanation.
+   The 22px side inset is the dialog body's own (appearance.css). */
+@media (max-width: 760px) {
+  .modal-scrim:has(> .modal.lg-sheet) { align-items: flex-end; padding: 0; }
+  .modal.lg-sheet {
+    max-width: none;
+    max-height: calc(100vh - var(--sp-6));
+    max-height: calc(100dvh - var(--sp-6) - env(safe-area-inset-top, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-width: 1px 0 0;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    animation-name: ptabs-sheet-in;
+  }
+  .lg-sheet .lg-act {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin: 0 -22px;
+    padding: var(--sp-3) 22px;
+    border-top: 1px solid rgb(var(--ink) / 0.06);
+    /* The sheet's own glass, frosting what scrolls under it: with nothing under it, it reads as the sheet. */
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    backdrop-filter: blur(18px) saturate(140%);
+    background: var(--glass-pop-bg, var(--bg-panel));
+  }
+  .lg-sheet .lg-act > .lg-extras { margin-top: 0; }
+}
 .lg-card__title {
   display: flex;
   align-items: center;
@@ -412,6 +447,10 @@ html .shell {
 }
 .lg-ask__x:hover { background: rgb(var(--ink) / 0.08); color: var(--text); }
 .lg-ask .lg-cta { min-height: 38px; font-size: var(--fs-xs); }
+/* Over the phone's tab bar, never on it: its height carries the home indicator's inset (PhoneTabBar.css --ptabs-h). */
+@media (max-width: 760px) {
+  .lg-ask { bottom: calc(var(--ptabs-h, 0px) + var(--sp-3)); }
+}
 @media (max-width: 600px) {
-  .lg-ask { left: var(--sp-3); right: var(--sp-3); width: auto; bottom: calc(var(--sp-3) + 56px); }
+  .lg-ask { left: var(--sp-3); right: var(--sp-3); width: auto; }
 }

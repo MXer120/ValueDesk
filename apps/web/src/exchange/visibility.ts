@@ -69,6 +69,32 @@ export function pollEvery(ms: number, fn: () => void): () => void {
 }
 
 /**
+ * `pollEvery(ms, fn)`, and also `fn` at once when the visitor comes back - the tab shown again or the window focused
+ * (another browser window, the wallet's app on a phone) - at most once per `minGapMs`. For a list another device may
+ * have changed meanwhile, polled slowly (a hedge invite: the second wallet switches over from the first one's tab or
+ * app, and should find it without waiting a whole interval). Returns a stop function.
+ */
+export function pollWhileShown(ms: number, fn: () => void, minGapMs = 5_000): () => void {
+  let last = Date.now();
+  const run = () => {
+    last = Date.now();
+    fn();
+  };
+  const stopPoll = pollEvery(ms, run);
+  const back = () => {
+    if (!isHidden() && Date.now() - last >= minGapMs) run();
+  };
+  const offShown = onShown(back);
+  const win = typeof window === 'undefined' || typeof window.addEventListener !== 'function' ? null : window;
+  win?.addEventListener('focus', back);
+  return () => {
+    stopPoll();
+    offShown();
+    win?.removeEventListener('focus', back);
+  };
+}
+
+/**
  * A one-shot delay that does not fire while the tab is hidden: it fires when
  * the tab is shown again instead (at once if the delay has already passed).
  */

@@ -118,13 +118,23 @@ export async function newContext(cdp) {
 /**
  * One page, attached with a flat session - in a fresh browser context (empty cache
  * and storage) unless `context` names one to share (a return visit).
+ *
+ * `languages`: what the page's navigator.languages says (default English). The app opens
+ * in the browser's own language for a visitor who never chose one (src/i18n/browserLang.ts),
+ * so without this a page here would follow this machine's locale; Intl's formatting still
+ * does. A tool that wants a language stores it ('vs.lang'), which wins; null leaves the
+ * browser's own.
  */
-export async function newPage(cdp, { width = 1920, height = 1080, dpr = 1, context } = {}) {
+export async function newPage(cdp, { width = 1920, height = 1080, dpr = 1, context, languages = ['en-US'] } = {}) {
   const browserContextId = context ?? (await cdp.send('Target.createBrowserContext', { disposeOnDetach: true })).browserContextId;
   const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank', browserContextId, width, height });
   const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
   const send = (m, p) => cdp.send(m, p, sessionId);
   await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: dpr, mobile: false });
+  if (languages?.length) {
+    const l = JSON.stringify(languages);
+    await send('Page.addScriptToEvaluateOnNewDocument', { source: `try{Object.defineProperty(Navigator.prototype,'languages',{configurable:true,get:function(){return ${l}}});Object.defineProperty(Navigator.prototype,'language',{configurable:true,get:function(){return ${JSON.stringify(languages[0])}}})}catch(e){}` });
+  }
   return {
     sessionId,
     targetId,

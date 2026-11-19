@@ -1028,8 +1028,13 @@ html[data-theme='light'] .bots-vip__perks svg { color: var(--vip-3); }
 .bots-flog { display: flex; flex-direction: column; gap: 10px; user-select: none; -webkit-user-select: none; }
 .bots-flog__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .bots-flog__live { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; color: var(--muted); }
-.bots-flog__live i { width: 7px; height: 7px; border-radius: 50%; background: var(--pos); box-shadow: 0 0 0 0 color-mix(in srgb, var(--pos) 60%, transparent); animation: flogLive 2s ease-out infinite; }
-@keyframes flogLive { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pos) 55%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+/* The ring is a disc of the dot's colour scaled 1 -> 3 (3.5 -> 10.5 px, the 7 px spread it was) while it fades: on the
+   compositor, where the box-shadow it replaces repainted every frame for as long as the log was open. Over the dot it
+   is the same colour on itself, so at rest (data-still, reduced motion) it is simply the lit dot. */
+.bots-flog__live i { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--pos); }
+.bots-flog__live i::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: color-mix(in srgb, var(--pos) 55%, transparent); animation: flogLive 2s ease-out infinite; }
+@keyframes flogLive { from { transform: scale(1); opacity: 1; } to { transform: scale(3); opacity: 0; } }
+:root[data-still] .bots-flog__live i::after { animation: none; }
 .bots-flog__list { max-height: 520px; overflow-y: auto; margin: 0; padding: 0 4px 0 0; list-style: none; display: flex; flex-direction: column; gap: 2px; overscroll-behavior: contain; }
 .bots-flog__row { border-radius: 8px; transition: background-color 150ms var(--tf-ease); }
 .bots-flog__row:hover, .bots-flog__row.is-open { background: rgb(var(--ink) / 0.04); }
@@ -1823,3 +1828,44 @@ html[data-theme='light'] .sv-ladder__rows li.is-vip .sv-ladder__fee { background
 @media (max-width: 520px) { .bots-engine { grid-template-columns: 1fr; } .bots-engine__opt { min-height: 50px; } }
 /* New bot > Markets: the Futures / Spot switch beside Compare all. */
 .bots-mhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+/* --- phones: the setup's buttons in a bar above the tab bar (PhoneActionBar.tsx) ---------------------------------
+   The receipt keeps its figures; its button row is the bar's on a phone. The bar is the tab bar's ground (blur, tint,
+   a hairline on top), its buttons full height for a thumb. */
+.bots-actbar { display: none; }
+/* The stepper on a phone: five titles in 343px ran into each other ("Markets3 Preset"). The current step keeps its
+   title, the others their number or check; the bar under the page says which step it is. */
+@media (max-width: 640px) {
+  .bots-wsteps li:not(.is-on) .bots-wsteps__t b { font-size: 0; gap: 0; }
+  .bots-wsteps li:not(.is-on) .bots-wsteps__n { font-size: 11px; }
+  .bots-wsteps ol { grid-template-columns: repeat(5, auto); justify-content: space-between; }
+  .bots-wsteps li.is-on { min-width: 0; }
+}
+/* The section's pages at the top of the page on a phone (BotsPage.tsx), in the rail bar's own switch, across the width. */
+.bots-phoneseg { display: flex; }
+.bots-phoneseg .nav-seg { flex: 1 1 auto; }
+.bots-phoneseg .nav-seg > button { flex: 1 1 0; min-width: 0; padding: 0 8px; }
+@media (max-width: 760px) {
+  .bots-sidecard .bots-sidepanel__act { display: none; }
+  .bots-newgrid { padding-bottom: 76px; }
+  .bots-actbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--ptabs-h, 0px);
+    z-index: 28;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px calc(12px + env(safe-area-inset-right, 0px)) 10px calc(12px + env(safe-area-inset-left, 0px));
+    border-top: 1px solid var(--panel-line);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    backdrop-filter: blur(18px) saturate(140%);
+    background: color-mix(in srgb, var(--bg) 86%, transparent);
+  }
+  .bots-actbar__row { display: flex; align-items: center; gap: 10px; }
+  .bots-actbar__step { flex: none; color: var(--tf-muted, var(--muted)); font-size: 12px; line-height: 16px; }
+  .bots-actbar__act { display: flex; flex: 1 1 auto; justify-content: flex-end; gap: 8px; min-width: 0; }
+  .bots-actbar__act > button { min-height: 44px; }
+  .bots-actbar__act > .bots-stepper__next { flex: 1 1 auto; max-width: 240px; justify-content: center; }
+  .bots-actbar__note { color: var(--tf-muted, var(--muted)); font-size: 12px; line-height: 16px; }
+}

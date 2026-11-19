@@ -45,9 +45,28 @@
  * so every trader row leaves its route with `label: null`, and no client reads
  * it. That member is dropped here, on the way out and before the ETag, rather
  * than in each of the dozen places a row is built: the routes keep answering
- * their own shape, and a row that DOES carry a name is sent unchanged.
+ * their own shape, and a row that DOES carry a name is sent unchanged. Routes
+ * that only borrow the ETag and the compressed cache (`trim: false`) are sent
+ * exactly as built.
+ *
+ * PREPARED BODIES. A route that hands out an answer it keeps (the cohort answers,
+ * indexer/cohortThread.ts) sends it with sendPrepared: the body already trimmed
+ * and its ETag already worked out, once per kept answer instead of per request.
+ *
+ * SERVER-TIMING on every answer (2026-11-18, the phone pass): where a request's
+ * time went, so a slow first answer on a phone can be split into its parts with
+ * curl -D or PerformanceResourceTiming.serverTiming. Durations in ms, no data:
+ *   pre    arrival to the handler (the gates, the body)
+ *   app    the handler
+ *   json   its return value serialized
+ *   thr    waiting for the cohort thread (the route says so: indexer/cohortThread.ts)
+ *   memo   desc=hit|joined|miss|off - an answer kept here, another request's build, built for this one
+ *   etag   the label trim and the ETag
+ *   cmp    compression (0 when the compressed body was kept)
+ *   tot    arrival to the body leaving this hook
  */
 import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 import { brotliCompress as brotliCb, constants as Z, gzip as gzipCb } from 'node:zlib';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -67,6 +86,8 @@ export interface CachePolicy {
    * minute (indexer/liqTiles.ts).
    */
   own?: boolean;
+  /** False: sent exactly as built - no `label: null` trim (that is for trader rows). Default true. */
+  trim?: boolean;
 }
 
 const BOARD: CachePolicy = { cacheControl: 'public, max-age=10, stale-while-revalidate=20' };
@@ -138,6 +159,21 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   // edge makes a crowd one call per ten seconds per region. No stale copy: an API that stops answering still shows within
   // the web's HEALTH_DOWN_MS (45 s).
   '/api/health': { cacheControl: 'public, max-age=10' },
+  // Routes that set their own public Cache-Control (2026-11-18): they had no ETag, so a poll that found nothing new took
+  // the whole body again, and each answer was compressed again per request. Their Cache-Control stands (`own`), their
+  // bodies are sent as built (`trim: false`), a failure is never cached. Not /api/vs/calendar/results: its body carries
+  // the request's own time (`now`), so it is new every request and would only push others out of the compressed cache.
+  '/api/vs/bots/markets': { cacheControl: 'public, max-age=60, stale-while-revalidate=300', own: true, trim: false },
+  '/api/vs/bots/regime': { cacheControl: 'public, max-age=30, stale-while-revalidate=30', own: true, trim: false },
+  '/api/vs/sodex/mm-daily': { cacheControl: 'public, max-age=600', own: true, trim: false },
+  '/api/vs/sodex/lottery/meta': { cacheControl: 'public, max-age=60', own: true, trim: false },
+  '/api/vs/sodex/lottery/feed': { cacheControl: 'public, max-age=10', own: true, trim: false },
+  '/api/vs/sodex/wealth/maintenance': { cacheControl: 'public, max-age=30', own: true, trim: false },
+  '/api/vs/fed/live': { cacheControl: 'public, max-age=0, s-maxage=10', own: true, trim: false },
+  '/api/vs/fedwatch': { cacheControl: 'public, max-age=0, s-maxage=30', own: true, trim: false },
+  '/api/vs/fedwatch/history': { cacheControl: 'public, max-age=0, s-maxage=300', own: true, trim: false },
+  '/api/vs/indicator': { cacheControl: 'public, max-age=0, s-maxage=300', own: true, trim: false },
+  '/api/vs/etf/flows': { cacheControl: 'public, max-age=0, s-maxage=300', own: true, trim: false },
 };
 
 export type Encoding = 'br' | 'gzip';
@@ -241,17 +277,95 @@ export class CompressedCache {
   }
 }
 
-export async function compress(body: Buffer, enc: Encoding): Promise<Buffer> {
+export async function compress(body: Buffer, enc: Encoding, quality = 5): Promise<Buffer> {
   return enc === 'br'
     ? brotli(body, {
         params: {
           // Quality 5: most of brotli's gain at a small fraction of 11's cost - these are live responses.
-          [Z.BROTLI_PARAM_QUALITY]: 5,
+          [Z.BROTLI_PARAM_QUALITY]: quality,
           [Z.BROTLI_PARAM_MODE]: Z.BROTLI_MODE_TEXT,
           [Z.BROTLI_PARAM_SIZE_HINT]: body.length,
         },
       })
     : gzip(body, { level: 6 });
+}
+
+/** A JSON body made ready once for many replies: trimmed as an index route sends it, and its ETag. */
+export interface Prepared {
+  buf: Buffer;
+  etag: string;
+}
+
+/** The body perf.ts would send for this JSON text on a trimmed index route, and its ETag. */
+export function prepareJson(json: string, trim = true): Prepared {
+  const buf = Buffer.from(trim ? omitNullLabels(json) : json, 'utf8');
+  return { buf, etag: weakEtag(buf) };
+}
+
+const preparedOf = new WeakMap<FastifyReply, Prepared>();
+
+/** Send a prepared body (prepareJson): the hook below then neither trims nor hashes it again. */
+export function sendPrepared(reply: FastifyReply, p: Prepared): FastifyReply {
+  preparedOf.set(reply, p);
+  return reply.type('application/json; charset=utf-8').send(p.buf);
+}
+
+interface Timing {
+  t0: number;
+  handler?: number;
+  serialize?: number;
+  parts: string[];
+}
+const timingOf = new WeakMap<FastifyRequest, Timing>();
+const ms = (x: number): string => (Math.round(x * 100) / 100).toString();
+
+/**
+ * A part of this request's Server-Timing, from the route: `dur` in ms and/or a `desc` (letters, digits, `-`, `_` only).
+ * Ignored for a request the plugin did not see arrive.
+ */
+export function serverTiming(reply: FastifyReply, name: string, dur?: number, desc?: string): void {
+  const t = timingOf.get(reply.request);
+  if (!t || !/^[a-z][a-z0-9]{0,15}$/.test(name)) return;
+  const d = desc !== undefined && /^[\w-]{1,32}$/.test(desc) ? `;desc=${desc}` : '';
+  t.parts.push(`${name}${dur !== undefined && Number.isFinite(dur) ? `;dur=${ms(dur)}` : ''}${d}`);
+}
+
+/**
+ * ANSWERS KEPT A DAY (a final heatmap tile, a passed flow window: max-age of a day or more) never change, and the edge
+ * and the browser keep each copy they get. They are answered at quality 5 as any other (never 11 inline: +147 ms for its
+ * first viewer), and the same body is then compressed once at 11 in the background - on zlib's pool, one at a time - and
+ * every later miss (another edge region, a browser) gets that. Measured 2026-11-17 on a 1-day BTC band tile (159 KB of
+ * JSON): 42.1 KB at 5, 29.9 KB at 11 (-29%), 150 ms of the pool once. The same bytes once decoded.
+ */
+export const LONG_LIVED_S = 86_400;
+const BEST_MAX_BYTES = 64 * 1024 * 1024;
+/** Bodies waiting for their quality-11 copy at most (more are left at 5: a burst of new tiles waits for none). */
+const BEST_QUEUE_MAX = 64;
+const best = new CompressedCache(8_192, BEST_MAX_BYTES);
+const bestWaiting = new Map<string, Buffer>();
+let bestRunning: Promise<void> | null = null;
+
+/** Does this Cache-Control keep an answer a day or more (max-age=N, N >= LONG_LIVED_S)? */
+export function isLongLived(cacheControl: unknown): boolean {
+  const m = /(?:^|[,\s])max-age=(\d+)/i.exec(String(cacheControl ?? ''));
+  return !!m && Number(m[1]) >= LONG_LIVED_S;
+}
+
+function queueBest(key: string, body: Buffer): void {
+  if (best.get(key) || bestWaiting.has(key) || bestWaiting.size >= BEST_QUEUE_MAX) return;
+  bestWaiting.set(key, body);
+  bestRunning ??= (async () => {
+    for (let next = bestWaiting.entries().next(); !next.done; next = bestWaiting.entries().next()) {
+      const [k, b] = next.value;
+      try { best.set(k, await compress(b, 'br', 11)); } catch { /* left at quality 5 */ }
+      bestWaiting.delete(k);
+    }
+  })().finally(() => { bestRunning = null; });
+}
+
+/** Tests: the quality-11 copies being made are done. */
+export async function bestCompressionIdle(): Promise<void> {
+  while (bestRunning) await bestRunning;
 }
 
 function appendVary(reply: FastifyReply, value: string): void {
@@ -273,56 +387,107 @@ async function perf(app: FastifyInstance, opts: PerfOptions): Promise<void> {
   const minBytes = opts.minBytes ?? COMPRESS_MIN_BYTES;
   const cache = new CompressedCache();
 
+  app.addHook('onRequest', async (req: FastifyRequest) => {
+    timingOf.set(req, { t0: performance.now(), parts: [] });
+  });
+  app.addHook('preHandler', async (req: FastifyRequest) => {
+    const t = timingOf.get(req);
+    if (t) t.handler = performance.now();
+  });
+  // Only for a handler that returned an object (Fastify serializes it after this): a string or a Buffer is not serialized.
+  app.addHook('preSerialization', async (req: FastifyRequest, _reply: FastifyReply, payload: unknown) => {
+    const t = timingOf.get(req);
+    if (t) t.serialize = performance.now();
+    return payload;
+  });
+
   app.addHook('onSend', async (req: FastifyRequest, reply: FastifyReply, payload: unknown) => {
+    const t = timingOf.get(req);
+    const sent = performance.now();
+    let etagMs: number | undefined;
+    let cmpMs: number | undefined;
+    const done = <T>(out: T): T => {
+      if (t) {
+        const parts: string[] = [];
+        if (t.handler !== undefined) {
+          parts.push(`pre;dur=${ms(t.handler - t.t0)}`);
+          parts.push(`app;dur=${ms((t.serialize ?? sent) - t.handler)}`);
+          if (t.serialize !== undefined) parts.push(`json;dur=${ms(sent - t.serialize)}`);
+        }
+        parts.push(...t.parts);
+        if (etagMs !== undefined) parts.push(`etag;dur=${ms(etagMs)}`);
+        if (cmpMs !== undefined) parts.push(`cmp;dur=${ms(cmpMs)}`);
+        parts.push(`tot;dur=${ms(performance.now() - t.t0)}`);
+        reply.header('Server-Timing', parts.join(', '));
+      }
+      return out;
+    };
+
     const isGet = req.method === 'GET' || req.method === 'HEAD';
     const status = reply.statusCode;
-    if (typeof payload !== 'string' && !Buffer.isBuffer(payload)) return payload; // streams, null
+    if (typeof payload !== 'string' && !Buffer.isBuffer(payload)) return done(payload); // streams, null
     const type = String(reply.getHeader('Content-Type') ?? '');
-    if (!/\bjson\b/i.test(type)) return payload;
+    if (!/\bjson\b/i.test(type)) return done(payload);
 
-    const policy = isGet && status === 200 && !isFailure(payload) ? policies[req.routeOptions.url ?? ''] : undefined;
-    // What is sent when nothing below replaces it: an index answer, trimmed.
-    const plain: string | Buffer = policy && typeof payload === 'string' ? omitNullLabels(payload) : payload;
+    const routePolicy = policies[req.routeOptions.url ?? ''];
+    const policy = isGet && status === 200 && !isFailure(payload) ? routePolicy : undefined;
+    // A failure is never cached, whatever the route set before it failed (mm-daily set its max-age=600 before the read).
+    if (routePolicy?.own && !policy) reply.header('Cache-Control', 'no-store');
+    const prepared = preparedOf.get(reply);
+    const ready = prepared !== undefined && payload === prepared.buf ? prepared : undefined;
+    const e0 = performance.now();
+    // What is sent when nothing below replaces it: an index answer, trimmed (a prepared one is already).
+    const plain: string | Buffer = !ready && policy && policy.trim !== false && typeof payload === 'string' ? omitNullLabels(payload) : payload;
     let body = typeof plain === 'string' ? Buffer.from(plain, 'utf8') : plain;
     let etag: string | undefined;
 
     if (policy) {
       const own = policy.own ? reply.getHeader('Cache-Control') : undefined;
       reply.header('Cache-Control', typeof own === 'string' && own ? own : policy.cacheControl);
-      etag = weakEtag(body);
+      etag = ready ? ready.etag : weakEtag(body);
+      etagMs = performance.now() - e0;
       reply.header('ETag', etag);
       appendVary(reply, 'Accept-Encoding');
       if (etagMatches(req.headers['if-none-match'], etag)) {
         reply.code(304);
         reply.removeHeader('Content-Length');
         reply.removeHeader('Content-Type');
-        return '';
+        return done('');
       }
     }
 
-    if (req.method === 'HEAD' || status === 204 || status === 304) return plain;
-    if (body.length < minBytes || reply.hasHeader('Content-Encoding')) return plain;
-    if (/\bno-transform\b/i.test(String(reply.getHeader('Cache-Control') ?? ''))) return plain;
+    if (req.method === 'HEAD' || status === 204 || status === 304) return done(plain);
+    if (body.length < minBytes || reply.hasHeader('Content-Encoding')) return done(plain);
+    if (/\bno-transform\b/i.test(String(reply.getHeader('Cache-Control') ?? ''))) return done(plain);
     appendVary(reply, 'Accept-Encoding');
     const enc = pickEncoding(req.headers['accept-encoding']);
-    if (!enc) return plain;
+    if (!enc) return done(plain);
 
     const key = etag ? `${enc}:${etag}` : undefined;
-    let out = key ? cache.get(key) : undefined;
+    const c0 = performance.now();
+    // Kept a day: its quality-11 copy once made, else quality 5 now and the 11 made after (queueBest).
+    const longLived = !!key && enc === 'br' && isLongLived(reply.getHeader('Cache-Control'));
+    let out = key && longLived ? best.get(key) : undefined;
+    if (!out && key) {
+      out = cache.get(key);
+      if (out && longLived) queueBest(key, body);
+    }
     if (!out) {
       try {
         out = await compress(body, enc);
       } catch (err) {
         req.log.warn({ err: (err as Error).message }, 'response compression failed; sent uncompressed');
-        return plain;
+        return done(plain);
       }
-      if (out.length >= body.length) return plain;
+      if (out.length >= body.length) return done(plain);
       if (key) cache.set(key, out);
+      if (longLived) queueBest(key!, body);
     }
+    cmpMs = performance.now() - c0;
     body = out;
     reply.header('Content-Encoding', enc);
     reply.removeHeader('Content-Length');
-    return body;
+    return done(body);
   });
 }
 

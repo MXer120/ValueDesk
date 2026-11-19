@@ -21,6 +21,7 @@ import {
 } from './HlCards';
 import { MyCopiesCard } from './MyCopies';
 import { VenueBand } from './VenueBand';
+import { openPath } from '../../nav';
 
 /* ---------------------------------------------------------------------------
  * SCAN
@@ -142,7 +143,7 @@ export const PORTFOLIO_HL_PANELS: Array<PanelDefinition<PortfolioHlExtras>> = [
             type="button"
             className="pf-btn pf-btn--ghost"
             onClick={() => {
-              window.location.href = `/scan?address=${encodeURIComponent(c.hl.address!)}&venue=hyperliquid`;
+              openPath(`/scan?address=${encodeURIComponent(c.hl.address!)}&venue=hyperliquid`);
             }}
           >
             Open in Scan

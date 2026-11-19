@@ -10,8 +10,7 @@
  * instead, and nothing restarts. A stopped bot runs again, and a practice bot runs with real orders, from New bot
  * filled with its settings. Pause, resume, stop and delete stay in the header.
  */
-import { botCard } from '../share/shareData';
-import { openShare } from '../share/host';
+import { shareCard, useShareBuildersPrefetch } from '../share/host';
 import { HedgeLegs, HedgeSettings } from './HedgeDetail';
 import { useEffect, useMemo, useState } from 'react';
 import { FINAL_STATUSES, regionPolicy, type AlgoEvent, type AlgoView } from '@copy-engine';
@@ -49,6 +48,7 @@ type Tab = 'overview' | 'analysis' | 'settings' | 'orders' | 'trades' | 'activit
 type How = 'clean' | 'takeover';
 
 function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
+  useShareBuildersPrefetch();
   const st = botState(v);
   const ended = st === 'ended' || st === 'failed';
   const busy = ctx.busy === v.algo.id;
@@ -63,7 +63,7 @@ function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
       {ended && <Button variant="danger" icon="trash" disabled={busy || !!v.bot?.leftover} title={v.bot?.leftover ? 'Close the leftover first' : undefined} onClick={() => void ctx.remove(v)}>Delete</Button>}
       {ended && <Button variant="primary" icon="play" onClick={() => ctx.runAgain(v)}>Run again</Button>}
       {v.algo.spec.paper && ctx.liveAllowed && <Button variant={ended ? 'secondary' : 'primary'} icon="bolt" onClick={() => ctx.runAgain(v, true)} title="New bot opens with these settings, set to real orders">Run with real orders</Button>}
-      {v.bot && <Button variant="secondary" icon="share" onClick={() => { const c = botCard(v); if (c) openShare(c); }}>Share</Button>}
+      {v.bot && <Button variant="secondary" icon="share" onClick={() => shareCard((b) => b.botCard(v))}>Share</Button>}
     </>
   );
 }

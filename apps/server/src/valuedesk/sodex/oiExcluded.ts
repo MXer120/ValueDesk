@@ -11,7 +11,7 @@
  */
 import { EXCLUDED_WALLETS } from '../internalWallets.js';
 import { gwGet } from './gateway.js';
-import { TtlCache } from './util.js';
+import { AheadValue } from '../../aheadValue.js';
 import { liqCoin } from '../liquidations/levels.js';
 
 export interface SodexOiExcluded {
@@ -56,11 +56,24 @@ export async function readOiExcluded(
   return { sizes, at };
 }
 
-const cache = new TtlCache(1);
+/**
+ * Read ahead while asked within this long (aheadValue.ts): just over the pages' 15 s poll (web hooks.ts), so one open
+ * Markets or trade page keeps it ready. The live heatmap's markets ask for it too (liqRead.ts marketsFor).
+ */
+const ASKED_WITHIN_MS = 20_000;
 
-/** The sizes, held 15 s (one read at a time, however many ask); a failed read is thrown and not kept. */
-export const sodexOiExcluded = (): Promise<SodexOiExcluded> =>
-  cache.wrap('oi-excluded', TTL_MS, () => readOiExcluded((p) => gwGet<unknown>(p), sodexInternalAddresses()));
+const held = new AheadValue(() => readOiExcluded((p) => gwGet<unknown>(p), sodexInternalAddresses()), { ttlMs: TTL_MS, askedWithinMs: ASKED_WITHIN_MS });
+
+/**
+ * The sizes, held 15 s (one read at a time, however many ask); a failed read is thrown and not kept. While asked, the
+ * next read starts just before the held one lapses, so a request does not wait for SoDEX (2026-11-18).
+ */
+export const sodexOiExcluded = (): Promise<SodexOiExcluded> => held.get();
+
+/** Tests: forget the held sizes. */
+export const resetOiExcluded = (): void => held.reset();
+/** The hold's counts (reads, waited, ahead, failed). */
+export const oiExcludedStats = (): Readonly<AheadValue<SodexOiExcluded>['stats']> => held.stats;
 
 /**
  * The pair's size per coin as one side of a market, to take off a venue's open interest counted the same way (rules.ts halves

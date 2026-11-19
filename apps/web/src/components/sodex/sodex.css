@@ -544,6 +544,15 @@ html .pf.sdx .pfx-slide { position: relative; border-radius: 8px; }
 .pf-card__body > .spm-legend { display: flex; margin-bottom: 14px; }
 
 .spm-season__row b.is-muted { font-size: 14px; font-weight: 500; color: var(--muted); }
+/* No wallet: the invite code's place is the Connect action (SeasonCard), at the muted line's size. */
+.spm-season__row .spm-season__connect { min-height: 0; font-size: 14px; font-weight: 500; }
+
+/* A phone without a wallet: the sign-in card (the page's one action) right under the week, not three cards down. */
+@media (max-width: 760px) {
+  .sdx-col > .sdx-signin { order: 1; }
+  .sdx-col > .sdx-duo:has(~ .sdx-signin),
+  .sdx-col > .sdx-signin ~ * { order: 2; }
+}
 .spc__mark { z-index: 3; }
 
 /* A glare across the Gold, Diamond and Epic cards: on arrival, on hover, then every few seconds (still for reduced motion). */

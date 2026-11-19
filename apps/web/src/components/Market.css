@@ -1907,3 +1907,11 @@
 }
 .mkt-header--info:has(> .mkt-aside) .mkt-stats::-webkit-scrollbar { display: none; }
 .mkt-header--info .mkt-stats > .mkt-stat { flex: none; }
+/* A phone: Futures / Spot at the end of the coin and price line (registry.tsx, the ticker's aside), the stats on the
+   line under them as before. */
+.mkt-aside .nav-seg { padding: 2px; }
+.mkt-aside .nav-seg > button { height: 30px; padding: 0 12px; }
+@media (max-width: 567px) {
+  .mkt-header--info > .mkt-aside { order: 1; padding-left: 0; }
+  .mkt-header--info:has(> .mkt-aside) .mkt-stats { order: 2; flex: 1 1 100%; }
+}

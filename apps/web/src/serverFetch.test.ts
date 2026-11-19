@@ -3,20 +3,27 @@
  */
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { _resetServerFetch, primeFirstReads, revalidating, serverFetchEnv, serverGet, serverGetJson } from './serverFetch';
+import {
+  FIRST_READS_BUDGET, _resetServerFetch, keepWindowMs, peekAnswer, peekJson, pickFirstReads, primeFirstReads, primeRoute, revalidating,
+  serverFetchEnv, serverGet, serverGetJson,
+} from './serverFetch';
 
 interface Call {
   url: string;
   cache: RequestCache | undefined;
   accept: string | undefined;
   signal: AbortSignal | undefined;
-  resolve: (body: string, status?: number) => void;
+  resolve: (body: string, status?: number, headers?: Record<string, string>) => void;
   reject: (e: unknown) => void;
 }
 let calls: Call[] = [];
 let store: Record<string, string> = {};
 let timers: Array<{ fn: () => void; ms: number }> = [];
 let hidden = false;
+let now = 1_800_000_000_000;
+let saveData = false;
+let globals: Record<string, unknown> = {};
+let here: string | null = null;
 
 beforeEach(() => {
   _resetServerFetch();
@@ -24,6 +31,10 @@ beforeEach(() => {
   store = {};
   timers = [];
   hidden = false;
+  now = 1_800_000_000_000;
+  saveData = false;
+  globals = {};
+  here = null;
   serverFetchEnv.fetch = (url, init) =>
     new Promise<Response>((res, rej) => {
       const c: Call = {
@@ -31,7 +42,7 @@ beforeEach(() => {
         cache: init.cache,
         accept: (init.headers as Record<string, string> | undefined)?.Accept,
         signal: init.signal ?? undefined,
-        resolve: (body, status = 200) => res(new Response(body, { status })),
+        resolve: (body, status = 200, headers = {}) => res(new Response(body, { status, headers })),
         reject: rej,
       };
       init.signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')));
@@ -43,13 +54,21 @@ beforeEach(() => {
   });
   serverFetchEnv.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
   serverFetchEnv.hidden = () => hidden;
+  serverFetchEnv.now = () => now;
+  serverFetchEnv.saveData = () => saveData;
+  serverFetchEnv.encodedSize = () => null;
+  serverFetchEnv.globals = () => globals as never;
+  serverFetchEnv.route = () => here;
 });
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 /** Run the timers of `ms` (the recording window is 4 s, the early answers' life 10 s). */
 const elapse = (ms: number) => { for (const t of timers.filter((x) => x.ms === ms)) t.fn(); timers = timers.filter((x) => x.ms !== ms); };
 const KEY = 'vs.firstReads';
-const kept = (): Record<string, string[]> => JSON.parse(store[KEY] ?? '{}');
+/** What is remembered: the paths per page (their sizes: `sized`). */
+const kept = (): Record<string, string[]> => Object.fromEntries(Object.entries(sized()).map(([k, v]) => [k, v.map((e) => (typeof e === 'string' ? e : e[0]))]));
+const sized = (): Record<string, Array<[string, number] | string>> => JSON.parse(store[KEY] ?? '{}');
+const http = (date: number) => new Date(date).toUTCString();
 
 test('identical concurrent reads share one request; each caller parses its own copy', async () => {
   const a = serverGetJson<{ rows: number[] }>('/api/vs/explore');
@@ -266,7 +285,8 @@ test('the next start sends them at once, and the page\'s own read takes that ans
   calls[2]!.resolve('{"rows":[9]}');
   assert.equal((await poll).text, '{"rows":[9]}');
   elapse(4_000);
-  assert.deepEqual(kept()['/leaderboard'], ['/api/vs/leaderboard?window=30d', '/api/vs/leaderboard?window=30d&curves=1'], 'the same first reads: nothing rewritten');
+  assert.deepEqual(kept()['/leaderboard'], ['/api/vs/leaderboard?window=30d', '/api/vs/leaderboard?window=30d&curves=1'], 'the same first reads');
+  assert.deepEqual(sized()['/leaderboard'], [['/api/vs/leaderboard?window=30d', 12], ['/api/vs/leaderboard?window=30d&curves=1', 12]], 'now with their sizes');
 });
 
 test('a read that asks the server neither takes an early answer nor counts as a first read', async () => {
@@ -336,7 +356,7 @@ test('an early answer nobody asked for is dropped, and what the page reads now r
   await later;
 });
 
-test('a page that reads nothing forgets its list; it is called once per load', async () => {
+test('a page that reads nothing keeps an empty list (no default is started for it either); it is called once per load', async () => {
   store[KEY] = JSON.stringify({ '/trade': ['/api/vs/explore'] });
   primeFirstReads('/trade');
   primeFirstReads('/explore');
@@ -344,7 +364,36 @@ test('a page that reads nothing forgets its list; it is called once per load', a
   assert.equal(calls.length, 1, 'the second call did nothing');
   calls[0]!.resolve('{}');
   elapse(4_000);
-  assert.deepEqual(kept(), {});
+  assert.deepEqual(kept(), { '/trade': [] });
+
+  _resetServerFetch();
+  calls = [];
+  globals = { __vsReads: { '/trade': ['/api/vs/sodex/oi-excluded'] } };
+  primeFirstReads('/trade');
+  await tick();
+  assert.equal(calls.length, 0, 'the remembered empty list wins over the build default');
+});
+
+test("an empty build default is the page's rule: nothing early whatever is remembered, nothing learned, nothing primed", async () => {
+  globals = { __vsReads: { '/explore': [] } };
+  store[KEY] = JSON.stringify({ '/explore': [['/api/vs/screener?view=assets', 13_301]] });
+  primeFirstReads('/explore');
+  primeRoute('/explore');
+  await tick();
+  assert.equal(calls.length, 0);
+  const r = serverGet('/api/vs/screener?view=assets');
+  await tick();
+  calls[0]!.resolve('{}');
+  await r;
+  elapse(4_000);
+  assert.deepEqual(kept(), { '/explore': ['/api/vs/screener?view=assets'] }, 'the list is left as it was');
+});
+
+test('such a page about to be opened in the app starts its reads on intent (no first paint to share the line with)', async () => {
+  globals = { __vsReads: { '/explore': [] }, __vsAhead: { '/explore': ['/api/vs/screener?view=assets', '/api/vs/cohorts/map?v=1'] } };
+  primeRoute('/explore');
+  await tick();
+  assert.deepEqual(calls.map((c) => c.url), ['/api/vs/screener?view=assets', '/api/vs/cohorts/map?v=1']);
 });
 
 test('nothing personal is remembered or sent early; a tampered list is ignored', async () => {
@@ -365,7 +414,7 @@ test('nothing personal is remembered or sent early; a tampered list is ignored',
   for (const x of calls) x.resolve('{}');
   await Promise.all([b, c]);
   elapse(4_000);
-  assert.equal(store[KEY], undefined, 'a search and a non-index read are not first reads');
+  assert.deepEqual(kept(), { '/leaderboard': [] }, 'a search and a non-index read are not first reads');
 
   _resetServerFetch();
   calls = [];
@@ -409,4 +458,233 @@ test('at most six reads per page and sixteen pages are remembered', async () => 
   assert.equal(routes.length, 16);
   assert.equal(routes.at(-1), '/explore?view=cohorts&coin=C19', 'the newest are kept');
   assert.equal(routes.includes('/explore'), false, 'the oldest went');
+});
+
+/* --- the route script's early reads, the window from boot, the budget ------------------------------ */
+
+test("the route script's reads are adopted: one request each, nothing sent again, a late script starts nothing", async () => {
+  let resolveA!: (r: Response) => void;
+  const a = new Promise<Response>((r) => { resolveA = r; });
+  globals = { __vsEarly: { '/api/vs/cohorts?venues=sodex': a, 'https://evil.example/x': Promise.resolve(new Response('{}')) } };
+  store[KEY] = JSON.stringify({ '/explore?view=cohorts': ['/api/vs/other'] });
+  primeFirstReads('/explore?view=cohorts');
+  assert.equal(globals.__vsPrimed, true, 'a route script that runs after this starts nothing');
+  assert.equal(globals.__vsEarly, undefined, 'taken once');
+  const page = serverGet('/api/vs/cohorts?venues=sodex');
+  const other = serverGet('/api/vs/cohorts?venues=sodex'); // a second reader joins the same request
+  await tick();
+  assert.equal(calls.length, 0, 'neither the remembered list nor the page sent anything of its own');
+  resolveA(new Response('{"n":1}', { status: 200 }));
+  assert.equal((await page).text, '{"n":1}');
+  assert.equal((await other).text, '{"n":1}');
+});
+
+test('without the route script, the remembered reads are sent here, as before', async () => {
+  store[KEY] = JSON.stringify({ '/leaderboard': [['/api/vs/leaderboard?win=1', 900]] });
+  primeFirstReads('/leaderboard');
+  await tick();
+  assert.deepEqual(calls.map((c) => c.url), ['/api/vs/leaderboard?win=1']);
+});
+
+test('a first visit starts the build defaults for its URL; a remembered list wins over them', async () => {
+  globals = { __vsReads: { '/leaderboard': ['/api/vs/leaderboard?d=1'], '/explore': ['/api/vs/x'] } };
+  store[KEY] = JSON.stringify({ '/explore': [['/api/vs/y', 10]] });
+  primeFirstReads('/leaderboard');
+  await tick();
+  assert.deepEqual(calls.map((c) => c.url), ['/api/vs/leaderboard?d=1']);
+  _resetServerFetch();
+  calls = [];
+  primeFirstReads('/explore');
+  await tick();
+  assert.deepEqual(calls.map((c) => c.url), ['/api/vs/y']);
+});
+
+test('the recording window and the early answers count from the moment the landing page is in, not from the start', async () => {
+  let booted!: () => void;
+  const boot = new Promise<void>((r) => { booted = r; });
+  store[KEY] = JSON.stringify({ '/explore': ['/api/vs/a'] });
+  primeFirstReads('/explore', boot);
+  await tick();
+  calls[0]!.resolve('{}');
+  assert.deepEqual(timers.map((t) => t.ms), [60_000, 60_000], 'only the give-up timers while the code is still coming');
+  booted();
+  await tick();
+  assert.deepEqual(timers.map((t) => t.ms).sort((x, y) => x - y), [4_000, 10_000, 60_000, 60_000]);
+  // The page renders and reads, seconds after the module ran: still its first reads, and the early answer is there.
+  const page = serverGet('/api/vs/a');
+  const more = serverGet('/api/vs/b');
+  await tick();
+  assert.equal(calls.length, 2, 'only /b went out');
+  calls[1]!.resolve('{"b":1}');
+  await Promise.all([page, more]);
+  elapse(4_000);
+  assert.deepEqual(kept(), { '/explore': ['/api/vs/a', '/api/vs/b'] });
+});
+
+test('reads made after the visitor moved to another page are not the landing page\'s first reads', async () => {
+  here = '/trade?symbol=ETH-USD';
+  primeFirstReads('/trade?symbol=ETH-USD');
+  const a = serverGet('/api/vs/a');
+  here = '/trade'; // the page cleaned its own query: still the landing page
+  const b = serverGet('/api/vs/b');
+  here = '/leaderboard';
+  const c = serverGet('/api/vs/c');
+  await tick();
+  for (const x of calls) x.resolve('{}');
+  await Promise.all([a, b, c]);
+  elapse(4_000);
+  assert.deepEqual(kept(), { '/trade?symbol=ETH-USD': ['/api/vs/a', '/api/vs/b'] });
+});
+
+test('a list is written with each read\'s bytes, once those are in', async () => {
+  serverFetchEnv.encodedSize = (p) => (p === '/api/vs/a' ? 7_000 : null);
+  primeFirstReads('/explore');
+  const a = serverGet('/api/vs/a');
+  const b = serverGet('/api/vs/b');
+  await tick();
+  calls[0]!.resolve('{"a":1}');
+  await a;
+  elapse(4_000);
+  assert.equal(store[KEY], undefined, '/b is still on the wire');
+  calls[1]!.resolve('{"bb":22}');
+  await b;
+  await tick();
+  assert.deepEqual(sized(), { '/explore': [['/api/vs/a', 7_000], ['/api/vs/b', 9]] }, 'the wire size when the browser says it, else the body');
+});
+
+test('at most six reads and 64 KB on the wire are started early for a page', () => {
+  assert.deepEqual(pickFirstReads([['/api/vs/a', 40_000], ['/api/vs/b', 30_000], ['/api/vs/c', 20_000], ['/api/vs/d', 0]]), ['/api/vs/a', '/api/vs/c', '/api/vs/d'], 'a read that would pass the budget is left to the page');
+  assert.equal(FIRST_READS_BUDGET, 65_536);
+  assert.equal(pickFirstReads(Array.from({ length: 9 }, (_, i) => [`/api/vs/x${i}`, 100] as [string, number])).length, 6);
+  assert.deepEqual(pickFirstReads([['/api/vs/a', 1], ['/api/vs/a', 1], ['/api/acct/x', 1], ['/api/vs/lbrow?address=0x1', 1]]), ['/api/vs/a']);
+});
+
+/* --- kept answers ---------------------------------------------------------------------------------- */
+
+test('an answer is kept for exactly as long as its Cache-Control allows any cache to hand it out', async () => {
+  const a = serverGet('/api/vs/leaderboard?win=30d');
+  await tick();
+  calls[0]!.resolve('{"rows":[1]}', 200, { 'cache-control': 'public, max-age=10, stale-while-revalidate=20', date: http(now - 4_000), age: '2' });
+  await a;
+  const k = peekAnswer('/api/vs/leaderboard?win=30d');
+  assert.equal(k?.text, '{"rows":[1]}');
+  assert.equal(k?.at, now - 4_000, 'made 4 s ago by its Date (its Age says less)');
+  assert.equal(k?.until, now - 4_000 + 30_000);
+  assert.deepEqual(peekJson('/api/vs/leaderboard?win=30d')?.body, { rows: [1] });
+  now += 25_999;
+  assert.ok(peekAnswer('/api/vs/leaderboard?win=30d'));
+  now += 1;
+  assert.equal(peekAnswer('/api/vs/leaderboard?win=30d'), null, 'past max-age + stale-while-revalidate: gone');
+});
+
+test('nothing is kept that a cache may not keep: no-cache, no-store, a failure, an error status, a wallet or a search', async () => {
+  const cases: Array<[string, string, number, Record<string, string>]> = [
+    ['/api/vs/whales', '{"trades":[]}', 200, { 'cache-control': 'public, no-cache' }],
+    ['/api/vs/bots/access', '{}', 200, { 'cache-control': 'no-store' }],
+    ['/api/vs/cohorts?v=1', '{"ok":false,"error":"down"}', 200, { 'cache-control': 'public, max-age=30' }],
+    ['/api/vs/cohorts?v=2', '{}', 503, { 'cache-control': 'public, max-age=30' }],
+    ['/api/vs/lbrow?address=0x1', '{}', 200, { 'cache-control': 'public, max-age=30' }],
+    ['/api/vs/leaderboard?q=0x1', '{}', 200, { 'cache-control': 'public, max-age=30' }],
+    ['/api/health', '{}', 200, { 'cache-control': 'public, max-age=10' }],
+    ['/api/vs/old', '{}', 200, { 'cache-control': 'public, max-age=10', age: '11' }],
+  ];
+  const reads = cases.map(([p]) => serverGet(p));
+  await tick();
+  cases.forEach(([, body, status, headers], i) => calls[i]!.resolve(body, status, headers));
+  await Promise.all(reads);
+  for (const [p] of cases) assert.equal(peekAnswer(p), null, p);
+  assert.equal(keepWindowMs('public, max-age=30, stale-while-revalidate=30'), 60_000);
+  assert.equal(keepWindowMs('public, max-age=10'), 10_000);
+  assert.equal(keepWindowMs('public, s-maxage=10'), null);
+  assert.equal(keepWindowMs(null), null);
+});
+
+test('a poll\'s answer replaces the kept one; the oldest answers go once 64 are kept', async () => {
+  const cc = { 'cache-control': 'public, max-age=30' };
+  const a = serverGet('/api/vs/a');
+  await tick();
+  calls[0]!.resolve('{"v":1}', 200, cc);
+  await a;
+  const poll = revalidating(() => serverGet('/api/vs/a'));
+  await tick();
+  calls[1]!.resolve('{"v":2}', 200, cc);
+  await poll;
+  assert.equal(peekAnswer('/api/vs/a')?.text, '{"v":2}');
+  const many = Array.from({ length: 64 }, (_, i) => serverGet(`/api/vs/m${i}`));
+  await tick();
+  calls.slice(2).forEach((c) => c.resolve('{}', 200, cc));
+  await Promise.all(many);
+  assert.equal(peekAnswer('/api/vs/a'), null, 'the oldest went');
+  assert.ok(peekAnswer('/api/vs/m63'));
+});
+
+test("an early answer is the page's own first read, not a kept one, until the page has taken it", async () => {
+  const cc = { 'cache-control': 'public, max-age=30, stale-while-revalidate=30' };
+  store[KEY] = JSON.stringify({ '/leaderboard': ['/api/vs/lb'] });
+  primeFirstReads('/leaderboard');
+  await tick();
+  calls[0]!.resolve('{"rows":[1]}', 200, cc);
+  await tick();
+  await tick();
+  assert.equal(peekAnswer('/api/vs/lb'), null, 'in before the page rendered: not drawn as an older answer, not asked again');
+  const page = await serverGet('/api/vs/lb');
+  assert.equal(page.text, '{"rows":[1]}');
+  assert.equal(calls.length, 1);
+  assert.equal(peekAnswer('/api/vs/lb')?.text, '{"rows":[1]}', 'taken: kept from now on, for the page reopened later');
+
+  // One nobody took is kept once it is let go.
+  globals = { __vsReads: { '/copy': ['/api/vs/c'] } };
+  primeRoute('/copy');
+  await tick();
+  calls[1]!.resolve('{"c":1}', 200, cc);
+  await tick();
+  await tick();
+  assert.equal(peekAnswer('/api/vs/c'), null);
+  elapse(10_000);
+  assert.equal(peekAnswer('/api/vs/c')?.text, '{"c":1}');
+});
+
+/* --- a page about to be opened --------------------------------------------------------------------- */
+
+test('primeRoute starts what the page will read; its read takes the answer once; nothing for a kept path or Save-Data', async () => {
+  globals = { __vsReads: { '/leaderboard': ['/api/vs/lb'], '/explore': ['/api/vs/k', '/api/vs/e'] } };
+  primeRoute('/leaderboard');
+  primeRoute('/leaderboard');
+  await tick();
+  assert.deepEqual(calls.map((c) => c.url), ['/api/vs/lb'], 'once, however often it is touched');
+  calls[0]!.resolve('{"lb":1}');
+  await tick();
+  const page = await serverGet('/api/vs/lb');
+  assert.equal(page.text, '{"lb":1}');
+  assert.equal(calls.length, 1, 'the page took it');
+
+  const k = serverGet('/api/vs/k');
+  await tick();
+  calls[1]!.resolve('{}', 200, { 'cache-control': 'public, max-age=30' });
+  await k;
+  primeRoute('/explore');
+  await tick();
+  assert.deepEqual(calls.slice(2).map((c) => c.url), ['/api/vs/e'], 'a kept path is painted and asked for by the page itself');
+
+  saveData = true;
+  primeRoute('/copy');
+  globals.__vsReads = { '/copy': ['/api/vs/c'] };
+  primeRoute('/copy');
+  primeRoute('/scan?address=0x1');
+  await tick();
+  assert.equal(calls.length, 3);
+});
+
+test('a primed answer is handed over for ten seconds only', async () => {
+  globals = { __vsReads: { '/bots': ['/api/vs/r'] } };
+  primeRoute('/bots');
+  await tick();
+  calls[0]!.resolve('{"old":1}');
+  await tick();
+  now += 10_000;
+  const late = serverGet('/api/vs/r');
+  await tick();
+  assert.equal(calls.length, 2, 'too old to hand over: the page reads for itself');
+  calls[1]!.resolve('{"new":1}');
+  assert.equal((await late).text, '{"new":1}');
 });

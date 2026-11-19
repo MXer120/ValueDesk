@@ -36,3 +36,20 @@ test('the carousel is a tablist whose tabs control named tabpanels; the ticket\'
   }
   assert.equal(new Set(panels.map((p) => p.id)).size, 3, 'every page has its own id');
 });
+
+test('the page last used in this browser is the one open from the first frame', async () => {
+  const { MobileCarousel } = await import('./MobileCarousel');
+  const { PAGE_KEY, carouselEnv } = await import('./carouselMemory');
+  carouselEnv.storage = () => ({ getItem: (k: string) => (k === PAGE_KEY ? 'exec' : null), setItem: () => {} });
+  const html = renderToMarkup(
+    createElement(MobileCarousel, {
+      pages: [
+        { key: 'chart', label: 'Chart', content: 'the chart' },
+        { key: 'book', label: 'Order Book', content: 'the book' },
+        { key: 'exec', label: 'Trade', name: 'Order entry', content: 'the ticket' },
+      ],
+    }),
+  );
+  const selected = [...html.matchAll(/<button[^>]*role="tab"[^>]*>([^<]*)<\/button>/g)].filter((m) => /is-active/.test(m[0])).map((m) => m[1]);
+  assert.deepEqual(selected, ['Trade']);
+});

@@ -9,9 +9,12 @@ import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { Card } from '../portfolio/parts';
 import { DASH, fmt } from '../../format';
 import { notify } from '../../toast';
+import { shareNative } from '../../share/nativeShare';
 import { inviteLink, inviteLinkShown, useOwnCode } from '../../invites/invites';
 import type { BoostConfig, VolumeWeights, WeekInfo } from '../../points';
 import { Pill, SegSwitch, SkelRows, useNow } from './parts';
+import { openConnectDialog } from '../account/connect';
+import { warmWalletModal } from '../../walletconnect';
 import { allWeeks, difficultyRows, earnTips, forecastWeek, mmByWeek, squadBreakdown, venueOiByWeek, venueVolumeByWeek, type AnyWeek, type DifficultyRow, type S2State, type SquadBreakdown, type Tip } from './soPointsV2';
 
 /* SoDEX's own tier styles, as their points page draws its card (bundle 2026-11-16). */
@@ -60,8 +63,7 @@ export function SoPointsCard({ s }: { s: S2State }) {
     if (total === null) return;
     const text = `I'm ${tier} on SoDEX with ${total.toLocaleString('en-US')} SoPoints${sum?.rank ? `, rank ${sum.rank.toLocaleString('en-US')}` : ''}.`;
     const url = `${location.origin}/points`;
-    if (navigator.share) void navigator.share({ text, url }).catch(() => {});
-    else void copy(`${text} ${url}`, 'Text');
+    void shareNative({ text, url }).then((r) => { if (r === 'failed' || r === 'unsupported') void copy(`${text} ${url}`, 'Text'); });
   };
   return (
     <section className={`spm-card${iron ? ' is-iron' : ''}${tier === 'Gold' || tier === 'Diamond' || epic ? ' is-glare' : ''}`} style={{ background: st.bg, outlineColor: st.border, boxShadow: `0 25px 50px -12px ${st.shadow}` }} aria-label="Your SoPoints">
@@ -140,7 +142,15 @@ export function SeasonCard({ week, address, settled }: { week: WeekInfo | null; 
       <div className="spm-season__invite">
         <div>
           <span className="spm-season__k">Your invite code</span>
-          <div className="spm-season__row"><b className={code ? '' : 'is-muted'}>{code ?? (!address ? 'Connect a wallet' : own.state === 'loading' ? '…' : own.state === 'none' ? 'Trade on SoDEX first' : DASH)}</b>{code && <CopyBtn onClick={() => void copy(code, 'Invite code')} label="Copy invite code" />}</div>
+          <div className="spm-season__row">
+            {/* No wallet: the line is the way to connect one (the app's Connect dialog), not words that look like a button. */}
+            {!code && !address ? (
+              <button type="button" className="fx-link spm-season__connect" onClick={() => void openConnectDialog()} onPointerEnter={warmWalletModal} onFocus={warmWalletModal}>Connect a wallet</button>
+            ) : (
+              <b className={code ? '' : 'is-muted'}>{code ?? (own.state === 'loading' ? '…' : own.state === 'none' ? 'Trade on SoDEX first' : DASH)}</b>
+            )}
+            {code && <CopyBtn onClick={() => void copy(code, 'Invite code')} label="Copy invite code" />}
+          </div>
         </div>
         <div>
           <span className="spm-season__k">Your invite link</span>

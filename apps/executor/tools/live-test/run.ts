@@ -155,7 +155,7 @@ function privateKey(v: string | undefined, name: string): Uint8Array {
   return hexToBytes(`0x${h}`);
 }
 
-/** keccak256 of the copy terms text as the web app shows it (apps/web/src/copy/terms.ts COPY_TERMS_HASH). */
+/** keccak256 of the copy terms text as the web app shows it (apps/web/src/copy/terms.ts copyTermsHashOfBuild). */
 async function termsHash(): Promise<string> {
   const mod = (await import(pathToFileURL(join(REPO, 'apps', 'web', 'src', 'legal', 'copyTerms.ts')).href)) as { COPY_TERMS: unknown };
   return bytesToHex(keccak256(utf8(canonicalJSON(mod.COPY_TERMS))));

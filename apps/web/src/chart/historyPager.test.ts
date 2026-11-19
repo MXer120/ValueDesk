@@ -6,7 +6,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { KLineData } from 'klinecharts';
-import { HISTORY_RETRY_MS, HistoryPager } from './historyPager';
+import { HISTORY_RETRY_MS, HistoryPager, nearOldest, prefetchAtLoad } from './historyPager';
+
+test('history: a narrow plot holding many screens of bars waits for the first touch; a wide one fetches at load', () => {
+  // A 375 px phone: ~230 px of plot at 6 px a bar = ~38 bars; 500 held = 13 screens.
+  assert.equal(prefetchAtLoad(500, 230 / 6), false);
+  // A desktop chart: ~1,200 px of plot = 200 bars; 500 held = 2.5 screens.
+  assert.equal(prefetchAtLoad(500, 1200 / 6), true);
+  // Few bars held (a young market), or the plot size not known yet: as before.
+  assert.equal(prefetchAtLoad(120, 38), true);
+  assert.equal(prefetchAtLoad(500, null), true);
+  assert.equal(prefetchAtLoad(500, 0), true);
+});
+
+test('history: the view coming near the oldest bar held starts the runway', () => {
+  assert.equal(nearOldest(462), false, 'a fresh load on a phone shows the newest 38 of 500');
+  assert.equal(nearOldest(249), true);
+  assert.equal(nearOldest(0), true);
+  assert.equal(nearOldest(Number.NaN), false);
+});
 
 const MIN = 60_000;
 /** A market whose history starts at `start` (ms) with one bar a minute. */

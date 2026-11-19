@@ -26,7 +26,9 @@ export const HEALTH_DOWN_MS = 45_000;
 /**
  * Whether the data service has not answered for HEALTH_DOWN_MS: `error` is the health
  * poll's (useAsync), null once it answers again. Not while the browser itself is offline -
- * that is this device's connection, which the status bar shows.
+ * that is this device's connection, which its own card says (IncidentNote.tsx, OFFLINE_VIEW).
+ * Back online, the count starts again: the polls that failed while offline say nothing about
+ * the service.
  */
 export function useHealthDown(error: string | null): boolean {
   const [since, setSince] = useState<number | null>(null);
@@ -34,6 +36,11 @@ export function useHealthDown(error: string | null): boolean {
   useEffect(() => {
     setSince(error ? (s) => s ?? Date.now() : null);
   }, [error]);
+  useEffect(() => {
+    const back = () => setSince((s) => (s === null ? null : Date.now()));
+    window.addEventListener('online', back);
+    return () => window.removeEventListener('online', back);
+  }, []);
   useEffect(() => {
     if (since === null) return;
     const left = since + HEALTH_DOWN_MS - Date.now();

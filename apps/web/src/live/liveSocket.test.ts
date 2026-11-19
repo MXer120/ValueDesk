@@ -12,7 +12,7 @@ import { installViteStubs } from '../components/macro/testEnv';
 
 installViteStubs();
 const { LiveSocket, IDLE_CLOSE_MS } = await import('./liveSocket');
-const { httpPlan } = await import('./useLiveRead');
+const { httpPlan, replaces } = await import('./useLiveRead');
 const { HIDDEN_CLOSE_MS } = await import('../components/liqmap/liveHeat');
 const { diff } = await import('@sign/live/jsonPatch.js');
 type LiveEvent = import('./liveSocket').LiveEvent;
@@ -164,4 +164,13 @@ test('the hook reads HTTP at once without a socket, after a wait while it is up,
   assert.equal(httpPlan(false, true, true), 'wait');
   assert.equal(httpPlan(false, true, false), 'now');
   assert.equal(httpPlan(true, true, true), 'none');
+});
+
+test('the first HTTP answer, kept past the socket coming up, never replaces a newer pushed one', () => {
+  assert.equal(replaces({ asOf: 2_000 }, { asOf: 1_000 }), false, 'older than what is shown: the screen never steps back');
+  assert.equal(replaces({ asOf: 1_000 }, { asOf: 1_000 }), true, 'the same load again');
+  assert.equal(replaces({ asOf: 1_000 }, { asOf: 2_000 }), true);
+  assert.equal(replaces({ at: 5 }, { at: 4 }), false, 'by `at` where there is no asOf');
+  assert.equal(replaces({ rows: [] }, { rows: [1] }), true, 'an answer that does not say when: the latest wins, as before');
+  assert.equal(replaces(null, { asOf: 1 }), true);
 });

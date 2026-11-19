@@ -1,5 +1,5 @@
 /**
- * The wallet menu (NavBar.tsx AddressMenu, opened from the rail's wallet button): it opens at its
+ * The wallet menu (components/account/AddressMenu.tsx, opened from the rail's wallet button): it opens at its
  * width and keeps it while the balances come in (it opened with "—" and widened a moment later,
  * owner 2026-10-31), and its Portfolio and Send feedback rows go where they say.
  */

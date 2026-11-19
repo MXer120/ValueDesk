@@ -20,8 +20,8 @@ import { VENUE_BRAND } from '../venueBrand';
 import { PlatformSelect } from '../PlatformSelect';
 import { VENUE_LABEL, vsApi, type BoardWindow, type TraderRow, type Venue } from '../../vsApi';
 import {
-  CATEGORIES, COPY_VENUES, EQUITY_STEPS, GRID_VENUES, GRID_WINDOWS, NO_FILTERS, SCORE_STEPS, SORTS, WIN_RATE_STEPS,
-  filtersActive, isCopyable, kindOf, mixKinds, normaliseFilters, normaliseVenues, scoreRows, shapeGrid, winRateLabel,
+  CATEGORIES, COPY_VENUES, EQUITY_STEPS, GRID_DEFAULT_WINDOW, GRID_VENUES, GRID_WINDOWS, NO_FILTERS, SCORE_STEPS, SORTS, WIN_RATE_STEPS,
+  boardVenues, filtersActive, isCopyable, kindOf, mixKinds, normaliseFilters, normaliseVenues, scoreRows, shapeGrid, winRateLabel,
   type Category, type Filters, type GridKind, type Scored, type SortKey,
 } from './gridModel';
 import { AgeHint, Avatar, CoinRow, CopyButton, ScoreMeter, Spark, TraderCard, ViewButton, WINDOW_SHORT, WinRate, useTraderPeek } from './TraderCard';
@@ -40,7 +40,7 @@ interface GridPrefs {
   venues: Venue[];
 }
 
-const DEFAULT_PREFS: GridPrefs = { category: 'top', sort: 'score', window: '30d', unit: 'usd', view: 'grid', filters: NO_FILTERS, venues: [...GRID_VENUES] };
+const DEFAULT_PREFS: GridPrefs = { category: 'top', sort: 'score', window: GRID_DEFAULT_WINDOW, unit: 'usd', view: 'grid', filters: NO_FILTERS, venues: [...GRID_VENUES] };
 const PAGE = 24;
 
 const keyOf = (r: Pick<TraderRow, 'venue' | 'address'>) => `${r.venue}:${r.address.toLowerCase()}`;
@@ -71,7 +71,7 @@ export function Discover({ onOpen, onCopy, copying, onAddress, onScan }: Discove
   const [shown, setShown] = useState(PAGE);
   const w = prefs.window;
   // The chosen platforms, plus the two a copy follows: the hero deals from those whatever is chosen.
-  const read = [...new Set<Venue>([...prefs.venues, ...COPY_VENUES])];
+  const read = boardVenues(prefs.venues);
   const readKey = read.join(',');
 
   const boards = useAsync(

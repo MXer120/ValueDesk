@@ -40,7 +40,15 @@
 //              are origins behind a Caddy gate: they get the origin secret (only over
 //              https, or http on loopback). PUBLIC ones (the site through Vercel) never
 //              get it. So a server that is dead entirely is still reported - by the
-//              other one.
+//              other one. A PUBLIC peer under /api/ is a call of the site's Vercel
+//              function, billed per call (2026-11-17: these and the status prober were
+//              62% of its calls, each path asked twice a minute): it is asked every
+//              HEALTH_PUBLIC_API_EVERY_S (300; 60 or less: every pass) while it answers and on every pass while it
+//              does not - a failure still takes two failing passes a minute apart, a
+//              recovery shows at once - and in between its last answer stands, said with
+//              its age (HEALTH_STATE_DIR/peer-probes.json). The status prober
+//              (apps/server/src/ops/status.ts) still takes the visitor's way every minute,
+//              and the GATED peers watch each origin directly every pass.
 //
 // ROLES. HEALTH_CHECKS (comma-separated) picks the checks; unset = every one of the
 // list above but the peers, as before. Server 1 (API + indexer) and server 2 (the
@@ -131,6 +139,11 @@ function peers(k, gated) {
   });
 }
 const PEERS = [...peers('HEALTH_PEERS_GATED', true), ...peers('HEALTH_PEERS_PUBLIC', false)];
+// A public peer under /api/ (the site's Vercel function): asked this often while it answers (the header: CROSS-WATCH).
+const PUBLIC_API_EVERY_MS = num('HEALTH_PUBLIC_API_EVERY_S', 300) * 1000;
+// The timer's passes are a minute apart give or take a few seconds: one that comes a little early still counts.
+const PASS_SLACK_MS = 30_000;
+const PEER_PROBES_FILE = join(STATE_DIR, 'peer-probes.json');
 
 const now = Date.now();
 const age = (t) => Math.round((now - t) / 1000);
@@ -334,6 +347,13 @@ await check('units', async () => {
 });
 
 // The cross-watch: all peers at once (each has its own 8 s limit).
+/** The last answer of each public /api/ peer: {name: {url, at, ok, warn, note}}. */
+let peerProbes = {};
+try {
+  const v = JSON.parse(readFileSync(PEER_PROBES_FILE, 'utf8'));
+  if (v && typeof v === 'object') peerProbes = v;
+} catch { /* first pass, or none kept */ }
+const probedNow = {};
 await Promise.all(PEERS.map(async (p) => {
   const name = `peer:${p.name}`;
   try {
@@ -344,6 +364,14 @@ await Promise.all(PEERS.map(async (p) => {
       results[name] = { ok: false, note: 'not a URL (health.env)' };
       return;
     }
+    // 60 or less: every pass, as before this setting.
+    const spaced = !p.gated && u.pathname.startsWith('/api/') && PUBLIC_API_EVERY_MS > 60_000;
+    const last = spaced ? peerProbes[p.name] : null;
+    if (last && last.url === p.url && last.ok === true && Number.isFinite(last.at) && now - last.at >= 0 && now - last.at < PUBLIC_API_EVERY_MS - PASS_SLACK_MS) {
+      results[name] = { ok: true, ...(last.warn ? { warn: true } : {}), note: `${String(last.note ?? '').slice(0, 160)} (asked ${age(last.at)} s ago: every ${Math.round(PUBLIC_API_EVERY_MS / 60_000)} min while it answers)` };
+      return;
+    }
+    if (spaced) probedNow[p.name] = { url: p.url };
     const loopback = u.hostname === '127.0.0.1' || u.hostname === 'localhost';
     if (p.gated && u.protocol !== 'https:' && !loopback) {
       results[name] = { ok: false, note: 'a gated peer must be https:// - the origin secret never travels in clear text' };
@@ -361,6 +389,22 @@ await Promise.all(PEERS.map(async (p) => {
     results[name] = { ok: false, note: `${p.name} does not answer (${String(e?.code ?? e?.message ?? e).slice(0, 80)})` };
   }
 }));
+// Keep what the spaced peers answered this pass (only those peers still configured).
+if (Object.keys(probedNow).length) {
+  const keep = {};
+  for (const p of PEERS) {
+    if (probedNow[p.name]) {
+      const r = results[`peer:${p.name}`] ?? { ok: false };
+      keep[p.name] = { url: p.url, at: now, ok: r.ok === true, ...(r.warn ? { warn: true } : {}), note: String(r.note ?? '') };
+    } else if (peerProbes[p.name]) keep[p.name] = peerProbes[p.name];
+  }
+  try {
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(PEER_PROBES_FILE, JSON.stringify(keep));
+  } catch (e) {
+    console.error(`healthcheck: could not keep the peer answers: ${e?.message ?? e}`);
+  }
+}
 
 const failed = Object.entries(results).filter(([, r]) => !r.ok).map(([k]) => k);
 const warned = Object.entries(results).filter(([, r]) => r.ok && r.warn).map(([k]) => k);

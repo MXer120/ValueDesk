@@ -11,6 +11,7 @@
  */
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSlot } from '../slots';
 import { setIndexEnabled } from '../setup/indexer';
 import { WALK_SPEEDS, walks, type WalkSpeed, type WalkState } from '../exchange/allTime';
 import { day, noteView, share } from './historyNoteView';
@@ -21,17 +22,9 @@ const LABEL: Record<ScopeKind, string> = { 'trades-perps': 'Perps trades', 'trad
 
 export function HistoryNote({ address }: { address: string | null }) {
   const [state, setState] = useState<WalkState | null>(null);
-  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  /* The notification lane moves into the navbar once that is up (toast.tsx): follow it (slots.ts). */
+  const slot = useSlot('vs-toast-pin');
   const [open, setOpen] = useState(false);
-
-  // The notification lane moves into the navbar once that is up (toast.tsx): follow it.
-  useEffect(() => {
-    const find = () => setSlot(document.getElementById('vs-toast-pin'));
-    find();
-    const mo = new MutationObserver(find);
-    mo.observe(document.body, { childList: true, subtree: true });
-    return () => mo.disconnect();
-  }, []);
 
   useEffect(() => {
     setState(null);

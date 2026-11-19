@@ -129,6 +129,8 @@ button.lbp-chip img { flex: none; border-radius: 50%; }
   line-height: 1.5;
 }
 .lbp-empty { padding: 24px 16px; text-align: center; }
+/* Under the board: the as-of line of a kept answer, on the bar's 12px rhythm. */
+.lbp-sheet + .lbp-note { margin: 12px 0 0; }
 
 /* --- podium ------------------------------------------------------------------ */
 

@@ -144,8 +144,11 @@ function closure(roots) {
 }
 const initial = closure([...entry, ...preloads.filter((p) => p.endsWith('.js'))]);
 
-// What each landing page adds: its chunk (App.tsx's lazyPage table) and that chunk's static imports.
-const ROUTES = { trade: 'TradeDashboard', explore: 'Explore', copy: 'CopyPage', leaderboard: 'LeaderboardPage', portfolio: 'PortfolioDashboard', scan: 'ScanDashboard' };
+// What each landing page adds: its chunk (App.tsx's lazyPage table and SODEX_DOCS) and that chunk's static imports.
+const ROUTES = {
+  trade: 'TradeDashboard', explore: 'Explore', copy: 'CopyPage', leaderboard: 'LeaderboardPage', portfolio: 'PortfolioDashboard',
+  scan: 'ScanDashboard', bots: 'BotsPage', referrals: 'ReferralsPage', points: 'SoPointsPage',
+};
 
 // ---- sizes -----------------------------------------------------------------
 function sizes(list) {
@@ -223,12 +226,27 @@ for (const { p, bytes } of logoFiles) {
 const biggestLogos = logoFiles.sort((a, b) => b.bytes - a.bytes).slice(0, 25)
   .map(({ p, bytes }) => ({ file: p.slice(distDir.length + 1).replace(/\\/g, '/'), bytes }));
 
+/** Bytes per original source file of a chunk list (for a before/after diff of what a route's first render holds). */
+function sourcesOf(list) {
+  const out = {};
+  for (const f of list) {
+    const mp = join(assets, f + '.map');
+    if (!existsSync(mp)) continue;
+    const a = attribute(readFileSync(join(assets, f), 'utf8'), JSON.parse(readFileSync(mp, 'utf8')));
+    for (const [src, bytes] of Object.entries(a)) {
+      const k = src === '(unmapped)' ? src : src.replace(/\\/g, '/').replace(/^.*?\/(apps|packages|node_modules)\//, '$1/');
+      out[k] = (out[k] || 0) + bytes;
+    }
+  }
+  return Object.fromEntries(Object.entries(out).sort((x, y) => y[1] - x[1]));
+}
 const routes = {};
 for (const [route, name] of Object.entries(ROUTES)) {
   const chunk = allJs.find((f) => f.startsWith(`${name}-`));
   if (!chunk) continue;
   const extra = closure([chunk]).filter((f) => !initial.includes(f));
-  routes[route] = { chunk, extra: sizes(extra), firstRender: sizes([...initial, ...extra]) };
+  const first = [...initial, ...extra];
+  routes[route] = { chunk, extra: sizes(extra), firstRender: sizes(first), chunks: first, sources: sourcesOf(first) };
 }
 
 const report = {

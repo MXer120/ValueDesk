@@ -67,9 +67,11 @@
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-modal);
   color: var(--text);
-  /* Fade plus a subtle scale, in on the app's spring and out on its plain
-     ease-out: arriving may overshoot a hair, leaving should just go. */
-  animation: cdlg-in var(--dur-med) var(--ease-spring) both;
+  /* Fade plus a subtle scale, in on the app's travel curve (--ease-view, the
+     chart's: it leaves at once and lands softly; the --ease-spring this used
+     never overshot, it jumped 43% in the first frame) and out on the plain
+     ease-out: leaving should just go. */
+  animation: cdlg-in var(--dur-med) var(--ease-view) both;
 }
 .cdlg[data-state="closing"] {
   animation: cdlg-out var(--dur-fast) var(--ease-out) both;
@@ -307,15 +309,55 @@
    screen reader is already watching the live region when a message lands. */
 .cdlg-note:not(:empty) { margin-top: var(--sp-3); }
 
+/* --- phones: wallet apps (walletLinks.ts) ----------------------------------
+   One line above the list says what a row does (it leaves this page for the
+   wallet's app); the row's aside repeats it as a muted word and a glyph, never
+   a colour. A wallet with no documented link opens a small panel under its row
+   instead: where to paste, and the button that copies the address. */
+.cdlg-lead {
+  margin: 0 0 var(--sp-4);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cdlg-list .cdlg-lead { margin-bottom: var(--sp-2); }
+.cdlg-group { display: flex; flex-direction: column; gap: var(--sp-2); }
+.cdlg-glyph { flex: none; color: var(--muted); transition: transform var(--dur-fast) var(--ease-out); }
+.cdlg-glyph[data-open="true"] { transform: rotate(180deg); }
+.cdlg-paste {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-md);
+  animation: cdlg-fade-in var(--dur-med) var(--ease-out) both;
+}
+.cdlg-paste__text {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cdlg-paste__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.cdlg-paste__actions button { min-height: 44px; padding: 0 var(--sp-4); }
+
 /* --- phones: a bottom sheet ------------------------------------------------
-   Anchored to the bottom edge, full width, sliding up rather than scaling.
-   The safe-area insets keep the last row clear of the home indicator and the
-   notch in landscape (index.html sets viewport-fit=cover). */
-@media (max-width: 640px) {
+   Anchored to the bottom edge, full width, travelling in from below it and
+   out the same way - the app's phone sheet (styles.css .modal.is-sheet): one
+   breakpoint, the tab bar's 760px (it was 640, so from 641 to 760px More was a
+   sheet and Connect a centred card), the same --dur-sheet on --ease-view, the
+   same grip, dragged down to dismiss (motion.tsx useSheetDrag). Its AppKit
+   hand-off leaves and returns on these same two animations; the scrim keeps its
+   own clock. The safe-area insets keep the last row clear of the home indicator
+   and the notch in landscape (index.html sets viewport-fit=cover). */
+@media (max-width: 760px) {
   .cdlg-scrim {
     align-items: flex-end;
     padding: 0;
   }
+  /* The scrim fades out as long as the sheet takes to slide down, so the two end together. */
+  .cdlg-scrim[data-state="closing"] { animation-duration: 200ms; }
   .cdlg {
     max-width: none;
     max-height: calc(100dvh - var(--sp-6) - env(safe-area-inset-top, 0px));
@@ -326,9 +368,11 @@
       calc(var(--sp-4) + env(safe-area-inset-left, 0px));
     border-width: 1px 0 0;
     border-radius: var(--radius-md) var(--radius-md) 0 0;
-    animation-name: cdlg-sheet-in;
+    animation: vs-sheet-in var(--dur-sheet) var(--ease-view) backwards;
   }
-  .cdlg[data-state="closing"] { animation-name: cdlg-sheet-out; }
+  .cdlg[data-state="closing"] { animation: vs-sheet-out 200ms var(--ease-view) forwards; }
+  .cdlg > .sheet-grip { display: block; }
+  .cdlg-head { touch-action: none; }
   .cdlg-close { right: calc(var(--sp-4) + env(safe-area-inset-right, 0px)); }
   .cdlg-head { margin-bottom: var(--sp-4); }
   .cdlg-or { margin: var(--sp-4) 0; }

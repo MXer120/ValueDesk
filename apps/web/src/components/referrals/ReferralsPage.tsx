@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CREDIT_FEE, REFERRED_START_USD, TIER_SHARES, VIP_CREDIT_USD, WELCOME_CAP, WELCOME_CAP_DAYS, WELCOME_USD, type InviteMe, type InviteReferral } from '@sign/invites/claim';
 import { DASH, fmtUsd } from '../../format';
 import { track } from '../../analytics/usage';
+import { canShareNative, prefersNativeShare, shareNative } from '../../share/nativeShare';
 import { notify } from '../../toast';
 import { Modal } from '../Modal';
 import { openConnectDialog } from '../account/connect';
@@ -131,14 +132,15 @@ function LinkCard({ address, me }: { address: string; me: InviteMe | null }) {
     window.open(`https://x.com/intent/post?${new URLSearchParams({ text, url: link }).toString()}`, '_blank', 'noopener,noreferrer');
     track('invite.copy', { how: 'x' });
   };
+  /* The phone's share sheet (share/nativeShare.ts): straight to WhatsApp or Telegram. Refused: copied instead. */
   const share = async () => {
-    if (!link || typeof navigator.share !== 'function') return;
-    try {
-      await navigator.share({ url: link, text: 'Trade on ValueDesk with my link.' });
-      track('invite.copy', { how: 'share' });
-    } catch { /* closed */ }
+    if (!link) return;
+    const r = await shareNative({ url: link, text: `Trade on ValueDesk with my link: no ValueDesk fee on your first $${WELCOME_USD.toLocaleString('en-US')}.` });
+    if (r === 'shared') track('invite.copy', { how: 'share' });
+    else if (r === 'failed' || r === 'unsupported') void copy();
   };
-  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  const canShare = canShareNative();
+  const phone = prefersNativeShare();
   return (
     <section className="rf-link" aria-label="Your link">
       <div className="rf-link__head">
@@ -155,9 +157,19 @@ function LinkCard({ address, me }: { address: string; me: InviteMe | null }) {
         )}
         {code ? (
           <div className="rf-link__acts">
-            <Button variant="primary" icon="layers" onClick={() => void copy()}>Copy</Button>
-            <Button variant="secondary" onClick={post}>Post on X</Button>
-            {canShare && <IconButton icon="share" label="Share" variant="secondary" onClick={() => void share()} />}
+            {phone ? (
+              /* A phone: its share sheet first, copying beside it. */
+              <>
+                <Button variant="primary" icon="share" onClick={() => void share()}>Share</Button>
+                <Button variant="secondary" icon="layers" onClick={() => void copy()}>Copy</Button>
+              </>
+            ) : (
+              <>
+                <Button variant="primary" icon="layers" onClick={() => void copy()}>Copy</Button>
+                <Button variant="secondary" onClick={post}>Post on X</Button>
+                {canShare && <IconButton icon="share" label="Share" variant="secondary" onClick={() => void share()} />}
+              </>
+            )}
           </div>
         ) : own.state === 'none' ? (
           <a className="tf-btn is-secondary is-sm rf-link__go" href="https://sodex.com" target="_blank" rel="noopener noreferrer">Open SoDEX</a>

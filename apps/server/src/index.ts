@@ -388,7 +388,7 @@ app.addHook('onSend', async (_req, reply, payload) => {
  * read), the site Origin for a state-changing route, per-client limits.
  */
 const GATES = gatesFor({ hosted: HOSTED, beta: betaLock !== null });
-if (GATES.hosted) installHostedGate(app, { cfg: HOSTED_CONFIG, site: SITE_ORIGINS, admin: ADMIN_ORIGINS });
+if (GATES.hosted) installHostedGate(app, { cfg: HOSTED_CONFIG, site: SITE_ORIGINS, admin: ADMIN_ORIGINS, log: (obj, msg) => app.log.warn(obj, msg) });
 // The beta channel's lock, after the gate above (beta/gate.ts).
 if (GATES.beta && betaLock) installBetaGate(app, betaLock);
 if (GATES.loopback) app.addHook('onRequest', async (req, reply) => {

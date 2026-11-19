@@ -17,6 +17,7 @@
  * a real timestamp. See the announcements section.
  */
 import type { FastifyInstance } from 'fastify';
+import { AheadValue } from '../aheadValue.js';
 import { NET } from '../config.js';
 import { resolveAccountOnChain } from '../sodex/chain.js';
 
@@ -190,6 +191,21 @@ async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Prom
 
 /** Test seam: how many upstream answers are held. */
 export const _externalCacheSize = (): number => cache.size;
+
+type MaintenanceBody = { status?: string; maintenanceDuration?: number; createTime?: number; updateTime?: number };
+let maintenance: AheadValue<MaintenanceBody> | null = null;
+
+/**
+ * SoDEX's maintenance flag, held 15 s as `cached` held it, and read ahead while a banner polls (every 45 s per tab:
+ * web MaintenanceBanner.tsx; asked within 50 s keeps it ready). Made on first use, so BIZ_API is read as configured.
+ */
+function maintenanceFlag(): AheadValue<MaintenanceBody> {
+  maintenance ??= new AheadValue(() => getJson<MaintenanceBody>(`${BIZ_API}/biz/v1/maintenance/status`), { ttlMs: 15_000, askedWithinMs: 50_000 });
+  return maintenance;
+}
+
+/** Test seam: forget the held maintenance flag. */
+export const _resetMaintenanceFlag = (): void => { maintenance?.reset(); maintenance = null; };
 
 /** Highest page number any list here is asked for. SoDEX publishes its top 1,000 rows. */
 const MAX_PAGE = 1000;
@@ -431,14 +447,12 @@ export async function externalRoutes(app: FastifyInstance): Promise<void> {
    * reported as unreachable, with maintenance left false and status null.
    */
   app.get('/api/external/maintenance/status', async () => {
-    const url = `${BIZ_API}/biz/v1/maintenance/status`;
     const checkedAt = Date.now();
     try {
       // 15s TTL against a ~45s per-tab poll: several tabs share one request,
-      // but the flag is never more than 15s stale.
-      const data = await cached(url, 15_000, () =>
-        getJson<{ status?: string; maintenanceDuration?: number; createTime?: number; updateTime?: number }>(url),
-      );
+      // but the flag is never more than 15s stale. Read again just before it
+      // lapses while a tab polls (aheadValue.ts), so a poll never waits for SoDEX.
+      const data = await maintenanceFlag().get();
       const status = typeof data?.status === 'string' ? data.status : null;
       // `!== 'NORMAL'`, never `=== 'MAINTENANCE'` - see the route comment.
       const declared = status !== null && status !== 'NORMAL';

@@ -5,8 +5,7 @@
  * every bot shown.
  */
 import { marketLabel } from '../../bots/engines';
-import { botCard } from '../share/shareData';
-import { openShare } from '../share/host';
+import { shareCard, useShareBuildersPrefetch } from '../share/host';
 import { useTheme } from '../../theme';
 import { usePrivacy, type PrivacyKey } from '../../privacy';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -283,6 +282,7 @@ function Controls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
 }
 
 function TileControls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
+  useShareBuildersPrefetch();
   const state = botState(v);
   const ended = state === 'ended' || state === 'failed';
   const busy = ctx.busy === v.algo.id;
@@ -293,7 +293,7 @@ function TileControls({ v, ctx }: { v: AlgoView; ctx: BotsCtx }) {
         : <IconButton icon="pause" label="Pause" disabled={busy} onClick={() => void ctx.pause(v)} />)}
       {!ended && <StopMenu v={v} ctx={ctx} closing={state === 'closing'} compact />}
       {ended && <IconButton icon="trash" label="Delete" className="is-danger" disabled={busy} onClick={() => void ctx.remove(v)} />}
-      {v.bot && <IconButton icon="share" label="Share" onClick={() => { const c = botCard(v); if (c) openShare(c); }} />}
+      {v.bot && <IconButton icon="share" label="Share" onClick={() => shareCard((b) => b.botCard(v))} />}
     </span>
   );
 }

@@ -14,6 +14,9 @@ import { logLoadFailure, useLoadFailedToast } from '../LoadFailed';
 import {
   vsApi, VsError, type TraderProfile, type Venue, type VsFill, type Window,
 } from '../../vsApi';
+/* This view reads venues in its first render: their code comes with its page (exchange/venuesLazy.ts). */
+import * as venuesModule from '../../exchange/venues';
+import { bindVenues } from '../../exchange/venuesLazy';
 import type { Eip1193Provider } from '../../wallet';
 import { simulate, toSimFills, type Reconstruction, type SimResult } from './sim';
 import { indexPositions } from '../../indexFills';
@@ -23,6 +26,7 @@ import {
   DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, copyErrorInWords, normaliseSetup, parseSetup, readTarget, toCopySettings, windowStart,
   isAddress, type ParsedSetup, type SetupState,
 } from './setup';
+bindVenues(venuesModule);
 
 /**
  * Fills replayed per backtest. An answer shorter than this is the whole window.

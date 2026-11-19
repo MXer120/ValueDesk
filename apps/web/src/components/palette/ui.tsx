@@ -27,6 +27,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -59,6 +60,10 @@ import {
   type ScreenerRow,
   type ViewportBox,
 } from './model';
+import { Ink, Seg, useInk, type SegOption } from '../Seg';
+
+/* One of N and its ink live in components/Seg.tsx (the entry imports Seg; this module stays out of it). */
+export { Ink, Seg, useInk, type SegOption };
 
 /** The palette's layer: pop-overs are portalled into it (beside the dialog) and placed against it. */
 export const HostContext = createContext<HTMLElement | null>(null);
@@ -150,42 +155,7 @@ export function useBoxSize<T extends HTMLElement>(): [(el: T | null) => void, { 
   return [ref, size];
 }
 
-/**
- * The cohort pages' sliding ink: where the chosen `.is-on` child of `ref` sits,
- * re-measured on resize. `ready` turns true after the first placement, so the
- * ink appears in place and only slides on later changes.
- */
-export function useInk(ref: RefObject<HTMLElement>, key: string): { left: number; width: number; ready: boolean } | null {
-  const [ink, setInk] = useState<{ left: number; width: number; ready: boolean } | null>(null);
-  useLayoutEffect(() => {
-    const box = ref.current;
-    if (!box) return;
-    const measure = () => {
-      const el = box.querySelector<HTMLElement>(':scope > .is-on');
-      if (!el) return setInk(null);
-      setInk((cur) => {
-        const next = { left: el.offsetLeft, width: el.offsetWidth, ready: cur !== null };
-        return cur && cur.left === next.left && cur.width === next.width && cur.ready === next.ready ? cur : next;
-      });
-    };
-    measure();
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
-    ro?.observe(box);
-    return () => ro?.disconnect();
-  }, [ref, key]);
-  return ink;
-}
-
-export function Ink({ ink }: { ink: { left: number; width: number; ready: boolean } | null }) {
-  if (!ink) return null;
-  return (
-    <span
-      className={`cp-ink${ink.ready ? ' is-ready' : ''}`}
-      style={{ transform: `translateX(${ink.left}px)`, width: ink.width }}
-      aria-hidden="true"
-    />
-  );
-}
+/* useInk and Ink: components/Seg.tsx (re-exported above). */
 
 /* ---------------------------------------------------------------------------
  * Pop-overs (glass, pop set), portalled into the layer.
@@ -596,43 +566,7 @@ export function VenueChip({ venue, on, last = false, onToggle }: { venue: Venue;
   );
 }
 
-export interface SegOption<T extends string> {
-  id: T;
-  label: string;
-  icon?: ReactNode;
-  /** A count after the label ("Watchlist 3"); null hides it. */
-  count?: number | null;
-  title?: string;
-}
-
-/** One of N (DESIGN.md section 5, `.lbp-seg`): a bordered well, the chosen one under a sliding ink. */
-export function Seg<T extends string>({
-  options, value, onChange, label, size = 'md',
-}: {
-  options: readonly SegOption<T>[];
-  value: T;
-  onChange: (v: T) => void;
-  label: string;
-  size?: 'sm' | 'md';
-}) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const ink = useInk(ref, `${value}|${options.map((o) => `${o.id}:${o.label}:${o.count ?? ''}`).join(',')}`);
-  return (
-    <span ref={ref} className={`cp-seg cp-seg--${size}`} role="group" aria-label={label}>
-      {options.map((o) => {
-        const on = o.id === value;
-        return (
-          <button key={o.id} type="button" className={on ? 'is-on' : ''} aria-pressed={on} title={o.title} onClick={() => onChange(o.id)}>
-            {o.icon}
-            <span>{o.label}</span>
-            {typeof o.count === 'number' && o.count > 0 && <span className="cp-seg__n cp-num">{o.count}</span>}
-          </button>
-        );
-      })}
-      <Ink ink={ink} />
-    </span>
-  );
-}
+/* SegOption and Seg: components/Seg.tsx (re-exported above). */
 
 export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="cp-kbd">{children}</kbd>;
@@ -729,8 +663,15 @@ export interface NavProps {
 
 /** Row container: option semantics, hover-to-highlight on real pointer movement only. */
 export function NavRow({
-  navId, active, onHover, onRun, className, role = 'option', children, title,
-}: NavProps & { className: string; role?: 'option' | 'row'; children: ReactNode; title?: string }) {
+  navId, active, onHover, onRun, onPress, className, role = 'option', children, title,
+}: NavProps & {
+  className: string;
+  role?: 'option' | 'row';
+  children: ReactNode;
+  title?: string;
+  /** The press before the click: a market row starts its chart read here (chart/press.ts). */
+  onPress?: (e: ReactPointerEvent<HTMLDivElement>) => void;
+}) {
   return (
     <div
       id={`cp-opt-${navId}`}
@@ -741,6 +682,7 @@ export function NavRow({
       onMouseMove={() => {
         if (!active) onHover(navId);
       }}
+      onPointerDown={onPress}
       onClick={onRun}
       title={title}
     >

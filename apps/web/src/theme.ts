@@ -14,6 +14,8 @@ export type Theme = 'dark' | 'light';
 
 const KEY = 'vs.theme';
 const listeners = new Set<() => void>();
+/** Each theme's --bg: the browser toolbar's colour (`<meta name="theme-color">`, index.html). */
+export const THEME_COLOR: Record<Theme, string> = { dark: '#0e0e0e', light: '#efefed' };
 
 function stored(): Theme {
   try {
@@ -32,6 +34,8 @@ function apply(t: Theme): void {
   else root.removeAttribute('data-theme');
   root.style.colorScheme = t;
   document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', t);
+  // Android Chrome tints its toolbar with this: the page's --bg (styles.css, theme-light.css), as theme-boot.js sets it.
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[t]);
 }
 apply(current);
 

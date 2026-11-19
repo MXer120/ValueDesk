@@ -30,6 +30,7 @@ import { startAnalytics } from './analytics/usage';
 import { startVercelInsights } from './analytics/vercel';
 import { startAttention } from './attention';
 import { bootLanguage } from './i18n/store';
+import { sheetPending } from './bootShell';
 import './styles.css';
 import './theme-light.css';
 import './theme';
@@ -80,8 +81,14 @@ function Root() {
   );
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <Root />
-  </StrictMode>,
-);
+const mount = () =>
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <Root />
+    </StrictMode>,
+  );
+/* The stylesheet sits after index.html's static shell (tools/boot-shell.mjs): the first render waits for it if it is
+   somehow not in yet (bootShell.ts sheetPending), so nothing is ever drawn unstyled. In this frame when it is. */
+const sheet = sheetPending();
+if (sheet) void sheet.then(mount);
+else mount();

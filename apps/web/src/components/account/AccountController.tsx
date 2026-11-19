@@ -44,14 +44,15 @@ import {
   disableTrading as disableTradingInBrowser,
   enableTrading as enableTradingInBrowser,
 } from '../../trading/session';
-import { WalletConnectError } from '../../walletconnect';
+import { WalletConnectError, isMobileDevice, shouldRestoreOnLoad } from '../../walletconnect';
 import { WALLET_EVENTS, getAccountPending, setAccountPending, type TransferPreset } from './actions';
 import { useBuilderConsent } from './BuilderConsent';
 import { BuilderTermsFollower } from './BuilderTermsFollower';
 import { ConnectDialog } from './ConnectDialog';
 import { openConnectDialog } from './connect';
 import { useWalletSnapshot } from './useWallet';
-import { recordPendingSiteTerms, requireTerms } from '../../legal/acceptance';
+import { acceptedBefore, lookedAround, recordPendingSiteTerms, requireTerms, useAcceptanceRevision } from '../../legal/acceptance';
+import { autoConnectHere, walletBrowser, withoutConnectParam } from '../../walletLinks';
 import { SANCTIONED_WALLET_REASON, screenWallet } from '../../legal/screening';
 import { LOCATION_UNKNOWN } from '../../legal/geo';
 import { SIGN_TERMS_EVENT, legalStateFor } from '../../trading/legalGate';
@@ -106,6 +107,8 @@ export function AccountController({ address, provider, session, onSession }: Pro
 
   /* The same action the navbar's Connect button runs: OUR Connect dialog. */
   const connect = useCallback(() => openConnectDialog(), []);
+
+  useWalletBrowserConnect(wallet.status);
 
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -388,4 +391,24 @@ export function AccountController({ address, provider, session, onSession }: Pro
       )}
     </>
   );
+}
+
+/**
+ * Opened inside a wallet's own browser on a phone (a phone row of the Connect dialog sends visitors there,
+ * walletLinks.ts): connect straight away, once the site's welcome has been answered - the dialog then skips its list
+ * and the wallet's prompt comes up. Not when a saved connection is being restored, not after a Disconnect there, and
+ * once per tab. The `vsConnect` mark the link carried comes off the address either way.
+ */
+function useWalletBrowserConnect(status: string): void {
+  const accepted = useAcceptanceRevision();
+  useEffect(() => {
+    const clean = withoutConnectParam(window.location.href);
+    if (clean !== null) window.history.replaceState(window.history.state, '', clean);
+  }, []);
+  useEffect(() => {
+    if (status !== 'idle' && status !== 'disconnected') return;
+    if (shouldRestoreOnLoad() || !(acceptedBefore() || lookedAround())) return;
+    const here = walletBrowser(window as unknown as Parameters<typeof walletBrowser>[0], navigator.userAgent, isMobileDevice());
+    if (autoConnectHere(!!here)) openConnectDialog();
+  }, [status, accepted]);
 }

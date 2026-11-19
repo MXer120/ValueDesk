@@ -43,14 +43,35 @@ const log = logger('trade');
 export const TERMS_PATH = '/api/vs/builder/terms';
 /** However long the server says, never longer than this. */
 export const TERMS_TTL_CAP_MS = 15 * 60_000;
-/** Asked again this often while trading is on (well inside the server's ttl). */
-export const TERMS_REFRESH_MS = 4 * 60_000;
+/**
+ * While trading is on, held terms are asked for again this long before they run out - not on a fixed short clock
+ * (it was every 4 min against the server's 10 min ttl, apps/server/src/builder/terms.ts TERMS_TTL_MS: a call of the
+ * site's /api function each time, 728 a day on 2026-11-17). If that ask fails - no answer, an error answer (the /api
+ * function's own 502/504, the server's {ok:false}) or one that does not verify - it is retried a minute later
+ * (TERMS_RETRY_MS), three times: two of the retries fall inside the held terms' time, the third as they run out. An
+ * order in between is covered by ensureTerms, a fill by hintTerms, a verification the server is running by
+ * TERMS_PENDING_MS.
+ */
+export const TERMS_LEAD_MS = 3 * 60_000;
+/** The longest wait between two asks while terms are held (the 15 min cap less the lead). */
+export const TERMS_REFRESH_MS = TERMS_TTL_CAP_MS - TERMS_LEAD_MS;
+/** With no terms held (none signed, or the server still unreachable after the quick retries): asked again this often. */
+export const TERMS_IDLE_MS = 4 * 60_000;
 /** ...and never more often than this, whatever a ttl says. */
 const TERMS_MIN_REFRESH_MS = 30_000;
+
+/**
+ * When held terms valid for `validForMs` are asked for again: TERMS_LEAD_MS before they run out, but never before half
+ * their time (a short ttl), never sooner than 30 s and never later than TERMS_REFRESH_MS. The server's 10 min: 7 min.
+ */
+export function termsRefreshDelay(validForMs: number): number {
+  const v = Math.max(0, Number(validForMs) || 0);
+  return Math.min(TERMS_REFRESH_MS, Math.max(TERMS_MIN_REFRESH_MS, Math.floor(v / 2), v - TERMS_LEAD_MS));
+}
 /** After an answer that says a verification is running: look again this soon, this many times. */
 const TERMS_PENDING_MS = 30_000;
 const TERMS_PENDING_RUNS = 6;
-/** After a request that got no answer: try again this soon (three times, then the normal pace). */
+/** After an ask that got no answer, or that failed while terms are still held: try again this soon (three times, then the normal pace). */
 const TERMS_RETRY_MS = 60_000;
 /** A fill is reported to the server (hint=1) this long after it, and at most once per this gap. */
 const HINT_DELAY_MS = 3_000;
@@ -557,15 +578,18 @@ async function followRun(f: Follow, hint: boolean): Promise<void> {
   f.timer = undefined;
   const t = await refreshTerms(f.owner, { hint });
   if (follow !== f) return;
-  let delay = TERMS_REFRESH_MS;
+  let delay = TERMS_IDLE_MS;
   if (t) {
     f.failures = 0;
-    delay = Math.min(TERMS_REFRESH_MS, Math.max(TERMS_MIN_REFRESH_MS, Math.floor(t.validForMs / 2)));
+    delay = termsRefreshDelay(t.validForMs);
     if (t.display.pending && f.pendingRuns < TERMS_PENDING_RUNS) {
       f.pendingRuns += 1;
       delay = Math.min(delay, TERMS_PENDING_MS);
     } else if (!t.display.pending) f.pendingRuns = 0;
-  } else if (unreachable.has(f.owner) && f.failures < 3) {
+  } else if ((unreachable.has(f.owner) || currentTerms(f.owner)) && f.failures < 3) {
+    // No answer at all, or any failure while the held terms still run: an error answer reaches the browser as an
+    // answer (the /api function's own 502/504 when the origin is down), and waiting TERMS_IDLE_MS would let the held
+    // terms run out - the lowered fee falling back to the default - over one bad answer.
     f.failures += 1;
     delay = TERMS_RETRY_MS;
   }
@@ -573,8 +597,9 @@ async function followRun(f: Follow, hint: boolean): Promise<void> {
 }
 
 /**
- * Keep `address`'s terms current: ask now, then every few minutes (sooner while
- * the server says a verification is running). `null` stops. The trading session
+ * Keep `address`'s terms current: ask now, then again shortly before the held ones
+ * run out (termsRefreshDelay; sooner while the server says a verification is
+ * running, every TERMS_IDLE_MS while none are held). `null` stops. The trading session
  * calls this when trading is enabled or restored, and when it goes off.
  */
 export function followTerms(address: string | null): void {

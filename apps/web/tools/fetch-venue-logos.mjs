@@ -6,6 +6,7 @@
  * from our own origin.
  *
  *   node apps/web/tools/fetch-venue-logos.mjs
+ *   node apps/web/tools/heavy-logos.mjs      (then: a coin logo heavier than it is drawn, brought to 128 px)
  *
  * Kept apart from fetch-logos.mjs (SoDEX's set): that tool rebuilds
  * public/logos by swapping in a staged copy, and must not have to know about

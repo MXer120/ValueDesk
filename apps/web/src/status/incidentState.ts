@@ -66,6 +66,8 @@ export interface IncidentView {
   rows: Array<{ id: ServiceId; name: string; state: string; impact: 'partial' | 'down' }>;
   /** Its latest words, when there is more than the first. */
   note: string | null;
+  /** About this device's connection, not a service: no status page link (it would not load either). */
+  local?: boolean;
 }
 
 const NAME = new Map<string, string>(STATUS_SERVICES.map((s) => [s.id, s.name]));
@@ -96,6 +98,41 @@ export const DOWN_VIEW: IncidentView = {
   rows: [],
   note: null,
 };
+
+/** The browser says it has no network: this device's connection, not ValueDesk's service. */
+export const OFFLINE_VIEW: IncidentView = {
+  tone: 'warn',
+  title: "You're offline",
+  line: "Figures may be out of date; they update when you're back.",
+  since: '',
+  rows: [],
+  note: 'Check Wi-Fi or mobile data.',
+  local: true,
+};
+
+/**
+ * ValueDesk's API and SoDEX's own socket have both stopped answering this device, while the browser still says it is
+ * online: a stalled mobile link far more often than two services down at once. A ValueDesk outage leaves SoDEX
+ * reachable, so its card stays DOWN_VIEW.
+ */
+export const LINK_VIEW: IncidentView = {
+  tone: 'warn',
+  title: 'Your connection looks slow or offline',
+  line: "Figures may be out of date; they update when it's back.",
+  since: '',
+  rows: [],
+  note: 'Neither ValueDesk nor SoDEX is reaching this device. If other sites load, see the status page.',
+};
+
+/**
+ * The connection card, if any: offline (the browser's own word) first; then the data service down for HEALTH_DOWN_MS,
+ * worded for this device's link when SoDEX's socket has failed too (`sodexDown`), else for the service.
+ */
+export function connectionView(s: { online: boolean; down: boolean; sodexDown: boolean }): IncidentView | null {
+  if (!s.online) return OFFLINE_VIEW;
+  if (!s.down) return null;
+  return s.sodexDown ? LINK_VIEW : DOWN_VIEW;
+}
 
 /**
  * The indexer's automatic incidents open and close several times a day, each with a new id, so one X brought the next

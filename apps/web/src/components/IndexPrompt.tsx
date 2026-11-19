@@ -5,6 +5,7 @@
  * until that walk is finished, including while paused. Hover (or a tap on the
  * card) opens pause, speed, and clear.
  */
+import { useSlot } from '../slots';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { earliestFlowTime } from '../accountData';
@@ -74,7 +75,8 @@ export function IndexPrompt({ address }: { address: string | null }) {
   const [earliest, setEarliest] = useState<number | null>(null);
   const [pct, setPct] = useState<number | null>(null);
   const [held, setHeld] = useState(false);
-  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  /* The toasts' pin (slots.ts), followed when the rail moves between the corner and the navbar's lane. */
+  const slot = useSlot('vs-toast-pin');
   const [historyUp, setHistoryUp] = useState(false);
   useEffect(() => {
     const sync = () => setHistoryUp(document.body.dataset.vsHistory === 'on');
@@ -83,9 +85,6 @@ export function IndexPrompt({ address }: { address: string | null }) {
     return () => window.removeEventListener('vs-history', sync);
   }, []);
 
-  useEffect(() => {
-    setSlot(document.getElementById('vs-toast-pin'));
-  }, []);
 
   useEffect(() => subscribeIndex(setProgress), []);
 

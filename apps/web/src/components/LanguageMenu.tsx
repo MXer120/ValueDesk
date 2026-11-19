@@ -45,6 +45,42 @@ export function LanguageGlobe() {
   );
 }
 
+const Globe = ({ size }: { size: number }) => (
+  <svg className="navlang__globe" viewBox="0 0 20 20" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="10" cy="10" r="8" />
+    <path d="M2 10h16M10 2c2.4 2.2 3.6 4.9 3.6 8s-1.2 5.8-3.6 8c-2.4-2.2-3.6-4.9-3.6-8s1.2-5.800 3.6-8Z" />
+  </svg>
+);
+
+/**
+ * The row in More's sheet on a phone (PhoneTabBar.tsx), where the bar has no globe: one of More's rows - the globe,
+ * "Language", the language it is in now - opening the same searchable list.
+ */
+export function LanguageMoreRow() {
+  const lang = useLanguage();
+  const options = useOptions();
+  return (
+    <FxSelect
+      value={lang}
+      options={options}
+      onChange={(v) => void setLanguage(v)}
+      label="Language"
+      searchable
+      searchPlaceholder="Search languages"
+      triggerClassName="menu-row navmore__row navmore__lang"
+      listMinWidth={270}
+      listAlign="end"
+      trigger={(cur) => (
+        <>
+          <span className="menu-row__ic"><Globe size={18} /></span>
+          <span className="menu-row__label">Language</span>
+          <span className="navmore__langval">{cur?.label}</span>
+        </>
+      )}
+    />
+  );
+}
+
 /** The row in Settings > Profile. */
 export function LanguageRow() {
   const lang = useLanguage();

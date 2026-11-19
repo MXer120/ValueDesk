@@ -33,10 +33,12 @@ export function LiqIndicatorFeed({ chart, engine, symbol, names, ids }: { chart:
   const coin = engine === 'perps' ? coinOfSymbol(symbol) : null;
   const heatOn = !!chart && !!coin && names.includes(LIQ_HEAT);
   const mapOn = !!chart && !!coin && names.includes(LIQ_MAP);
-  // The snapshots of the window on the chart, in tiles, and the scale over the 30 days (components/liqmap/histTiles.ts).
+  // The snapshots of the window on the chart, in tiles, and the scale over the 30 days (components/liqmap/histTiles.ts):
+  // nothing read before the chart reports its window, by side with every band (slim rows), the snapshot each bar draws.
   const view = useChartWindow(chart, heatOn);
-  const hist = useHistTiles(heatOn ? coin : null, SCAN_VENUES, view);
-  const now = usePolled<HeatApi>(mapOn ? `${coin}|liq-now` : null, (s) => vsApi.liquidations(coin!, SCAN_VENUES, 'fine', s, []), 30_000);
+  const hist = useHistTiles(heatOn ? coin : null, SCAN_VENUES, view, [], { waitForView: true, slim: true, draw: view?.draw ?? null });
+  // The levels now summed to the Fine bar the map draws, on the server (bar=fine: a third of the buckets, the same bars).
+  const now = usePolled<HeatApi>(mapOn ? `${coin}|liq-now|fine` : null, (s) => vsApi.liquidations(coin!, SCAN_VENUES, 'fine', s, [], undefined, 'fine'), 30_000);
   useEffect(() => {
     if (!chart || !heatOn) return;
     const data: HeatData = { points: hist.points, side: 'both', scale: hist.scale('both', LEV_BANDS) };

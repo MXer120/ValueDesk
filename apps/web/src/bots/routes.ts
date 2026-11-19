@@ -12,6 +12,7 @@
  * work ships without it (owner, 2026-11-07).
  */
 import { useEffect, useState } from 'react';
+import { openPath, scrollPageTop } from '../nav';
 
 const env = (import.meta as { env?: { DEV?: boolean; VITE_BOTS?: string; VITE_CHANNEL?: string } }).env;
 export const BOTS_ON: boolean = !!env?.DEV || env?.VITE_BOTS === '1';
@@ -44,9 +45,15 @@ export function pathForBots(v: BotsView): string {
 /** Go to a Bots page: a history entry of its own, and every listener (the router's included) reads the URL again. */
 export function goBots(v: BotsView): void {
   const path = pathForBots(v);
+  // From another page: the app's own navigation (nav.ts), which waits for the Bots code with the tab lit.
+  if (!/^\/bots(\/|$)/.test(window.location.pathname)) {
+    openPath(path);
+    return;
+  }
   if (window.location.pathname + window.location.search !== path) window.history.pushState(null, '', path);
   window.dispatchEvent(new PopStateEvent('popstate'));
-  window.scrollTo?.({ top: 0 });
+  // The page scroller, not the window (which never scrolls: styles.css .appcontent).
+  scrollPageTop();
 }
 
 export function useBotsView(): BotsView {

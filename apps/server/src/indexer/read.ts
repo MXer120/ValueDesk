@@ -11,7 +11,7 @@ import { VENUES } from '../valuedesk/types.js';
 import { mergeBoards } from './boards.js';
 import { closeReader, reader } from './reader.js';
 import type { CohortBookRow, CohortMemberRow, NetRow } from './store.js';
-import { IndexStore, type BoardRow, type HistoryKind } from './store.js';
+import { IndexStore, type BoardMeta, type BoardRow, type HistoryKind } from './store.js';
 import { BOARD_SIZE, MIN_TRADES, windowStart, type BoardFilter, type Side } from './windows.js';
 import {
   Aggregator, MARGIN_SIBLING, TAIL_EQUITY, cohortsOf, filterKey, holdsPosition, longShare, netWallet, perpEquity, scopeKey, scopeWalletSteps, walletRow,
@@ -117,11 +117,132 @@ function toRow(r: BoardRow, window: BoardWindow, rank: number): TraderRow {
     winRateFrom: r.winFrom ?? null,
     trades: r.trades,
     tradesCapped: r.tradesCapped,
-    assets: r.assets,
+    // A copy: the board's rows are kept between reads (boardOf), and a row sent on may be decorated.
+    assets: [...r.assets],
     rank,
     // Movement on THIS board; a merged multi-venue page has no single previous board.
     rankChange: r.rankChange ?? null,
   };
+}
+
+// --- boards and netted pools kept between reads -------------------------------------------------
+//
+// A leaderboard read used to read its boards again (100 rows each, a JSON.parse per row) and, for the netted view, every
+// candidate of the venues' pools (a join over trader_win and accounts, a JSON.parse per row) on this thread, per request.
+// Both are kept now, each against the version of what it was read from, and read again only once that moved:
+//   - a board against its meta row (writeBoard replaces rows and meta in one transaction, with a new updated_at);
+//   - a netted pool against its venues' trader_win versions (store.ts traderWinVersion: writeTraderWin moves it).
+// The version is read before and after the rows, and the rows are kept only when it did not move in between: what is kept
+// is always exactly what a read of that version returns. Nothing else of a page is kept: the sodex trade note, the
+// boards' meta rows and the SoDEX account ids on screen are read per request as before. Kept per connection: a file
+// opened again (another file, a restored one) starts with nothing kept.
+
+/**
+ * Bounds, least recently used first out: every board there is (5 venues x 6 windows x 2 sides x 2 filters = 120, ~100
+ * rows each), and the netted pools of the venue sets and windows asked lately (each up to a few thousand rows, ~1 MB).
+ */
+const BOARDS_KEPT = 128;
+const NETS_KEPT = 24;
+interface NetKept {
+  version: string;
+  /** Every candidate, ranked (best first for top, worst first for worst). */
+  rows: NetRow[];
+  /** The board-sized pick per trade filter, worked out on first use. */
+  picks: Map<BoardFilter, { picked: NetRow[]; pending: number }>;
+}
+const keptBy = new WeakMap<IndexStore, { boards: Map<string, { meta: string; rows: BoardRow[] }>; nets: Map<string, NetKept> }>();
+function keptOf(s: IndexStore): { boards: Map<string, { meta: string; rows: BoardRow[] }>; nets: Map<string, NetKept> } {
+  let k = keptBy.get(s);
+  if (!k) keptBy.set(s, (k = { boards: new Map(), nets: new Map() }));
+  return k;
+}
+/** Reads served from what was kept, and read again (for /api/vs/index/status and the tests). */
+export const keptStats = { boardHit: 0, boardRead: 0, netHit: 0, netRead: 0 };
+
+function keep<V>(m: Map<string, V>, key: string, v: V, max: number): void {
+  m.delete(key);
+  m.set(key, v);
+  while (m.size > max) m.delete(m.keys().next().value!);
+}
+
+/** A hit moves to the back: the least recently used go first. */
+function touch<V>(m: Map<string, V>, key: string, v: V): void {
+  m.delete(key);
+  m.set(key, v);
+}
+
+const metaKey = (m: { updatedAt: number; sourceAt: number; complete: boolean; pending: number; scanned: number; note: string | null; rankSince?: number | null }): string =>
+  `${m.updatedAt}|${m.sourceAt}|${m.complete ? 1 : 0}|${m.pending}|${m.scanned}|${m.note ?? ''}|${m.rankSince ?? ''}`;
+
+/** store.readBoard, its rows kept while the board's meta row is the one they were read with. */
+function boardOf(s: IndexStore, venue: Venue, window: BoardWindow, side: Side, filter: BoardFilter): { meta: BoardMeta; rows: BoardRow[] } | null {
+  const meta = s.readBoardMeta(venue, window, side, filter);
+  if (!meta) return null;
+  const k = `${venue}|${window}|${side}|${filter}`;
+  const mk = metaKey(meta);
+  const kept = keptOf(s).boards;
+  const hit = kept.get(k);
+  if (hit && hit.meta === mk) {
+    keptStats.boardHit++;
+    touch(kept, k, hit);
+    return { meta, rows: hit.rows };
+  }
+  const b = s.readBoard(venue, window, side, filter);
+  if (!b) return null;
+  keptStats.boardRead++;
+  // Kept only when no build landed between the two reads of its meta row.
+  if (metaKey(b.meta) === mk) keep(kept, k, { meta: mk, rows: b.rows }, BOARDS_KEPT);
+  return b;
+}
+
+/** store.netCandidates ranked, kept while the venues' trader_win versions stand. `seen.memo` says which it was. */
+function netPoolOf(s: IndexStore, set: readonly Venue[], window: BoardWindow, side: Side, seen?: { memo?: string }): NetKept {
+  const k = `${set.join(',')}|${window}|${side}`;
+  const v0 = s.traderWinVersion(set, window);
+  const netKept = keptOf(s).nets;
+  const hit = v0 === null ? undefined : netKept.get(k);
+  if (hit && hit.version === v0) {
+    keptStats.netHit++;
+    if (seen) seen.memo = 'hit';
+    touch(netKept, k, hit);
+    return hit;
+  }
+  const rows = s.netCandidates(set, window, side);
+  rows.sort((a, b) => (side === 'worst' ? a.pnl - b.pnl : b.pnl - a.pnl));
+  keptStats.netRead++;
+  if (seen) seen.memo = v0 === null ? 'off' : 'miss';
+  const pool: NetKept = { version: v0 ?? '', rows, picks: new Map() };
+  if (v0 !== null && rows.length && s.traderWinVersion(set, window) === v0) keep(netKept, k, pool, NETS_KEPT);
+  return pool;
+}
+
+/** The board-sized pick of a ranked pool under a trade filter (netPage's rule), worked out once per pool and filter. */
+function pickOf(pool: NetKept, side: Side, filter: BoardFilter): { picked: NetRow[]; pending: number } {
+  const hit = pool.picks.get(filter);
+  if (hit) return hit;
+  const picked: NetRow[] = [];
+  let pending = 0;
+  for (const r of pool.rows) {
+    if (picked.length >= BOARD_SIZE) break;
+    if (side === 'top' ? r.pnl <= 0 : r.pnl >= 0) break;
+    if (filter === 'active') {
+      if ((r.trades ?? 0) < MIN_TRADES) {
+        if (!r.exact) pending++;
+        continue;
+      }
+    }
+    picked.push(r);
+  }
+  const out = { picked, pending };
+  pool.picks.set(filter, out);
+  return out;
+}
+
+/** Tests: forget every kept board and pool of the reader in use. */
+export function clearKeptBoards(): void {
+  const s = reader();
+  if (s) keptBy.delete(s);
+  keptStats.boardHit = keptStats.boardRead = keptStats.netHit = keptStats.netRead = 0;
 }
 
 const WINDOW_WORD: Record<BoardWindow, string> = {
@@ -141,7 +262,7 @@ export function boardPage(
   const venues: readonly Venue[] = venue === 'all' ? VENUES : typeof venue === 'string' ? [venue] : venue;
   let boards;
   try {
-    boards = venues.map((v) => s.readBoard(v, window, side, filter)).filter((b) => b !== null);
+    boards = venues.map((v) => boardOf(s, v, window, side, filter)).filter((b) => b !== null);
   } catch {
     return null;
   }
@@ -172,14 +293,15 @@ export function boardPage(
 
 const VENUE_WORD: Record<Venue, string> = { sodex: 'SoDEX', hyperliquid: 'Hyperliquid', tradexyz: 'trade.xyz', lighter: 'Lighter', arcus: 'Arcus' };
 
-function netToRow(r: NetRow, window: BoardWindow, rank: number): TraderRow {
+function netToRow(r: NetRow, window: BoardWindow, rank: number, accountId: number | null | undefined = r.accountId): TraderRow {
   const wr = winRateOf(r.wins, r.closes, r.winExact);
   return {
     venue: r.venues[0]!,
-    venues: r.venues,
+    // A copy: the netted pool is kept between reads (netPoolOf).
+    venues: [...r.venues],
     address: r.address,
     label: shownLabel(r.address, r.label),
-    accountId: r.accountId ?? undefined,
+    accountId: accountId ?? undefined,
     accountValue: r.accountValue,
     pnl: { [window]: r.pnl },
     roi: {},
@@ -207,38 +329,32 @@ export function netPage(
   side: Side,
   filter: BoardFilter,
   o: { limit: number; offset: number; q?: string },
+  seen?: { memo?: string },
 ): BoardPage | null {
   const s = reader();
   if (!s) return null;
-  let rows: NetRow[];
+  let pool: NetKept;
   // Hyperliquid's own figures already include its xyz dex: netting both would count xyz twice.
   const set = venues.includes('hyperliquid') ? venues.filter((v) => v !== 'tradexyz') : venues;
   try {
-    rows = s.netCandidates(set, window, side);
+    pool = netPoolOf(s, set, window, side, seen);
   } catch {
     return null;
   }
-  if (!rows.length) return null;
-  rows.sort((a, b) => (side === 'worst' ? a.pnl - b.pnl : b.pnl - a.pnl));
-  const picked: NetRow[] = [];
-  let pending = 0;
-  for (const r of rows) {
-    if (picked.length >= BOARD_SIZE) break;
-    if (side === 'top' ? r.pnl <= 0 : r.pnl >= 0) break;
-    if (filter === 'active') {
-      if ((r.trades ?? 0) < MIN_TRADES) {
-        if (!r.exact) pending++;
-        continue;
-      }
-    }
-    picked.push(r);
-  }
+  if (!pool.rows.length) return null;
+  const { picked, pending } = pickOf(pool, side, filter);
   const q = o.q?.trim().toLowerCase();
   const shown = q ? picked.filter((r) => r.address.includes(q) || labelMatches(r.address, r.label, q)) : picked;
-  const metas = venues.map((v) => s.readBoard(v, window, side, filter)?.meta).filter((m) => !!m);
+  // The meta rows alone: the boards' own rows were read here only for these (100 rows and a JSON.parse each, per venue).
+  const metas = venues.map((v) => s.readBoardMeta(v, window, side, filter)).filter((m) => !!m);
   const which = side === 'worst' ? 'Lowest' : 'Highest';
   const who = filter === 'active' ? ', among traders with more than one trade in that window' : '';
-  const shownRows = shown.slice(o.offset, o.offset + o.limit).map((r, i) => netToRow(r, window, o.offset + i + 1));
+  // The SoDEX account id of each row on screen, read now (the pool is kept by its trader_win version, which an id learned
+  // later does not move): what the pool's join with accounts would give on this read.
+  const shownRows = shown.slice(o.offset, o.offset + o.limit).map((r, i) => netToRow(
+    r, window, o.offset + i + 1,
+    r.venues.includes('sodex') ? s.account('sodex', r.address)?.accountId ?? undefined : undefined,
+  ));
   const sodexTrades = markSodexTrades(shownRows, window);
   return {
     ...(sodexTrades ? { sodexTrades } : {}),
@@ -313,7 +429,7 @@ export function indexPool(venue: Venue): { rows: TraderRow[]; updatedAt: number 
   try {
     for (const window of ['1d', '7d', '30d', 'all'] as const) {
       for (const side of ['top', 'worst'] as const) {
-        const b = s.readBoard(venue, window, side, 'any');
+        const b = boardOf(s, venue, window, side, 'any');
         if (!b) continue;
         updatedAt = Math.max(updatedAt, b.meta.sourceAt || b.meta.updatedAt);
         for (const r of b.rows) {
@@ -440,6 +556,54 @@ let warmKey: string | null = null;
 let rebuildFailedAt = 0;
 /** Counters for tests and diagnostics: loads built inside a read, and from behind. */
 const built = { inPlace: 0, behind: 0 };
+
+// --- how long a cohort answer stays what it is ---------------------------------------------------
+//
+// The API thread keeps the cohort answers it was sent (cohortThread.ts) and hands one out again only while this side
+// would build the very same text. An answer is the load in use plus the few kept reads beside it, so a read says:
+//   - which load it came from (answersIdentity: a load swapped in, or a kept read thrown away, moves it - answersMoved);
+//   - until when the kept reads it used stand (answerWithin): the load's own minute (after it a read starts a rebuild),
+//     the series kept a minute per start minute (history), the open interest check kept 30 s (booksOverOi).
+
+let answerUntil = Infinity;
+let answersEpoch = 0;
+const answersListeners = new Set<() => void>();
+
+function validFor(until: number): void {
+  if (until < answerUntil) answerUntil = until;
+}
+
+function answersMoved(): void {
+  answersEpoch++;
+  for (const l of answersListeners) {
+    try { l(); } catch { /* a listener's own trouble */ }
+  }
+}
+
+/** Called whenever an answer read now could differ from one read before for reasons no time bound covers. */
+export function onAnswersMoved(l: () => void): () => void {
+  answersListeners.add(l);
+  return () => { answersListeners.delete(l); };
+}
+
+/** What the cohort answers are read from now (null: no load yet - nothing is kept then). */
+export function answersIdentity(): string | null {
+  return cohortLoad ? `${answersEpoch}|${cohortLoad.gen}|${cohortLoad.at}` : null;
+}
+
+/**
+ * A synchronous cohort read, with the time until which the same read gives the same answer (`until`, ms) and what it was
+ * read from (`ident`). Nothing may be awaited inside `read`.
+ */
+export function answerWithin<T>(read: () => T): { value: T; until: number; ident: string | null } {
+  answerUntil = Infinity;
+  try {
+    const value = read();
+    return { value, until: answerUntil, ident: answersIdentity() };
+  } finally {
+    answerUntil = Infinity;
+  }
+}
 
 /** Run steps to the end, here and now. */
 function runNow<T>(steps: Generator<void, T>): T {
@@ -1264,6 +1428,7 @@ async function rebuildBehind(s: IndexStore): Promise<void> {
     const p = runBehind(loadSteps(s, started, wantedNow(started)));
     inflight = p;
     cohortLoad = await p;
+    answersMoved();
     built.behind++;
     lastRebuildMs = Date.now() - started;
   } catch {
@@ -1287,6 +1452,7 @@ function loadCohorts(s: IndexStore): CohortLoad {
     // While a rebuild from behind is half way through the rows kept between loads, this one reads
     // its own (in full) and leaves them to it.
     cohortLoad = runNow(loadSteps(s, now, [], !rebuilding));
+    answersMoved();
     built.inPlace++;
   } else if (now - cohortLoad.at >= LOAD_TTL_MS && !rebuilding) {
     // It expired while nobody was asking (the rebuilds stop then). Building it
@@ -1298,6 +1464,8 @@ function loadCohorts(s: IndexStore): CohortLoad {
     void rebuildBehind(s);
   }
   armRebuild(s);
+  // A read after the load's minute starts its rebuild (above): an answer kept for this read is not handed out past it.
+  validFor(cohortLoad.at + LOAD_TTL_MS);
   return cohortLoad;
 }
 
@@ -1347,10 +1515,12 @@ export const _cohortLoad = {
     if (!s) throw new Error('no index');
     const was = cohortLoad;
     cohortLoad = runNow(loadSteps(s, Date.now(), [], false));
+    answersMoved();
     try {
       return fn();
     } finally {
       cohortLoad = was;
+      answersMoved();
     }
   },
   /** Drop the rows kept between loads: the next load reads everything (as after a gap). */
@@ -1384,6 +1554,7 @@ export const _cohortLoad = {
     if (rebuildTimer) clearTimeout(rebuildTimer);
     rebuildTimer = null;
     cohortLoad = null;
+    answersMoved();
     cohortState = null;
     stateToken++;
     loadKind.full = 0;
@@ -1417,13 +1588,25 @@ function thin<T>(rows: T[], max: number): T[] {
 const historyKept = new Map<string, { at: number; out: Map<string, CohortPoint[]> }>();
 const HISTORY_KEEP_MS = 60_000;
 
-function history(s: IndexStore, scope: string, fromT: number, f: CohortFilter, cohort?: CohortId): Map<string, CohortPoint[]> {
-  const key = `${scope}|${Math.floor(fromT / 60_000)}|${f.coin ?? ''}|${f.sector ?? ''}|${cohort ?? ''}`;
+/** `fromT` = `now` - the range: `now` says when the key (its start minute) moves on, so an answer kept beside it does too. */
+function history(s: IndexStore, scope: string, fromT: number, f: CohortFilter, cohort?: CohortId, now = Date.now()): Map<string, CohortPoint[]> {
+  const minute = Math.floor(fromT / 60_000);
+  const key = `${scope}|${minute}|${f.coin ?? ''}|${f.sector ?? ''}|${cohort ?? ''}`;
+  validFor(now + (minute + 1) * 60_000 - fromT);
   const hit = historyKept.get(key);
-  if (hit && Date.now() - hit.at < HISTORY_KEEP_MS) return hit.out;
+  if (hit && Date.now() - hit.at < HISTORY_KEEP_MS) {
+    validFor(hit.at + HISTORY_KEEP_MS);
+    return hit.out;
+  }
   const out = historyRead(s, scope, fromT, f, cohort);
-  if (historyKept.size >= 200) historyKept.clear();
-  historyKept.set(key, { at: Date.now(), out });
+  if (historyKept.size >= 200) {
+    historyKept.clear();
+    // Every other key is read again from the file on its next use, which may hold rows written since.
+    answersMoved();
+  }
+  const at = Date.now();
+  historyKept.set(key, { at, out });
+  validFor(at + HISTORY_KEEP_MS);
   return out;
 }
 
@@ -1478,6 +1661,7 @@ export function cohortInternal(): { at: number; internal: ReadonlyMap<string, nu
  */
 export function excludedNow(): Array<ExcludedWallet & { from: readonly ExcludedFrom[]; equity: number | null; long: number; short: number; coins: Array<{ coin: string; usd: number }>; at: number | null }> {
   const load = cohortLoad;
+  if (load) validFor(load.at + LOAD_TTL_MS);
   return EXCLUDED_WALLETS.map((w) => {
     const b = load?.excluded.get(`${w.venue}|${w.address}`);
     let long = 0;
@@ -1511,7 +1695,8 @@ export function cohortsRead(venues: readonly Venue[], f: CohortFilter): CohortsR
   if (!s) return null;
   const load = loadCohorts(s);
   const stats = statsOf(load, venues, f).cohorts;
-  const series = history(s, scopeKey(venues), Date.now() - RANGE_MS['7d'], f);
+  const now = Date.now();
+  const series = history(s, scopeKey(venues), now - RANGE_MS['7d'], f, undefined, now);
   // The asset picker: every coin held in this scope, unfiltered.
   const coins = statsOf(load, venues, {}).all.markets
     .map((m) => ({ coin: m.coin, sector: m.sector, gross: m.long + m.short }))
@@ -1539,7 +1724,8 @@ export function cohortDetail(venues: readonly Venue[], cohort: CohortId, range: 
   if (!s) return null;
   const load = loadCohorts(s);
   const stat = statsOf(load, venues, f).cohorts.find((x) => x.id === cohort)!;
-  const series = history(s, scopeKey(venues), Date.now() - RANGE_MS[range], f, cohort).get(cohort) ?? [];
+  const now = Date.now();
+  const series = history(s, scopeKey(venues), now - RANGE_MS[range], f, cohort, now).get(cohort) ?? [];
   return {
     venues: [...venues], filter: f, at: load.booksAt, asOf: load.at, range, cohort: stat,
     series: thin(series, 500), coverage: Object.fromEntries(venues.map((v) => [v, load.coverage[v]])),
@@ -1623,7 +1809,8 @@ export function cohortFocus(venues: readonly Venue[], f: CohortFilter, range: Co
   const load = loadCohorts(s);
   const { cohorts: stats, all } = statsOf(load, venues, f);
   const total = { long: all.long, short: all.short, upnl: all.upnl, wallets: all.wallets, inProfit: all.inProfit, inLoss: all.inLoss };
-  const hist = history(s, scopeKey(venues), Date.now() - RANGE_MS[range], f);
+  const now = Date.now();
+  const hist = history(s, scopeKey(venues), now - RANGE_MS[range], f, undefined, now);
   return {
     venues: [...venues],
     filter: f,
@@ -1708,6 +1895,7 @@ export function overOiRows(status: unknown, now: number, maxAgeMs = OVER_OI_MAX_
 export function booksOverOi(venues: readonly Venue[], coin?: string | null): BooksOverOi[] {
   const now = Date.now();
   if (!overOiCache || now - overOiCache.at >= OVER_OI_CACHE_MS) overOiCache = { at: now, rows: overOiRows(indexerStatus(), now) };
+  validFor(overOiCache.at + OVER_OI_CACHE_MS);
   return overOiCache.rows.filter((r) => venues.includes(r.venue) && (!coin || r.coin === coin));
 }
 

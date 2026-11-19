@@ -35,7 +35,7 @@ import { VenueLogo } from '../VenueLogo';
 import { fmtPx, fmtUsdShort } from '../explore/model';
 import { usePolled } from '../explore/cohorts/parts';
 import { useLiveHeat, type FineSub } from './liveHeat';
-import { useHistTiles } from './histTiles';
+import { drawGridOf, useHistTiles } from './histTiles';
 import { poolOf, useHistFine, type FineView } from './histFine';
 import { WalletView, type Res, type Side, type StepsView, type Unit, type ViewChange } from './WalletView';
 import { Chart } from '../Chart';
@@ -249,23 +249,17 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   // switching to $100").
   const winKey = `${coin}|${prefs.view}`;
   const [winAt, setWinAt] = useState<{ k: string; w: [number, number, number] } | null>(null);
-  // The time window, the chart's bar and where its bars begin (modulo the bar): the fine tiles read the snapshot each bar draws.
-  const [timesAt, setTimesAt] = useState<{ k: string; w: [number, number, number, number] } | null>(null);
+  // The time window, the chart's bar and where its bars begin (modulo the bar): the fine tiles read the snapshot each bar
+  // draws; and whether every bar starts on that grid (1: the snapshots' tiles may be cut to it too, histTiles.ts drawGridOf).
+  const [timesAt, setTimesAt] = useState<{ k: string; w: [number, number, number, number, number] } | null>(null);
   const win = winAt && winAt.k === winKey ? winAt.w : null;
   const times = timesAt && timesAt.k === winKey ? timesAt.w : null;
   const onWindow = useCallback((lo: number, hi: number, px: number) => setWinAt((x) => (x && x.k === winKey && x.w[0] === lo && x.w[1] === hi && x.w[2] === px ? x : { k: winKey, w: [lo, hi, px] })), [winKey]);
-  const onTimes = useCallback((a: number, b: number, bar: number, off: number) => setTimesAt((x) => (x && x.k === winKey && x.w[0] === a && x.w[1] === b && x.w[2] === bar && x.w[3] === off ? x : { k: winKey, w: [a, b, bar, off] })), [winKey]);
+  const onTimes = useCallback((a: number, b: number, bar: number, off: number, grid: number) => setTimesAt((x) => (x && x.k === winKey && x.w[0] === a && x.w[1] === b && x.w[2] === bar && x.w[3] === off && x.w[4] === grid ? x : { k: winKey, w: [a, b, bar, off, grid] })), [winKey]);
   const { symbols } = useSymbols('perps');
 
   const vkey = chosen.join(',');
-  // The historical view's snapshots (30 days): every snapshot's time, price and step and the colour
-  // scales, and the rows of the time and price window on screen and around it, in tiles (histTiles.ts;
-  // the wallet filter in one piece). Its newest: width and price (the resolution's ladder there).
   const histOn = prefs.view === 'history';
-  const hist = useHistTiles(histOn ? coin : null, chosen, win && times ? { t0: times[0], t1: times[1], lo: win[0], hi: win[1] } : null, wallets);
-  const coarsePts = histOn ? hist.points : EMPTY_POINTS;
-  const newest = histOn ? hist.list.at(-1) : undefined;
-  const histAt = newest ? { st: newest.st, p: newest.p } : null;
   // The historical view's strip of the levels now (its newest column reads them too).
   const strip = histOn && prefs.strip === true;
   // Live over the WebSocket (a second apart); over HTTP, a read a minute, while the socket is down.
@@ -282,7 +276,10 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
     (s) => vsApi.liquidations(coin, chosen, 'fine', s, wallets),
     wallets.length ? 10_000 : 60_000,
   );
-  const apiData = wallets.length ? heat.data : live.data ?? heat.data;
+  /* A kept live snapshot (shown dimmed with its as-of) gives way to the HTTP answer as soon as that is in: with the
+     socket slow or down it must not stay on screen past the fresh answer (the stale-data rule). */
+  const keptLive = live.keptAt !== null && !!heat.data && heat.data.coin === coin;
+  const apiData = wallets.length || keptLive ? heat.data : live.data ?? heat.data;
   const raw = useMemo(() => (apiData ? fromApi(apiData, side, lev) : null), [apiData, side, levKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const stripData = useMemo(() => (strip ? mapData(apiData, { side, lev, colorBy }) : null), [strip, apiData, side, levKey, colorBy]); // eslint-disable-line react-hooks/exhaustive-deps
   const h = raw;
@@ -290,12 +287,9 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const unit: Unit = prefs.unit === 'coin' ? 'coin' : 'usd';
   // The resolution: the coin's ladder from its price and SoDEX tick, the level kept for it. A panel
   // set to Medium or Coarse before the steps keeps Auto until a step is picked.
-  const price = h?.price ?? (histOn ? histAt?.p ?? null : null);
-  const ladder = price ? stepLadder(price, tickOf(coin, symbols, price)) : [];
   const initial: StepLevel = res === 'fine' ? 0 : 'auto';
   const kept = prefs.steps && typeof prefs.steps === 'object' ? prefs.steps[coin] : undefined;
   const level: StepLevel = kept === 'auto' || (typeof kept === 'number' && kept >= 0) ? kept : initial;
-  const picked = stepAt(level, ladder);
   // The step drawn: the one picked, or Auto's (owner 2026-11-01: "auto is bad as its just the 100
   // steps no matter what"): about PX_PER_CELL of the window's pixels a cell (Fine / Medium / Coarse
   // under it), from the widths the live data holds - the stream's and, near the price, its fine
@@ -303,13 +297,33 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
   const rawStep = h ? h.step / streamK : 0;
   const fm = live.fineMeta;
   const inReach = !!(fm && win && win[0] >= fm.lo && win[1] <= fm.hi);
-  let step: number | null = picked;
-  // Only once the view has a size: unmeasured, it spans a pixel and Auto would pick the coarsest width.
-  if (level === 'auto' && win && win[2] >= MIN_PX) {
-    const target = ((win[1] - win[0]) / win[2]) * PX_PER_CELL[res];
-    step = histOn ? (histAt ? autoStep(target, histSteps(histAt.st, ladder.at(-1) ?? 0)) : null)
-      : rawStep > 0 ? autoStep(target, streamSteps(rawStep, inReach ? fm!.st : null)) : null;
-  }
+  // Of the history's newest snapshot (its width and price), which its own index gives: the history's tiles are cut by it.
+  const stepOf = (at: { st: number; p: number } | null) => {
+    const price = h?.price ?? (histOn ? at?.p ?? null : null);
+    const ladder = price ? stepLadder(price, tickOf(coin, symbols, price)) : [];
+    let step: number | null = stepAt(level, ladder);
+    // Only once the view has a size: unmeasured, it spans a pixel and Auto would pick the coarsest width.
+    if (level === 'auto' && win && win[2] >= MIN_PX) {
+      const target = ((win[1] - win[0]) / win[2]) * PX_PER_CELL[res];
+      step = histOn ? (at ? autoStep(target, histSteps(at.st, ladder.at(-1) ?? 0)) : null)
+        : rawStep > 0 ? autoStep(target, streamSteps(rawStep, inReach ? fm!.st : null)) : null;
+    }
+    return { ladder, step, finer: histOn && step !== null && at !== null && step < at.st * (1 - 1e-9) };
+  };
+  // The historical view's snapshots (30 days): every snapshot's time, price and step and the colour
+  // scales, and the rows of the time and price window on screen and around it, in tiles (histTiles.ts;
+  // the wallet filter too). Read once its chart reports its window; slim rows by side with every band;
+  // the snapshot each bar draws - except at a step finer than the snapshots', where every one is read
+  // as before (the fine parts' colour scale is of the snapshots held, histFine.ts).
+  const hist = useHistTiles(histOn ? coin : null, chosen, win && times ? { t0: times[0], t1: times[1], lo: win[0], hi: win[1] } : null, wallets, {
+    waitForView: true,
+    slim: colorBy === 'side' && isAllLev(lev),
+    draw: (at) => (times && times[4] && !stepOf(at).finer ? { every: times[2], off: times[3] } : null),
+  });
+  const coarsePts = histOn ? hist.points : EMPTY_POINTS;
+  const newest = histOn ? hist.list.at(-1) : undefined;
+  const histAt = newest ? { st: newest.st, p: newest.p } : null;
+  const { ladder, step } = stepOf(histAt);
   // The bar width in server buckets: from the price and Fine / Medium / Coarse until the window is
   // known (groupFor), else the step when it is a whole number of them - told to the stream a quarter
   // second after it settles, drawn at once from what is held meanwhile. A finer step streams from the
@@ -406,11 +420,12 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
     note: null,
   } : null;
   // What the live and chart views say instead of levels; and the historical view, instead of snapshots.
+  const keptNote = !wallets.length && prefs.view !== 'history' && live.keptAt ? asOfText(live.keptAt) : null;
   const nowEmpty = !h ? (heat.error ? `Liquidation levels unavailable: ${heat.error}` : 'Reading the books…')
     : !h.price || !h.buckets.length ? `${wallets.length ? (wallets.length === 1 ? 'This wallet holds' : 'These wallets hold') + ` no ${coin} position with a liquidation price` : `No tracked ${coin} positions with a liquidation price`} on ${chosen.length === SCAN_VENUES.length ? 'any platform' : chosen.map((v) => VENUE_LABEL[v]).join(', ')}.`
       : null;
   const histEmpty = hist.error && !hist.ready ? `History unavailable: ${hist.error}`
-    : !hist.ready ? 'Reading the snapshots…'
+    : !hist.ready ? (hist.building && hist.building.of > 0 ? `Reading the snapshots… ${Math.min(99, Math.floor((hist.building.done / hist.building.of) * 100))}%` : 'Reading the snapshots…')
       : !hist.list.length ? (wallets.length ? `No snapshots of ${coin} for ${wallets.length === 1 ? 'this wallet' : 'these wallets'} in this range: every position's level is kept from 28 Oct 2026, 15-minutely for 3 days and hourly to 30.` : `No snapshots of ${coin} yet: the index keeps every coin SoDEX lists, a snapshot every 15 minutes.`)
         : null;
   const change = (p: ViewChange) => {
@@ -452,9 +467,11 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
             <><span><i className="lqm-sw is-long" />Long liquidations</span><span><i className="lqm-sw is-short" />Short liquidations</span></>
           )}
           {prefs.view === 'live' && <><span><i className="lqm-ln is-long" />Cumulative longs</span><span><i className="lqm-ln is-short" />Cumulative shorts</span></>}
+          {/* The kept snapshot (liveHeat.ts keptHeat) until the socket's own lands: dimmed, with its time. */}
+          {keptNote && <span className="lqm-legend-note" title="The levels last streamed here, until the stream answers">{keptNote}</span>}
         </div>
       )}
-      <div className="lqm-body">
+      <div className={`lqm-body${keptNote ? ' is-kept' : ''}`}>
         {prefs.view !== 'live' ? (
           // One chart for Chart and Historical: switching keeps its timeframe, zoom and scale.
           <ChartPanel
@@ -829,8 +846,8 @@ function ChartPanel({ engine, symbol, points, scale, refSt, palette, mark = null
   fmt: (v: number) => string;
   note: string | null;
   onWindow: (lo: number, hi: number, px: number) => void;
-  /** The time window, the chart's bar (ms) and where its bars begin modulo the bar. */
-  onTimes: (t0: number, t1: number, bar: number, off: number) => void;
+  /** The time window, the chart's bar (ms), where its bars begin modulo the bar, and 1 when every bar starts on that grid (else 0). */
+  onTimes: (t0: number, t1: number, bar: number, off: number, grid: number) => void;
   onPick: (p: Pick) => void;
 }) {
   const levKey = lev.join(',');
@@ -882,7 +899,8 @@ function ChartPanel({ engine, symbol, points, scale, refSt, palette, mark = null
         const a = list[Math.max(0, Math.min(list.length - 1, Math.floor(r.realFrom)))]!.timestamp;
         const bar = barMsOf(list);
         const b = list[Math.max(0, Math.min(list.length - 1, Math.ceil(r.realTo) - 1))]!.timestamp + bar;
-        report.current.onTimes(a, b, bar, list.at(-1)!.timestamp % bar);
+        const grid = drawGridOf(list);
+        report.current.onTimes(a, b, bar, list.at(-1)!.timestamp % bar, grid && grid.every === bar ? 1 : 0);
       }
     };
     read();

@@ -61,6 +61,7 @@
  * deliberately no fallback id baked in: using someone else's project would
  * silently bill their quota.
  */
+import { setHereOff, walletBrowser } from './walletLinks';
 import type { AppKit, ChainAdapterConnector } from '@reown/appkit';
 import type { EthersAdapter } from '@reown/appkit-adapter-ethers';
 /* One exported string (AppKit's own version), not the AppKit chunk: safe to
@@ -482,14 +483,23 @@ const walletCode = startLater(() => {
 /** The header mounted: have the wallet modal's code in memory before anyone presses Connect. */
 export function preloadWalletModal(): void {
   discoverWallets();
-  if (!hasWalletConnectConfig()) return;
+  if (!hasWalletConnectConfig() || phoneOutsideWallet()) return;
   walletCode.now();
 }
 
 /** The pointer or the focus reached a Connect control: fetch the wallet modal's code now. */
 export function warmWalletModal(): void {
-  if (!hasWalletConnectConfig()) return;
+  if (!hasWalletConnectConfig() || phoneOutsideWallet()) return;
   walletCode.now();
+}
+
+/**
+ * A phone browser that is not a wallet's own (phone pass, 2026-11-18): its Connect rows open the wallet's app by a
+ * link (walletLinks.ts) and need no AppKit, so the 0.55 MB is not fetched up front there - on "Slow 4G" it took the
+ * line for ~3 s right after the first paint. WalletConnect and "Other Wallet" still load it, when pressed.
+ */
+function phoneOutsideWallet(): boolean {
+  return isMobileDevice() && !walletBrowser(window as unknown as Parameters<typeof walletBrowser>[0], navigator.userAgent, true);
 }
 
 /** Minimal shape of the UniversalProvider instance we depend on. */
@@ -1286,6 +1296,7 @@ async function connectExtension(k: AppKit, w: FeaturedWallet, c: KitConnector): 
     off?.();
     k.resetConnectingWallet();
   }
+  setHereOff(false);
   void toValueChain();
 }
 
@@ -1805,6 +1816,24 @@ export async function connectVia(
 }
 
 /**
+ * Inside a wallet's own browser on a phone (walletLinks.ts walletBrowser): connect its injected provider straight
+ * away, the way an extension row does - the wallet's prompt, no AppKit view. The provider is the one that wallet
+ * announced (EIP-6963, by its explorer rdns) when there is one, else `window.ethereum` (AppKit's 'injected').
+ * Rejects with ConnectRejectedError when the prompt is refused or closed, or when there is no provider after all.
+ */
+export async function connectHere(here: { key: string | null; label: string }, rdns: readonly string[] = []): Promise<void> {
+  const k = await initWallet();
+  const announced = getDiscoveredWallets().filter((d) => d.uuid !== 'legacy');
+  const hit = announced.find((d) => rdns.includes(String(d.rdns ?? '').toLowerCase()));
+  const found: InstalledWallet = hit ? { via: 'announced', rdns: hit.rdns, name: hit.name, icon: hit.icon } : { via: 'injected' };
+  const connector = kitConnectorFor(k, found) ?? kitConnectorFor(k, { via: 'injected' });
+  if (!connector) throw new ConnectRejectedError(`${here.label} did not offer a connection on this page.`);
+  const label = here.label === 'your wallet' ? 'Your wallet' : here.label;
+  const w: FeaturedWallet = { ...featured('metamask'), label, name: connector.name || label };
+  await connectExtension(k, w, connector);
+}
+
+/**
  * Called ONCE, on the first frame of AppKit's exit - whether the user closed it
  * (leaveModal says so before its fade) or AppKit closed itself - with whether a
  * wallet connected while it was up. Our dialog brings its card back during
@@ -1917,6 +1946,7 @@ export const shouldRestoreOnLoad = (): boolean => hasWalletConnectConfig() && ha
  */
 export async function disconnectWallet(): Promise<void> {
   userDisconnecting = true;
+  setHereOff(true);
   clearTimeout(teardownTimer);
   try {
     let k: AppKit | null = kitPromise ? await kitPromise.catch(() => null) : null;

@@ -135,7 +135,9 @@
 .tfl-stat { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .tfl-stat__l { font-size: var(--fs-micro); line-height: var(--lh-micro); color: var(--muted); white-space: nowrap; }
 .tfl-stat__v { min-height: 16px; font-size: var(--fs-xs); font-weight: 500; color: var(--text); white-space: nowrap; display: flex; align-items: center; }
-.tfl-skelv { display: inline-block; width: 40px; height: 9px; border-radius: var(--radius-full); background: linear-gradient(90deg, var(--tint), var(--line-soft), var(--tint)); background-size: 200% 100%; animation: tfl-shimmer 1.4s linear infinite; }
+/* The skeletons' sweep on the compositor: a layer of the same tiles slides by one tile (motion.css). */
+.tfl-skelv { display: inline-block; position: relative; overflow: hidden; width: 40px; height: 9px; border-radius: var(--radius-full); }
+.tfl-skelv::after, .tfl-skel > i::after { content: ''; position: absolute; top: 0; bottom: 0; left: -200%; width: 400%; background: linear-gradient(90deg, var(--tint), var(--line-soft), var(--tint)) 0 0 / 50% 100% repeat-x; animation: tfl-shimmer 1.4s linear infinite; pointer-events: none; }
 
 .tfl-split { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .tfl-split__bar { display: flex; gap: 1px; height: 3px; border-radius: var(--radius-full); overflow: hidden; }
@@ -219,10 +221,10 @@ button.tfl-tr:hover, button.tfl-tr:focus-visible { background: var(--bg-hover); 
 .tfl-tr--empty { border-top: 1px solid rgb(var(--ink) / 0.06); padding: var(--sp-2) var(--sp-3) var(--sp-4); }
 .tfl-tr--empty .empty-state { padding-block: var(--sp-4) 0; }
 .tfl-skel { pointer-events: none; grid-template-columns: 1fr; }
-.tfl-skel > i { height: 10px; border-radius: var(--radius-full); background: linear-gradient(90deg, var(--tint), var(--line-soft), var(--tint)); background-size: 200% 100%; animation: tfl-shimmer 1.4s linear infinite; }
+.tfl-skel > i { position: relative; overflow: hidden; height: 10px; border-radius: var(--radius-full); }
 .tfl-skel:nth-child(odd) > i { width: 82%; }
-@keyframes tfl-shimmer { to { background-position: -200% 0; } }
-@media (prefers-reduced-motion: reduce) { .tfl-skel > i, .tfl-skelv { animation: none; } }
+@keyframes tfl-shimmer { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(50%, 0, 0); } }
+@media (prefers-reduced-motion: reduce) { .tfl-skel > i::after, .tfl-skelv::after { animation: none; } }
 
 .tfl-more { align-self: center; margin-top: var(--sp-2); padding: 0 var(--sp-4); }
 

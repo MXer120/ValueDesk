@@ -671,6 +671,15 @@ Registered in `index.ts` right after CORS (`ec5b8d6`).
   fresher at the edge, drop `stale-while-revalidate` from `perf.ts` `BOARD` -
   at the price of a round trip to the origin for every page reopened 10-30 s
   after its last read.
+  On Vercel (2026-11-18, phone pass) longer edge stale windows by rebuild cadence
+  (the boards 60 s in all, the cohort load 120 s) were tried in
+  `deploy/vercel/api-proxy.cjs` and taken back on review: the leaderboard, the
+  market map, Explore > Markets, Home's map, the terminal heatmap and the cohort
+  focus/detail charts show no as-of time, the copy cards' `age`/`fresh` are set
+  when the origin answers, and an edge copy's age adds to the data's own (a cohort
+  answer may come from a load already 120 s old, indexer/read.ts STALE_MAX_MS).
+  The edge keeps the origin's own windows; a longer one is a `perf.ts` change
+  once every screen of that route shows the answer's time.
 - `/logos/*` and `/addrbook/*` are not hashed and have no Cache-Control in the
   deployment doc; `public, max-age=86400, stale-while-revalidate=604800` would
   spare repeat visitors the logos they already have (the leaderboard loads 43

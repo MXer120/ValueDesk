@@ -37,7 +37,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CSP, HEADERS, adminHeadersFor, headersFor } from '../smoke/prod-headers.mjs';
+import { CSP, HEADERS, I18N_PART_SRC, I18N_WHOLE_SRC, UNHASHED_SCRIPT_SRC, adminHeadersFor, headersFor } from '../smoke/prod-headers.mjs';
 import { LEGAL_PATHS, edgeBlockList } from '../../apps/web/src/legal/jurisdictions.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -68,13 +68,24 @@ const NO_DOT_LAST = `${DIRS}[^/.]*$`; // the last segment has no dot: an app rou
 const DOT_LAST = `${DIRS}[^/]*\\.[^/]*$`;
 const HTML_LAST = `${DIRS}[^/]*\\.html$`;
 const NOT_HTML = '(?!.*\\.html$)';
+/** The site's own files that are not a class of their own below (prod-headers.mjs cacheControlFor's rows). */
+const NOT_OWN_CLASS = `(?!api/|logos/|addrbook/|scan/|assets/|models/|theme-boot\\.js$|${I18N_PART_SRC.slice(1)}$|${I18N_WHOLE_SRC.slice(1)}$)`;
+/** Not an unhashed script (those have no stale window: cacheControlFor). */
+const NOT_SCRIPT = `(?!.*${UNHASHED_SCRIPT_SRC})`;
 
 /** [src, a path of that class] - the headers of the class are headersFor(that path). */
 export const HEADER_CLASSES = [
   [`^/${NOT_SPECIAL}${NO_DOT_LAST}`, '/trade'],
   [`^/assets/${DOT_LAST}`, '/assets/index-0.js'],
   [`^/(?!api/|logos/|addrbook/|scan/|assets/)${HTML_LAST}`, '/index.html'],
-  [`^${NOT_HTML}/(?!api/|logos/|addrbook/|scan/|assets/)${DOT_LAST}`, '/favicon.svg'],
+  // The translation parts and landing files (content-hashed), a whole catalogue, the speech model, the theme script.
+  [`^${I18N_PART_SRC}$`, '/i18n/pt/0f-nAhXkzf.json'],
+  [`^${I18N_WHOLE_SRC}$`, '/i18n/pt.json'],
+  [`^${NOT_HTML}/models/${DOT_LAST}`, '/models/onnx-community/moonshine-tiny-ONNX/config.json'],
+  ['^/theme-boot\\.js$', '/theme-boot.js'],
+  // The other unhashed scripts (the Fed live widget's AudioWorklet module): an hour, no stale window.
+  [`^/${NOT_OWN_CLASS}${DIRS}[^/]*${UNHASHED_SCRIPT_SRC}`, '/fedlive/tap-worklet.js'],
+  [`^${NOT_HTML}${NOT_SCRIPT}/${NOT_OWN_CLASS}${DOT_LAST}`, '/favicon.svg'],
   [`^/(?:logos|addrbook)/${NO_DOT_LAST}`, '/logos/x'],
   [`^/(?:logos|addrbook)/${HTML_LAST}`, '/logos/x.html'],
   [`^${NOT_HTML}/(?:logos|addrbook)/${DOT_LAST}`, '/logos/x.svg'],
@@ -153,8 +164,16 @@ export function routes() {
   ];
 }
 
+/**
+ * Kept between Vercel's own builds of the project (Build Output API `cache`, honoured when Vercel builds from git -
+ * not for a --prebuilt upload): the speech model's files as build.sh fetched them (fetch-model.sh <dist> <cache>),
+ * so the ~32 MB come from Hugging Face once per pinned revision, not on every build. Nothing else: the install is
+ * `npm ci`, which deletes node_modules first, so keeping that would only cost upload and restore time.
+ */
+export const MODEL_CACHE = '.cache/valuedesk-model';
+
 export function config() {
-  return { version: 3, routes: routes() };
+  return { version: 3, routes: routes(), cache: [`${MODEL_CACHE}/**`] };
 }
 
 /** The function's .vc-config.json. */

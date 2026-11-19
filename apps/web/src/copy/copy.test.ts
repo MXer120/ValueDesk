@@ -10,7 +10,7 @@ import { DEFAULT_SETUP, parseSetup, toCopySettings } from '../components/copy/se
 import { COPY_TERMS } from '../legal/copyTerms';
 import { selfBase, selfUrlProblem } from './executor';
 import { readiness, type LiveCopy } from './live';
-import { COPY_TERMS_HASH } from './terms';
+import { copyTermsHashOfBuild } from './terms';
 
 const LEADER = '0x' + 'ab'.repeat(20);
 
@@ -55,7 +55,7 @@ const base = (): LiveCopy => ({
 test('readiness: a mode is ready only with terms, the fee, its connection and its key', () => {
   const s = base();
   assert.equal(readiness(s, 'browser').ready, false);
-  s.terms = { termsVersion: COPY_TERMS_VERSION, termsHash: COPY_TERMS_HASH, country: 'SG', acceptedAt: 1, recorded: true, request: {} as never };
+  s.terms = { termsVersion: COPY_TERMS_VERSION, termsHash: copyTermsHashOfBuild(), country: 'SG', acceptedAt: 1, recorded: true, request: {} as never };
   s.browser.key = { address: '0x' + '22'.repeat(20), name: 'vd-copy-browser', expiresAt: Date.now() + 3_600_000, accountId: 5 };
   // No builder in a test build: the fee step is not needed.
   const b = readiness(s, 'browser');
@@ -66,6 +66,6 @@ test('readiness: a mode is ready only with terms, the fee, its connection and it
 });
 
 test('the terms hash is the hash of the text shown, and the text names its version', () => {
-  assert.match(COPY_TERMS_HASH, /^0x[0-9a-f]{64}$/);
+  assert.match(copyTermsHashOfBuild(), /^0x[0-9a-f]{64}$/);
   assert.ok(JSON.stringify(COPY_TERMS).includes(COPY_TERMS_VERSION));
 });
