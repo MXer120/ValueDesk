@@ -86,9 +86,9 @@ interface KeyRow {
   expiresAt?: number;
 }
 
-/** Whether SoDEX lists `address` under `name` on perps, unexpired. */
-export async function copyKeyRegistered(owner: string, name: string, address: string, now = Date.now()): Promise<{ ok: boolean; expiresAt: number | null }> {
-  const rows = await readGateway<KeyRow[] | { apiKeys?: KeyRow[] } | null>(`/api/v1/perps/accounts/${owner.toLowerCase()}/api-keys`);
+/** Whether SoDEX lists `address` under `name` on `engine` (perps by default), unexpired. */
+export async function copyKeyRegistered(owner: string, name: string, address: string, now = Date.now(), engine: Engine = 'perps'): Promise<{ ok: boolean; expiresAt: number | null }> {
+  const rows = await readGateway<KeyRow[] | { apiKeys?: KeyRow[] } | null>(`/api/v1/${engine}/accounts/${owner.toLowerCase()}/api-keys`);
   const list = Array.isArray(rows) ? rows : rows?.apiKeys ?? [];
   const row = list.find((r) => r.name === name);
   if (!row || row.publicKey.toLowerCase() !== address.toLowerCase()) return { ok: false, expiresAt: null };
@@ -122,16 +122,30 @@ export async function registerCopyKey(o: { owner: string; provider: Eip1193Provi
     expiryPolicy: { maxTtlMs: MAX_COPY_KEY_DAYS * DAY_MS },
   });
   const signature = await signTypedData(o.provider, owner, prepared.typedData);
-  const [req] = assembleExchangeRequests(prepared, signature, { base: '' });
-  try {
-    await sendSigned(req!, 'copy key registration');
-  } catch (e) {
-    if (!(e instanceof OutcomeUnknownError)) throw e;
+  // One request per engine, the same signed body (2026-11-20 fix: only the first, spot, was sent, so since spot joined
+  // COPY_ENGINES no new key reached perps and the executor waited for it there forever).
+  const requests = assembleExchangeRequests(prepared, signature, { base: '' });
+  const settled = await Promise.allSettled(requests.map((r) => sendSigned(r, `copy key registration (${r.engine})`)));
+  const failed: Engine[] = [];
+  for (let i = 0; i < requests.length; i++) {
+    const engine = requests[i]!.engine;
+    const r = settled[i]!;
+    if (r.status === 'fulfilled') continue;
+    if (!(r.reason instanceof OutcomeUnknownError)) {
+      if (engine === 'perps') throw r.reason;
+      failed.push(engine);
+      continue;
+    }
     // No answer is not a no: ask SoDEX whether it landed.
-    const landed = await copyKeyRegistered(owner, o.name, o.address).catch(() => ({ ok: false }));
-    if (!landed.ok) throw new Error('SoDEX did not confirm the copy key. Check your connection and approve again.');
+    const landed = await copyKeyRegistered(owner, o.name, o.address, Date.now(), engine).catch(() => ({ ok: false }));
+    if (!landed.ok) {
+      if (engine === 'perps') throw new Error('SoDEX did not confirm the copy key. Check your connection and approve again.');
+      failed.push(engine);
+    }
   }
-  log.info('copy key registered', { name: o.name, key: o.address, expiresAt });
+  // Perps carries copies, algos and futures bots, so it must land; a spot refusal only limits spot bots.
+  if (failed.length) log.warn('copy key not registered on every engine', { name: o.name, failed });
+  log.info('copy key registered', { name: o.name, key: o.address, expiresAt, engines: requests.map((r) => r.engine).filter((e) => !failed.includes(e)) });
   return { expiresAt, accountId };
 }
 
