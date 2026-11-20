@@ -1,6 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { KEY_NOT_CONFIRMED, sendKeyRegistration, type KeyEngine } from './keyRegistration';
+import { KEY_NOT_CONFIRMED, keyLimitText, sendKeyRegistration, type KeyEngine } from './keyRegistration';
+
+test('a full futures key list names the keys, the expired one first, and where to remove one', () => {
+  const now = Date.parse('2026-11-20T16:00:00Z');
+  const rows = [
+    { name: 'default', expiresAt: 0 }, { name: 'mobilekey', expiresAt: now + 5e8 }, { name: 'sodextra-1', expiresAt: now + 5e9 },
+    { name: 'webkey', expiresAt: now + 6e8 }, { name: 'GRIDBOT', expiresAt: now + 3e9 }, { name: 'SODEX_API_KEY', expiresAt: now - 3e9 },
+  ];
+  const t = keyLimitText(rows, 'vd-copy-tokyo', 'api key limit', now)!;
+  assert.match(t, /holds 5 API keys on futures/);
+  assert.match(t, /: SODEX_API_KEY \(expired\), /);
+  assert.match(t, /\(SODEX_API_KEY has expired\)/);
+  assert.match(t, /SoDEX said: api key limit$/);
+  // Room left, or our own key among them (it is replaced): no limit text.
+  assert.equal(keyLimitText(rows.slice(0, 5), 'vd-copy-tokyo', 'x', now), null);
+  assert.equal(keyLimitText([...rows.slice(0, 5), { name: 'vd-copy-tokyo', expiresAt: now + 1e9 }], 'vd-copy-tokyo', 'x', now), null);
+});
 
 class Unknown extends Error {}
 const reqs = (...e: KeyEngine[]) => e.map((engine) => ({ engine }));

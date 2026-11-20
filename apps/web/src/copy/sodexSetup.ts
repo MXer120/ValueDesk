@@ -30,7 +30,7 @@ import { OutcomeUnknownError, readGateway, sendSigned } from '../trading/gateway
 import { nonces, sodexAccountId } from '../trading/session';
 import { addOrSwitchChain, getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 import { logger } from '../log';
-import { sendKeyRegistration } from './keyRegistration';
+import { keyLimitText, sendKeyRegistration } from './keyRegistration';
 
 const log = logger('copy');
 
@@ -127,12 +127,25 @@ export async function registerCopyKey(o: { owner: string; provider: Eip1193Provi
   // COPY_ENGINES no new key reached perps and the executor waited for it there forever).
   const requests = assembleExchangeRequests(prepared, signature, { base: '' });
   // Perps carries copies, algos and futures bots, so it must land; a spot refusal only limits spot bots.
-  const { sent, failed } = await sendKeyRegistration(
-    requests,
-    (r) => sendSigned(r, `copy key registration (${r.engine})`),
-    (e) => e instanceof OutcomeUnknownError,
-    async (engine) => (await copyKeyRegistered(owner, o.name, o.address, Date.now(), engine)).ok,
-  );
+  let result: Awaited<ReturnType<typeof sendKeyRegistration>>;
+  try {
+    result = await sendKeyRegistration(
+      requests,
+      (r) => sendSigned(r, `copy key registration (${r.engine})`),
+      (e) => e instanceof OutcomeUnknownError,
+      async (engine) => (await copyKeyRegistered(owner, o.name, o.address, Date.now(), engine)).ok,
+    );
+  } catch (e) {
+    // A full key list on futures (SoDEX's 5-key limit; 2026-11-20 a wallet with 5 sodex.com / other-app keys was
+    // refused there while spot took the key): name the keys and the way out, not just SoDEX's code.
+    const rows = await readGateway<KeyRow[] | { apiKeys?: KeyRow[] } | null>(`/api/v1/perps/accounts/${owner}/api-keys`).catch(() => null);
+    const list = Array.isArray(rows) ? rows : rows?.apiKeys ?? [];
+    const text = keyLimitText(list, o.name, e instanceof Error ? e.message : String(e));
+    log.error('copy key refused on futures', { name: o.name, error: String(e), perpsKeys: list.length, full: !!text });
+    if (text) throw new Error(text);
+    throw e;
+  }
+  const { sent, failed } = result;
   if (failed.length) log.warn('copy key not registered on every engine', { name: o.name, failed });
   log.info('copy key registered', { name: o.name, key: o.address, expiresAt, engines: sent });
   return { expiresAt, accountId };
