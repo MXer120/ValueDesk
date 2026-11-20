@@ -248,10 +248,7 @@ export function DayBars({ days, label }: { days: DayDetail[]; label: string }) {
         onKeyDown={onKey}
       >
         {days.map((d, i) => (
-          <span key={d.day} data-i={i} className={`st-bar is-${d.tone}${d.extra.length ? ' is-mixed' : ''}${i === active ? ' is-active' : ''}`}>
-            {/* More than one kind of issue that day: the shorter ones dashed on top, in their own colours. */}
-            {d.extra.map((x) => <i key={x.tone} className={`st-bar__dash is-${x.tone}`} />)}
-          </span>
+          <span key={d.day} data-i={i} className={`st-bar is-${d.tone}${i === active ? ' is-active' : ''}`} />
         ))}
       </div>
       {active !== null && days[active] && <DayTip d={days[active]!} id={tipId} index={active} count={days.length} />}
@@ -507,7 +504,6 @@ export function StatusPage() {
             <span><i className="st-bar is-down" />Down</span>
             <span><i className="st-bar is-maintenance" />Maintenance</span>
             <span><i className="st-bar is-nodata" />No data</span>
-            <span><i className="st-bar is-up is-mixed"><i className="st-bar__dash is-degraded" /></i>Dashed: a shorter issue that day</span>
           </div>
           <p>
             Checked every minute. Days and times are in UTC. Follow updates with the{' '}
