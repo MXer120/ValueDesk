@@ -545,6 +545,15 @@ export async function importKey(mode: 'hosted' | 'self', name: string, privateKe
 }
 
 /** Revoke a mode's copy key on SoDEX (the hard stop) and forget it there. Every copy of that mode stops. */
+/**
+ * Make room on a full futures key list (KeyLimitError): remove the EXPIRED key `name` on SoDEX (it trades for nobody).
+ * The same revocation as revokeKey's, on another key of the wallet: a switch to ValueChain and a signature per engine.
+ */
+export async function removeExpiredKey(name: string): Promise<void> {
+  const { owner, provider: p } = needWallet();
+  await busyWith('wallet', () => revokeCopyKey({ owner, provider: p, name }));
+}
+
 export async function revokeKey(mode: CopyModeId, closePositions: boolean): Promise<void> {
   const { owner, provider: p } = needWallet();
   if (mode === 'browser') {

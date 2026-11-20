@@ -15,20 +15,34 @@ export const KEY_NOT_CONFIRMED = 'SoDEX did not confirm the copy key. Check your
 /** SoDEX's documented limit: API keys per account and engine, besides the wallet's own `default`. */
 export const SODEX_KEY_LIMIT = 5;
 
+/** The futures key list is full: `message` says which keys and what to do; `expired` is one the setup may remove itself. */
+export class KeyLimitError extends Error {
+  constructor(message: string, readonly expired: string | null) {
+    super(message);
+    this.name = 'KeyLimitError';
+  }
+}
+
 /**
  * When a futures registration was refused and the account's futures key list is full: what the trader reads (which
- * keys there are, expired ones first, and where to remove one). Null when the list has room (another reason).
- * A key under `name` itself does not count: registering it again replaces it.
+ * keys there are, expired ones first, and how to make room) and an expired key the setup can remove for them (an
+ * expired key trades for nobody; a live one may be sodex.com's own login or another app, so only the trader removes
+ * those). Null when the list has room (another reason). A key under `name` itself does not count: it is replaced.
  */
-export function keyLimitText(rows: ReadonlyArray<{ name: string; expiresAt?: number | null }>, name: string, reason: string, now = Date.now()): string | null {
+export function keyLimit(rows: ReadonlyArray<{ name: string; expiresAt?: number | null }>, name: string, reason: string, now = Date.now()): { text: string; expired: string | null } | null {
   const others = rows.filter((r) => r.name !== 'default' && r.name !== name);
   if (others.length < SODEX_KEY_LIMIT) return null;
-  const expired = (r: { expiresAt?: number | null }) => !!r.expiresAt && r.expiresAt <= now;
-  const list = [...others].sort((a, b) => Number(expired(b)) - Number(expired(a)))
-    .map((r) => `${r.name}${expired(r) ? ' (expired)' : ''}`).join(', ');
-  const old = others.filter(expired);
-  return `Your SoDEX account already holds ${others.length} API keys on futures (SoDEX allows ${SODEX_KEY_LIMIT}): ${list}. `
-    + `Remove one on sodex.com > API keys${old.length ? ` (${old[0]!.name} has expired)` : ''}, then approve the trading key again. SoDEX said: ${reason}`;
+  const isOld = (r: { expiresAt?: number | null }) => !!r.expiresAt && r.expiresAt <= now;
+  const list = [...others].sort((a, b) => Number(isOld(b)) - Number(isOld(a)))
+    .map((r) => `${r.name}${isOld(r) ? ' (expired)' : ''}`).join(', ');
+  const expired = others.find(isOld)?.name ?? null;
+  const how = expired
+    ? `Remove the expired key ${expired} with the button below (two wallet signatures), or any key you no longer use on sodex.com > API keys`
+    : 'Remove a key you no longer use on sodex.com > API keys';
+  return {
+    text: `Your SoDEX account already holds ${others.length} API keys on futures, the most SoDEX allows: ${list}. ${how}, then approve the trading key again. (SoDEX said: ${reason})`,
+    expired,
+  };
 }
 
 export async function sendKeyRegistration<R extends { engine: KeyEngine }>(

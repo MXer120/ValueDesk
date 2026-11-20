@@ -31,12 +31,14 @@ import {
   approveKey,
   importKey,
   readiness,
+  removeExpiredKey,
   revokeKey,
   signIn,
   type CopyModeId,
   type LiveCopy,
 } from './live';
 import { MAX_BROWSER_KEY_DAYS } from './sodexSetup';
+import { KeyLimitError } from './keyRegistration';
 import { TermsChangedError } from './terms';
 import { ModeCards } from './ModeCards';
 import { Button as KitButton, Icon as KitIcon, NumberField as KitNumber, Segmented as KitSegmented } from '../components/bots/kit/kit';
@@ -184,6 +186,8 @@ export function SetupPrimaryButton({ ready, primary, doneLabel = 'Done', onDone,
  */
 export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPrimary }: { mode: CopyModeId; live: LiveCopy; paper?: boolean; bots?: boolean; hideDone?: boolean; onPrimary?: (p: SetupPrimary | null) => void }) {
   const [error, setError] = useState<string | null>(null);
+  // A full futures key list (KeyLimitError) holding an expired key: offered for removal under the error.
+  const [expiredKey, setExpiredKey] = useState<string | null>(null);
   // Not an error: the terms changed while the setup was open, and the new text is shown to sign.
   const [termsNote, setTermsNote] = useState<string | null>(null);
   const [working, setWorking] = useState<string | null>(null);
@@ -218,6 +222,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
 
   const run = async (what: string, fn: () => Promise<void>, ok?: string) => {
     setError(null);
+    setExpiredKey(null);
     setTermsNote(null);
     setWorking(what);
     try {
@@ -225,7 +230,10 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
       if (ok) notify('ok', ok);
     } catch (e) {
       if (e instanceof TermsChangedError) setTermsNote(e.message);
-      else if (!isRejection(e)) setError(e instanceof Error ? e.message : String(e));
+      else if (!isRejection(e)) {
+        setError(e instanceof Error ? e.message : String(e));
+        if (e instanceof KeyLimitError) setExpiredKey(e.expired);
+      }
     } finally {
       setWorking(null);
     }
@@ -492,6 +500,18 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
       )}
     </ol>
     {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
+    {error && expiredKey && (
+      // A full futures key list with an expired key in it: remove that one here, then Approve again.
+      <div className="cs-keyacts">
+        <Act
+          label={`Remove expired key ${expiredKey}`}
+          primary
+          disabled={!owner || !!working}
+          busy={working === 'clean'}
+          onClick={() => { const k = expiredKey; void run('clean', () => removeExpiredKey(k), `Expired key ${k} removed from SoDEX. Approve the trading key again.`); }}
+        />
+      </div>
+    )}
     {live.busy === 'wallet' && <p className="fx-wait"><span className="fx-spin" aria-hidden="true" />Waiting for your wallet…</p>}
     </HideDone.Provider>
   );

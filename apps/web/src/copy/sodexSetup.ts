@@ -30,7 +30,7 @@ import { OutcomeUnknownError, readGateway, sendSigned } from '../trading/gateway
 import { nonces, sodexAccountId } from '../trading/session';
 import { addOrSwitchChain, getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 import { logger } from '../log';
-import { keyLimitText, sendKeyRegistration } from './keyRegistration';
+import { KeyLimitError, keyLimit, sendKeyRegistration } from './keyRegistration';
 
 const log = logger('copy');
 
@@ -140,9 +140,9 @@ export async function registerCopyKey(o: { owner: string; provider: Eip1193Provi
     // refused there while spot took the key): name the keys and the way out, not just SoDEX's code.
     const rows = await readGateway<KeyRow[] | { apiKeys?: KeyRow[] } | null>(`/api/v1/perps/accounts/${owner}/api-keys`).catch(() => null);
     const list = Array.isArray(rows) ? rows : rows?.apiKeys ?? [];
-    const text = keyLimitText(list, o.name, e instanceof Error ? e.message : String(e));
-    log.error('copy key refused on futures', { name: o.name, error: String(e), perpsKeys: list.length, full: !!text });
-    if (text) throw new Error(text);
+    const full = keyLimit(list, o.name, e instanceof Error ? e.message : String(e));
+    log.error('copy key refused on futures', { name: o.name, error: String(e), perpsKeys: list.length, full: !!full });
+    if (full) throw new KeyLimitError(full.text, full.expired);
     throw e;
   }
   const { sent, failed } = result;
