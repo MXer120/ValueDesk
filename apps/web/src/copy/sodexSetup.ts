@@ -30,6 +30,7 @@ import { OutcomeUnknownError, readGateway, sendSigned } from '../trading/gateway
 import { nonces, sodexAccountId } from '../trading/session';
 import { addOrSwitchChain, getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 import { logger } from '../log';
+import { sendKeyRegistration } from './keyRegistration';
 
 const log = logger('copy');
 
@@ -125,27 +126,15 @@ export async function registerCopyKey(o: { owner: string; provider: Eip1193Provi
   // One request per engine, the same signed body (2026-11-20 fix: only the first, spot, was sent, so since spot joined
   // COPY_ENGINES no new key reached perps and the executor waited for it there forever).
   const requests = assembleExchangeRequests(prepared, signature, { base: '' });
-  const settled = await Promise.allSettled(requests.map((r) => sendSigned(r, `copy key registration (${r.engine})`)));
-  const failed: Engine[] = [];
-  for (let i = 0; i < requests.length; i++) {
-    const engine = requests[i]!.engine;
-    const r = settled[i]!;
-    if (r.status === 'fulfilled') continue;
-    if (!(r.reason instanceof OutcomeUnknownError)) {
-      if (engine === 'perps') throw r.reason;
-      failed.push(engine);
-      continue;
-    }
-    // No answer is not a no: ask SoDEX whether it landed.
-    const landed = await copyKeyRegistered(owner, o.name, o.address, Date.now(), engine).catch(() => ({ ok: false }));
-    if (!landed.ok) {
-      if (engine === 'perps') throw new Error('SoDEX did not confirm the copy key. Check your connection and approve again.');
-      failed.push(engine);
-    }
-  }
   // Perps carries copies, algos and futures bots, so it must land; a spot refusal only limits spot bots.
+  const { sent, failed } = await sendKeyRegistration(
+    requests,
+    (r) => sendSigned(r, `copy key registration (${r.engine})`),
+    (e) => e instanceof OutcomeUnknownError,
+    async (engine) => (await copyKeyRegistered(owner, o.name, o.address, Date.now(), engine)).ok,
+  );
   if (failed.length) log.warn('copy key not registered on every engine', { name: o.name, failed });
-  log.info('copy key registered', { name: o.name, key: o.address, expiresAt, engines: requests.map((r) => r.engine).filter((e) => !failed.includes(e)) });
+  log.info('copy key registered', { name: o.name, key: o.address, expiresAt, engines: sent });
   return { expiresAt, accountId };
 }
 
