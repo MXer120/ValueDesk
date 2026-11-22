@@ -323,3 +323,34 @@ test('live stream: a bot is sent again only when something shown of it changes',
   assert.notEqual(liveSig({ ...v, bot: { ...v.bot, health: { checks: [{ state: 'warn', value: 'feed stale' }] } } }), s0, 'its health changed');
   assert.notEqual(liveSig({ ...v, algo: { ...v.algo, status: 'paused' } }), s0, 'its status changed');
 });
+
+test('a new wallet signs once (owner 2026-11-22, shorter setup): the terms with ValueDesk\'s own and a day key; sign-in and the key request follow without the wallet', async () => {
+  const { svc, db, cleanup } = make({ EXECUTOR_KIND: 'hosted' });
+  const w = new Wallet();
+  assert.ok(svc.info({ viewerCountry: 'SG' }).features?.includes('terms-day-key'));
+  assert.deepEqual(svc.termsStatus(w.address), { accepted: false, termsVersion: COPY_TERMS_VERSION });
+  assert.equal(await code(() => svc.termsStatus('nope')), '400:owner');
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+  const pub = bytesToHex(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
+  const dayKey = { alg: 'p256', key: pub, expiresAt: Date.now() + 23 * 3_600_000, executor: svc.executorId };
+  // Bad site terms inside: refused as /site-terms refuses them.
+  assert.equal(await code(() => svc.acceptTerms(w.sign(COPY_TERMS_EXECUTOR, 'accept-terms', { ...TERMS, dayKey, siteTerms: { ...SITE_TERMS, risks: false } }), { viewerCountry: 'SG' })), '400:statements');
+  const terms = w.sign(COPY_TERMS_EXECUTOR, 'accept-terms', { ...TERMS, dayKey, siteTerms: SITE_TERMS });
+  assert.equal(svc.acceptTerms(terms, { viewerCountry: 'SG' }).terms?.country, 'SG');
+  assert.equal(svc.termsStatus(w.address).accepted, true);
+  const rec = db.consents(w.address).find((c) => c.signature === terms.signature);
+  assert.ok(rec && rec.action === 'accept-terms' && rec.payload.includes('"siteTerms"') && rec.payload.includes('"dayKey"'), 'one signed record carries both terms and the day key');
+  const byDayKey = async (action: CopyAction, payload: unknown) => {
+    const r = buildCopyRequest({ action, owner: w.address, executor: svc.executorId, payload, chainId: 42161 });
+    const hex = copyRequestDigest(r).slice(2);
+    const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new Uint8Array(hex.match(/../g)!.map((h) => parseInt(h, 16))));
+    return { ...r, signature: bytesToHex(new Uint8Array(sig)), delegation: terms };
+  };
+  const g = svc.session(await byDayKey('session', {}), { viewerCountry: 'SG' });
+  assert.equal(svc.authenticate(g.token), w.address);
+  const k = svc.createKey(await byDayKey('create-key', { accountId: 42, days: 30 }), { viewerCountry: 'SG' });
+  assert.match(k.address, /^0x[0-9a-f]{40}$/);
+  // A key's removal still takes the wallet itself.
+  assert.equal(await code(async () => svc.deleteKey(await byDayKey('delete-key', {}), { viewerCountry: 'SG' })), '401:signature');
+  await cleanup();
+});

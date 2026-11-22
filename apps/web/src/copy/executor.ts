@@ -83,6 +83,11 @@ export function selfUrlProblem(url: string): string | null {
 
 /** Executors whose /info says they accept day-key signatures ('day-key'); every other one gets the wallet's own. */
 const dayKeyExecutors = new Set<string>();
+/**
+ * Executors that also take a day key approved inside the terms acceptance and a day-key-signed 'create-key'
+ * ('terms-day-key', owner 2026-11-22 "make that shorter"): a new follower then signs the terms, the fee and SoDEX's key.
+ */
+const termsDayKeyExecutors = new Set<string>();
 
 /** Sign one request for `executor` with the connected wallet. */
 export async function signCopy(provider: Eip1193Provider, owner: string, executor: string, action: CopyAction, payload: unknown): Promise<SignedCopyRequest> {
@@ -90,7 +95,7 @@ export async function signCopy(provider: Eip1193Provider, owner: string, executo
   const req = buildCopyRequest({ action, owner, executor, payload, chainId });
   // Everyday actions (start, stop, pause, save, sign-in...) are signed by this browser's day key: the wallet signs
   // once a day at most (owner 2026-11-08). The terms and a trading key always take the wallet itself.
-  if (DELEGABLE_ACTIONS.has(action) && dayKeyExecutors.has(executor)) {
+  if (DELEGABLE_ACTIONS.has(action) && dayKeyExecutors.has(executor) && (action !== 'create-key' || termsDayKeyExecutors.has(executor))) {
     const day = await dayKey(provider, owner, executor, chainId);
     if (day) {
       const sig = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, day.key, new Uint8Array(hexToBytes(copyRequestDigest(req) as `0x${string}`))));
@@ -184,6 +189,39 @@ async function dayKey(provider: Eip1193Provider, owner: string, executor: string
   // Forgotten once answered (or refused); a newer request that replaced it stays.
   void make.then(() => {}, () => {}).finally(() => { if (dayKeyPending.get(name) === entry) dayKeyPending.delete(name); });
   return withAnswerTime(make);
+}
+
+/**
+ * Sign the copy terms acceptance with the wallet and, for an executor with 'terms-day-key', approve this browser's day
+ * key for it in the same signature (payload.dayKey): the follower's sign-in, key request and everyday actions there then
+ * take no further wallet popup for a day. Without WebCrypto / IndexedDB, or for an older executor: the terms alone.
+ */
+export async function signTermsWithDayKey(provider: Eip1193Provider, owner: string, termsExecutor: string, payload: Record<string, unknown>, dayKeyFor: string | null): Promise<SignedCopyRequest> {
+  const chainId = await getChainId(provider);
+  let pair: CryptoKeyPair | null = null;
+  let expiresAt = 0;
+  if (dayKeyFor && termsDayKeyExecutors.has(dayKeyFor) && dayKeyExecutors.has(dayKeyFor) && typeof crypto !== 'undefined' && crypto.subtle && typeof indexedDB !== 'undefined') {
+    try {
+      pair = (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify'])) as CryptoKeyPair;
+    } catch {
+      pair = null;
+    }
+  }
+  const body: Record<string, unknown> = { ...payload };
+  if (pair && dayKeyFor) {
+    expiresAt = Date.now() + DELEGATION_TTL_MS - 60_000;
+    body.dayKey = { alg: 'p256', key: bytesToHex(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey))), expiresAt, executor: dayKeyFor };
+  }
+  const req = buildCopyRequest({ action: 'accept-terms', owner, executor: termsExecutor, payload: body, chainId });
+  const signature = await signTypedData(provider, owner, copyRequestTypedData(req));
+  const signed: SignedCopyRequest = { ...req, signature };
+  if (pair && dayKeyFor) {
+    const d: DayKey = { key: pair.privateKey, approval: signed, expiresAt };
+    const name = dayKeyName(dayKeyFor, owner, chainId);
+    dayKeys.set(name, d);
+    await dayDbDo('readwrite', (s) => s.put(d, name));
+  }
+  return signed;
 }
 
 /** The request as an action waits on it: at most DAY_KEY_ANSWER_MS, then a clear failure (the request itself goes on). */
@@ -292,6 +330,8 @@ export class ExecutorClient {
       this.id = i.executorId;
       if (i.features?.includes('day-key')) dayKeyExecutors.add(i.executorId);
       else dayKeyExecutors.delete(i.executorId);
+      if (i.features?.includes('terms-day-key')) termsDayKeyExecutors.add(i.executorId);
+      else termsDayKeyExecutors.delete(i.executorId);
       try { localStorage.setItem(lastIdKey(this.base), i.executorId); } catch { /* private mode */ }
     }
     return i;
@@ -375,6 +415,8 @@ export class ExecutorClient {
   /* ----------------------------------------------------------- writes ----- */
 
   acceptTerms = (request: SignedCopyRequest) => this.call<MeResponse>('POST', '/terms', { body: { request } });
+  /** Whether `owner` accepted the copy terms in force here (public yes/no; 'terms-day-key' executors). */
+  termsStatus = (owner: string) => this.call<{ accepted: boolean; termsVersion: string }>('GET', `/terms/status?owner=${encodeURIComponent(owner.toLowerCase())}`);
   /** ValueDesk's own terms (legal/acceptance.ts): recorded by the hosted executor only. */
   acceptSiteTerms = (request: SignedCopyRequest) => this.call<SiteTermsRecord>('POST', '/site-terms', { body: { request } });
   createKey = (request: SignedCopyRequest) => this.call<{ address: string; name: string; maxDays: number; days: number }>('POST', '/keys', { body: { request } });

@@ -228,6 +228,18 @@ export async function signSiteTerms(o: { provider: Eip1193Provider; owner: strin
   return signedTerms(owner) ?? t;
 }
 
+/**
+ * The wallet signed these terms inside its copy terms acceptance (one signature for both, 'terms-day-key'; owner
+ * 2026-11-22): kept as this wallet's signed acceptance. ValueDesk's executor records it with the copy terms, so it is
+ * never sent to /site-terms on its own (that route takes 'accept-site-terms' only).
+ */
+export function adoptSiteTermsFrom(owner: string, request: SignedCopyRequest, payload: AcceptSiteTermsPayload): void {
+  const o = owner.toLowerCase();
+  const t: SignedSiteTerms = { termsVersion: payload.termsVersion, termsHash: payload.termsHash, country: payload.country, acceptedAt: Date.now(), recorded: true, request };
+  write(signedKey(o), t);
+  acceptBrowse(STATEMENTS.map((s) => s.id), t.acceptedAt, o);
+}
+
 async function sendRecord(owner: string, t: SignedSiteTerms): Promise<void> {
   try {
     await hostedExecutor.acceptSiteTerms(t.request);

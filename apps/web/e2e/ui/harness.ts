@@ -139,7 +139,7 @@ export function uiSuite(file = process.argv[1] ?? 'spec') {
     const errors: string[] = [];
     const watch = (p: Page) => {
       p.on('console', (m) => {
-        if (m.type() === 'error') errors.push(`console: ${m.text().slice(0, 400)}`);
+        if (m.type() === 'error' || process.env.VS_E2E_VERBOSE) errors.push(`console: ${m.text().slice(0, 400)}`);
       });
       p.on('pageerror', (e) => errors.push(`pageerror: ${String(e?.message ?? e).slice(0, 400)}`));
     };
@@ -260,19 +260,35 @@ export async function acceptWelcome(page: Page): Promise<void> {
 export async function connectWallet(page: Page, o: { settle?: boolean } = {}): Promise<void> {
   // The Tools rail on a wide screen; on a phone (no rail) the header's own button, which then names the address.
   const rail = page.getByRole('complementary', { name: 'Tools' });
-  const wide = await rail.getByRole('button', { name: 'Connect wallet' }).isVisible().catch(() => false);
+  // The rail's button reads "Connect" since the phone pass (2026-11-18); "Connect wallet" before.
+  const railConnect = rail.getByRole('button', { name: /^Connect( wallet)?$/ });
+  const wide = await railConnect.first().isVisible().catch(() => false);
   const header = page.getByRole('banner');
-  await (wide ? rail : header).getByRole('button', { name: 'Connect wallet' }).click();
+  await (wide ? railConnect.first() : header.getByRole('button', { name: 'Connect wallet' })).click();
   const dialog = page.getByRole('dialog', { name: 'Connect' });
   await dialog.waitFor({ state: 'visible' });
   // The test wallet announced itself over EIP-6963 as io.metamask: on a desktop the row says so. On a phone the page
   // is in the wallet's own browser, and the dialog asks the wallet at once (ConnectDialog.tsx chooseHere).
-  if (wide) await dialog.getByRole('button', { name: 'MetaMask Installed' }).click();
-  const connected = wide ? rail.getByRole('button', { name: /^Wallet / }) : header.getByRole('button', { name: /0x[0-9a-f]{2,}/i });
+  const connected = wide ? rail.getByRole('button', { name: /^Wallet |0x[0-9a-f]{2,}/i }) : header.getByRole('button', { name: /0x[0-9a-f]{2,}/i });
+  if (wide) {
+    // The dialog takes no choice while its card is still coming in (ConnectDialog.tsx choose): click again until it does.
+    const row = dialog.getByRole('button', { name: /^MetaMask\s*Installed$/ });
+    for (let i = 0; i < 6; i++) {
+      if (!(await row.isVisible().catch(() => false))) break;
+      await row.click().catch(() => {});
+      if (await connected.first().waitFor({ state: 'visible', timeout: 2_500 }).then(() => true, () => false)) break;
+    }
+  }
   await connected.first().waitFor({ state: 'visible', timeout: 30_000 });
   if (o.settle === false) return; // a spec about what shows the moment a wallet connects
   await dismissOnboarding(page);
   await dismissSetup(page);
+  // The VALUEDESK code offer (owner 2026-11-14) to a wallet SoDEX lists without a code: Not now.
+  const ref = page.getByRole('dialog', { name: /SoDEX code/ });
+  if (await ref.waitFor({ state: 'visible', timeout: 4_000 }).then(() => true, () => false)) {
+    await ref.getByRole('button', { name: 'Not now', exact: true }).click();
+    await ref.waitFor({ state: 'hidden' });
+  }
 }
 
 /** The first-signup flow a brand-new wallet gets (src/onboarding/): Skip. A no-op when it is not up. onboarding.spec.ts walks it. */

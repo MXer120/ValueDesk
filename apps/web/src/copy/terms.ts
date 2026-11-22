@@ -28,7 +28,8 @@ import {
 } from '@copy-engine';
 import type { Eip1193Provider } from '../wallet';
 import { logger } from '../log';
-import { ExecutorError, hostedExecutor, signCopy, type ExecutorClient } from './executor';
+import { adoptSiteTermsFrom, siteTermsPayload } from '../legal/acceptance';
+import { ExecutorError, hostedExecutor, signTermsWithDayKey, type ExecutorClient } from './executor';
 
 const log = logger('copy');
 
@@ -123,7 +124,7 @@ function save(owner: string, t: LocalTerms): void {
 /** The region rule for this wallet (declared country here, IP country as the executor saw it). */
 export const termsPolicy = (t: LocalTerms | null, viewerCountry: string | null): RegionPolicy => regionPolicy(t?.country ?? null, viewerCountry);
 
-export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: string; country: string }): Promise<LocalTerms> {
+export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: string; country: string; withSiteTerms?: boolean }): Promise<LocalTerms> {
   const owner = o.owner.toLowerCase();
   const country = normaliseCountry(o.country);
   if (!country) throw new Error('Choose your country of residence.');
@@ -137,7 +138,12 @@ export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: str
     ownDecision: true,
     risksUnderstood: true,
   };
-  const request = await signCopy(o.provider, owner, COPY_TERMS_EXECUTOR, 'accept-terms', payload);
+  // The same signature approves this browser's day key for ValueDesk's executor when it can take one: sign-in, the
+  // trading key's request and the bots' everyday actions then need no further popup (owner 2026-11-22: shorter setup).
+  // A wallet that never signed ValueDesk's own terms signs them here too: one signature for both.
+  const site = o.withSiteTerms ? siteTermsPayload(country) : null;
+  const request = await signTermsWithDayKey(o.provider, owner, COPY_TERMS_EXECUTOR, { ...payload, ...(site ? { siteTerms: site } : {}) }, hostedExecutor.executorIdNow());
+  if (site) adoptSiteTermsFrom(owner, request, site);
   const t: LocalTerms = { termsVersion: terms.termsVersion, termsHash: terms.termsHash, country, acceptedAt: Date.now(), recorded: false, request };
   try {
     await hostedExecutor.acceptTerms(request);

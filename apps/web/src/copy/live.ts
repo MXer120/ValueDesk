@@ -31,7 +31,7 @@ import { BROWSER_KEY_NAME, browserCopier, type BrowserKey, type CopierRole, type
 import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, HOSTED_BASE, VIP_BASE, hostedExecutor, keepSessionAt, keepVipSession, selfBase, selfUrlProblem, setVipMoved, signCopy, standardExecutor, vipMoved } from './executor';
 import { MAX_BROWSER_KEY_DAYS, approveCopyFee, copyFeeApproval, copyKeyRegistered, registerCopyKey, revokeCopyKey } from './sodexSetup';
 import { acceptCopyTerms, activeCopyTerms, adoptRecordedTerms, followExecutorTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
-import { requireTermsOrThrow } from '../legal/acceptance';
+import { requireTermsOrThrow, signedTerms as signedSiteTerms } from '../legal/acceptance';
 import { track } from '../analytics/usage';
 
 const log = logger('copy');
@@ -44,6 +44,12 @@ export interface ExecutorSide {
   infoError: string | null;
   me: MeResponse | null;
   signedIn: boolean;
+  /**
+   * Hosted, signed out: whether the executor has this wallet's acceptance of the terms in force (public yes/no,
+   * 'terms-day-key'). false: a new wallet - the setup asks for the terms first, and that signature also approves the
+   * day key, so signing in takes no popup. null: not known (older executor, not read yet).
+   */
+  termsOnRecord?: boolean | null;
 }
 
 export interface LiveCopy {
@@ -337,13 +343,26 @@ export async function refreshHosted(): Promise<void> {
   const token = state.owner ? hostedExecutor.token(state.owner) : null;
   // No token (it expired, the executor refused it, another executor): signed out, so the page offers Sign in again
   // instead of showing an empty list (audit A5).
-  if (!token) { markSignedOut('hosted'); return; }
+  if (!token) {
+    markSignedOut('hosted');
+    await readTermsOnRecord();
+    return;
+  }
   await loadMe('hosted', token);
   // A VIP move started before (another tab, a closed page): followed to its end.
   if (hostedExecutor.base === HOSTED_BASE) void resumeVipMove();
 }
 
 /** The executor's sign-in for this wallet is gone: the page says so (Sign in) rather than showing nothing. */
+/** Signed out of the hosted executor: read whether it has this wallet's terms (setup order; see termsOnRecord). */
+async function readTermsOnRecord(): Promise<void> {
+  const owner = state.owner;
+  if (!owner || state.terms || !state.hosted.info?.features?.includes('terms-day-key')) return;
+  if (state.hosted.termsOnRecord != null) return;
+  const r = await hostedExecutor.termsStatus(owner).catch(() => null);
+  if (r && state.owner === owner) set({ hosted: { ...state.hosted, termsOnRecord: r.accepted } });
+}
+
 export function markSignedOut(mode: 'hosted' | 'self'): void {
   const side = state[mode];
   if (!side.signedIn && !side.me) return;
@@ -452,11 +471,16 @@ export async function refreshSelf(): Promise<void> {
 
 /* --------------------------------------------------------------- steps ----- */
 
-export async function acceptTerms(country: string): Promise<void> {
+/**
+ * Sign the copy terms. `withSiteTerms`: ValueDesk's own terms are in the same form and the same signature (a wallet that
+ * never signed them, on an executor with 'terms-day-key'), so the separate site terms popup is not asked for.
+ */
+export async function acceptTerms(country: string, o: { withSiteTerms?: boolean } = {}): Promise<void> {
   const { owner, provider: p } = needWallet();
+  const withSiteTerms = !!o.withSiteTerms && !signedSiteTerms(owner);
   // ValueDesk's own terms first (the popup, as a gate): copy trading adds to them.
-  await requireTermsOrThrow({ owner, reason: 'start copy trading' });
-  const t = await busyWith('wallet', () => acceptCopyTerms({ provider: p, owner, country }));
+  if (!withSiteTerms) await requireTermsOrThrow({ owner, reason: 'start copy trading' });
+  const t = await busyWith('wallet', () => acceptCopyTerms({ provider: p, owner, country, withSiteTerms }));
   set({ terms: t });
   if (selfClient && state.self.signedIn) await sendTermsTo(selfClient, owner).catch((e) => log.warn('copy: terms not sent to the copier', { error: String(e) }));
   if (state.hosted.signedIn) await refreshHosted();
@@ -470,7 +494,7 @@ export async function approveFee(): Promise<void> {
   await refreshFee();
 }
 
-/** Approve the copy key of `mode` for `days`. Two signatures for an executor (its request, then SoDEX's), one for this browser. */
+/** Approve the copy key of `mode` for `days`. For an executor: its request (the day key signs it where the executor has terms-day-key, else the wallet), then SoDEX's registration (the wallet). One for this browser. */
 /**
  * `onStep` hears which wallet request is out (1: the executor makes the key, 2: SoDEX registers it), so a page can say
  * "2 of 2" (owner 2026-11-10: a renewal waited on the second request with nothing saying a second one was coming).

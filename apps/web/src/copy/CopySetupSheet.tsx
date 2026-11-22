@@ -22,6 +22,7 @@ import { notify } from '../toast';
 import { tradingConfig } from '../trading/config';
 import { WalletError } from '../wallet';
 import { BOT_HOSTED_KEY_NOTICE, BOT_RISK_SUMMARY, BOT_STATEMENT_LABEL, COPY_RISK_SUMMARY, COPY_STATEMENTS, HOSTED_KEY_NOTICE } from '../legal/copyTerms';
+import { STATEMENTS as SITE_STATEMENTS, signedTerms as signedSiteTerms, type StatementId as SiteStatementId } from '../legal/acceptance';
 import { countryName } from './countries';
 import { LOCATION_UNKNOWN, useViewerGeo } from '../legal/geo';
 import {
@@ -65,6 +66,20 @@ const Tick = () => (
     <path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+/** A statement of ValueDesk's own terms with its [label](/page) links as links (as the site terms popup shows them). */
+function siteLabel(id: SiteStatementId): ReactNode {
+  const text = SITE_STATEMENTS.find((s) => s.id === id)?.label ?? '';
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(/\[([^\]]+)\]\((\/[a-z-]+)\)/g)) {
+    out.push(text.slice(last, m.index));
+    out.push(<a key={m.index} className="fx-link" href={m[2]} target="_blank" rel="noopener">{m[1]}</a>);
+    last = (m.index ?? 0) + m[0].length;
+  }
+  out.push(text.slice(last));
+  return out;
+}
 
 /** A step already done is left out (the copy dialog: only what is missing shows, owner 2026-11-03). */
 const HideDone = createContext(false);
@@ -146,6 +161,34 @@ export function setupSteps(live: LiveCopy, mode: CopyModeId, paper?: boolean, bo
   out.push({ id: 'terms', done: bots ? r.terms && r.connected : r.terms });
   if (!paper) out.push({ id: 'fee', done: r.fee }, { id: 'key', done: r.key });
   return out;
+}
+
+/**
+ * A new wallet on an executor with 'terms-day-key' (owner 2026-11-22, "make that shorter"): its first signature accepts
+ * ValueDesk's terms and the copy terms together and approves this browser's day key, so signing in and asking for the
+ * trading key take no popup. Hosted only, signed out, terms known not to be on record there.
+ */
+export function newWalletPath(live: LiveCopy, mode: CopyModeId): boolean {
+  return mode === 'hosted' && !live.hosted.signedIn && !live.terms && live.hosted.termsOnRecord === false && !!live.hosted.info?.features?.includes('terms-day-key');
+}
+
+/**
+ * How many wallet signatures the steps still ask for (each free: a signed message, no transaction). Hosted with
+ * 'terms-day-key': terms (or sign-in) 1, fee 1, SoDEX's key registration 1. Otherwise ValueDesk's own terms, the sign-in
+ * and the executor's key request add theirs. A day key still fresh in this browser can save one more; not counted.
+ */
+export function signaturesLeft(live: LiveCopy, mode: CopyModeId, paper?: boolean, bots?: boolean): number {
+  const r = readiness(live, mode);
+  // The executor takes a day-key-signed key request (any setup); the one-signature terms are the bot setup's.
+  const keyByDayKey = mode !== 'browser' && !!live[mode].info?.features?.includes('terms-day-key');
+  const tdk = !!bots && keyByDayKey;
+  let n = 0;
+  if (!live.owner) return 0;
+  if (!r.terms) n += 1 + (signedSiteTerms(live.owner) || tdk ? 0 : 1);
+  if (mode !== 'browser' && !r.connected && !(tdk && !r.terms)) n += 1;
+  if (!paper && !r.fee) n += 1;
+  if (!paper && !r.key) n += mode === 'browser' || keyByDayKey ? 1 : 2;
+  return n;
 }
 
 /**
@@ -241,7 +284,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
 
   // The steps of this mode, in order; the first one not done is lit.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const steps = useMemo(() => setupSteps(live, mode, paper, bots), [owner, live.canSign, mode, r.connected, r.terms, r.fee, r.key, paper, bots]);
+  const steps = useMemo(() => setupSteps(live, mode, paper, bots), [owner, live.canSign, mode, r.connected, r.terms, r.fee, r.key, paper, bots, live.hosted.termsOnRecord, live.hosted.signedIn]);
   const current = steps.find((s) => !s.done)?.id ?? null;
   // Numbered among the steps shown: with the done ones left out, what is missing reads 1, 2, ...
   const shown = hideDone ? steps.filter((s) => !s.done) : steps;
@@ -254,19 +297,25 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
   // Bots: the terms step signs in to the executor as well (no step of its own).
   const termsDone = bots ? r.terms && r.connected : r.terms;
 
+  // A new wallet (terms-day-key): the terms form opens without a sign-in first, ValueDesk's own terms in it when this
+  // wallet never signed them, and one signature accepts everything and approves the day key (signing in then is silent).
+  // Bots only for now (the copy setup keeps its sign-in step and the site terms popup).
+  const fresh = !!bots && newWalletPath(live, mode);
+  const withSite = !!bots && !!owner && !signedSiteTerms(owner) && !!live.hosted.info?.features?.includes('terms-day-key');
+  const siteTicked = !withSite || SITE_STATEMENTS.every((s) => ticks[`site:${s.id}`]);
   // Signing the terms: the bottom button of the host (onPrimary), or the step's own button without one.
-  const termsForm = !r.terms && termsOpen && (!bots || r.connected);
-  const canAccept = !!country && allTicked && regionPolicy(country, live.viewerCountry).allowed;
+  const termsForm = !r.terms && termsOpen && (!bots || r.connected || fresh);
+  const canAccept = !!country && allTicked && siteTicked && regionPolicy(country, live.viewerCountry).allowed;
   const acceptNow = () => void run('terms', async () => {
-    await acceptTerms(country);
-    if (bots && !getLiveCopy().hosted.signedIn) await signIn('hosted');
+    await acceptTerms(country, { withSiteTerms: withSite });
+    if ((bots || fresh) && !getLiveCopy().hosted.signedIn) await signIn('hosted');
   }, bots ? 'Terms accepted.' : 'Copy trading terms accepted.');
   const acceptLabel = 'Sign and accept the terms';
   useEffect(() => {
     if (!onPrimary) return;
     onPrimary(termsForm ? { label: acceptLabel, disabled: !canAccept, busy: working === 'terms', run: acceptNow } : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onPrimary, termsForm, canAccept, working, country, bots]);
+  }, [onPrimary, termsForm, canAccept, working, country, bots, withSite]);
   useEffect(() => () => onPrimary?.(null), [onPrimary]);
 
   return (
@@ -318,14 +367,14 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
           live.terms
             ? `Accepted ${new Date(live.terms.acceptedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })} · from ${countryName(live.terms.country)}.${bots && !r.connected ? ' One more signature opens your bots.' : ''}`
             : bots
-              ? r.connected
-                ? 'No acceptance on record for this wallet yet: the risks, the fee, and what you confirm. One signature.'
+              ? r.connected || fresh
+                ? 'No acceptance on record for this wallet yet: the risks, the fee, and what you confirm. One signature, and it also signs you in.'
                 : 'One signature opens your bots. If this wallet accepted the terms before, in any browser, that is all.'
               : 'The risks, the fee, and what you confirm. One signature.'
         }
         action={
           !r.terms
-            ? bots && !r.connected
+            ? bots && !r.connected && !fresh
               // Sign in first: the executor's record of an earlier acceptance then counts, and nobody signs the terms twice.
               ? <Act label="Continue" primary={current === 'terms'} disabled={!owner || !live.hosted.info} busy={working === 'signin'} onClick={() => void run('signin', async () => {
                   await signIn('hosted');
@@ -355,6 +404,12 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
               <p className="fx-note fx-note--err">{regionPolicy(country, live.viewerCountry).reason}</p>
             )}
             <div className="cs-checks">
+              {withSite && SITE_STATEMENTS.map((s) => (
+                <label key={`site:${s.id}`} className="oe-check cs-check">
+                  <input type="checkbox" checked={!!ticks[`site:${s.id}`]} onChange={(e) => setTicks({ ...ticks, [`site:${s.id}`]: e.target.checked })} />
+                  <span>{siteLabel(s.id)}</span>
+                </label>
+              ))}
               {COPY_STATEMENTS.map((s) => (
                 <label key={s.id} className="oe-check cs-check">
                   <input type="checkbox" checked={!!ticks[s.id]} onChange={(e) => setTicks({ ...ticks, [s.id]: e.target.checked })} />
@@ -364,7 +419,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
             </div>
             {termsNote && <p className="fx-note fx-note--warn" role="status">{termsNote}</p>}
             {onPrimary
-              ? <p className="fx-note">{allTicked ? 'Accept with the button below: one wallet signature.' : 'Tick each statement, then accept with the button below.'}</p>
+              ? <p className="fx-note">{allTicked && siteTicked ? `Accept with the button below: one wallet signature${withSite ? ' for ValueDesk’s terms and these' : ''}.` : 'Tick each statement, then accept with the button below.'}</p>
               : <Act label={acceptLabel} primary disabled={!canAccept} busy={working === 'terms'} onClick={acceptNow} />}
           </div>
         )}
@@ -531,9 +586,13 @@ export const STEP_DONE_LABEL: Record<string, string> = {
 export function SetupProgress({ live, mode, paper, bots }: { live: LiveCopy; mode: CopyModeId; paper?: boolean; bots?: boolean }) {
   const steps = setupSteps(live, mode, paper, bots);
   const done = steps.filter((x) => x.done).length;
+  const sigs = signaturesLeft(live, mode, paper, bots);
   return (
     <div className="cs-progress" aria-label={`${done} of ${steps.length} steps done`}>
-      <span className="cs-progress__t">{done === steps.length ? (bots ? 'Ready to run bots' : 'Ready to copy') : `${done} of ${steps.length} steps done`}</span>
+      <span className="cs-progress__t">
+        {done === steps.length ? (bots ? 'Ready to run bots' : 'Ready to copy') : `${done} of ${steps.length} steps done`}
+        {sigs > 0 && <span className="cs-progress__sigs">{sigs} wallet {sigs === 1 ? 'signature' : 'signatures'} left · free, no transaction</span>}
+      </span>
       <span className="cs-progress__bar"><i style={{ width: `${(done / steps.length) * 100}%` }} /></span>
     </div>
   );

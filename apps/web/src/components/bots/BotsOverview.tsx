@@ -11,7 +11,7 @@ import { usePrivacy, type PrivacyKey } from '../../privacy';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FINAL_STATUSES, type AlgoView } from '@copy-engine';
 import { DASH, fmtUsd } from '../../format';
-import { SetupProgress } from '../../copy/CopySetupSheet';
+import { SetupProgress, newWalletPath, signaturesLeft } from '../../copy/CopySetupSheet';
 import { openConnectDialog } from '../account/connect';
 import { CoinIcon } from '../CoinIcon';
 import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
@@ -231,9 +231,13 @@ export function SignInButton({ ctx }: { ctx: BotsCtx }) {
   );
 }
 
+/** "3 free wallet signatures" (each a signed message, no transaction). */
+const sigWords = (n: number) => (n === 0 ? 'Nothing left to sign' : `${n} free wallet ${n === 1 ? 'signature' : 'signatures'}, no transaction`);
+
 function Setup({ ctx }: { ctx: BotsCtx }) {
   // Signed out (a new browser, or 30 days on): one read signature, never the terms again - they are on record.
-  if (ctx.address && ctx.supported && !ctx.seen) {
+  // A new wallet (nothing on record, terms-day-key): straight to the setup, whose terms signature signs in as well.
+  if (ctx.address && ctx.supported && !ctx.seen && !newWalletPath(ctx.live, 'hosted')) {
     return (
       <Shell className="bots-setupcard">
         <ShellHeader icon="wallet" title="Sign in to your bots" subtitle="One free signature, it only reads" />
@@ -253,7 +257,7 @@ function Setup({ ctx }: { ctx: BotsCtx }) {
       : { line: PRACTICE_BOTS ? `Accept the terms to start a practice bot: it runs against the real book and sends nothing. Real orders add the ${botFeeWords(ctx.feeTenths)} fee and a trading key.` : `Accept the terms, approve the ${botFeeWords(ctx.feeTenths)} fee and a trading key, then start a bot with real orders.`, act: <Button variant="primary" onClick={() => ctx.setup(PRACTICE_BOTS)}>Set up</Button> };
   return (
     <Shell className="bots-setupcard">
-      <ShellHeader icon="bolt" title="Start here" subtitle={ctx.address ? 'Two short steps, one signature each' : 'No wallet connected'} />
+      <ShellHeader icon="bolt" title="Start here" subtitle={ctx.address ? sigWords(signaturesLeft(ctx.live, 'hosted', PRACTICE_BOTS, true)) : 'No wallet connected'} />
       <Panel className="bots-setup">
         <p className="bots-setup__line">{body.line}</p>
         {ctx.address && ctx.supported && <div className="bots-setup__steps"><SetupProgress live={ctx.live} mode="hosted" paper={PRACTICE_BOTS} bots /></div>}

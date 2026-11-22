@@ -398,6 +398,20 @@ const KEY_READ_GAP_MS = 3_000;
  */
 const KEY_REFUSED_AT = 0;
 
+/** ValueDesk's own terms as signed ('accept-site-terms', or inside an 'accept-terms'): form, fingerprint, country, statements, text. */
+function checkSiteTerms(payload: unknown): AcceptSiteTermsPayload {
+  const p = (payload && typeof payload === 'object' ? payload : {}) as Partial<AcceptSiteTermsPayload>;
+  if (typeof p.termsVersion !== 'string' || !/^\d{4}-\d{2}-\d{2}(\.\d+)?$/.test(p.termsVersion)) throw new ApiError(400, 'terms-version', 'termsVersion must be the version of the terms shown.');
+  if (typeof p.termsHash !== 'string' || !/^0x[0-9a-f]{64}$/.test(p.termsHash)) throw new ApiError(400, 'terms-hash', 'termsHash must be the keccak256 of the terms text.');
+  const country = normaliseCountry(p.country);
+  if (!country) throw new ApiError(400, 'country', 'Choose your country of residence.');
+  for (const k of ['agree', 'eligible', 'risks', 'ownDecisions'] as const) {
+    if (p[k] !== true) throw new ApiError(400, 'statements', 'Every statement must be confirmed to trade through ValueDesk.');
+  }
+  if (typeof p.text !== 'string' || p.text.length < 40 || p.text.length > 4000) throw new ApiError(400, 'text', 'The signed message must carry the statements as text.');
+  return { ...(p as AcceptSiteTermsPayload), country };
+}
+
 export class ExecutorService {
   readonly executorId: string;
   readonly keyName: string;
@@ -894,6 +908,9 @@ export class ExecutorService {
     for (const k of ['adult', 'notUsPerson', 'ownDecision', 'risksUnderstood'] as const) {
       if (p[k] !== true) throw new ApiError(400, 'statements', 'Every statement must be confirmed to copy trades.');
     }
+    // ValueDesk's own terms signed in the same signature (a new wallet's one terms signature): checked as /site-terms
+    // checks them; the consent log keeps the signed request with both.
+    if (p.siteTerms !== undefined) checkSiteTerms(p.siteTerms);
     this.screen(owner);
     const policy = regionPolicy(country, ctx.viewerCountry);
     this.db.setTerms(owner, { termsVersion: p.termsVersion, termsHash: p.termsHash, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() });
@@ -913,16 +930,20 @@ export class ExecutorService {
   acceptSiteTerms(req: unknown, ctx: RequestContext): SiteTermsRecord {
     if (this.cfg.kind !== 'hosted') throw new ApiError(404, 'path', 'ValueDesk\'s terms are recorded by ValueDesk\'s own executor.');
     const { payload } = this.accept(req, 'accept-site-terms', ctx);
-    const p = payload as Partial<AcceptSiteTermsPayload>;
-    if (typeof p.termsVersion !== 'string' || !/^\d{4}-\d{2}-\d{2}(\.\d+)?$/.test(p.termsVersion)) throw new ApiError(400, 'terms-version', 'termsVersion must be the version of the terms shown.');
-    if (typeof p.termsHash !== 'string' || !/^0x[0-9a-f]{64}$/.test(p.termsHash)) throw new ApiError(400, 'terms-hash', 'termsHash must be the keccak256 of the terms text.');
-    const country = normaliseCountry(p.country);
-    if (!country) throw new ApiError(400, 'country', 'Choose your country of residence.');
-    for (const k of ['agree', 'eligible', 'risks', 'ownDecisions'] as const) {
-      if (p[k] !== true) throw new ApiError(400, 'statements', 'Every statement must be confirmed to trade through ValueDesk.');
-    }
-    if (typeof p.text !== 'string' || p.text.length < 40 || p.text.length > 4000) throw new ApiError(400, 'text', 'The signed message must carry the statements as text.');
-    return { recorded: true, termsVersion: p.termsVersion, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() };
+    const p = checkSiteTerms(payload);
+    return { recorded: true, termsVersion: p.termsVersion, country: p.country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() };
+  }
+
+  /**
+   * Whether `owner` accepted the copy terms in force here: yes or no, nothing else (owner 2026-11-22, a shorter setup).
+   * A new wallet then signs the terms first - that one signature also approves its day key ('terms-day-key') - and a
+   * wallet on record only signs in. That a wallet uses ValueDesk is public on SoDEX already (its builder approval).
+   */
+  termsStatus(owner: string | null): { accepted: boolean; termsVersion: string } {
+    const o = String(owner ?? '').toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(o)) throw new ApiError(400, 'owner', 'owner must be a 0x address');
+    const t = this.db.terms(o);
+    return { accepted: !!t && t.termsVersion === COPY_TERMS_VERSION, termsVersion: COPY_TERMS_VERSION };
   }
 
   me(owner: string, ctx: RequestContext): MeResponse {

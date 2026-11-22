@@ -31,11 +31,11 @@ const shot = (page: Page, name: string) => page.screenshot({ path: join(OUT, `bo
  */
 async function setUp(page: Page, wallet: TestWallet): Promise<void> {
   const mark = wallet.mark();
-  // Signed out, the page asks for the read sign-in first (one signature); a new wallet then gets the setup.
-  const signIn = page.locator('.bots-setupcard').getByRole('button', { name: 'Sign in', exact: true });
-  await signIn.waitFor({ state: 'visible', timeout: 20_000 });
-  await signIn.click();
+  // A new wallet (nothing on record, owner 2026-11-22 "make that shorter"): no sign-in first - the setup's one terms
+  // signature accepts ValueDesk's terms and the bot terms together and approves the day key, which then signs the sign-in.
+  assert.equal(await page.locator('.bots-setupcard').getByRole('button', { name: 'Sign in', exact: true }).count(), 0, 'a new wallet is not asked to sign in first');
   await page.getByRole('button', { name: 'Set up', exact: true }).first().waitFor({ state: 'visible', timeout: 30_000 });
+  await page.getByText(/[1-3] free wallet signatures?, no transaction/).first().waitFor({ state: 'visible', timeout: 10_000 });
   await page.getByRole('button', { name: 'Set up', exact: true }).first().click();
   const sheet = page.getByRole('dialog', { name: 'Bot setup' });
   await sheet.waitFor({ state: 'visible' });
@@ -45,7 +45,6 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
     assert.equal(await sheet.getByText(copyWords).count(), 0, `no copy setup wording: ${copyWords}`);
   }
   const step = (t: string) => sheet.getByRole('listitem').filter({ hasText: t });
-  // Signed in already; with no acceptance on record for this wallet, the terms form opens.
   const cont = step('Accept the terms').getByRole('button', { name: /^(Continue|Review)$/ });
   if (await cont.count()) await cont.click();
   await sheet.getByRole('checkbox', { name: /^I am at least 18/ }).waitFor({ state: 'visible', timeout: 30_000 });
@@ -54,21 +53,29 @@ async function setUp(page: Page, wallet: TestWallet): Promise<void> {
   const accept = sheet.getByRole('button', { name: 'Sign and accept the terms', exact: true });
   await accept.waitFor({ state: 'visible', timeout: 10_000 });
   assert.equal(await step('Accept the terms').getByRole('button', { name: /Sign and accept/ }).count(), 0, 'no accept button in the terms step');
-  assert.equal(await sheet.getByRole('button', { name: 'Finish the steps', exact: true }).count(), 0, 'the bottom button is the accept button now');
   assert.ok(await accept.isDisabled(), 'accept waits for the statements');
+  // ValueDesk's own statements are in the same form (no second popup), then the bot statements.
+  for (const s of [/^I agree to the Terms of use/, /^I am 18 or older/, /^I understand that trading perpetual/, /^My trades are my own decisions/]) await sheet.getByRole('checkbox', { name: s }).check();
   for (const s of [/^I am at least 18/, /^I am not a US person/, /^I chose every bot/, /^I have read the terms and risk disclosure/]) await sheet.getByRole('checkbox', { name: s }).check();
   await until(page, () => accept.isEnabled(), 'every statement ticked: accept is on');
+  await shot(page, 'setup-terms');
   await accept.click();
-  const site = page.getByRole('dialog', { name: 'Sign the terms to continue' });
-  await site.waitFor({ state: 'visible' });
-  await site.getByRole('checkbox', { name: /^I confirm that/ }).check();
-  await site.getByRole('button', { name: 'Only necessary', exact: true }).click();
   await toast(page, 'Terms accepted.').waitFor({ state: 'visible', timeout: 30_000 });
-  await sheet.getByText('Ready to run bots').waitFor({ state: 'visible', timeout: 20_000 });
-  await sheet.getByRole('button', { name: 'Done', exact: true }).waitFor({ state: 'visible' });
-  // The day key (owner 2026-11-08): the sign-in asks the wallet for it once; the terms always take the wallet itself.
-  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['day-key', 'site-terms', 'copy-terms']);
-  await sheet.locator('.cs-actions').getByRole('button', { name: 'Close', exact: true }).click();
+  // Signed in by the day key the terms approved (the revoke line shows once signed in).
+  await sheet.getByRole('button', { name: 'Revoke every day key' }).waitFor({ state: 'visible', timeout: 20_000 });
+  assert.equal(await page.getByRole('dialog', { name: 'Sign the terms to continue' }).count(), 0, 'no separate site terms popup');
+  // One wallet signature for all of it: the terms (both) with the day key; the sign-in was signed by the day key.
+  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.kind), ['copy-terms']);
+  await shot(page, 'setup-after-terms');
+  if (await sheet.getByText(/Approve the fee/).count()) {
+    // Real orders (practice off since 2026-11-15): the fee and SoDEX's key are left, one signature each. A throwaway
+    // wallet has no SoDEX account to approve them on; the live suite covers them.
+    await sheet.getByText('2 wallet signatures left', { exact: false }).waitFor({ state: 'visible' });
+  } else {
+    await sheet.getByText('Ready to run bots').waitFor({ state: 'visible', timeout: 20_000 });
+    await sheet.getByRole('button', { name: 'Done', exact: true }).waitFor({ state: 'visible' });
+  }
+  await sheet.locator('.cs-actions').getByRole('button', { name: /^(Close|Cancel)$/ }).click();
   await sheet.waitFor({ state: 'hidden' });
 }
 

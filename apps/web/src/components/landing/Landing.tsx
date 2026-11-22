@@ -349,7 +349,7 @@ export function Landing() {
           <ul className="lp-points is-3">
             <Point icon="bolt" title="Hosted, always on">Bots run on the ValueDesk executor, not in your browser. Start one and close the laptop.</Point>
             <Point icon="shield" title="Limits you set">An inventory cap, a loss limit and trading hours. A bot holds while its price source is not fresh.</Point>
-            <Point icon="play" title="Practice first">Run any bot in practice, with no real orders, then run the same settings for real.</Point>
+            <Point icon="clock" title="Revoke any time">The trading key lives as long as you choose, at most 180 days. Revoke it on SoDEX whenever you like.</Point>
           </ul>
         </section>
 
@@ -407,11 +407,11 @@ export function Landing() {
         <section className="lp-sec lp-start" aria-labelledby="lp-start">
           <div className="lp-start__t">
             <h2 id="lp-start" className="lp-h2">Set up once, in three signatures.</h2>
-            <p className="lp-lead">Connect your wallet and approve with three signatures. No deposit to ValueDesk: your funds stay in your SoDEX account, and you can revoke the access at any time.</p>
+            <p className="lp-lead">Connect your wallet and sign three times: the terms, the fee and the trading key. No deposit to ValueDesk: your funds stay in your SoDEX account, and you can revoke the access at any time.</p>
           </div>
           <ol className="lp-steps">
             <li><span className="lp-steps__n">1</span><b>Connect</b><span>Any wallet you use on SoDEX.</span></li>
-            <li><span className="lp-steps__n">2</span><b>Sign three times</b><span>Accept the terms and approve the trading key.</span></li>
+            <li><span className="lp-steps__n">2</span><b>Sign three times</b><span>Accept the terms, approve the fee and the trading key. Free signatures, no transaction.</span></li>
             <li><span className="lp-steps__n">3</span><b>Start</b><span>A bot, a copy, or a trade from the terminal.</span></li>
           </ol>
           <div className="lp-cta is-end">

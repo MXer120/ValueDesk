@@ -71,10 +71,12 @@ export type CopyAction =
 export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'accept-site-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action', 'vip-move', 'delegate'];
 
 /**
- * What a day key (action 'delegate') may sign: the everyday actions. Never the terms, a trading key's creation or
- * removal, or another delegation - those always take the wallet itself.
+ * What a day key (action 'delegate') may sign: the everyday actions, and asking the executor for a new trading key
+ * ('create-key', owner 2026-11-22 "make the setup shorter": the key it makes trades nothing until the wallet itself
+ * registers it on SoDEX with its own signature, and its private part never leaves the executor). Never the terms, a
+ * key's removal, or another delegation - those always take the wallet itself.
  */
-export const DELEGABLE_ACTIONS: ReadonlySet<CopyAction> = new Set<CopyAction>(['session', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action', 'vip-move']);
+export const DELEGABLE_ACTIONS: ReadonlySet<CopyAction> = new Set<CopyAction>(['session', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action', 'vip-move', 'create-key']);
 /** How long a day key lives at most. */
 export const DELEGATION_TTL_MS = 24 * 60 * 60_000;
 
@@ -226,11 +228,16 @@ export function verifyCopyRequest(r: unknown, o: { executor: string; now?: numbe
     // A day key's signature: the wallet's delegation must name this key, for this executor, and be valid now.
     const d = q.delegation as SignedCopyRequest | undefined;
     if (!d || !DELEGABLE_ACTIONS.has(action)) return { ok: false, error: 'the signature is not from this wallet' };
-    if (d.action !== 'delegate' || (d as { delegation?: unknown }).delegation !== undefined) return { ok: false, error: 'the day key\'s approval is not a delegation' };
-    const dv = verifyCopyRequest(d, { executor: o.executor, now, maxAgeMs: o.maxAgeMs });
+    // The approval is a 'delegate' for this executor, or the wallet's acceptance of the copy terms carrying the day key
+    // for this executor (payload.dayKey, 'terms-day-key': one signature accepts the terms and approves the key).
+    const viaTerms = d.action === 'accept-terms';
+    if ((d.action !== 'delegate' && !viaTerms) || (d as { delegation?: unknown }).delegation !== undefined) return { ok: false, error: 'the day key\'s approval is not a delegation' };
+    const dv = verifyCopyRequest(d, { executor: viaTerms ? COPY_TERMS_EXECUTOR : o.executor, now, maxAgeMs: o.maxAgeMs });
     if (!dv.ok) return { ok: false, error: `the day key's approval does not hold: ${dv.error}` };
     if (d.owner.toLowerCase() !== owner) return { ok: false, error: 'the day key was approved by another wallet' };
-    const p = dv.payload as { key?: unknown; expiresAt?: unknown; alg?: unknown };
+    const tk = viaTerms ? ((dv.payload ?? {}) as { dayKey?: unknown }).dayKey as Partial<TermsDayKey> | undefined : undefined;
+    if (viaTerms && (!tk || typeof tk !== 'object' || tk.executor !== o.executor)) return { ok: false, error: 'the terms acceptance approves no day key for this executor' };
+    const p = (viaTerms ? tk : dv.payload) as { key?: unknown; expiresAt?: unknown; alg?: unknown };
     if (typeof p.key !== 'string') return { ok: false, error: 'the signature is not from this wallet or its day key' };
     if (p256Sig) {
       // A P-256 day key (WebCrypto ECDSA with SHA-256 over the digest; its private key never leaves the browser's crypto).
@@ -269,6 +276,27 @@ export interface AcceptTermsPayload {
   notUsPerson: true;
   ownDecision: true;
   risksUnderstood: true;
+  /**
+   * The browser's day key for one executor, approved by this same signature ('terms-day-key'): the follower's first
+   * signature accepts the terms and lets that executor take everyday actions signed by the key for at most a day.
+   */
+  dayKey?: TermsDayKey;
+  /**
+   * ValueDesk's own Terms of use and Risk disclosure, accepted in this same signature ('terms-day-key'): a wallet that
+   * never signed them signs both at once (owner 2026-11-22, a shorter setup). As 'accept-site-terms' would carry them.
+   */
+  siteTerms?: AcceptSiteTermsPayload;
+}
+
+/** A day key carried by a terms acceptance: a 'delegate' payload plus the executor it is for. */
+export interface TermsDayKey {
+  alg: 'p256';
+  /** The P-256 public key, raw (0x04...). */
+  key: string;
+  /** ms; at most DELEGATION_TTL_MS after the acceptance's nonce. */
+  expiresAt: number;
+  /** The executor id it is for (the acceptance itself names COPY_TERMS_EXECUTOR). */
+  executor: string;
 }
 
 /** 'accept-site-terms': ValueDesk's Terms of use and Risk disclosure, as the wallet saw them. */
@@ -479,10 +507,12 @@ export interface ExecutorInfo {
  * 'terms-doc': GET /terms/copy serves the copy terms in force here (version, hash, text) for the web to sign exactly.
  * 'day-key': it accepts requests signed by a wallet-approved day key (SignedCopyRequest.delegation); the site signs
  * with the wallet itself for an executor without it (an older release refuses a 64-byte signature).
+ * 'terms-day-key': it takes a day key approved inside the copy terms acceptance (AcceptTermsPayload.dayKey), and
+ * 'create-key' signed by a day key; the site then asks a new follower for the terms, the fee and the SoDEX key only.
  * 'spot-bots': it runs volume makers and grids on SoDEX spot (spec engine 'spot', a *_vUSDC market): spot orders, spot
  * balances, its key's spot registration and the spot builder approval checked. The site starts a spot bot only there.
  */
-export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier', 'bot-restart', 'day-key', 'terms-doc', 'hedge', 'spot-bots'] as const;
+export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update', 'bots', 'multiplier', 'bot-restart', 'day-key', 'terms-doc', 'hedge', 'spot-bots', 'terms-day-key'] as const;
 
 export interface SessionGrant {
   token: string;

@@ -9,6 +9,7 @@
  *   GET  /api/copy/v1/bots/latency               Bearer: this wallet's own signed-write latency to SoDEX, ?hours=1..48 (docs/BOTS-UI.md)
  *   POST /api/copy/v1/session                    {request: session}          -> a read token
  *   POST /api/copy/v1/terms                      {request: accept-terms}
+ *   GET  /api/copy/v1/terms/status?owner=0x…     whether that wallet accepted the copy terms in force (public, yes/no)
  *   POST /api/copy/v1/site-terms                 {request: accept-site-terms}  (hosted: ValueDesk's own terms, recorded)
  *   GET  /api/copy/v1/me                         Bearer                      -> terms, policy, key, copies
  *   POST /api/copy/v1/keys                       {request: create-key}       -> the key to register
@@ -316,6 +317,8 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
 
       if (req.method === 'GET' && route === '/info') return send(res, 200, svc.info(ctx));
       if (req.method === 'GET' && route === '/terms/copy') return send(res, 200, svc.copyTerms());
+      // Public: the setup asks a new wallet for the terms (which also approve its day key) and a known one only to sign in.
+      if (req.method === 'GET' && route === '/terms/status') return send(res, 200, svc.termsStatus(url.searchParams.get('owner')));
       if (req.method === 'GET' && route === '/health') return send(res, 200, svc.health());
       // Public like /info: no token, no signature; a read (240/min per client), no-store (the chart reads every few seconds).
       if (req.method === 'GET' && route === '/bots/latency') return send(res, 200, svc.botLatency(svc.authenticate(bearer(req)), clampHours(url.searchParams.get('hours')), url.searchParams.get('bot')));

@@ -167,6 +167,7 @@
 /* How far the mode's steps are. */
 .cs-progress { display: flex; align-items: center; gap: 10px; }
 .cs-progress__t { flex: none; color: var(--muted); font-size: var(--fs-xs); }
+.cs-progress__sigs { display: block; margin-top: 2px; color: var(--text); font-variant-numeric: tabular-nums; }
 .cs-progress__bar { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
 .cs-progress__bar i { display: block; height: 100%; border-radius: inherit; background: var(--pos); transition: width 260ms var(--ease-out, ease); }
 
