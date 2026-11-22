@@ -3979,16 +3979,21 @@ export class IndexStore {
     return num(r?.equity);
   }
 
+  /**
+   * Write book rows; `meta` (key, value) is set in the same transaction (cohortTracker writes its prints-through mark
+   * with the last batch of a flush, so the saved books and the mark move together).
+   */
   putCohortBooks(rows: ReadonlyArray<{
     venue: Venue; address: string; equity: number | null; positions: ReadonlyArray<BookPosition>; at: number;
     collateral?: number | null; spotAt?: number | null; cash?: number | null;
-  }>): void {
+  }>, meta?: readonly [string, string]): void {
     this.tx(() => {
       const ins = this.q('INSERT OR REPLACE INTO cohort_book (venue, address, equity, positions, at, collateral, spot_at, cash, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
       let rev = rows.length ? this.takeRevs(rows.length) : 0;
       for (const r of rows) {
         ins.run(r.venue, r.address, r.equity, JSON.stringify(r.positions.map(bookEntry)), r.at, r.collateral ?? null, r.spotAt ?? null, r.cash ?? null, rev++);
       }
+      if (meta) this.setMeta(meta[0], meta[1]);
     });
   }
 
@@ -4601,6 +4606,18 @@ export class IndexStore {
   }
 
   /** All-time PnL of every wallet the venue's lists gave the index. */
+  /** pnlAll a page at a time, in address order after `after` (the cohort pass reads ~400k rows between breaths). */
+  pnlAllPage(venue: Venue, after: string, limit: number): Array<[string, number]> {
+    return (this.q("SELECT address, pnl FROM pnl_snap WHERE venue = ? AND win = 'all' AND address > ? ORDER BY address LIMIT ?").all(venue, after, limit) as Array<{ address: string; pnl: number }>)
+      .map((r) => [r.address, r.pnl]);
+  }
+
+  /** accountValues a page at a time, in address order after `after`. */
+  accountValuesPage(venue: Venue, after: string, limit: number): Array<[string, number]> {
+    return (this.q('SELECT address, account_value FROM accounts WHERE venue = ? AND address > ? AND account_value IS NOT NULL ORDER BY address LIMIT ?').all(venue, after, limit) as Array<{ address: string; account_value: number }>)
+      .map((r) => [r.address, r.account_value]);
+  }
+
   pnlAll(venue: Venue): Map<string, number> {
     const out = new Map<string, number>();
     for (const r of this.q("SELECT address, pnl FROM pnl_snap WHERE venue = ? AND win = 'all'").all(venue) as Array<{ address: string; pnl: number }>) out.set(r.address, r.pnl);

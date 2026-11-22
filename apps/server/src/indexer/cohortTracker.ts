@@ -384,8 +384,22 @@ const PNL_FLOW_SAVE_MS = 5 * 60_000;
 /** Changed flows written per transaction (saveFlows), the loop free between batches. */
 // 500, not 2,000 (2026-11-09 12:20, v0.2.202's first start: a stall of 63 s began in this save, beside the writer thread holding the lock).
 const FLOW_SAVE_BATCH = 500;
-/** Members written or dropped per transaction (saveMembers): 5,000 random inserts into the member table held the indexer 10-17 s (profiles 2026-11-08). */
-const MEMBER_SAVE_BATCH = 1_000;
+/**
+ * Members written or dropped per transaction (saveMembers): 5,000 random inserts into the member table held the indexer
+ * 10-17 s (profiles 2026-11-08); 1,000 still held it 7-12 s on 2026-11-22 (stall profiles), so 200.
+ */
+const MEMBER_SAVE_BATCH = 200;
+/**
+ * Book rows per transaction in a flush, adapted to stay near FLUSH_SLICE_MS (cohortTracker.flush). One transaction of
+ * every dirty book held the indexer 23.5 s on 2026-11-22 19:00 (stall profile): every stream, the liquidation step and
+ * the boards waited, and the status page called the indexer degraded.
+ */
+const FLUSH_BATCH_MIN = 25;
+const FLUSH_BATCH_MAX = 1_000;
+const FLUSH_SLICE_MS = 30;
+/** Rows of a whole-venue read (membersOf: pnl, account values) between breaths: ~400k rows read at once held it 12 s. */
+const MEMBERS_READ_PAGE = 5_000;
+type BookFlushRow = { venue: Venue; address: string; equity: number | null; positions: BookPosition[]; at: number; collateral: number | null; spotAt: number | null; cash: number | null };
 /** Set once every open position has been written with the extra fields (logLevels; the moves that log a level again: liqLiveCore.ts). */
 const LIQ_LOG_FULL_META = 'liq_log_full_v2';
 /**
@@ -854,7 +868,7 @@ export class CohortTracker {
     this.scoh.stop();
     this.stateReader?.stop();
     void this.live.stop();
-    this.flush();
+    this.flush(true);
     this.saveFlowsNow();
   }
 
@@ -1205,8 +1219,15 @@ export class CohortTracker {
         }
       }
     } else {
-      for (const [a, p] of s.pnlAll(venue)) put(a, { pnl: p });
-      for (const [a, v] of s.accountValues(venue)) put(a, { equity: v });
+      // A page at a time with a breath between (2026-11-22: the whole tables at once held the indexer up to 12 s).
+      for (let after = '', page: Array<[string, number]>; (page = s.pnlAllPage(venue, after, MEMBERS_READ_PAGE)).length; after = page[page.length - 1]![0]) {
+        for (const [a, p] of page) put(a, { pnl: p });
+        await this.breathePlan();
+      }
+      for (let after = '', page: Array<[string, number]>; (page = s.accountValuesPage(venue, after, MEMBERS_READ_PAGE)).length; after = page[page.length - 1]![0]) {
+        for (const [a, v] of page) put(a, { equity: v });
+        await this.breathePlan();
+      }
       if (venue === 'tradexyz' || venue === 'arcus') {
         for (const a of await activeAccountsAsync(s, venue, { day: dayOf(this.d.now() - 30 * DAY_MS) }, 1, 50_000)) put(a.acct, {});
       }
@@ -1912,25 +1933,80 @@ export class CohortTracker {
     this.fundingLast = { end: f.end, books: n, paid };
   }
 
-  private flush(): void {
+  /**
+   * A flush under way (flushBooks): the dirty books as they were when it began, the next row to write, and the
+   * prints-through mark of that moment. The mark goes in with the last batch, so it never says more than the saved
+   * books hold; a book that changes meanwhile is dirty again and goes in the next flush.
+   */
+  private flushing: { rows: BookFlushRow[]; i: number; through: string } | null = null;
+  private flushBatch = 200;
+
+  /** The dirty books as rows now (their state at this moment), and the dirty set emptied. */
+  private takeDirtyBooks(): BookFlushRow[] {
+    const rows: BookFlushRow[] = [];
+    for (const k of this.dirtyBooks) {
+      const i = k.indexOf('|');
+      const venue = k.slice(0, i) as Venue;
+      const address = k.slice(i + 1);
+      const b = this.books.get(venue)?.get(address);
+      if (!b) continue;
+      rows.push({
+        venue, address, equity: b.equity, at: b.at, collateral: b.collateral ?? null, spotAt: b.spotAt ?? null, cash: b.cash ?? null,
+        positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })),
+      });
+    }
+    this.dirtyBooks.clear();
+    return rows;
+  }
+
+  /**
+   * Write a flush's books: batches near FLUSH_SLICE_MS each with the loop free between (2026-11-22: one transaction
+   * of every dirty book held the indexer 6-23 s, several times an hour). `sync` writes the rest at once (stop()).
+   */
+  private async flushBooks(sync = false): Promise<void> {
+    const s = this.d.store;
+    const f = this.flushing;
+    if (!f) return;
+    while (f.i < f.rows.length) {
+      const n = sync ? f.rows.length - f.i : this.flushBatch;
+      const batch = f.rows.slice(f.i, f.i + n);
+      const last = f.i + batch.length >= f.rows.length;
+      const t0 = Date.now();
+      s.putCohortBooks(batch, last ? [PRINTS_THROUGH_META, f.through] : undefined);
+      f.i += batch.length;
+      if (sync) continue;
+      const ms = Date.now() - t0;
+      if (ms > FLUSH_SLICE_MS) this.flushBatch = Math.max(FLUSH_BATCH_MIN, this.flushBatch >> 1);
+      else if (ms < FLUSH_SLICE_MS / 3) this.flushBatch = Math.min(FLUSH_BATCH_MAX, this.flushBatch << 1);
+      if (!last) {
+        await new Promise<void>((r) => setImmediate(r));
+        mark('coh:flush');
+        if (this.flushing !== f) return; // stop() finished it meanwhile
+      }
+    }
+    if (this.flushing === f) this.flushing = null;
+  }
+
+  private flush(sync = false): void {
     const s = this.d.store;
     try {
+      if (this.flushing) {
+        // One flush at a time: the next begins once this one is in (its books stay dirty meanwhile).
+        if (!sync) return;
+        this.flushBooks(true).catch((e) => { this.lastError = `cohort flush: ${String(e)}`; });
+      }
       if (this.dirtyBooks.size) {
-        const rows: Array<{ venue: Venue; address: string; equity: number | null; positions: BookPosition[]; at: number; collateral: number | null; spotAt: number | null; cash: number | null }> = [];
-        for (const k of this.dirtyBooks) {
-          const i = k.indexOf('|');
-          const venue = k.slice(0, i) as Venue;
-          const address = k.slice(i + 1);
-          const b = this.books.get(venue)?.get(address);
-          if (!b) continue;
-          rows.push({
-            venue, address, equity: b.equity, at: b.at, collateral: b.collateral ?? null, spotAt: b.spotAt ?? null, cash: b.cash ?? null,
-            positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })),
+        this.flushing = { rows: this.takeDirtyBooks(), i: 0, through: JSON.stringify(Object.fromEntries(this.printsThrough)) };
+        if (sync) this.flushBooks(true).catch((e) => { this.lastError = `cohort flush: ${String(e)}`; });
+        else {
+          void this.flushBooks().catch((e) => {
+            this.lastError = `cohort flush: ${String(e)}`;
+            // Not written: those books are dirty again for the next flush.
+            const f = this.flushing;
+            this.flushing = null;
+            if (f) for (const r of f.rows.slice(f.i)) this.dirtyBooks.add(`${r.venue}|${r.address}`);
           });
         }
-        this.dirtyBooks.clear();
-        s.putCohortBooks(rows);
-        s.setMeta(PRINTS_THROUGH_META, JSON.stringify(Object.fromEntries(this.printsThrough)));
       }
       if (this.liqAccDirty) {
         this.liqAccDirty = false;
