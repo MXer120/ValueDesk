@@ -71,6 +71,8 @@ import './components/bots/botsPages.css';
 import './components/bots/hedge.css';
 import './components/share/share.css';
 import './components/referrals/referrals.css';
+// The landing page (/home): on the Bots kit, before VIP's gold.
+import './components/landing/landing.css';
 // Last: VIP is gold over every pill, button and row it marks (owner 2026-11-14).
 import './components/vip.css';
 import './components/portfolio/PortfolioPage.css';

@@ -159,6 +159,18 @@ export function isLimitsPath(pathname: string): boolean {
   return pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() === 'limits';
 }
 
+/**
+ * The landing page (components/landing/Landing.tsx): what ValueDesk is, for a first visit - bots, copy trading and
+ * the analytics, each with its way in. Shown like the status page, instead of the tab's page, with no nav item and no
+ * number key. `/` still lands on the trade page (DEFAULT_TAB); this is its own path.
+ */
+export const HOME_PATH = '/home';
+
+/** Whether a pathname is the landing page. Tolerant like `tabForPath`. */
+export function isHomePath(pathname: string): boolean {
+  return pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() === 'home';
+}
+
 /** Whether a pathname is the status page. Tolerant like `tabForPath`. */
 export function isStatusPath(pathname: string): boolean {
   return pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() === 'status';
@@ -200,6 +212,7 @@ export function routeKeyForPath(pathname: string): string | null {
   if (isStatusPath(pathname)) return 'status';
   if (isExcludedPath(pathname)) return 'excluded';
   if (isLimitsPath(pathname)) return 'limits';
+  if (isHomePath(pathname)) return 'home';
   const sodex = sodexViewForPath(pathname);
   if (sodex) return `sodex:${sodex}`;
   const tab = tabForPath(pathname);
@@ -207,11 +220,12 @@ export function routeKeyForPath(pathname: string): string | null {
 }
 
 /** The key of what `useRoute` shows (a legal page over the status page over the rest, as App.tsx renders them). */
-export function routeKeyOf(r: { tab: Tab; legal: LegalPage | null; status: boolean; excluded: boolean; limits: boolean; sodex: SodexView | null }): string {
+export function routeKeyOf(r: { tab: Tab; legal: LegalPage | null; status: boolean; excluded: boolean; limits: boolean; sodex: SodexView | null; home?: boolean }): string {
   if (r.legal) return `legal:${r.legal}`;
   if (r.status) return 'status';
   if (r.excluded) return 'excluded';
   if (r.limits) return 'limits';
+  if (r.home) return 'home';
   if (r.sodex) return `sodex:${r.sodex}`;
   return `tab:${r.tab}`;
 }
@@ -249,7 +263,7 @@ export type RouteReady = (pathname: string) => Promise<unknown> | null;
  * with the default page: pushing would put a URL that renders nothing into the
  * history stack, and going "back" to it would be a dead end.
  */
-export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void, boolean, () => void, boolean, () => void, boolean, () => void, SodexView | null, (view: SodexView) => void] {
+export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void, boolean, () => void, boolean, () => void, boolean, () => void, SodexView | null, (view: SodexView) => void, boolean, () => void] {
   const [tab, setTab] = useState<Tab>(() => tabForPath(window.location.pathname) ?? DEFAULT_TAB);
   /* A legal page is shown INSTEAD of the tab's page; `tab` keeps the default
      there, so everything keyed on it (the nav, the shortcuts) is unchanged. */
@@ -262,6 +276,8 @@ export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPag
   const [limits, setLimits] = useState<boolean>(() => isLimitsPath(window.location.pathname));
   /* One of SoDEX's products, the same way. */
   const [sodex, setSodex] = useState<SodexView | null>(() => sodexViewForPath(window.location.pathname));
+  /* The landing page, the same way. */
+  const [home, setHome] = useState<boolean>(() => isHomePath(window.location.pathname));
 
   const readyRef = useRef(ready);
   readyRef.current = ready;
@@ -276,7 +292,7 @@ export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPag
      */
     const apply = () => {
       const path = window.location.pathname;
-      if (tabForPath(path) === null && legalForPath(path) === null && !isStatusPath(path) && !isExcludedPath(path) && !isLimitsPath(path) && sodexViewForPath(path) === null) {
+      if (tabForPath(path) === null && legalForPath(path) === null && !isStatusPath(path) && !isExcludedPath(path) && !isLimitsPath(path) && !isHomePath(path) && sodexViewForPath(path) === null) {
         const seg = path.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() ?? '';
         window.history.replaceState(window.history.state, '', pathForTab(MOVED[seg] ?? DEFAULT_TAB));
       }
@@ -286,6 +302,7 @@ export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPag
       setExcluded(isExcludedPath(window.location.pathname));
       setLimits(isLimitsPath(window.location.pathname));
       setSodex(sodexViewForPath(window.location.pathname));
+      setHome(isHomePath(window.location.pathname));
     };
     apply();
     /*
@@ -329,6 +346,7 @@ export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPag
     setExcluded(false);
     setLimits(false);
     setSodex(null);
+    setHome(false);
   }, []);
 
   const openLegal = useCallback((page: LegalPage) => {
@@ -340,6 +358,7 @@ export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPag
     setExcluded(false);
     setLimits(false);
     setSodex(null);
+    setHome(false);
   }, []);
 
   const openStatus = useCallback(() => {
@@ -349,6 +368,7 @@ export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPag
     setExcluded(false);
     setLimits(false);
     setSodex(null);
+    setHome(false);
   }, []);
 
   const openExcluded = useCallback(() => {
@@ -358,6 +378,7 @@ export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPag
     setExcluded(true);
     setLimits(false);
     setSodex(null);
+    setHome(false);
   }, []);
 
   const openLimits = useCallback(() => {
@@ -367,6 +388,7 @@ export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPag
     setExcluded(false);
     setLimits(true);
     setSodex(null);
+    setHome(false);
   }, []);
 
   const openSodex = useCallback((view: SodexView) => {
@@ -381,7 +403,18 @@ export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPag
     setExcluded(false);
     setLimits(false);
     setSodex(view);
+    setHome(false);
   }, []);
 
-  return [tab, navigate, legal, openLegal, status, openStatus, excluded, openExcluded, limits, openLimits, sodex, openSodex];
+  const openHome = useCallback(() => {
+    if (!isHomePath(window.location.pathname)) pushPath(HOME_PATH);
+    setLegal(null);
+    setStatus(false);
+    setExcluded(false);
+    setLimits(false);
+    setSodex(null);
+    setHome(true);
+  }, []);
+
+  return [tab, navigate, legal, openLegal, status, openStatus, excluded, openExcluded, limits, openLimits, sodex, openSodex, home, openHome];
 }
