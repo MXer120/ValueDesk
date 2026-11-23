@@ -417,3 +417,33 @@ html:has(.v3), body:has(.v3) { background: #050505; }
   .v3-gauge.is-real .v3-gauge__needle { transform: rotate(var(--to)); }
   .v3-tile__ok { background: var(--signal); color: #04120c; }
 }
+
+/* ------------------------------------------------------------------ feature card ground (FeatureFx) ----- */
+.v3-feat > :not(.v3-fx) { position: relative; z-index: 1; }
+.v3-fx { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; border-radius: inherit; }
+.v3-fx::before { content: ''; position: absolute; inset: 0; }
+.v3-fx__dots { position: absolute; inset: 0; opacity: 0; background-image: radial-gradient(rgba(255, 255, 255, 0.22) 1px, transparent 1.3px); background-size: 12px 12px; }
+.v3-fx i { position: absolute; border-radius: 50%; background: #fff; opacity: 0; animation: v3-fx-dust var(--dur) linear var(--del) infinite; }
+@keyframes v3-fx-dust { 0% { transform: translate(0, 0); opacity: 0; } 15% { opacity: var(--a); } 85% { opacity: calc(var(--a) * 0.7); } 100% { transform: translate(var(--dx, 26px), var(--dy, -40px)); opacity: 0; } }
+/* 1: a glare from the top-right corner, the dots lit inside it */
+.v3-fx.is-1::before { background: radial-gradient(60% 45% at 92% 0%, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.03) 45%, transparent 70%); }
+.v3-fx.is-1 .v3-fx__dots { opacity: 1; -webkit-mask-image: radial-gradient(45% 38% at 90% 4%, #000, transparent 75%); mask-image: radial-gradient(45% 38% at 90% 4%, #000, transparent 75%); }
+.v3-fx.is-1 i { --dx: -22px; --dy: 34px; }
+/* 2: a soft glare down the left side */
+.v3-fx.is-2::before { background: linear-gradient(90deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02) 22%, transparent 45%), radial-gradient(30% 50% at 0% 30%, rgba(255, 255, 255, 0.08), transparent 70%); }
+.v3-fx.is-2::after { content: ''; position: absolute; left: 0; top: 8%; bottom: 30%; width: 1px; background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.45), transparent); }
+.v3-fx.is-2 i { --dx: 30px; --dy: -18px; }
+/* 3: a beam from the top, slightly to the left, dots in its pool */
+.v3-fx.is-3::before { background: conic-gradient(from 168deg at 38% -10%, transparent 0deg, rgba(255, 255, 255, 0.1) 12deg, transparent 28deg); }
+.v3-fx.is-3 .v3-fx__dots { opacity: 0.8; background-size: 10px 10px; -webkit-mask-image: radial-gradient(40% 50% at 40% 10%, #000, transparent 75%); mask-image: radial-gradient(40% 50% at 40% 10%, #000, transparent 75%); }
+.v3-fx.is-3 i { --dx: 12px; --dy: 40px; }
+/* 4: a wide card, the glare along the top edge to the right and a faint dotted band */
+.v3-fx.is-4::before { background: radial-gradient(70% 30% at 75% 0%, rgba(255, 255, 255, 0.12), transparent 70%); }
+.v3-fx.is-4::after { content: ''; position: absolute; top: 0; left: 45%; right: 8%; height: 1px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent); }
+.v3-fx.is-4 .v3-fx__dots { opacity: 0.7; -webkit-mask-image: linear-gradient(180deg, #000, transparent 35%), linear-gradient(90deg, transparent 40%, #000 80%); -webkit-mask-composite: source-in; mask-image: linear-gradient(180deg, #000, transparent 35%), linear-gradient(90deg, transparent 40%, #000 80%); mask-composite: intersect; }
+.v3-fx.is-4 i { --dx: -34px; --dy: -12px; }
+/* 5: a wide card, the glare from the right side, dots in it */
+.v3-fx.is-5::before { background: radial-gradient(40% 70% at 100% 45%, rgba(255, 255, 255, 0.11), transparent 70%); }
+.v3-fx.is-5 .v3-fx__dots { opacity: 1; -webkit-mask-image: radial-gradient(30% 55% at 100% 45%, #000, transparent 75%); mask-image: radial-gradient(30% 55% at 100% 45%, #000, transparent 75%); }
+.v3-fx.is-5 i { --dx: -28px; --dy: 22px; }
+@media (prefers-reduced-motion: reduce) { .v3-fx i { animation: none; opacity: var(--a); } }

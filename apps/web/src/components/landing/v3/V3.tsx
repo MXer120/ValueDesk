@@ -172,7 +172,7 @@ export function HeatField({ className }: { className?: string }) {
 
 /* ------------------------------------------------------------------------------------------------- hero ----- */
 
-/** The busy market where a market maker costs least now (rows = the busiest, each at the new wallet's fee). */
+/** The busy market where a market maker costs least now (rows = the busiest, each at the VIP fee). */
 function cheapestOf(rows: MarketRow[]): MarketRow | null {
   let best: MarketRow | null = null;
   for (const r of rows) if (r.bp !== null && (!best || r.bp < (best.bp as number))) best = r;
@@ -206,7 +206,7 @@ export function BotPanel({ rows, loading, error }: { rows: MarketRow[]; loading:
       <div className="v3-bot__book">
         {[0.5, 0.8, 0.35, 0.95, 0.6, 0.4, 0.75, 0.55, 0.9, 0.3].map((w, i) => <span key={i} className={i < 5 ? 'is-ask' : 'is-bid'} style={{ '--w': w, '--i': i } as CSSProperties} />)}
       </div>
-      <p className="v3-bot__note">Lowest market maker cost of the {rows.length || 'busiest'} busiest SoDEX markets over {DESK_WINDOW_TEXT}, at a new wallet's fee.</p>
+      <p className="v3-bot__note">Lowest market maker cost of the {rows.length || 'busiest'} busiest SoDEX markets over {DESK_WINDOW_TEXT}, at the VIP fee.</p>
     </div>
   );
 }
@@ -410,6 +410,24 @@ const FAQ: Array<{ q: string; a: ReactNode }> = [
   { q: 'What is the minimum?', a: "$5 is enough to start a market maker on the busiest markets. SoDEX's own minimum order applies." },
 ];
 
+/**
+ * The feature cards' ground (owner 2026-11-23, after a reference: "particles - move slowly but subtle, subtle slightly
+ * directional glares, some have a glare on the side and some a dotted bg in the glare"): each card its own - a corner,
+ * a side or a top glare, a dotted field lit by it on some, and a few dust particles drifting one way. Decorative only.
+ */
+const FX_DUST = Array.from({ length: 9 }, (_, i) => {
+  const r = (k: number) => { const x = Math.sin(i * 91.7 + k * 47.3) * 43758.5453; return x - Math.floor(x); };
+  return { x: r(1) * 100, y: r(2) * 100, s: 1 + r(3) * 1.6, d: 22 + r(4) * 26, o: -r(5) * 40, a: 0.2 + r(6) * 0.45 };
+});
+function FeatureFx({ v }: { v: number }) {
+  return (
+    <span className={`v3-fx is-${v}`} aria-hidden="true">
+      <span className="v3-fx__dots" />
+      {FX_DUST.map((p, i) => <i key={i} style={{ left: `${p.x}%`, top: `${p.y}%`, width: p.s, height: p.s, '--dur': `${p.d}s`, '--del': `${p.o}s`, '--a': p.a } as CSSProperties} />)}
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------------- sections other pages reuse (site/) ----- */
 
 /** The feature cards (owner 2026-11-23: "very very good"): one job per card, live where a figure shows. */
@@ -428,21 +446,25 @@ export function V3Features({ live }: { live: ReturnType<typeof useLiveDesk> }) {
       </Reveal>
       <div className="v3-grid">
         <Reveal as="article" className="v3-feat">
+          <FeatureFx v={1} />
           <PickerViz rows={live.rows} />
           <h3>Built around your market</h3>
           <p>Pick any of the {live.marketCount ?? ''} SoDEX markets a bot can run on. Each shows its volume and what a market maker costs there, read live.</p>
         </Reveal>
         <Reveal as="article" className="v3-feat" delay={80}>
+          <FeatureFx v={2} />
           <SleepViz />
           <h3>Runs while you sleep</h3>
           <p>Bots and hosted copies run on ValueDesk's executor in Tokyo, day and night. Close the laptop; they stop at your limits or when you stop them.</p>
         </Reveal>
         <Reveal as="article" className="v3-feat" delay={160}>
+          <FeatureFx v={3} />
           <FollowViz />
           <h3>Follow any trader</h3>
           <p>Copy any {listOf(copyNames, 'or')} wallet trade for trade, at your size and under your leverage cap. In your browser or hosted.</p>
         </Reveal>
         <Reveal as="article" className="v3-feat is-wide" delay={0}>
+          <FeatureFx v={4} />
           <div ref={gaugeRef}><GaugeViz latency={latency} /></div>
           <h3>Speed you can see</h3>
           <p>{latency
@@ -450,6 +472,7 @@ export function V3Features({ live }: { live: ReturnType<typeof useLiveDesk> }) {
             : <>Bots sign and send from the executor in Tokyo. The Bots page shows how long your own bots' orders take to SoDEX's answer, measured on every order.</>}</p>
         </Reveal>
         <Reveal as="article" className="v3-feat is-wide" delay={80}>
+          <FeatureFx v={5} />
           <HubViz />
           <h3>Everything connected</h3>
           <p>Bots trade SoDEX, copies follow {listOf(copyNames)}, and the analytics read liquidations and flows from {listOf(venueNames)}. One wallet, one desk.</p>

@@ -53,12 +53,12 @@ export function usdShort(v: number): string {
 
 /* ------------------------------------------------------------------------------------------- live reads ----- */
 
-export interface MarketRow { m: BotMarket; bp: number | null; recipe: string | null }
+export interface MarketRow { m: BotMarket; bp: number | null; recipe: string | null; recipeId: string | null }
 
 export interface LiveDesk {
   loading: boolean;
   error: string | null;
-  /** Busiest markets first, each with its cheapest bot's cost (bp; negative = earned) at the new wallet's fee. */
+  /** Busiest markets first, each with its cheapest bot's cost (bp; negative = earned) at the VIP fee. */
   rows: MarketRow[];
   /** Markets a bot can run on. */
   marketCount: number | null;
@@ -84,14 +84,15 @@ export function useLiveDesk(): LiveDesk {
   const { byName } = useSymbols('perps');
   const rows = useMemo<MarketRow[]>(() => {
     if (!bots.data) return [];
-    const adj = feeAdjOf(FEES.botNew, bots.data.fee.builderBps);
+    // At the VIP fee (owner 2026-11-23: "always use vip tiers there"); every place that shows these says so.
+    const adj = feeAdjOf(FEES.botLowest, bots.data.fee.builderBps);
     return bots.data.markets
       .filter((m) => m.confidence === 'high')
       .sort((a, b) => b.volumeUsdH - a.volumeUsdH)
       .slice(0, 16)
       .map((m) => {
         const best = bestOf(rankRecipes(m, [], adj));
-        return { m, bp: best?.est.bp ?? null, recipe: best ? RECIPE[best.id].name : null };
+        return { m, bp: best?.est.bp ?? null, recipe: best ? RECIPE[best.id].name : null, recipeId: best?.id ?? null };
       });
   }, [bots.data]);
   const startFrom = useMemo<LiveDesk['startFrom']>(() => {
@@ -122,6 +123,10 @@ export function useLiveDesk(): LiveDesk {
     startFrom,
   };
 }
+
+/** The New bot page on this market with exactly the bot shown (Explore's Configure: /bots/new?market=&kind=<recipe>). */
+export const botHref = (r: Pick<MarketRow, 'm' | 'recipeId'>): string =>
+  `/bots/new?market=${encodeURIComponent(r.m.symbol)}&kind=${encodeURIComponent(r.recipeId ?? 'market')}`;
 
 /**
  * The amount the page advertises to start with (owner 2026-11-23: "Start with as low as $5"): $5, unless today's real

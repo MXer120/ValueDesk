@@ -18,6 +18,7 @@ import { HeatGlass } from '../v4/heat';
 import { bp, DESK_WINDOW_TEXT, FEES, startFromText, useLiveDesk } from '../shared';
 import { Calcs } from './Calcs';
 import { HeroDeck } from './HeroDeck';
+import { SiteTape } from './Tape';
 import { qaFor } from './faq';
 import { Embed, ProductCards, Row, SitePage, Ticks, PAGE_PATHS } from './Site';
 import '../v2/v2.css';
@@ -79,14 +80,14 @@ export function V5() {
             <p className="h-sub">Market makers that run around the clock, copies of any Hyperliquid or SoDEX wallet, and the liquidation map to read it all. Every order lands in your own SoDEX account.</p>
           </div>
           <div className="h-up h-cta" style={{ '--d': '240ms' } as CSSProperties}>
-            <a href="/bots/new" className="h-btn is-light">Start a bot with {start}<Arrow /></a>
+            <a href="/bots/new" className="h-btn is-light">Start with as low as {start}<Arrow /></a>
             <a href="/copy" className="h-btn is-glass">Copy a trader</a>
           </div>
           <div className="h-up" style={{ '--d': '320ms' } as CSSProperties}><Trust /></div>
         </div>
         <Embed scope="v3" className="vd-hd"><HeroDeck live={live} /></Embed>
       </header>
-      <Tape rows={live.rows} label={`Bot cost per $1M traded · all fees · ${DESK_WINDOW_TEXT}`} />
+      <SiteTape rows={live.rows} />
 
       <div className="vd-layer"><Embed scope="v3"><V3Features live={live} /></Embed></div>
       <Embed scope="v2"><Money /></Embed>

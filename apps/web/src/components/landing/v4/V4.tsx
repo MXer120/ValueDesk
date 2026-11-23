@@ -125,7 +125,7 @@ export function Ticker({ rows, marketCount, volumeH }: { rows: MarketRow[]; mark
           <div className="v4-tk__skel">{[0, 1, 2, 3, 4].map((i) => <span key={i} />)}</div>
         )}
       </div>
-      <p className="v4-tk__f">Cheapest bot per market, estimated over {DESK_WINDOW_TEXT} at the new-wallet fee.</p>
+      <p className="v4-tk__f">Cheapest bot per market, estimated over {DESK_WINDOW_TEXT} at the VIP fee.</p>
     </div>
   );
 }
@@ -431,7 +431,7 @@ export function V4() {
               <Kicker>Live markets</Kicker>
               <h2 className="v4-h2">Where the volume is.<br /><span>Pick one, start there.</span></h2>
             </div>
-            <p className="v4-lead">The busiest SoDEX markets now, with the cheapest bot for each and what it cost or earned per $1M traded, estimated over {DESK_WINDOW_TEXT} at the new-wallet fee. Green with a + is earned.</p>
+            <p className="v4-lead">The busiest SoDEX markets now, with the cheapest bot for each and what it cost or earned per $1M traded, estimated over {DESK_WINDOW_TEXT} at the VIP fee. Green with a + is earned.</p>
           </Reveal>
           <Reveal className="v4-table" >
             <div className="v4-tr is-h" role="row">

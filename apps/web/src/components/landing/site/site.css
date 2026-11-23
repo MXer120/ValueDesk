@@ -325,23 +325,22 @@
 .hd-tier > small { grid-column: 1 / -1; font-size: 11px; color: var(--fg-3); display: flex; align-items: center; gap: 6px; }
 .hd-tier .vip-pill { font-size: 9.5px; padding: 1px 6px; }
 .hd-tier.is-on { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.1); }
-@media (max-width: 1100px) { .hd-slot.is-copy { display: none; } }
+/* Narrower than the full layout: two cards, never on top of each other - cross-venue analytics and the fee tiers
+   (the bot card is the tape's job there, so the hero is not all bots). */
+@media (max-width: 1180px) {
+  .hd { height: 520px; }
+  .hd-slot.is-copy, .hd-slot.is-bot { display: none; }
+  .hd-slot.is-venues { right: 0; top: 0; left: auto; width: 250px; }
+  .hd-slot.is-tiers { left: 0; bottom: 0; top: auto; width: 262px; }
+}
 @media (max-width: 980px) {
   .hd { height: 470px; order: -1; margin: -10px 0 -20px; }
-  .hd-slot.is-bot { left: 50%; top: 14%; margin-left: -145px; }
-  .hd-slot.is-venues { right: 0; top: 0; }
-  .hd-slot.is-tiers { left: 0; bottom: 0; }
 }
 @media (max-width: 640px) {
-  .hd { height: 510px; }
-  .hd-slot.is-copy, .hd-slot.is-venues { display: none; }
-  .hd-slot.is-bot { width: 290px; top: 0; }
-  .hd-slot.is-tiers { left: auto; right: -4px; bottom: 0; width: 260px; }
+  .hd { height: 520px; }
+  .hd-slot.is-venues { left: 0; right: auto; top: 0; }
+  .hd-slot.is-tiers { right: 0; left: auto; bottom: 0; }
 }
-@media (prefers-reduced-motion: reduce) { .hd-slot, .hd-float { animation: none !important; } }
-.vd-hd { position: relative; z-index: 1; } .vd-matrix td small { font-size: 11.5px; color: var(--fg-3); }
-@media (max-width: 980px) { .vd-hd { order: -1; min-width: 0; } }
-
 /* the calculator switch: both panes in one cell, cross-fading */
 .vd-calcs__panes { display: grid; }
 .vd-calcs__pane { grid-area: 1 / 1; transition: opacity 0.45s var(--ease), transform 0.6s var(--ease), filter 0.45s var(--ease), visibility 0s linear 0s; }
@@ -353,3 +352,8 @@
 .h-tape__k { position: absolute; left: 0; top: 0; bottom: 0; z-index: 2; display: flex; align-items: center; padding: 0 64px 0 max(16px, calc((100vw - 1176px) / 2));
   font-size: 12px; color: var(--fg-2); white-space: nowrap; background: linear-gradient(90deg, var(--ink) 70%, rgba(5, 5, 5, 0.9) 85%, transparent); }
 @media (max-width: 640px) { .h-tape__k { font-size: 11px; max-width: 46vw; white-space: normal; line-height: 1.3; } }
+
+/* V5 tape: right to left, a little quicker; traders marked with a Copy chip */
+.vd-tape .h-tape__run { animation-duration: 70s; animation-direction: normal; }
+.h-tape__i.is-trader { background: linear-gradient(180deg, rgba(0, 180, 129, 0.06), transparent); }
+.h-tape__copy { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid rgba(0, 180, 129, 0.4); color: #4fe3b3; }
