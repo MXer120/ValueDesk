@@ -39,11 +39,12 @@ export const COPY_TERMS_VERSION = '2026-11-23';
 
 /**
  * The oldest version whose signature still counts (owner 2026-11-23: "never need to sign it except once"). A new text
- * no longer asks anybody again: a wallet that signed this version or any later one is done. Raise it ONLY when the law
+ * no longer asks anybody again: a wallet that signed this version or any later one is done. 2026-11-10 = the version live before
+ * sign-once: owner 2026-11-23 "keep their old one" (those wallets stay bound by the text they signed). Raise it ONLY when the law
  * or a change that takes rights away really needs a new signature from everybody, and only on the owner's word:
  * terms-docs.test.ts pins it.
  */
-export const COPY_TERMS_VALID_FROM = '2026-11-23';
+export const COPY_TERMS_VALID_FROM = '2026-11-10';
 
 /** A terms version as numbers: 2026-10-24.2 -> [2026, 10, 24, 2]. Null when it is not one. */
 const versionParts = (v: string): number[] | null => {

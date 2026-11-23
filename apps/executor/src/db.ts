@@ -639,6 +639,11 @@ export class ExecutorDb implements CopyStore, AlgoStore, LatencyStore {
     }));
   }
 
+  /** The payloads of one kind of signed request of a wallet, newest first. */
+  consentsOf(owner: string, action: string): string[] {
+    return (this.q('SELECT payload FROM consents WHERE owner = ? AND action = ? ORDER BY seq DESC LIMIT 20').all(owner, action) as Row[]).map((r) => String(r.payload));
+  }
+
   consents(owner: string, limit = 200): ConsentRow[] {
     return (this.q('SELECT * FROM consents WHERE owner = ? ORDER BY seq DESC LIMIT ?').all(owner, limit) as Row[]).map((r) => ({
       owner: String(r.owner),

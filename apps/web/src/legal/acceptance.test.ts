@@ -99,18 +99,18 @@ test('signing: ONE free wallet signature (typed data, no transaction) that verif
 
 test('signed once: later versions, another browser and a release never ask again', async () => {
   // Raising this asks EVERY wallet to sign again. Only on the owner's word (owner 2026-11-23: "never except once").
-  assert.equal(SITE_TERMS_VALID_FROM, '2026-11-23');
-  assert.ok(siteTermsValid(SITE_TERMS_VERSION) && siteTermsValid('2027-05-01') && !siteTermsValid('2026-11-14'));
+  assert.equal(SITE_TERMS_VALID_FROM, '2026-11-14');
+  assert.ok(siteTermsValid(SITE_TERMS_VERSION) && siteTermsValid('2027-05-01') && siteTermsValid('2026-11-14') && !siteTermsValid('2026-11-13'));
   _resetAcceptanceForTests();
   const real = globalThis.fetch;
   const owner = '0x' + 'ab'.repeat(20);
   const answer = (site: string | null) => { globalThis.fetch = (async () => new Response(JSON.stringify({ accepted: false, termsVersion: 'x', site }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch; };
   try {
-    answer('2026-11-14');
-    assert.equal(await adoptRecordedSiteTerms(owner), false, 'a version before the last signature does not count');
+    answer('2026-11-13');
+    assert.equal(await adoptRecordedSiteTerms(owner), false, 'an older version does not count');
     answer(null);
     assert.equal(await adoptRecordedSiteTerms(owner), false, 'never signed');
-    answer('2026-11-23');
+    answer('2026-11-14');
     assert.equal(await adoptRecordedSiteTerms(owner), true, 'signed on another device: adopted');
     const t = signedTerms(owner);
     assert.ok(t && t.recorded && t.request === null && t.country === null);

@@ -55,10 +55,11 @@ const log = logger('legal');
 /** The terms' version: a date, with a counter when they change twice on one day (2026-10-24.2). */
 export const SITE_TERMS_VERSION = '2026-11-23';
 /**
- * The oldest version whose signature still counts. Raise it ONLY when the law or a change that takes rights away really
+ * The oldest version whose signature still counts: the one live before sign-once (owner 2026-11-23, "keep their old
+ * one"; those wallets stay bound by the text they signed). Raise it ONLY when the law or a change that takes rights away really
  * needs a new signature from everybody, and only on the owner's word: acceptance.test.ts pins it.
  */
-export const SITE_TERMS_VALID_FROM = '2026-11-23';
+export const SITE_TERMS_VALID_FROM = '2026-11-14';
 /** A signature of this version still counts. */
 export const siteTermsValid = (v: unknown): boolean => termsVersionSince(v, SITE_TERMS_VALID_FROM);
 /** keccak256(canonicalJSON({ terms: TERMS, risk: RISK })) of SITE_TERMS_VERSION; acceptance.test.ts recomputes it. */

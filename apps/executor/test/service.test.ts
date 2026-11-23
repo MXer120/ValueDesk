@@ -356,3 +356,17 @@ test('a new wallet signs once (owner 2026-11-22, shorter setup): the terms with 
   assert.equal(await code(async () => svc.deleteKey(await byDayKey('delete-key', {}), { viewerCountry: 'SG' })), '401:signature');
   await cleanup();
 });
+
+test('a site signature from before sign-once counts on every device (owner 2026-11-23, keep their old one); a malformed one does not', async () => {
+  const { svc, db, cleanup } = make({ EXECUTOR_KIND: 'hosted' });
+  const w = new Wallet();
+  const log = (n: number, payload: unknown) => db.addConsent({ owner: w.address, action: 'accept-site-terms', digest: `0xd${n}`, signature: `0xs${n}`, chainId: 1, payload: JSON.stringify(payload), nonce: String(n), at: n, viewerCountry: 'SG' });
+  log(1, { ...SITE_TERMS, termsVersion: '2026-11-14' });
+  log(2, { ...SITE_TERMS, termsVersion: '2026-11-23', risks: false });
+  assert.equal(svc.termsStatus(w.address).site, '2026-11-14');
+  db.setTerms(w.address, { termsVersion: '2026-11-10', termsHash: '0x' + '0'.repeat(64), country: 'SG', observedCountry: 'SG', acceptedAt: 1 });
+  assert.equal(svc.termsStatus(w.address).accepted, true, 'and so do the copy terms live then');
+  db.setTerms(w.address, { termsVersion: '2026-11-09', termsHash: '0x' + '0'.repeat(64), country: 'SG', observedCountry: 'SG', acceptedAt: 1 });
+  assert.equal(svc.termsStatus(w.address).accepted, false);
+  await cleanup();
+});

@@ -24,10 +24,10 @@ test('every published version keeps the exact text its followers signed', () => 
 
 test('signed once: a version from COPY_TERMS_VALID_FROM on counts for good', () => {
   // Raising this asks EVERY wallet to sign again. Only on the owner's word (owner 2026-11-23: "never except once").
-  assert.equal(COPY_TERMS_VALID_FROM, '2026-11-23');
+  assert.equal(COPY_TERMS_VALID_FROM, '2026-11-10');
   assert.ok(copyTermsValid(COPY_TERMS_VERSION), 'the newest text counts');
-  for (const v of ['2026-11-23', '2026-11-23.2', '2026-12-01', '2031-01-01']) assert.ok(copyTermsValid(v), v);
-  for (const v of ['2026-11-10', '2026-11-22', '', 'x', null, undefined, 5]) assert.equal(copyTermsValid(v), false, String(v));
+  for (const v of ['2026-11-10', '2026-11-23', '2026-11-23.2', '2026-12-01', '2031-01-01']) assert.ok(copyTermsValid(v), v);
+  for (const v of ['2026-11-09', '2026-11-09.9', '', 'x', null, undefined, 5]) assert.equal(copyTermsValid(v), false, String(v));
   assert.ok(termsVersionSince('2026-11-23.10', '2026-11-23.2'), 'the counter is a number');
 });
 

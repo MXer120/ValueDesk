@@ -951,7 +951,22 @@ export class ExecutorService {
     const t = this.db.terms(o);
     // `site`: the version of ValueDesk's own terms this wallet signed last (the web decides whether it still counts), so a
     // second browser or device never asks for a signature that exists. Never the country or anything else of the record.
-    return { accepted: !!t && copyTermsValid(t.termsVersion), termsVersion: COPY_TERMS_VERSION, site: this.db.meta(`site-terms:${o}`) ?? null };
+    return { accepted: !!t && copyTermsValid(t.termsVersion), termsVersion: COPY_TERMS_VERSION, site: this.db.meta(`site-terms:${o}`) ?? this.siteTermsLogged(o) };
+  }
+
+  /**
+   * The site terms a wallet signed before `site-terms:` was kept (its old signature counts on every device too, owner
+   * 2026-11-23): the newest well-formed 'accept-site-terms' of the consent log, which that route never refuses for a region.
+   */
+  private siteTermsLogged(owner: string): string | null {
+    for (const c of this.db.consentsOf(owner, 'accept-site-terms')) {
+      try {
+        return checkSiteTerms(JSON.parse(c)).termsVersion;
+      } catch {
+        /* refused when it came: it counts nowhere */
+      }
+    }
+    return null;
   }
 
   me(owner: string, ctx: RequestContext): MeResponse {
