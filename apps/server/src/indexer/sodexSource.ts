@@ -202,7 +202,7 @@ async function pageNewestFirst(
   const now = store.coverage('sodex', address, kind)!;
   if (now.fromT > fromT && !now.exhausted && pages < o.maxPages) {
     const r = await run(fromT, now.fromT);
-    const tooMany = store.fillExtent('sodex', address).count >= o.rowCap;
+    const tooMany = store.fillExtent('sodex', address, o.rowCap).count >= o.rowCap;
     store.addCoverage(
       'sodex',
       address,

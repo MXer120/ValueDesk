@@ -160,12 +160,26 @@ export async function hlSyncFills(store: IndexStore, address: string, fromT: num
   }
   // HL serves only the newest 10k fills: once that many are held, nothing
   // older than the oldest held one can be known.
-  const ext = store.fillExtent('hyperliquid', address);
-  const cov = store.coverage('hyperliquid', address, 'fills');
-  if (cov && ext.count >= CAP_NEAR && ext.minT !== null && ext.minT > cov.fromT) {
-    store.setCoverage('hyperliquid', address, 'fills', { ...cov, fromT: ext.minT, exhausted: true, capped: true });
-  }
+  await markCapped(store, address);
   return { rows, pages, reachedNow: true };
+}
+
+/**
+ * The held range starts at the oldest held fill, capped, once CAP_NEAR fills are held: HL serves no older one. The count is
+ * asked only when it can change anything (the oldest held fill is newer than the range's start), up to CAP_NEAR, and in
+ * slices: fillExtent counted up to 50,000 rows here after every sync in one go, 6.5-19 s of the indexer's thread on rows
+ * out of the OS's cache (production stall profiles 2026-11-23 01:00 and 01:11).
+ */
+export async function markCapped(store: IndexStore, address: string): Promise<void> {
+  const cov = store.coverage('hyperliquid', address, 'fills');
+  if (!cov) return;
+  const minT = store.fillMinT('hyperliquid', address);
+  if (minT === null || minT <= cov.fromT) return;
+  if ((await store.fillCountAsync('hyperliquid', address, CAP_NEAR, yieldLoop)) < CAP_NEAR) return;
+  // Read again: the loop ran between the slices.
+  const now = store.coverage('hyperliquid', address, 'fills');
+  const first = store.fillMinT('hyperliquid', address);
+  if (now && first !== null && first > now.fromT) store.setCoverage('hyperliquid', address, 'fills', { ...now, fromT: first, exhausted: true, capped: true });
 }
 
 /**
