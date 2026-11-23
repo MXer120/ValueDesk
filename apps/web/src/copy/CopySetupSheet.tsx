@@ -81,6 +81,11 @@ function siteLabel(id: SiteStatementId): ReactNode {
   return out;
 }
 
+/** The bot fee in a few words, as the fee step says it in full. */
+function botFeeLine(): string {
+  return '0.1 to 0.5 bp of each order, by your 14-day volume';
+}
+
 /** A step already done is left out (the copy dialog: only what is missing shows, owner 2026-11-03). */
 const HideDone = createContext(false);
 
@@ -246,6 +251,9 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
   // A key lifetime typed in (owner 2026-11-09: the picks plus a custom number of days).
   const [customDays, setCustomDays] = useState(false);
   const [keyMore, setKeyMore] = useState(false);
+  // Bots (owner 2026-11-23 "even slimmer"): the risk summary one tap away, the key lifetime changed only on request.
+  const [risksOpen, setRisksOpen] = useState(false);
+  const [daysOpen, setDaysOpen] = useState(false);
   // Bots draw the steps' buttons in the Bots section's kit (owner 2026-11-09: the bot setup in the section's style).
   const Act = bots ? KitAct : ActBtn;
 
@@ -306,16 +314,48 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
   // Signing the terms: the bottom button of the host (onPrimary), or the step's own button without one.
   const termsForm = !r.terms && termsOpen && (!bots || r.connected || fresh);
   const canAccept = !!country && allTicked && siteTicked && regionPolicy(country, live.viewerCountry).allowed;
+  // Bots, real orders: after the terms, the fee and the trading key follow in the same click, each its own wallet
+  // popup (SoDEX takes one signature per action), so the setup is one button (owner 2026-11-23 "even slimmer").
+  const sigs = signaturesLeft(live, mode, paper, bots);
+  const finishRest = async () => {
+    if (paper) return;
+    if (!readiness(getLiveCopy(), mode).fee) {
+      setWorking('fee');
+      await approveFee();
+    }
+    if (!readiness(getLiveCopy(), mode).key) {
+      setWorking('key');
+      await approveKey(mode, days);
+    }
+  };
+  const chain = !!bots && !paper;
+  const doneMsg = chain ? 'Set up: your bots can trade.' : bots ? 'Terms accepted.' : 'Copy trading terms accepted.';
   const acceptNow = () => void run('terms', async () => {
     await acceptTerms(country, { withSiteTerms: withSite });
     if ((bots || fresh) && !getLiveCopy().hosted.signedIn) await signIn('hosted');
-  }, bots ? 'Terms accepted.' : 'Copy trading terms accepted.');
-  const acceptLabel = 'Sign and accept the terms';
+    if (chain) await finishRest();
+  }, doneMsg);
+  const sigWord = (k: number) => `${k} ${k === 1 ? 'signature' : 'signatures'}`;
+  const busyLabel = working === 'fee' ? 'Approve the fee in your wallet' : working === 'key' ? 'Approve the trading key in your wallet' : 'Sign the terms in your wallet';
+  const acceptLabel = chain ? `Accept and set up · ${sigWord(sigs)}` : 'Sign and accept the terms';
+  // Terms done, fee or key still missing (a popup closed half way, or an older acceptance): the rest in one click.
+  const restOnly = chain && !termsForm && r.terms && r.connected && (!r.fee || !r.key);
   useEffect(() => {
     if (!onPrimary) return;
-    onPrimary(termsForm ? { label: acceptLabel, disabled: !canAccept, busy: working === 'terms', run: acceptNow } : null);
+    const busy = working === 'terms' || working === 'fee' || working === 'key';
+    onPrimary(
+      termsForm
+        ? { label: busy ? busyLabel : acceptLabel, disabled: !canAccept, busy, run: acceptNow }
+        : restOnly
+          ? { label: busy ? busyLabel : `Finish setup · ${sigWord(sigs)}`, disabled: !owner, busy, run: () => void run('fee', finishRest, doneMsg) }
+          : null,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onPrimary, termsForm, canAccept, working, country, bots, withSite]);
+  }, [onPrimary, termsForm, restOnly, canAccept, working, country, bots, withSite, sigs, days]);
+  // Bots: the form is there at once when the terms are next (no "Review" click).
+  useEffect(() => {
+    if (bots && current === 'terms' && !r.terms) setTermsOpen(true);
+  }, [bots, current, r.terms]);
   useEffect(() => () => onPrimary?.(null), [onPrimary]);
 
   return (
@@ -368,7 +408,9 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
             ? `Accepted ${new Date(live.terms.acceptedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })} · from ${countryName(live.terms.country)}.${bots && !r.connected ? ' One more signature opens your bots.' : ''}`
             : bots
               ? r.connected || fresh
-                ? 'No acceptance on record for this wallet yet: the risks, the fee, and what you confirm. One signature, and it also signs you in.'
+                ? termsForm && chain
+                  ? 'One click below asks your wallet for each signature in turn.'
+                  : 'No acceptance on record for this wallet yet: the risks, the fee, and what you confirm. One signature, and it also signs you in.'
                 : 'One signature opens your bots. If this wallet accepted the terms before, in any browser, that is all.'
               : 'The risks, the fee, and what you confirm. One signature.'
         }
@@ -386,15 +428,71 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
             )
         }
       >
-        {termsForm && (
+        {termsForm && bots && (
+          <div className="cs-form">
+            {chain && (
+              <ol className="cs-signs" aria-label="What you sign">
+                <li><KitIcon name="check" size={14} /><span><b>The terms</b> below. It also signs you in.</span></li>
+                <li><KitIcon name="wallet" size={14} /><span><b>The fee</b> on SoDEX: {botFeeLine()}, revocable.</span></li>
+                <li>
+                  <KitIcon name="shield" size={14} />
+                  <span>
+                    <b>A trading key</b>, valid {days} days, kept encrypted on ValueDesk's server; revoke it on SoDEX any time.{' '}
+                    <button type="button" className="bots-link" aria-expanded={daysOpen} onClick={() => setDaysOpen((x) => !x)}>{daysOpen ? 'Done' : 'Change'}</button>
+                  </span>
+                </li>
+              </ol>
+            )}
+            {chain && daysOpen && (
+              <div className="cs-days">
+                <span className="fx-note">Key valid for</span>
+                <KitSegmented
+                  label="Key lifetime"
+                  value={String(days)}
+                  onChange={(x) => setDays(Number(x))}
+                  options={keyDays.map((d) => ({ value: String(d), label: `${d}d` }))}
+                />
+              </div>
+            )}
+            <ul className="cs-statements">
+              {withSite && SITE_STATEMENTS.map((x) => <li key={`site:${x.id}`}>{siteLabel(x.id)}</li>)}
+              {COPY_STATEMENTS.map((x) => <li key={x.id}>{BOT_STATEMENT_LABEL[x.id] ?? x.label}</li>)}
+            </ul>
+            <label className="oe-check cs-check cs-check--all">
+              <input
+                type="checkbox"
+                checked={allTicked && siteTicked}
+                onChange={(e) => setTicks(Object.fromEntries([...COPY_STATEMENTS.map((x) => x.id), ...(withSite ? SITE_STATEMENTS.map((x) => `site:${x.id}`) : [])].map((id) => [id, e.target.checked])))}
+              />
+              <span>I confirm every statement above</span>
+            </label>
+            <p className="fx-note">
+              <button type="button" className="bots-link" aria-expanded={risksOpen} onClick={() => setRisksOpen((x) => !x)}>{risksOpen ? 'Hide the risks' : 'The risks in short'}</button>
+              {' · '}<a className="fx-link" href="/copy-terms" target="_blank" rel="noopener">Full terms</a>
+              {' · '}From {country ? countryName(country) : 'an unknown place'}
+            </p>
+            {risksOpen && (
+              <ul className="cs-risks">
+                {BOT_RISK_SUMMARY.map((t) => <li key={t}>{t}</li>)}
+              </ul>
+            )}
+            {!country && <p className="fx-note fx-note--err">{LOCATION_UNKNOWN}</p>}
+            {country && !regionPolicy(country, live.viewerCountry).allowed && (
+              <p className="fx-note fx-note--err">{regionPolicy(country, live.viewerCountry).reason}</p>
+            )}
+            {termsNote && <p className="fx-note fx-note--warn" role="status">{termsNote}</p>}
+            {!onPrimary && <Act label={acceptLabel} primary disabled={!canAccept} busy={working === 'terms'} onClick={acceptNow} />}
+          </div>
+        )}
+        {termsForm && !bots && (
           <div className="cs-form">
             <ul className="cs-risks">
-              {(bots ? BOT_RISK_SUMMARY : COPY_RISK_SUMMARY).map((t) => (
+              {COPY_RISK_SUMMARY.map((t) => (
                 <li key={t}>{t}</li>
               ))}
             </ul>
             <p className="fx-note">
-              Read the full <a className="fx-link" href="/copy-terms" target="_blank" rel="noopener">{bots ? 'terms and risk disclosure' : 'copy trading terms and risk disclosure'}</a>{bots ? ' (bots: section 3).' : '.'}
+              Read the full <a className="fx-link" href="/copy-terms" target="_blank" rel="noopener">copy trading terms and risk disclosure</a>.
             </p>
             <p className="fx-note">
               Your location: <b>{country ? `${countryName(country)}, from your connection` : 'unknown'}</b>
@@ -404,22 +502,16 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
               <p className="fx-note fx-note--err">{regionPolicy(country, live.viewerCountry).reason}</p>
             )}
             <div className="cs-checks">
-              {withSite && SITE_STATEMENTS.map((s) => (
-                <label key={`site:${s.id}`} className="oe-check cs-check">
-                  <input type="checkbox" checked={!!ticks[`site:${s.id}`]} onChange={(e) => setTicks({ ...ticks, [`site:${s.id}`]: e.target.checked })} />
-                  <span>{siteLabel(s.id)}</span>
-                </label>
-              ))}
               {COPY_STATEMENTS.map((s) => (
                 <label key={s.id} className="oe-check cs-check">
                   <input type="checkbox" checked={!!ticks[s.id]} onChange={(e) => setTicks({ ...ticks, [s.id]: e.target.checked })} />
-                  <span>{bots ? BOT_STATEMENT_LABEL[s.id] ?? s.label : s.label}</span>
+                  <span>{s.label}</span>
                 </label>
               ))}
             </div>
             {termsNote && <p className="fx-note fx-note--warn" role="status">{termsNote}</p>}
             {onPrimary
-              ? <p className="fx-note">{allTicked && siteTicked ? `Accept with the button below: one wallet signature${withSite ? ' for ValueDesk’s terms and these' : ''}.` : 'Tick each statement, then accept with the button below.'}</p>
+              ? <p className="fx-note">{allTicked ? 'Accept with the button below: one wallet signature.' : 'Tick each statement, then accept with the button below.'}</p>
               : <Act label={acceptLabel} primary disabled={!canAccept} busy={working === 'terms'} onClick={acceptNow} />}
           </div>
         )}
@@ -437,7 +529,9 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
               ? `This build of ValueDesk charges no ${bots ? '' : 'copy '}fee: nothing to approve.`
               : r.fee
               ? `Approved on SoDEX up to ${localize(feePercent(Math.max(live.fee.perps ?? COPY_FEE_MAX, COPY_FEE_MAX)))}.`
-              : bots
+              : bots && current !== 'fee'
+                ? `Bot fee: ${botFeeLine()}, charged by SoDEX. Revocable.`
+                : bots
                 ? `Bot orders pay 0.1 to 0.5 bp of their value by your 14-day volume (0.2 bp from $500K; VIP and new beta testers 0.1 bp), instead of any other ValueDesk fee. SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
                 : `Copied orders pay ${ladder} of their value (by your 14-day volume). SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
           }
@@ -482,7 +576,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
             )
           }
         >
-          {!r.key && (
+          {!r.key && (!bots || current === 'key') && (
             <div className="cs-form">
               {mode === 'hosted' && current === 'key' && (bots ? (
                 // Three facts, the full disclosure one tap away (owner 2026-11-09: far less text).

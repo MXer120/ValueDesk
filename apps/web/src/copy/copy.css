@@ -192,3 +192,10 @@
 .cs-days__picks .pf-ctl:hover:not(.is-on) { color: var(--text); }
 .cs-days__picks .pf-ctl.is-on { color: var(--text); border-color: var(--text); background: color-mix(in srgb, var(--text) 7%, transparent); }
 .cs-keyacts { display: inline-flex; align-items: center; gap: 10px; }
+
+/* Bot setup, slim (owner 2026-11-23): what the one click signs, the statements as one list under one tick. */
+.cs-signs { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-xs); line-height: 1.45; }
+.cs-signs li { display: flex; align-items: flex-start; gap: 8px; }
+.cs-signs li > :first-child { flex: none; margin-top: 2px; opacity: 0.8; }
+.cs-statements { margin: 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs); line-height: 1.4; color: var(--text-dim, inherit); }
+.cs-check--all { font-weight: 600; }
