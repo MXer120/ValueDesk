@@ -119,7 +119,7 @@ function perMillion(b: number): { text: string; earned: boolean } {
 const HEAT = ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'];
 
 /** Liquidation heat drifting behind ribbed glass. A drawing: no figures. */
-function HeatField({ className }: { className?: string }) {
+export function HeatField({ className }: { className?: string }) {
   const [ref, on] = useOnScreen<HTMLDivElement>();
   const cv = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -179,7 +179,7 @@ function cheapestOf(rows: MarketRow[]): MarketRow | null {
   return best;
 }
 
-function BotPanel({ rows, loading, error }: { rows: MarketRow[]; loading: boolean; error: string | null }) {
+export function BotPanel({ rows, loading, error }: { rows: MarketRow[]; loading: boolean; error: string | null }) {
   const best = cheapestOf(rows);
   const pm = best && best.bp !== null ? perMillion(best.bp) : null;
   return (
@@ -211,7 +211,7 @@ function BotPanel({ rows, loading, error }: { rows: MarketRow[]; loading: boolea
   );
 }
 
-function CopyPanel() {
+export function CopyPanel() {
   const d = 'M0 92 C30 86 48 52 80 58 S130 92 160 74 S210 22 240 34 S290 52 320 16';
   return (
     <div className="v3-card v3-copy">
@@ -232,7 +232,7 @@ function CopyPanel() {
 }
 
 /** The desk: the product's parts on a tilted glass slab, assembling on load and leaning toward the pointer. */
-function Desk({ live }: { live: ReturnType<typeof useLiveDesk> }) {
+export function Desk({ live }: { live: ReturnType<typeof useLiveDesk> }) {
   const box = useRef<HTMLDivElement>(null);
   const rig = useRef<HTMLDivElement>(null);
   const [ref, on] = useOnScreen<HTMLDivElement>();
@@ -299,7 +299,7 @@ function Desk({ live }: { live: ReturnType<typeof useLiveDesk> }) {
 
 /* ----------------------------------------------------------------------------------------- feature cards ----- */
 
-function PickerViz({ rows }: { rows: MarketRow[] }) {
+export function PickerViz({ rows }: { rows: MarketRow[] }) {
   const items = rows.slice(0, 4);
   return (
     <Live className="v3-viz v3-picker">
@@ -323,7 +323,7 @@ function PickerViz({ rows }: { rows: MarketRow[] }) {
   );
 }
 
-function SleepViz() {
+export function SleepViz() {
   return (
     <Live className="v3-viz v3-sleep">
       <div className="v3-sleep__ring">
@@ -341,7 +341,7 @@ function SleepViz() {
   );
 }
 
-function GaugeViz({ latency }: { latency: { p50: number; label: string } | null }) {
+export function GaugeViz({ latency }: { latency: { p50: number; label: string } | null }) {
   // A real p50 points the needle on a 0..1000 ms scale (log-ish); without one the needle only idles.
   const angle = latency ? -90 + 180 * Math.min(1, Math.log10(1 + latency.p50) / 3) : null;
   return (
@@ -357,7 +357,7 @@ function GaugeViz({ latency }: { latency: { p50: number; label: string } | null 
   );
 }
 
-function HubViz() {
+export function HubViz() {
   const n = GRID_VENUES.length;
   // Nodes on an ellipse around the centre (percent of the box).
   const pts = GRID_VENUES.map((v, i) => {
@@ -380,7 +380,7 @@ function HubViz() {
   );
 }
 
-function FollowViz() {
+export function FollowViz() {
   return (
     <Live className="v3-viz v3-follow">
       <div className="v3-follow__card is-lead">
@@ -410,15 +410,132 @@ const FAQ: Array<{ q: string; a: ReactNode }> = [
   { q: 'What is the minimum?', a: "$5 is enough to start a market maker on the busiest markets. SoDEX's own minimum order applies." },
 ];
 
+/* ------------------------------------------------------------------- sections other pages reuse (site/) ----- */
+
+/** The feature cards (owner 2026-11-23: "very very good"): one job per card, live where a figure shows. */
+export function V3Features({ live }: { live: ReturnType<typeof useLiveDesk> }) {
+  const [gaugeRef, gaugeNear] = useOnScreen<HTMLDivElement>({ once: true, margin: '400px' });
+  const latency = usePublicLatency(gaugeNear);
+  const venueNames = useMemo(() => GRID_VENUES.map((v) => VENUE_LABEL[v]), []);
+  const copyNames = useMemo(() => COPY_VENUES.map((v) => VENUE_LABEL[v]), []);
+  return (
+    <>
+    {/* ------------------------------------------------------------------------------------------ features */}
+    <section className="v3-sec" id="features">
+      <Reveal as="header" className="v3-head">
+        <Eyebrow>Features</Eyebrow>
+        <h2 className="v3-h2">Every part has one job.<br /><span>Making your trading run.</span></h2>
+      </Reveal>
+      <div className="v3-grid">
+        <Reveal as="article" className="v3-feat">
+          <PickerViz rows={live.rows} />
+          <h3>Built around your market</h3>
+          <p>Pick any of the {live.marketCount ?? ''} SoDEX markets a bot can run on. Each shows its volume and what a market maker costs there, read live.</p>
+        </Reveal>
+        <Reveal as="article" className="v3-feat" delay={80}>
+          <SleepViz />
+          <h3>Runs while you sleep</h3>
+          <p>Bots and hosted copies run on ValueDesk's executor in Tokyo, day and night. Close the laptop; they stop at your limits or when you stop them.</p>
+        </Reveal>
+        <Reveal as="article" className="v3-feat" delay={160}>
+          <FollowViz />
+          <h3>Follow any trader</h3>
+          <p>Copy any {listOf(copyNames, 'or')} wallet trade for trade, at your size and under your leverage cap. In your browser or hosted.</p>
+        </Reveal>
+        <Reveal as="article" className="v3-feat is-wide" delay={0}>
+          <div ref={gaugeRef}><GaugeViz latency={latency} /></div>
+          <h3>Speed you can see</h3>
+          <p>{latency
+            ? <>Signed orders reach SoDEX's answer in {Math.round(latency.p50)} ms at the median (p50, {latency.label}), read live. Your own bots' times are on the Bots page.</>
+            : <>Bots sign and send from the executor in Tokyo. The Bots page shows how long your own bots' orders take to SoDEX's answer, measured on every order.</>}</p>
+        </Reveal>
+        <Reveal as="article" className="v3-feat is-wide" delay={80}>
+          <HubViz />
+          <h3>Everything connected</h3>
+          <p>Bots trade SoDEX, copies follow {listOf(copyNames)}, and the analytics read liquidations and flows from {listOf(venueNames)}. One wallet, one desk.</p>
+        </Reveal>
+      </div>
+    </section>
+    </>
+  );
+}
+
+/** "Your funds stay yours": the key path and the four facts. */
+export function V3Safety() {
+  return (
+    <>
+    {/* -------------------------------------------------------------------------------------------- safety */}
+    <section className="v3-sec" id="safety">
+      <Reveal as="header" className="v3-head is-center">
+        <Eyebrow>Your funds</Eyebrow>
+        <h2 className="v3-h2">Your funds stay yours.</h2>
+        <p className="v3-lead">ValueDesk never holds your money. A trading key you register on SoDEX places the orders.</p>
+      </Reveal>
+      <Reveal className="v3-safe">
+        <Live className="v3-flow">
+          <div className="v3-node"><span className="v3-node__ic"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="3" /><path d="M16 12.5h2M3 9h15" /></svg></span><b>Your wallet</b><span>signs</span></div>
+          <div className="v3-wire"><i /></div>
+          <div className="v3-node"><span className="v3-node__ic"><svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="4" /><path d="M12 12h9M18 12v3M21 12v2" /></svg></span><b>Trading key</b><span>at most 180 days</span></div>
+          <div className="v3-wire"><i /></div>
+          <div className="v3-node is-shield"><span className="v3-node__ic"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5.5c0 4.4 3 7.9 7 9.5 4-1.6 7-5.1 7-9.5V6Z" /><path d="m9 12 2.2 2.2L15.5 10" /></svg></span><b>Your SoDEX account</b><span>funds stay here</span></div>
+          <div className="v3-wire"><i /></div>
+          <div className="v3-node__pair">
+            <div className="v3-node is-sm"><span className="v3-node__ic"><BrandMark size={18} /></span><b>Bots</b></div>
+            <div className="v3-node is-sm"><span className="v3-node__ic"><svg viewBox="0 0 24 24"><path d="M4 16c3-6 5-8 8-4s5 2 8-4" /><path d="M4 19c3-6 5-8 8-4s5 2 8-4" opacity=".45" /></svg></span><b>Copies</b></div>
+          </div>
+        </Live>
+        <ul className="v3-facts">
+          <li><Check /><span>Your funds stay in your own SoDEX account. Nothing is deposited with ValueDesk.</span></li>
+          <li><Check /><span>The trading key trades, and can move funds only between your own SoDEX accounts and your wallet. Never to anyone else.</span></li>
+          <li><Check /><span>Revoke the key on SoDEX at any time.</span></li>
+          <li><Check /><span>The key ends on its own after the days you choose, at most 180.</span></li>
+        </ul>
+      </Reveal>
+    </section>
+    </>
+  );
+}
+
+/** "Up and running in three signatures": the three tiles and the CTA. */
+export function V3SignTiles() {
+  return (
+    <>
+    {/* ----------------------------------------------------------------------------------------- signatures */}
+    <section className="v3-sec v3-signsec">
+      <Reveal as="header" className="v3-head is-center">
+        <Eyebrow>Set up</Eyebrow>
+        <h2 className="v3-h2">Up and running<br /><span>in three signatures.</span></h2>
+        <p className="v3-lead">Connect a wallet you use on SoDEX. One click asks your wallet for each; free, no transaction.</p>
+      </Reveal>
+      <Live className="v3-tiles">
+        {[
+          { t: 'Terms', s: 'Accept the terms of use' },
+          { t: 'Fee', s: "Approve ValueDesk's fee on SoDEX" },
+          { t: 'Key', s: 'Register the trading key' },
+        ].map((x, i) => (
+          <div key={x.t} className="v3-tile" style={{ '--i': i } as CSSProperties}>
+            <div className="v3-tile__in">
+              <span className="v3-tile__n">{i + 1}</span>
+              <span className="v3-tile__ok"><Check /></span>
+              <b>{x.t}</b>
+              <span>{x.s}</span>
+              <em>Free signature</em>
+            </div>
+          </div>
+        ))}
+      </Live>
+      <div className="v3-cta is-center"><a href="/bots/new" className="v3-btn is-light">Set up now<Arrow /></a></div>
+    </section>
+    </>
+  );
+}
+
 export function V3() {
   const live = useLiveDesk();
   const start = startFromText(live.startFrom);
   const [faq, setFaq] = useState(0);
   const [scrolled, setScrolled] = useState(false);
-  const [gaugeRef, gaugeNear] = useOnScreen<HTMLDivElement>({ once: true, margin: '400px' });
-  const latency = usePublicLatency(gaugeNear);
   const [whaleRef, whaleNear] = useOnScreen<HTMLDivElement>({ margin: '0px 0px -30% 0px' });
-  const venueNames = useMemo(() => GRID_VENUES.map((v) => VENUE_LABEL[v]), []);
   const copyNames = useMemo(() => COPY_VENUES.map((v) => VENUE_LABEL[v]), []);
 
   useEffect(() => {
@@ -470,98 +587,9 @@ export function V3() {
         <span className="v3-livetag is-abs">Live</span>
       </section>
 
-      {/* ------------------------------------------------------------------------------------------ features */}
-      <section className="v3-sec" id="features">
-        <Reveal as="header" className="v3-head">
-          <Eyebrow>Features</Eyebrow>
-          <h2 className="v3-h2">Every part has one job.<br /><span>Making your trading run.</span></h2>
-        </Reveal>
-        <div className="v3-grid">
-          <Reveal as="article" className="v3-feat">
-            <PickerViz rows={live.rows} />
-            <h3>Built around your market</h3>
-            <p>Pick any of the {live.marketCount ?? ''} SoDEX markets a bot can run on. Each shows its volume and what a market maker costs there, read live.</p>
-          </Reveal>
-          <Reveal as="article" className="v3-feat" delay={80}>
-            <SleepViz />
-            <h3>Runs while you sleep</h3>
-            <p>Bots and hosted copies run on ValueDesk's executor in Tokyo, day and night. Close the laptop; they stop at your limits or when you stop them.</p>
-          </Reveal>
-          <Reveal as="article" className="v3-feat" delay={160}>
-            <FollowViz />
-            <h3>Follow any trader</h3>
-            <p>Copy any {listOf(copyNames, 'or')} wallet trade for trade, at your size and under your leverage cap. In your browser or hosted.</p>
-          </Reveal>
-          <Reveal as="article" className="v3-feat is-wide" delay={0}>
-            <div ref={gaugeRef}><GaugeViz latency={latency} /></div>
-            <h3>Speed you can see</h3>
-            <p>{latency
-              ? <>Signed orders reach SoDEX's answer in {Math.round(latency.p50)} ms at the median (p50, {latency.label}), read live. Your own bots' times are on the Bots page.</>
-              : <>Bots sign and send from the executor in Tokyo. The Bots page shows how long your own bots' orders take to SoDEX's answer, measured on every order.</>}</p>
-          </Reveal>
-          <Reveal as="article" className="v3-feat is-wide" delay={80}>
-            <HubViz />
-            <h3>Everything connected</h3>
-            <p>Bots trade SoDEX, copies follow {listOf(copyNames)}, and the analytics read liquidations and flows from {listOf(venueNames)}. One wallet, one desk.</p>
-          </Reveal>
-        </div>
-      </section>
-
-      {/* -------------------------------------------------------------------------------------------- safety */}
-      <section className="v3-sec" id="safety">
-        <Reveal as="header" className="v3-head is-center">
-          <Eyebrow>Your funds</Eyebrow>
-          <h2 className="v3-h2">Your funds stay yours.</h2>
-          <p className="v3-lead">ValueDesk never holds your money. A trading key you register on SoDEX places the orders.</p>
-        </Reveal>
-        <Reveal className="v3-safe">
-          <Live className="v3-flow">
-            <div className="v3-node"><span className="v3-node__ic"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="3" /><path d="M16 12.5h2M3 9h15" /></svg></span><b>Your wallet</b><span>signs</span></div>
-            <div className="v3-wire"><i /></div>
-            <div className="v3-node"><span className="v3-node__ic"><svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="4" /><path d="M12 12h9M18 12v3M21 12v2" /></svg></span><b>Trading key</b><span>at most 180 days</span></div>
-            <div className="v3-wire"><i /></div>
-            <div className="v3-node is-shield"><span className="v3-node__ic"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5.5c0 4.4 3 7.9 7 9.5 4-1.6 7-5.1 7-9.5V6Z" /><path d="m9 12 2.2 2.2L15.5 10" /></svg></span><b>Your SoDEX account</b><span>funds stay here</span></div>
-            <div className="v3-wire"><i /></div>
-            <div className="v3-node__pair">
-              <div className="v3-node is-sm"><span className="v3-node__ic"><BrandMark size={18} /></span><b>Bots</b></div>
-              <div className="v3-node is-sm"><span className="v3-node__ic"><svg viewBox="0 0 24 24"><path d="M4 16c3-6 5-8 8-4s5 2 8-4" /><path d="M4 19c3-6 5-8 8-4s5 2 8-4" opacity=".45" /></svg></span><b>Copies</b></div>
-            </div>
-          </Live>
-          <ul className="v3-facts">
-            <li><Check /><span>Your funds stay in your own SoDEX account. Nothing is deposited with ValueDesk.</span></li>
-            <li><Check /><span>The trading key trades, and can move funds only between your own SoDEX accounts and your wallet. Never to anyone else.</span></li>
-            <li><Check /><span>Revoke the key on SoDEX at any time.</span></li>
-            <li><Check /><span>The key ends on its own after the days you choose, at most 180.</span></li>
-          </ul>
-        </Reveal>
-      </section>
-
-      {/* ----------------------------------------------------------------------------------------- signatures */}
-      <section className="v3-sec v3-signsec">
-        <Reveal as="header" className="v3-head is-center">
-          <Eyebrow>Set up</Eyebrow>
-          <h2 className="v3-h2">Up and running<br /><span>in three signatures.</span></h2>
-          <p className="v3-lead">Connect a wallet you use on SoDEX. One click asks your wallet for each; free, no transaction.</p>
-        </Reveal>
-        <Live className="v3-tiles">
-          {[
-            { t: 'Terms', s: 'Accept the terms of use' },
-            { t: 'Fee', s: "Approve ValueDesk's fee on SoDEX" },
-            { t: 'Key', s: 'Register the trading key' },
-          ].map((x, i) => (
-            <div key={x.t} className="v3-tile" style={{ '--i': i } as CSSProperties}>
-              <div className="v3-tile__in">
-                <span className="v3-tile__n">{i + 1}</span>
-                <span className="v3-tile__ok"><Check /></span>
-                <b>{x.t}</b>
-                <span>{x.s}</span>
-                <em>Free signature</em>
-              </div>
-            </div>
-          ))}
-        </Live>
-        <div className="v3-cta is-center"><a href="/bots/new" className="v3-btn is-light">Set up now<Arrow /></a></div>
-      </section>
+      <V3Features live={live} />
+      <V3Safety />
+      <V3SignTiles />
 
       {/* the whale swims behind everything from here down */}
       <div ref={whaleRef}>

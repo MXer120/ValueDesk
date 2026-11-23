@@ -45,7 +45,7 @@ function usdShort(v: number): string {
 const reduced = (): boolean => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** On screen now (true/false, follows): loops pause off screen. `once`: true from the first time it comes near, for reveals and reads. */
-function useOnScreen<T extends Element>(o: { once?: boolean; margin?: string } = {}): [React.RefObject<T>, boolean] {
+export function useOnScreen<T extends Element>(o: { once?: boolean; margin?: string } = {}): [React.RefObject<T>, boolean] {
   const ref = useRef<T>(null);
   const [on, setOn] = useState(false);
   useEffect(() => {
@@ -63,13 +63,13 @@ function useOnScreen<T extends Element>(o: { once?: boolean; margin?: string } =
 }
 
 /** Fades and lifts its children in once, as they come on screen. */
-function Reveal({ children, className, delay = 0, as: As = 'div' }: { children: ReactNode; className?: string; delay?: number; as?: 'div' | 'section' | 'li' | 'header' }) {
+export function Reveal({ children, className, delay = 0, as: As = 'div' }: { children: ReactNode; className?: string; delay?: number; as?: 'div' | 'section' | 'li' | 'header' }) {
   const [ref, on] = useOnScreen<HTMLDivElement>({ once: true, margin: '-8% 0px' });
   return <As ref={ref as never} className={cx('h-rv', on && 'is-in', className)} style={{ '--d': `${delay}ms` } as CSSProperties}>{children}</As>;
 }
 
 /** A number that counts up to its value once on screen. */
-function Count({ to, fmt }: { to: number | null; fmt: (v: number) => string }) {
+export function Count({ to, fmt }: { to: number | null; fmt: (v: number) => string }) {
   const [ref, on] = useOnScreen<HTMLSpanElement>({ once: true });
   const [v, setV] = useState(0);
   useEffect(() => {
@@ -103,7 +103,7 @@ function Block({ c, r, i }: { c: number; r: number; i: number }) {
 }
 
 /** The V in chrome: five extruded blocks turning slowly, leaning toward the pointer. Decorative. */
-function ChromeV() {
+export function ChromeV() {
   const [ref, on] = useOnScreen<HTMLDivElement>();
   const stage = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -161,7 +161,7 @@ function perMillion(b: number | null): ReactNode {
 }
 
 /** The live tape under the hero: each busy SoDEX market, its hourly volume and what a market maker costs per $1M there. */
-function Tape({ rows }: { rows: MarketRow[] }) {
+export function Tape({ rows }: { rows: MarketRow[] }) {
   const [ref, on] = useOnScreen<HTMLDivElement>();
   if (!rows.length) return <div className="h-tape is-empty" />;
   const items = rows.map(({ m, bp: b }) => (
@@ -182,7 +182,7 @@ function Tape({ rows }: { rows: MarketRow[] }) {
 /* ---------------------------------------------------------------------------------------------- graphics ----- */
 
 /** A book with quotes resting on both sides of the mid and filling: what a market maker does. Drawing, no figures. */
-function BookViz() {
+export function BookViz() {
   const [ref, on] = useOnScreen<HTMLDivElement>();
   const asks = [0.92, 0.66, 0.8, 0.44, 0.58, 0.3];
   const bids = [0.34, 0.6, 0.48, 0.84, 0.62, 0.95];
@@ -196,7 +196,7 @@ function BookViz() {
 }
 
 /** A leader's line and a copy following it a step behind. Drawing, no figures. */
-function FollowViz() {
+export function FollowViz() {
   const [ref, on] = useOnScreen<HTMLDivElement>();
   const d = 'M0 120 C40 110 60 70 100 78 S160 120 200 96 S260 30 300 44 S360 70 400 24';
   return (
@@ -218,7 +218,7 @@ function FollowViz() {
 const HEAT = ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'];
 
 /** Bands of liquidation heat drifting behind ribbed glass: the brand's one big colour field. Drawing, no figures. */
-function HeatViz() {
+export function HeatViz() {
   const [ref, on] = useOnScreen<HTMLDivElement>();
   const cv = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -270,7 +270,7 @@ function HeatViz() {
 }
 
 /** The three signatures as chrome tiles, ticked in turn. */
-function SignViz() {
+export function SignViz() {
   const [ref, on] = useOnScreen<HTMLDivElement>();
   return (
     <div ref={ref} className="g-sign" data-off={on ? undefined : ''} aria-hidden="true">
@@ -287,7 +287,7 @@ function SignViz() {
 
 /* --------------------------------------------------------------------------------------------- copy list ----- */
 
-function TopTraders({ on }: { on: boolean }) {
+export function TopTraders({ on }: { on: boolean }) {
   const boards = useAsync(
     () => Promise.all(COPY_VENUES.map((venue) => vsApi.leaderboard({ venue, window: BOARD_WINDOW, sort: 'pnl', limit: 100 }).then((b) => b.rows, () => [] as TraderRow[]))),
     [],
@@ -316,11 +316,11 @@ function TopTraders({ on }: { on: boolean }) {
 
 /* -------------------------------------------------------------------------------------------------- page ----- */
 
-function Eyebrow({ children }: { children: ReactNode }) {
+export function Eyebrow({ children }: { children: ReactNode }) {
   return <p className="h-eyebrow"><span className="h-eyebrow__dot" />{children}</p>;
 }
 
-function Arrow() {
+export function Arrow() {
   return <svg className="h-arrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" /></svg>;
 }
 

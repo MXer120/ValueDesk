@@ -231,6 +231,9 @@ export const VERSIONS = [
   { n: 2, name: 'Version 2' },
   { n: 3, name: 'Version 3' },
   { n: 4, name: 'Version 4' },
+  { n: 5, name: 'Chrome on heat' },
+  { n: 6, name: 'Heat, then convert' },
+  { n: 7, name: 'One desk, long' },
 ] as const;
 
 /** The version in the path: /home -> 1, /home/2 -> 2 ... */
@@ -245,7 +248,7 @@ export function VersionSwitcher({ current }: { current: number }): ReactNode {
   return (
     <nav aria-label="Landing versions" style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 100, display: 'flex', gap: 4, padding: 4, borderRadius: 999, background: 'rgba(20,20,20,0.85)', border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(10px)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 12 }}>
       {VERSIONS.map((v) => (
-        <a key={v.n} href={v.n === 1 ? '/home' : `/home/${v.n}`} style={{ padding: '6px 11px', borderRadius: 999, color: v.n === current ? '#0a0a0a' : '#ddd', background: v.n === current ? '#f4f4f2' : 'transparent', textDecoration: 'none' }}>
+        <a key={v.n} href={v.n === 1 ? '/home' : `/home/${v.n}`} title={v.name} style={{ padding: '6px 11px', borderRadius: 999, color: v.n === current ? '#0a0a0a' : v.n >= 5 ? '#4fe3b3' : '#ddd', background: v.n === current ? '#f4f4f2' : 'transparent', textDecoration: 'none' }}>
           V{v.n}
         </a>
       ))}

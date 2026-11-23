@@ -1,0 +1,116 @@
+/**
+ * The calculators (owner 2026-11-23: V4's fee calculator "is very smart", plus "one with SoPoints like that, estimated
+ * from volume done or USD allocated"). Both in V4's calculator layout, switched with the app's own Segmented control.
+ *
+ * SoPoints: SoDEX's points for trading on SoDEX, estimated with ValueDesk's fitted model (sopoints.ts): from a week's
+ * futures volume and the average open position held over the week (the "USD allocated" that counts: positions earn
+ * points too, x10). Shown as the central estimate with the quiet-week to busy-week band, never as one sure number.
+ * The fees on that volume use the new wallet's bot fee and SoDEX's maker fee read now; plain arithmetic, labelled.
+ */
+import { useState, type CSSProperties } from 'react';
+import { Segmented, Slider } from '../../bots/kit/kit';
+import { bp, FEES } from '../shared';
+import { Calculator, Glide, money } from '../v4/V4';
+import { HeatGlass } from '../v4/heat';
+import { estimate, SOPOINTS_MODEL } from './sopoints';
+import '../../vip.css';
+import '../v4/v4.css';
+
+const STEPS = 1000;
+/** A log slider from 10^lo to 10^hi, two significant figures; t = 0 is zero when `zero`. */
+function logScale(lo: number, hi: number, zero = false) {
+  const of = (t: number): number => {
+    if (zero && t === 0) return 0;
+    const v = Math.pow(10, lo + ((hi - lo) * t) / STEPS);
+    const mag = Math.pow(10, Math.floor(Math.log10(v)) - 1);
+    return Math.round(v / mag) * mag;
+  };
+  const t = (usd: number): number => (usd <= 0 ? 0 : Math.round(((Math.log10(usd) - lo) / (hi - lo)) * STEPS));
+  return { of, t };
+}
+const VOL = logScale(3, 7); // $1K .. $10M a week
+const POS = logScale(2, 6, true); // $0, $100 .. $1M held
+const usdText = (v: number): string => (v === 0 ? '$0' : v >= 1e6 ? `$${+(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `$${+(v / 1e3).toFixed(1)}K` : `$${Math.round(v)}`);
+const pts = (v: number): string => Math.round(v).toLocaleString('en-US');
+
+export function PointsCalc({ makerBps }: { makerBps: number | null }) {
+  const [tv, setTv] = useState(() => VOL.t(100_000));
+  const [tp, setTp] = useState(() => POS.t(1_000));
+  const futures = VOL.of(tv);
+  const oi = POS.of(tp);
+  const e = estimate({ futures, oi });
+  const ours = (futures * (FEES.botNew / 10)) / 10_000;
+  const sodex = makerBps === null ? null : (futures * makerBps) / 10_000;
+  const perPoint = sodex === null || e.mid <= 0 ? null : (ours + sodex) / e.mid;
+  return (
+    <div className="v4-calc vd-pcalc">
+      <div className="v4-calc__in tf">
+        <div>
+          <div className="v4-calc__row">
+            <label className="v4-calc__l" htmlFor="vd-pv">Futures volume in a week</label>
+            <output className="v4-calc__vol" htmlFor="vd-pv">{usdText(futures)}</output>
+          </div>
+          <div className="v4-calc__slider is-tight" style={{ '--p': `${(tv / STEPS) * 100}%` } as CSSProperties}>
+            <Slider value={tv} min={0} max={STEPS} step={1} onChange={setTv} label={`Futures volume in a week: ${usdText(futures)}`} className="v4-slider" />
+            <div className="v4-calc__ends" aria-hidden="true"><span>$1K</span><span>$10M</span></div>
+          </div>
+        </div>
+        <div>
+          <div className="v4-calc__row">
+            <label className="v4-calc__l" htmlFor="vd-pp">Average open position, held all week</label>
+            <output className="v4-calc__vol is-sm" htmlFor="vd-pp">{usdText(oi)}</output>
+          </div>
+          <div className="v4-calc__slider is-tight" style={{ '--p': `${(tp / STEPS) * 100}%` } as CSSProperties}>
+            <Slider value={tp} min={0} max={STEPS} step={1} onChange={setTp} label={`Average open position: ${usdText(oi)}`} className="v4-slider" />
+            <div className="v4-calc__ends" aria-hidden="true"><span>$0</span><span>$1M</span></div>
+          </div>
+        </div>
+        <ul className="vd-pcalc__how">
+          <li><b>1 ×</b> futures volume</li>
+          <li><b>10 ×</b> the position you hold</li>
+          <li><b>^ 0.70</b> big volume earns less per dollar</li>
+        </ul>
+      </div>
+
+      <div className="v4-calc__out">
+        <HeatGlass layout="card" rib={22} className="v4-calc__heat" />
+        <div className="v4-calc__res">
+          <p className="v4-calc__k">Estimated own SoPoints for that week</p>
+          <p className="v4-calc__big">≈ <Glide value={e.mid} fmt={pts} /></p>
+          <p className="v4-calc__eq">quiet week <b>{pts(e.low)}</b> · busy week <b>{pts(e.high)}</b></p>
+          <div className="v4-calc__split">
+            <div>
+              <small>Fees on that volume</small>
+              <b>{sodex === null ? '—' : <Glide value={ours + sodex} fmt={money} />}</b>
+              <span className="v4-dim">{bp(FEES.botNew)} new-wallet bot fee{makerBps === null ? '' : ` + ${makerBps} bp SoDEX maker`}</span>
+            </div>
+            <div>
+              <small>Fees per point</small>
+              <b>{perPoint === null ? '—' : <Glide value={perPoint} fmt={money} />}</b>
+              <span className="v4-dim">at the central estimate</span>
+            </div>
+          </div>
+          <a href="/bots/new" className="v4-btn is-light is-block">Start a bot</a>
+        </div>
+      </div>
+      <p className="v4-calc__note">
+        An estimate, not a promise. SoPoints are SoDEX's and SoDEX decides them; it publishes no formula. This uses ValueDesk's model fitted on {SOPOINTS_MODEL.fittedOn} ({SOPOINTS_MODEL.fittedAt}): a week paid {SOPOINTS_MODEL.rateLow} to {SOPOINTS_MODEL.rateHigh} points per $10K of futures so far, depending on everyone else's activity. Referral points and squad boosts come on top. A bot's own profit or loss is not shown.
+      </p>
+    </div>
+  );
+}
+
+type Tab = 'fees' | 'points';
+
+/** Both calculators behind one switch. Must sit inside a `.v4` scope (site.tsx Embed). */
+export function Calcs({ makerBps, initial = 'fees' }: { makerBps: number | null; initial?: Tab }) {
+  const [tab, setTab] = useState<Tab>(initial);
+  return (
+    <div className="vd-calcs">
+      <div className="vd-calcs__tabs tf">
+        <Segmented<Tab> options={[{ value: 'fees', label: 'Fee calculator' }, { value: 'points', label: 'SoPoints estimate' }]} value={tab} onChange={setTab} label="Calculator" size="md" />
+      </div>
+      {tab === 'fees' ? <Calculator makerBps={makerBps} /> : <PointsCalc makerBps={makerBps} />}
+    </div>
+  );
+}

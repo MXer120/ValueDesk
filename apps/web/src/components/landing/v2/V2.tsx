@@ -18,6 +18,8 @@ import { BrandMark } from '../../BrandMark';
 import { CoinIcon } from '../../CoinIcon';
 import { dropBootShell } from '../../../bootShell';
 import { bp, FEES, reducedMotion, startFromText, SwimmingWhale, usdShort, usdStep, useLiveDesk, type MarketRow } from '../shared';
+import { MoneyFlow, MONEY_FACTS } from '../site/MoneyFlow';
+import '../site/site.css';
 import './v2.css';
 
 /** The VIP condition without its "VIP:" lead (a gold VIP pill or the word VIP stands beside it). */
@@ -92,7 +94,7 @@ const DUST = Array.from({ length: 42 }, (_, i) => {
   return { x: r(1) * 100, y: r(2) * 100, s: 1 + r(3) * 2.4, d: 14 + r(4) * 22, o: -r(5) * 30, a: 0.25 + r(6) * 0.55, b: r(7) > 0.82 };
 });
 
-function Sky() {
+export function Sky() {
   return (
     <div className="v2-sky" aria-hidden="true">
       <div className="v2-sky__light" />
@@ -164,7 +166,7 @@ function Hero({ start }: { start: string }) {
 const STEPS = [
   { t: 'Connect your wallet', s: 'The wallet you use on SoDEX. Connecting moves nothing.' },
   { t: 'Sign the terms', s: 'One click asks your wallet for a signature. Free: no transaction, no gas.' },
-  { t: 'Approve the fee', s: 'You approve our fee on SoDEX. SoDEX charges it per order; you can revoke it on SoDEX any time.' },
+  { t: 'Approve the fee', s: "You approve ValueDesk's fee on SoDEX, up to a maximum. SoDEX takes it on each fill; revoke it on SoDEX any time." },
   { t: 'Create the trading key', s: 'It trades for your bot and can move funds only between your own SoDEX accounts and wallet. It ends after the days you choose, at most 180.' },
   { t: 'Your bot is running', s: "On ValueDesk's executor in Tokyo, also with the tab closed. Stop it any time." },
 ] as const;
@@ -196,7 +198,7 @@ function useScrollScene(steps: number): [React.RefObject<HTMLElement>, number] {
   return [ref, step];
 }
 
-function SetupScene() {
+export function SetupScene() {
   const [ref, step] = useScrollScene(STEPS.length);
   const lit = (n: number) => step >= n;
   const sig = (n: number) => cx('v2-chip', lit(n) && 'is-on', step === n && 'is-now');
@@ -247,108 +249,20 @@ function SetupScene() {
 
 /* -------------------------------------------------------------------------------- where your money goes ----- */
 
-/** The money flow: your account -> bots / copies / your own trades -> orders on SoDEX. Drawing; no amounts. */
-function MoneyFlow() {
-  const [ref, on] = useOnScreen<HTMLDivElement>();
-  const [seen, setSeen] = useState(false);
-  useEffect(() => { if (on) setSeen(true); }, [on]);
-  // Horizontal: nodes at left (x 24-214), middle (424-604), right (814-976).
-  const mids = [{ y: 86, t: 'Bots', s: 'market maker, grid' }, { y: 220, t: 'Copies', s: 'follow a trader' }, { y: 354, t: 'Your own trades', s: 'the terminal' }];
-  const band = (x1: number, y1: number, x2: number, y2: number) => `M${x1} ${y1} C${(x1 + x2) / 2} ${y1} ${(x1 + x2) / 2} ${y2} ${x2} ${y2}`;
-  const inY = [150, 220, 290];
-  const outY = [160, 220, 280];
-  // Vertical (phone): top (y 20-96), middle row of three, bottom.
-  const vx = [62, 170, 278];
-  const vband = (x1: number, y1: number, x2: number, y2: number) => `M${x1} ${y1} C${x1} ${(y1 + y2) / 2} ${x2} ${(y1 + y2) / 2} ${x2} ${y2}`;
-  const vin = [130, 170, 210];
-  return (
-    <div ref={ref} className={cx('v2-sankey', seen && 'is-in')} data-off={on ? undefined : ''}>
-      <svg className="v2-sankey__h" viewBox="0 0 1000 440" role="img" aria-label="Your SoDEX account feeds your bots, your copies and your own trades; each sends orders to SoDEX.">
-        <defs>
-          <linearGradient id="v2g-band" x1="0" x2="1"><stop offset="0" stopColor="#fff" stopOpacity=".16" /><stop offset=".5" stopColor="#fff" stopOpacity=".05" /><stop offset="1" stopColor="#fff" stopOpacity=".14" /></linearGradient>
-          <linearGradient id="v2g-node" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2a2a2c" /><stop offset="1" stopColor="#111112" /></linearGradient>
-        </defs>
-        {mids.map((m, i) => (
-          <g key={m.t}>
-            <path className="v2-sk__band" d={band(214, inY[i]!, 424, m.y)} style={{ '--i': i } as CSSProperties} />
-            <path className="v2-sk__band" d={band(604, m.y, 814, outY[i]!)} style={{ '--i': i + 3 } as CSSProperties} />
-            <path className="v2-sk__flow" pathLength={1} d={band(214, inY[i]!, 424, m.y)} style={{ '--i': i } as CSSProperties} />
-            <path className="v2-sk__flow" pathLength={1} d={band(604, m.y, 814, outY[i]!)} style={{ '--i': i + 3 } as CSSProperties} />
-          </g>
-        ))}
-        <g className="v2-sk__node">
-          <rect x="24" y="70" width="190" height="300" rx="26" />
-          <text x="119" y="205" className="v2-sk__t">Your SoDEX</text>
-          <text x="119" y="231" className="v2-sk__t">account</text>
-          <text x="119" y="262" className="v2-sk__s">your funds stay here</text>
-        </g>
-        {mids.map((m) => (
-          <g key={m.t} className="v2-sk__node is-mid">
-            <rect x="424" y={m.y - 44} width="180" height="88" rx="22" />
-            <text x="514" y={m.y - 2} className="v2-sk__t">{m.t}</text>
-            <text x="514" y={m.y + 22} className="v2-sk__s">{m.s}</text>
-          </g>
-        ))}
-        <g className="v2-sk__node is-out">
-          <rect x="814" y="100" width="162" height="240" rx="26" />
-          <text x="895" y="212" className="v2-sk__t">Orders</text>
-          <text x="895" y="238" className="v2-sk__t">on SoDEX</text>
-        </g>
-      </svg>
-
-      <svg className="v2-sankey__v" viewBox="0 0 340 520" role="img" aria-label="Your SoDEX account feeds your bots, your copies and your own trades; each sends orders to SoDEX.">
-        {vx.map((x, i) => (
-          <g key={i}>
-            <path className="v2-sk__band is-v" d={vband(vin[i]!, 100, x, 214)} style={{ '--i': i } as CSSProperties} />
-            <path className="v2-sk__band is-v" d={vband(x, 306, vin[i]!, 420)} style={{ '--i': i + 3 } as CSSProperties} />
-            <path className="v2-sk__flow" pathLength={1} d={vband(vin[i]!, 100, x, 214)} style={{ '--i': i } as CSSProperties} />
-            <path className="v2-sk__flow" pathLength={1} d={vband(x, 306, vin[i]!, 420)} style={{ '--i': i + 3 } as CSSProperties} />
-          </g>
-        ))}
-        <g className="v2-sk__node">
-          <rect x="40" y="16" width="260" height="84" rx="22" />
-          <text x="170" y="54" className="v2-sk__t">Your SoDEX account</text>
-          <text x="170" y="78" className="v2-sk__s">your funds stay here</text>
-        </g>
-        {mids.map((m, i) => (
-          <g key={m.t} className="v2-sk__node is-mid">
-            <rect x={vx[i]! - 52} y="214" width="104" height="92" rx="20" />
-            {m.t === 'Your own trades'
-              ? <><text x={vx[i]} y="256" className="v2-sk__t is-sm">Your own</text><text x={vx[i]} y="276" className="v2-sk__t is-sm">trades</text></>
-              : <text x={vx[i]} y="266" className="v2-sk__t is-sm">{m.t}</text>}
-          </g>
-        ))}
-        <g className="v2-sk__node is-out">
-          <rect x="70" y="420" width="200" height="80" rx="22" />
-          <text x="170" y="466" className="v2-sk__t">Orders on SoDEX</text>
-        </g>
-      </svg>
-    </div>
-  );
-}
-
-function Money() {
+export function Money() {
   return (
     <section id="money" className="v2-sec">
       <div className="v2-wrap">
         <Reveal className="v2-head">
           <span className="v2-kicker">Where your money goes</span>
-          <h2 className="v2-h2">Nowhere. It stays in your account.</h2>
-          <p className="v2-sub">There is no deposit to ValueDesk. Your bots, your copies and your own trades all place orders from your SoDEX account.</p>
+          <h2 className="v2-h2">It stays in your SoDEX account.</h2>
+          <p className="v2-sub">There is no deposit to ValueDesk. Funds move only between your wallet, your SoDEX account and SoDEX's book; bots, copies and your own trades send orders, never funds.</p>
         </Reveal>
-        <Reveal delay={100} className="v2-glass v2-money">
+        <Reveal delay={100} className="v2-glass vd-money">
           <MoneyFlow />
-          <aside className="v2-keynote">
-            <span className="v2-keynote__ic">{I.key}</span>
-            <div>
-              <b>What the trading key can do</b>
-              <p>It can trade, and it can move funds only between your own SoDEX accounts and your wallet. Never to anyone else.</p>
-              <ul>
-                <li>{I.check}Ends after the days you choose, at most 180</li>
-                <li>{I.check}Revoke it and the fee on SoDEX any time</li>
-              </ul>
-            </div>
-          </aside>
+          <ul className="vd-money__facts">
+            {MONEY_FACTS.map((f) => <li key={f.t}><span className="vd-money__ic">{I.check}</span><div><b>{f.t}</b><p>{f.s}</p></div></li>)}
+          </ul>
         </Reveal>
       </div>
     </section>
@@ -461,18 +375,18 @@ const FAQ: Array<{ q: string; a: ReactNode }> = [
   { q: 'What is the minimum?', a: "$5 is enough to start a market maker on the busiest markets. SoDEX's own minimum order applies." },
 ];
 
-function Faq() {
+export function Faq({ items = FAQ, title = 'Before you dive in.', id = 'faq' }: { items?: Array<{ q: string; a: ReactNode }>; title?: ReactNode; id?: string }) {
   const [open, setOpen] = useState<number | null>(0);
   return (
-    <section id="faq" className="v2-sec">
+    <section id={id} className="v2-sec">
       <div className="v2-wrap v2-faq">
         <Reveal className="v2-head is-left">
           <span className="v2-kicker">FAQ</span>
-          <h2 className="v2-h2">Before you dive in.</h2>
+          <h2 className="v2-h2">{title}</h2>
           <p className="v2-sub">Anything else: the <a href="/copy-terms">copy and bot terms</a> and the <a href="/risk">risk disclosure</a>.</p>
         </Reveal>
         <Reveal delay={80} className="v2-faq__list">
-          {FAQ.map((f, i) => {
+          {items.map((f, i) => {
             const isOpen = open === i;
             return (
               <div key={i} className={cx('v2-qa', isOpen && 'is-open')}>

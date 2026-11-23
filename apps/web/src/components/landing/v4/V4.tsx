@@ -51,7 +51,7 @@ function Reveal({ children, className, delay = 0, as: As = 'div', id }: { childr
 }
 
 /** A number that glides to its new value (the calculator's results). */
-function Glide({ value, fmt }: { value: number; fmt: (v: number) => string }) {
+export function Glide({ value, fmt }: { value: number; fmt: (v: number) => string }) {
   const [v, setV] = useState(value);
   const from = useRef(value);
   useEffect(() => {
@@ -72,7 +72,7 @@ function Glide({ value, fmt }: { value: number; fmt: (v: number) => string }) {
   return <>{fmt(v)}</>;
 }
 
-const money = (v: number): string => {
+export const money = (v: number): string => {
   const a = Math.abs(v);
   const s = a >= 1000 ? Math.round(a).toLocaleString('en-US') : a.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return `${v < 0 ? '−' : ''}$${s}`;
@@ -99,7 +99,7 @@ const marketHref = (symbol: string) => `/bots/new?market=${encodeURIComponent(sy
 /* ------------------------------------------------------------------------------------- hero ticker ----- */
 
 /** SoDEX markets now, rolling upward: coin, traded per hour, what the cheapest bot costs (or earns) per $1M. */
-function Ticker({ rows, marketCount, volumeH }: { rows: MarketRow[]; marketCount: number | null; volumeH: number | null }) {
+export function Ticker({ rows, marketCount, volumeH }: { rows: MarketRow[]; marketCount: number | null; volumeH: number | null }) {
   const [ref, on] = useOnScreen<HTMLDivElement>();
   const list = rows.slice(0, 12);
   const item = ({ m, bp: b }: MarketRow, dup = false) => (
@@ -143,7 +143,7 @@ const volOf = (t: number): number => {
 const tOf = (usd: number): number => Math.round(((Math.log10(usd) - LOG_MIN) / (LOG_MAX - LOG_MIN)) * STEPS);
 const volText = (v: number): string => (v >= 1e6 ? `$${+(v / 1e6).toFixed(2)}M` : `$${+(v / 1e3).toFixed(1)}K`);
 
-function Calculator({ makerBps }: { makerBps: number | null }) {
+export function Calculator({ makerBps }: { makerBps: number | null }) {
   const [t, setT] = useState(() => tOf(500_000));
   const [vip, setVip] = useState(false);
   const vol = volOf(t);
@@ -226,7 +226,7 @@ const SETUP = [
   { k: 'Sign 3', t: 'The trading key' },
 ];
 
-function SetupSteps() {
+export function SetupSteps() {
   const [ref, on] = useOnScreen<HTMLOListElement>();
   const [at, setAt] = useState(reducedMotion() ? SETUP.length : 0);
   useEffect(() => {
