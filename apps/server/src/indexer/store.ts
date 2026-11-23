@@ -969,6 +969,7 @@ export class IndexStore {
   /** `venue|address|day` -> ops with rows of that day sent to the writer thread and not settled (writerThread.ts). */
   private inflightDays = new Map<string, number>();
   private writer: WriterThread<WriterExtra> | null = null;
+  private liqWriter: WriterThread<WriterExtra> | null = null;
   /** The writer thread's control array, while one runs: this thread's writes are counted in it (writing()). */
   private ctl: Int32Array | null = null;
   /** How long a stop waits for the writer thread to park before it ends it (writerThread.ts stopSync). */
@@ -1292,11 +1293,26 @@ export class IndexStore {
       up: () => this.applyAutoCheckpoint(),
     }, {
       cacheKb: o.cacheKb ?? WRITER_CACHE_KB, busyMs: WRITER_BUSY_MS, walLimit: WAL_LIMIT_BYTES,
-      liqPath: this.liqFile, liqCacheKb: o.liqCacheKb ?? liqCacheKb(), liqAutoCkpt: WAL_CHECKPOINT_PAGES,
-      autoCkpt: this.selfCheckpoint ? WAL_CHECKPOINT_PAGES : 0,
+      autoCkpt: this.selfCheckpoint ? WAL_CHECKPOINT_PAGES : 0, noLiq: this.liqFile !== null,
       targetMs: o.targetMs, maxRows: o.maxRows, hungMs: o.hungMs, restartAfterMs: o.restartAfterMs,
     });
     this.ctl = this.writer.ctl;
+    // The level change log's file has a thread of its own (2026-11-23): one thread wrote both files and took the log's steps
+    // first, and they were 59% of its time that day (66 steps, 35,216 s) - the stream rows waited behind them, 14.5M deep.
+    if (this.liqFile) {
+      this.liqWriter = new WriterThread<WriterExtra>(this.path, {
+        rows: () => {},
+        inline: (p, from) => this.writerInline(p, from),
+        settled: () => {},
+        committed: () => null,
+        locked: (fn) => fn(),
+        log: (line) => console.warn(line.replace('writer thread', 'liquidation writer thread')),
+      }, {
+        liqOnly: true, liqPath: this.liqFile, liqCacheKb: o.liqCacheKb ?? liqCacheKb(), liqAutoCkpt: WAL_CHECKPOINT_PAGES,
+        cacheKb: 2_000, busyMs: WRITER_BUSY_MS, walLimit: WAL_LIMIT_BYTES, autoCkpt: 0,
+        targetMs: o.targetMs, maxRows: o.maxRows, hungMs: o.hungMs, restartAfterMs: o.restartAfterMs,
+      });
+    }
     return true;
   }
 
@@ -1311,7 +1327,19 @@ export class IndexStore {
   }
 
   get writerStatus(): WriterStatus | null {
-    return this.writer?.state ?? null;
+    const s = this.writer?.state;
+    if (!s) return null;
+    const l = this.liqWriter?.state;
+    if (!l) return s;
+    return {
+      ...s, liqFile: true, liqRows: l.liqRows, liqTxs: l.liqTxs, liqLastTxMs: l.liqLastTxMs, liqMaxTxMs: l.liqMaxTxMs, liqMaxLockMs: l.liqMaxLockMs,
+      liqPendingRows: l.pendingRows, liqRestarts: l.restarts, liqLastError: l.lastError,
+    };
+  }
+
+  /** Rows sent to the writer thread and not in the file yet. */
+  get writerPendingRows(): number {
+    return this.writer?.state.pendingRows ?? 0;
   }
 
   /** For a test: the writer thread dies. */
@@ -1404,6 +1432,10 @@ export class IndexStore {
     const w = this.writer;
     if (!w) return;
     this.writer = null;
+    const lw = this.liqWriter;
+    this.liqWriter = null;
+    // A step not written is refused (the tracker writes it again from the same state).
+    lw?.stopSync(() => {}, this.writerStopWaitMs);
     try {
       w.stopSync(!spill ? null : (left) => {
         const fills: FillRow[] = [];
@@ -4578,7 +4610,7 @@ export class IndexStore {
       const wire: LiqChangedWire[] = changed.map((c) => [c.aid, c.coin, c.venue, c.side, c.liq, c.usd, c.sym ?? null, finiteOrNull(c.sz), finiteOrNull(c.entry), finiteOrNull(c.mark),
         c.iso === undefined || c.iso === null ? null : c.iso ? 1 : 0, finiteOrNull(c.lev), finiteOrNull(c.eq), finiteOrNull(c.cash), finiteOrNull(c.readAt)]);
       const gone: LiqClosedWire[] = closed.map((c) => [c.aid, c.coin, c.venue, finiteOrNull(c.mark)]);
-      const a = await this.writer.send({ kind: 'liqLog', t, newAddrs: [...newAddrs], changed: wire, closed: gone }, wire.length + gone.length, { liq: { t, newAddrs, changed, closed } });
+      const a = await (this.liqWriter ?? this.writer).send({ kind: 'liqLog', t, newAddrs: [...newAddrs], changed: wire, closed: gone }, wire.length + gone.length, { liq: { t, newAddrs, changed, closed } });
       return new Map(a.ids ?? []);
     }
     const ids = this.putLiqLog(t, newAddrs, [], []);
@@ -4961,13 +4993,21 @@ export class IndexStore {
   private spillMade = false;
 
   /** Parts of rows, in the order they were to be written, in one transaction. */
-  spillWrites(parts: ReadonlyArray<{ kind: 'fills'; rows: readonly FillRow[] } | { kind: 'activity'; rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }>): void {
-    if (!parts.length) return;
+  spillWrites(parts: ReadonlyArray<{ kind: 'fills'; rows: readonly FillRow[] } | { kind: 'activity'; rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }>): number[] {
+    const ids: number[] = [];
+    if (!parts.length) return ids;
     this.spillTable();
     const ins = this.q('INSERT INTO write_spill (kind, rows) VALUES (?, ?)');
     this.tx(() => {
-      for (const p of parts) if (p.rows.length) ins.run(p.kind, JSON.stringify(p.rows));
+      for (const p of parts) if (p.rows.length) ids.push(Number(ins.run(p.kind, JSON.stringify(p.rows)).lastInsertRowid));
     });
+    return ids;
+  }
+
+  /** The spilled parts' ids, oldest first. Their rows are not read: counting them parses the whole backlog's JSON. */
+  spilledIds(): number[] {
+    this.spillTable();
+    return (this.q('SELECT id FROM write_spill ORDER BY id').all() as Array<{ id: number }>).map((r) => r.id);
   }
 
   /** The spilled parts, oldest first: each part's id and how many rows it holds. */

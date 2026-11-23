@@ -159,6 +159,10 @@ export interface WriterStatus {
   liqLastTxMs: number;
   liqMaxTxMs: number;
   liqMaxLockMs: number;
+  /** The change log's own thread (store.ts): its rows waiting, deaths and last error. */
+  liqPendingRows?: number;
+  liqRestarts?: number;
+  liqLastError?: string | null;
   /** Rows skipped for a constraint (a broken row; putFills used to fail its whole slice). */
   badRows: number;
   restarts: number;
@@ -180,15 +184,16 @@ const ctl = new Int32Array(w.ctl);
 const port = w.port;
 const DAY = 86400000;
 const WANT = ${CTL_WANT}, STOP = ${CTL_STOP}, PARKED = ${CTL_PARKED};
-const db = new DatabaseSync(w.path);
+const db = new DatabaseSync(w.liqOnly ? w.liqPath : w.path);
 db.exec('PRAGMA busy_timeout = ' + w.busyMs);
 db.exec('PRAGMA synchronous = NORMAL');
 db.exec('PRAGMA temp_store = MEMORY');
 db.exec('PRAGMA journal_size_limit = ' + w.walLimit);
-db.exec('PRAGMA cache_size = -' + w.cacheKb);
-db.exec('PRAGMA wal_autocheckpoint = ' + w.autoCkpt);
+db.exec('PRAGMA cache_size = -' + (w.liqOnly ? w.liqCacheKb : w.cacheKb));
+db.exec('PRAGMA wal_autocheckpoint = ' + (w.liqOnly ? w.liqAutoCkpt : w.autoCkpt));
 // The change log's own file, when it has one: its own connection, cache and checkpoints (no checkpoint thread there).
-const ldb = w.liqPath ? new DatabaseSync(w.liqPath) : db;
+const ldb = w.liqPath && !w.liqOnly ? new DatabaseSync(w.liqPath) : db;
+const LIQ_OWN = w.liqOnly || ldb !== db;
 if (ldb !== db) {
   ldb.exec('PRAGMA busy_timeout = ' + w.busyMs);
   ldb.exec('PRAGMA synchronous = NORMAL');
@@ -198,9 +203,11 @@ if (ldb !== db) {
   ldb.exec('PRAGMA wal_autocheckpoint = ' + w.liqAutoCkpt);
 }
 const S = w.sql;
-const FILL = db.prepare(S.fill), DIRTY = db.prepare(S.dirty), HOUR = db.prepare(S.hour), DAYQ = db.prepare(S.day);
-const ADDR = ldb.prepare(S.addr), LOG = ldb.prepare(S.log), CUR = ldb.prepare(S.cur), UNCUR = ldb.prepare(S.uncur);
-const DONE = db.prepare("INSERT INTO meta (key, value) VALUES ('" + S.doneKey + "', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value");
+const main = (sql) => (w.liqOnly ? null : db.prepare(sql));
+const FILL = main(S.fill), DIRTY = main(S.dirty), HOUR = main(S.hour), DAYQ = main(S.day);
+const liq = (sql) => (w.noLiq ? null : ldb.prepare(sql));
+const ADDR = liq(S.addr), LOG = liq(S.log), CUR = liq(S.cur), UNCUR = liq(S.uncur);
+const DONE = main("INSERT INTO meta (key, value) VALUES ('" + S.doneKey + "', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value");
 let UNSPILL = null;
 const queue = [];
 /** The change log's steps, when they have a file of their own: written first, on ldb. */
@@ -230,7 +237,7 @@ port.on('message', (m) => {
   }
   // From the row a dead thread had committed (an op handed on after a death), else from the start.
   m.done = m.from > 0 ? m.from : 0;
-  if (m.kind === 'liqLog' && ldb !== db) { lqueue.push(m); kick(); return; }
+  if (m.kind === 'liqLog' && LIQ_OWN) { lqueue.push(m); kick(); return; }
   // A liq step goes ahead of the stream rows (after any step already there): behind a backlog of millions of rows it waited
   // hours (2026-11-09, the heatmap's history 4.7 h behind). It may: a step is written again whole where it stands (it
   // replaces its own rows), meta.writer_done names stream ops only, and their order among themselves stays.
@@ -470,6 +477,10 @@ export class WriterThread<X = unknown> {
       cacheKb: number; busyMs: number; walLimit: number; autoCkpt: number;
       /** The change log's own file (null or absent: it is in the index file). */
       liqPath?: string | null; liqCacheKb?: number; liqAutoCkpt?: number;
+      /** Only the change log's own file: a thread whose steps nothing else waits behind. */
+      liqOnly?: boolean;
+      /** The change log is on another thread's file: no statement of it here. */
+      noLiq?: boolean;
       targetMs?: number; maxRows?: number; hungMs?: number; restartAfterMs?: number;
     },
   ) {
@@ -514,7 +525,7 @@ export class WriterThread<X = unknown> {
       workerData: {
         path: this.path, ctl: this.ctl.buffer, port: port2,
         cacheKb: this.o.cacheKb, busyMs: this.o.busyMs, walLimit: this.o.walLimit, autoCkpt: this.o.autoCkpt,
-        liqPath: this.o.liqPath ?? null, liqCacheKb: this.o.liqCacheKb ?? this.o.cacheKb, liqAutoCkpt: this.o.liqAutoCkpt ?? 16_000,
+        liqOnly: this.o.liqOnly === true, noLiq: this.o.noLiq === true, liqPath: this.o.liqPath ?? null, liqCacheKb: this.o.liqCacheKb ?? this.o.cacheKb, liqAutoCkpt: this.o.liqAutoCkpt ?? 16_000,
         targetMs: this.o.targetMs ?? TARGET_MS, maxRows: this.o.maxRows ?? MAX_ROWS, maxYieldMs: MAX_YIELD_MS,
         sql: { fill: FILL_UPSERT, dirty: DIRTY_INSERT, hour: ACTIVITY_HOUR, day: ACTIVITY_DAY, addr: LIQ_ADDR_INSERT, log: LIQ_LOG_INSERT, cur: LIQ_CUR_INSERT, uncur: LIQ_CUR_DELETE, doneKey: WRITER_DONE_META },
       },
