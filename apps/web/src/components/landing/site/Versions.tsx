@@ -18,7 +18,6 @@ import { HeatGlass } from '../v4/heat';
 import { bp, FEES, startFromText, useLiveDesk } from '../shared';
 import { Calcs } from './Calcs';
 import { HeroDeck } from './HeroDeck';
-import { FeaturesCards } from './Features';
 import { qaFor } from './faq';
 import { Embed, ProductCards, Row, SitePage, Ticks, PAGE_PATHS } from './Site';
 import '../v2/v2.css';
@@ -90,7 +89,7 @@ export function V5() {
       </header>
       <Tape rows={live.rows} />
 
-      <FeaturesCards />
+      <div className="vd-layer"><Embed scope="v3"><V3Features live={live} /></Embed></div>
       <Embed scope="v2"><SetupScene /></Embed>
       <Embed scope="v2"><Money /></Embed>
       <CalcSection makerBps={live.makerBps} />
