@@ -19,12 +19,15 @@ import { Arrow, BookViz, Count, Eyebrow, FollowViz, HeatViz, Reveal, TopTraders 
 import { Faq, Money } from '../v2/V2';
 import { FeatureFx, HubViz, SleepViz } from '../v3/V3';
 import { Calculator } from '../v4/V4';
+import { useSymbols, useTickers } from '../../../hooks';
+import { coinOf, isBotSpot } from '../../../bots/engines';
 import { MarketConditions } from '../../bots/BotsRegime';
+import '../../bots/bots.css';
 import '../../bots/botsPages.css';
 import { HeatGlass } from '../v4/heat';
 import { botHref, bp, DESK_WINDOW_TEXT, FEES, startFromText, usdShort, usdStep, useLiveDesk, type MarketRow } from '../shared';
 import { Calcs } from './Calcs';
-import { BotConsole, CopyConsole, FeatureMap, LiqMapViz } from './viz';
+import { BotConsole, BotSettingsMap, CopyConsole, LiqMapViz } from './viz';
 import './pages.css';
 import { FeeCards } from './FeeCards';
 import { qaFor } from './faq';
@@ -108,7 +111,7 @@ function GridViz() {
     <div className="vd-grid" aria-hidden="true">
       {levels.map((y, i) => <i key={y} className={i < 3 ? 'is-sell' : 'is-buy'} style={{ top: `${y * 100}%` }}><b>{i < 3 ? 'sell' : 'buy'}</b></i>)}
       <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-        <path pathLength={1} d="M0 60 C8 50 12 72 20 68 S30 40 38 44 S48 70 56 66 S66 30 74 34 S86 58 100 50" vectorEffect="non-scaling-stroke" />
+        <path d="M0 60 C8 50 12 72 20 68 S30 40 38 44 S48 70 56 66 S66 30 74 34 S86 58 100 50" vectorEffect="non-scaling-stroke" />
       </svg>
       {[[20, 68, '0.8s'], [38, 40, '1.8s'], [56, 68, '2.9s'], [74, 26, '3.9s']].map(([x, y, d]) => (
         <svg key={String(x)} viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0 }}><circle cx={x as number} cy={y as number} r="1.6" style={{ '--d': d } as CSSProperties} /></svg>
@@ -159,16 +162,32 @@ function ArbViz() {
 
 /* ------------------------------------------------------------------------------------------------ bots ----- */
 
-/** Two bots, side by side and compact (owner 2026-11-23: the old rows mixed bot types and features and were too big). */
+/** A hedge: a long and a short of the same size moving against each other, the net flat in the middle. A drawing. */
+function HedgeViz() {
+  return (
+    <div className="vd-hg" aria-hidden="true">
+      <div className="vd-hg__leg is-long"><small>Long</small><i /></div>
+      <div className="vd-hg__net"><svg viewBox="0 0 200 120" preserveAspectRatio="none">
+        <path className="is-l" d="M0 60 C25 40 45 30 70 44 S120 96 150 84 S185 40 200 36" />
+        <path className="is-s" d="M0 60 C25 80 45 90 70 76 S120 24 150 36 S185 80 200 84" />
+        <path className="is-n" d="M0 60H200" />
+      </svg><em>net flat</em></div>
+      <div className="vd-hg__leg is-short"><small>Short</small><i /></div>
+    </div>
+  );
+}
+
+/** Every bot the app has (bots/presets STRATEGIES, plus the hedge, which is early access: executor hedgeAccess). */
 function BotTypes() {
   return (
-    <div className="vd-two">
+    <div className="vd-three">
       <Reveal className="vd-type">
         <FeatureFx v={1} />
         <div className="vd-type__vis"><BookViz /></div>
         <p className="vd-row__k">Market maker</p>
-        <h3>Quotes on both sides of the book.</h3>
-        <p>Rests a bid and an ask at the best prices and earns the spread when both fill, within the size and holding you allow.</p>
+        <h3>Quotes both sides of the book.</h3>
+        <p>Rests a bid and an ask and earns the spread when both fill, within the size and holding you allow.</p>
+        <p className="vd-type__tags"><span>Perps</span><span>Spot</span></p>
       </Reveal>
       <Reveal className="vd-type" delay={90}>
         <FeatureFx v={4} />
@@ -176,6 +195,42 @@ function BotTypes() {
         <p className="vd-row__k">Grid</p>
         <h3>Buys low, sells high, step by step.</h3>
         <p>Orders at set steps across a price range; as the price moves through them, each step buys or sells.</p>
+        <p className="vd-type__tags"><span>Perps</span><span>Spot</span></p>
+      </Reveal>
+      <Reveal className="vd-type" delay={180}>
+        <FeatureFx v={5} />
+        <div className="vd-type__vis"><HedgeViz /></div>
+        <p className="vd-row__k">OI hedge</p>
+        <h3>Holds open interest, market-neutral.</h3>
+        <p>A long and a short of the same size, in two wallets or against spot you hold. Both legs shrink before either nears its liquidation.</p>
+        <p className="vd-type__tags"><span>Perps</span><span>Perps + spot</span><span className="is-early">Early access</span></p>
+      </Reveal>
+    </div>
+  );
+}
+
+/** Perps or spot: what each means for a bot (bots/presets BotDraft: spot has no short and no leverage). */
+function PerpsSpot({ perps, perpsCount }: { perps: MarketRow[]; perpsCount: number | null }) {
+  const { symbols } = useSymbols('spot');
+  const tickers = useTickers('spot', { pollMs: 60_000 });
+  const vol = new Map((tickers.data?.tickers ?? []).map((t) => [t.symbol, Number(t.quoteVolume) || 0]));
+  const spot = symbols.filter((x) => isBotSpot(x.name) && x.status === 'TRADING').sort((a, b) => (vol.get(b.name) ?? 0) - (vol.get(a.name) ?? 0)).map((x) => coinOf(x.name));
+  const icons = (xs: string[], total: number) => <div className="vd-ps__icons">{xs.slice(0, 7).map((c) => <CoinIcon key={c} coin={c} venue="SODEX" size={30} />)}{total > 7 && xs.length > 0 && <span>{total} markets</span>}</div>;
+  return (
+    <div className="vd-two">
+      <Reveal className="vd-ps">
+        <FeatureFx v={3} />
+        <p className="vd-row__k">Perps</p>
+        <h3>Both directions, with leverage.</h3>
+        <ul><li>Long and short</li><li>Leverage up to the market's maximum</li><li>Market maker, grid and hedge</li></ul>
+        {icons([...new Set(perps.map((r) => r.m.base))], perpsCount ?? 0)}
+      </Reveal>
+      <Reveal className="vd-ps" delay={90}>
+        <FeatureFx v={2} />
+        <p className="vd-row__k">Spot</p>
+        <h3>You own the coin. Nothing to liquidate.</h3>
+        <ul><li>No leverage, no short</li><li>Sells only what it bought</li><li>Market maker and grid</li></ul>
+        {icons([...new Set(spot)], spot.length)}
       </Reveal>
     </div>
   );
@@ -188,7 +243,7 @@ export function BotsPage() {
     <SitePage title={`Trading bots on SoDEX · start with ${start} · ValueDesk`} current="bots" footer={<SiteFooter title={<>Your first bot,<br /><span>with {start}.</span></>} />}>
       <PageHero
         title={<>Bots that trade<br /><span>while you sleep.</span></>}
-        sub="A market maker or a grid on SoDEX, running around the clock from your own account."
+        sub="Market makers, grids and hedges on SoDEX perps and spot, around the clock from your own account."
         cta={<><a href="/bots/new" className="h-btn is-light vd-cta-main">Start with just {start}<Arrow /></a><a href="/bots/explore" className="h-btn is-glass">Every market</a></>}
         stage={<Embed scope="v3"><BotConsole rows={live.rows} /></Embed>}
       />
@@ -200,13 +255,18 @@ export function BotsPage() {
       ]} />
 
       <section className="vd-sec">
-        <Head k="Two bots" title={<>Pick one.<br /><span>Set your limits.</span></>} />
+        <Head k="Three bots" title={<>Pick one.<br /><span>Set your limits.</span></>} />
         <Embed scope="v3"><BotTypes /></Embed>
       </section>
 
       <section className="vd-sec">
-        <Head k="Every setting" title={<>Everything a bot<br /><span>can do for you.</span></>} lead="Each one is a switch in the bot's settings. Use as many as you like." />
-        <Reveal><FeatureMap /></Reveal>
+        <Head k="Perps and spot" title={<>Trade the future,<br /><span>or own the coin.</span></>} />
+        <Embed scope="v3"><PerpsSpot perps={live.rows} perpsCount={live.marketCount} /></Embed>
+      </section>
+
+      <section className="vd-sec">
+        <Head k="Every setting" title={<>Everything a bot<br /><span>can do for you.</span></>} />
+        <Reveal><Embed scope="v3"><BotSettingsMap /></Embed></Reveal>
       </section>
 
       <section className="vd-sec">
@@ -216,7 +276,7 @@ export function BotsPage() {
 
       <section className="vd-sec">
         <Head k="Market conditions" title={<>Who is trading,<br /><span>and how calm it is.</span></>} lead="The same board the Bots page shows: the share of uninformed flow, informed flow and volatility on every market." />
-        <Reveal className="vd-app"><MarketConditions /></Reveal>
+        <Reveal className="tf vd-app"><MarketConditions /></Reveal>
       </section>
 
       <section className="vd-sec">
@@ -261,7 +321,7 @@ function CopyOrCounter() {
 export function CopyPage() {
   const copyNames = venueList(COPY_VENUES);
   return (
-    <SitePage title="Copy trading on SoDEX · follow Hyperliquid and SoDEX wallets · ValueDesk" current="copy" footer={<SiteFooter title={<>Follow a trader<br /><span>you trust.</span></>} />}>
+    <SitePage title="Copy trading on SoDEX · follow Hyperliquid and SoDEX wallets · ValueDesk" current="copy" footer={<SiteFooter title={<>Follow a trader<br /><span>you trust.</span></>} cta={{ href: '/copy', label: 'Copy a trader' }} />}>
       <PageHero
         title={<>Follow any wallet.<br /><span>Trade for trade.</span></>}
         sub="Copy, or counter, any Hyperliquid or SoDEX trader from your own SoDEX account."
@@ -354,7 +414,7 @@ function MapFrame() {
 
 export function AnalyticsPage() {
   return (
-    <SitePage title="Crypto liquidation map, order flow and macro calendar · free · ValueDesk" current="analytics" footer={<SiteFooter title={<>Read the market.<br /><span>Free.</span></>} />}>
+    <SitePage title="Crypto liquidation map, order flow and macro calendar · free · ValueDesk" current="analytics" footer={<SiteFooter title={<>Read the market.<br /><span>Free.</span></>} cta={{ href: '/trade', label: 'Open the terminal' }} />}>
       <header className="vd-ahero">
         <h1 className="h-h1 h-up">See where the<br /><span>liquidations sit.</span></h1>
         <p className="h-sub h-up" style={{ '--d': '80ms' } as CSSProperties}>Five venues, one map, and everything else around the price. Free, no wallet needed.</p>
@@ -418,7 +478,7 @@ function Matrix() {
   return (
     <div className="vd-tablebox">
       <table className="vd-matrix">
-        <thead><tr><th />{GRID_VENUES.map((v) => <th key={v}><span><VenueLogo venue={v} size={16} />{VENUE_LABEL[v]}</span></th>)}</tr></thead>
+        <thead><tr><th />{GRID_VENUES.map((v) => <th key={v}><span><VenueLogo venue={v} size={16} /><em>{VENUE_LABEL[v]}</em></span></th>)}</tr></thead>
         <tbody>
           {MATRIX.map((r) => (
             <tr key={r.t}><td>{r.t}</td>{GRID_VENUES.map((v) => <td key={v} className={r.on.includes(v) ? 'y' : 'n'} aria-label={r.on.includes(v) ? 'yes' : r.off ?? 'no'}>{r.on.includes(v) ? <span className="vd-yes">{IC.check}</span> : r.off ? <small>{r.off}</small> : '–'}</td>)}</tr>
@@ -447,7 +507,7 @@ function CrossBlock() {
 
 export function CrossVenuePage() {
   return (
-    <SitePage title="Cross-venue: traders, liquidations and funding across five venues · ValueDesk" current="cross" footer={<SiteFooter title={<>Every venue,<br /><span>one desk.</span></>} />}>
+    <SitePage title="Cross-venue: traders, liquidations and funding across five venues · ValueDesk" current="cross" footer={<SiteFooter title={<>Every venue,<br /><span>one desk.</span></>} cta={{ href: '/trade', label: 'Open the terminal' }} />}>
       <PageHero
         title={<>Five venues.<br /><span>One view.</span></>}
         sub={`${venueList(GRID_VENUES)}: traders, liquidations and positioning side by side.`}
@@ -515,7 +575,6 @@ export function PricingPage() {
   return (
     <SitePage title={`Fees · bots from ${bp(FEES.botLowest)} · ValueDesk`} current="fees">
       <header className="vd-sec" style={{ paddingTop: 56 }}>
-        <p className="vd-crumb h-up"><a href="/home">ValueDesk</a><span>/</span><span>Fees</span></p>
         <div className="h-head is-center h-up">
           <Eyebrow>Fees</Eyebrow>
           <h1 className="h-h1">Pay on what runs.<br /><span>Nothing else.</span></h1>

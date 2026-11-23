@@ -239,10 +239,10 @@ html:has(.h), body:has(.h) { background: #050505; }
 /* follow */
 .g-follow { position: relative; height: 150px; border-radius: 16px; background: rgba(0,0,0,0.35); border: 1px solid var(--line); overflow: hidden; }
 .g-follow svg { position: absolute; inset: 10px 0 0; width: 100%; height: calc(100% - 10px); }
-.g-follow__lead { fill: none; stroke: #f4f4f2; stroke-width: 2; stroke-dasharray: 1; stroke-dashoffset: 1; animation: g-draw 5s cubic-bezier(.5,0,.3,1) infinite; vector-effect: non-scaling-stroke; }
-.g-follow__copy { fill: none; stroke: var(--signal); stroke-width: 2; stroke-dasharray: 1; stroke-dashoffset: 1; animation: g-draw 5s cubic-bezier(.5,0,.3,1) 0.45s infinite; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 6px rgba(0,180,129,0.7)); }
+.g-follow__lead { fill: none; stroke: #f4f4f2; stroke-width: 2; animation: g-draw 5s cubic-bezier(.5,0,.3,1) infinite; vector-effect: non-scaling-stroke; }
+.g-follow__copy { fill: none; stroke: var(--signal); stroke-width: 2; animation: g-draw 5s cubic-bezier(.5,0,.3,1) 0.45s infinite; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 6px rgba(0,180,129,0.7)); }
 .g-follow__area { opacity: 0; animation: g-area 5s ease infinite 0.45s; }
-@keyframes g-draw { 0% { stroke-dashoffset: 1; } 60%, 88% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes g-draw { 0% { clip-path: inset(-20px 100% -20px -4px); opacity: 1; } 55%, 88% { clip-path: inset(-20px -4px -20px -4px); opacity: 1; } 100% { clip-path: inset(-20px -4px -20px -4px); opacity: 0; } }
 @keyframes g-area { 0%, 30% { opacity: 0; } 60%, 88% { opacity: 1; } 100% { opacity: 0; } }
 .g-follow__tag { position: absolute; top: 10px; font-size: 11px; display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); }
 .g-follow__tag::before { content: ''; width: 14px; height: 2px; border-radius: 2px; background: currentColor; }

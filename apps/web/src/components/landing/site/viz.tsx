@@ -6,7 +6,7 @@
  *                 the price crosses is taken out (those positions were liquidated), new ones build up over time.
  *   BotConsole  - the Bots hero: BTC's best bot, its all-in cost per $1M, the book it quotes, the limits that are yours.
  *   CopyConsole - the Copy hero: a live top trader, the copy below it, switching between Copy and Counter.
- *   FeatureMap  - the Bots page: every setting of a bot around the bot itself, a pulse running out to each in turn.
+ *   BotSettingsMap - the Bots page: every setting as three questions (when it trades, when it stops, how hard it works).
  */
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAsync } from '../../../hooks';
@@ -208,73 +208,120 @@ export function CopyConsole() {
   );
 }
 
-/* ------------------------------------------------------------------------------------------ feature map ----- */
+/* --------------------------------------------------------------------------------------- bot settings ----- */
 
-const I = {
-  pulse: <svg viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6" /></svg>,
-  flow: <svg viewBox="0 0 24 24"><path d="M4 8h12l-3-3M20 16H8l3 3" /></svg>,
-  clock: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>,
-  news: <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M8 9h8M8 13h8M8 17h5" /></svg>,
-  stop: <svg viewBox="0 0 24 24"><path d="M8 3h8l5 5v8l-5 5H8l-5-5V8z" /><path d="M9 12h6" /></svg>,
-  box: <svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v8l-8 4-8-4z" /><path d="M4 8l8 4 8-4M12 12v8" /></svg>,
-  timer: <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7" /><path d="M12 13V9M9 3h6" /></svg>,
-  lev: <svg viewBox="0 0 24 24"><path d="M4 18 18 6M14 6h4v4" /></svg>,
-  sliders: <svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14" /><circle cx="9" cy="6" r="1.8" /><circle cx="15" cy="12" r="1.8" /><circle cx="11" cy="18" r="1.8" /></svg>,
-  swap: <svg viewBox="0 0 24 24"><path d="M7 4v16M17 4v16M4 8l3-4 3 4M14 16l3 4 3-4" /></svg>,
-};
-
-const FEATURES: Array<{ ic: ReactNode; t: string; s: string }> = [
-  { ic: I.pulse, t: 'Volatility gate', s: 'Pauses the moment the price moves fast' },
-  { ic: I.flow, t: 'Flow gate', s: 'Quotes only while enough flow trades' },
-  { ic: I.clock, t: 'Trading hours', s: 'Pause inside or outside your hours' },
-  { ic: I.news, t: 'News gate', s: 'Pauses around CPI, jobs and the Fed' },
-  { ic: I.stop, t: 'Loss limit', s: 'Stops at the loss you set' },
-  { ic: I.box, t: 'Max holding', s: 'Caps the position it may build' },
-  { ic: I.timer, t: 'Run for', s: 'An hour, a day, a week or until stopped' },
-  { ic: I.lev, t: 'Leverage', s: "Yours, up to the market's maximum" },
-  { ic: I.sliders, t: 'Presets', s: 'Steady, Balanced or Active' },
-  { ic: I.swap, t: 'Perps and spot', s: 'Market maker and grid on both' },
-  { ic: <svg viewBox="0 0 24 24"><path d="M4 9h16M4 15h16" /><path d="M9 5v4M15 15v4" /></svg>, t: 'Spread limit', s: 'Pauses while the book is too wide' },
-  { ic: <svg viewBox="0 0 24 24"><path d="M4 19h16M6 15l4-4 3 3 5-6" /></svg>, t: 'Stop after volume', s: 'Stops once it has traded your amount' },
+/** The gates: each one lights the stretch of the drawing where the bot would stand aside. x in 0..600. */
+const GATES: Array<{ t: string; s: string; x: [number, number] }> = [
+  { t: 'Volatility gate', s: 'Pauses the moment the price moves fast, and comes back when it is calm.', x: [92, 168] },
+  { t: 'Flow gate', s: 'Quotes only while enough volume trades.', x: [196, 282] },
+  { t: 'News gate', s: 'Pauses around US releases: CPI, jobs and the Fed.', x: [312, 374] },
+  { t: 'Spread limit', s: 'Pauses while the book is too wide.', x: [402, 470] },
+  { t: 'Trading hours', s: 'Pauses inside or outside the hours you set.', x: [504, 600] },
 ];
 
-/** Every setting around the bot: tiles on a ring, a pulse running from the bot to each in turn. */
-export function FeatureMap() {
+/** One day of a drawn market: the price, its bid and ask, the volume. Every gate has its reason in it. A drawing. */
+const DAY = (() => {
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const pts: Array<{ x: number; y: number; w: number; v: number }> = [];
+  for (let i = 0; i <= 100; i++) {
+    const x = i * 6;
+    const spike = x > 92 && x < 168 ? Math.sin(((x - 92) / 76) * Math.PI * 3) * 34 : 0;
+    const news = x >= 336 ? -22 * Math.min(1, (x - 336) / 14) : 0;
+    const y = 92 + Math.sin(x / 70) * 10 + Math.sin(x / 23) * 4 + (rnd() - 0.5) * 5 + spike + news;
+    const w = 4 + (x > 402 && x < 470 ? 17 * Math.sin(((x - 402) / 68) * Math.PI) : 0) + (Math.abs(x - 342) < 12 ? 4 : 0);
+    const quiet = x > 196 && x < 282;
+    const v = quiet ? 2 + rnd() * 3 : 9 + rnd() * 13 + (Math.abs(spike) > 8 ? 12 : 0) + (Math.abs(x - 342) < 18 ? 14 : 0);
+    pts.push({ x, y, w, v });
+  }
+  const line = (f: (p: (typeof pts)[number]) => number) => pts.map((p, i) => `${i ? 'L' : 'M'}${p.x} ${f(p).toFixed(1)}`).join('');
+  return { pts, mid: line((p) => p.y), bid: line((p) => p.y + p.w), ask: line((p) => p.y - p.w) };
+})();
+
+function GateStage() {
   const [ref, on] = useOn<HTMLDivElement>();
   const [at, setAt] = useState(0);
+  const [held, setHeld] = useState(false);
   useEffect(() => {
-    if (!on || reducedMotion()) return;
-    const id = window.setInterval(() => setAt((a) => (a + 1) % FEATURES.length), 1100);
+    if (!on || held || reducedMotion()) return;
+    const id = window.setInterval(() => setAt((a) => (a + 1) % GATES.length), 2600);
     return () => window.clearInterval(id);
-  }, [on]);
-  // Grid: 4 columns x 4 rows, the bot in the middle 2 x 2; ten tiles on the ring around it.
-  const slots: Array<[number, number]> = [[0, 0], [1, 0], [2, 0], [3, 0], [3, 1], [3, 2], [3, 3], [2, 3], [1, 3], [0, 3]];
-  const left: Array<[number, number]> = [[0, 2], [0, 1]];
-  const all = [...slots, ...left];
+  }, [on, held]);
+  const g = GATES[at]!;
   return (
-    <div ref={ref} className="vd-fm">
-      <svg className="vd-fm__lines" viewBox="0 0 400 400" preserveAspectRatio="none" aria-hidden="true">
-        {FEATURES.map((_, i) => {
-          const [c, r] = all[i]!;
-          return <line key={i} x1="200" y1="200" x2={(c + 0.5) * 100} y2={(r + 0.5) * 100} className={cx(i === at && 'is-on')} />;
-        })}
-      </svg>
-      <div className="vd-fm__core" aria-hidden="true">
-        <span className="vd-fm__ring" /><span className="vd-fm__ring is-2" />
-        <span className="vd-fm__mark"><BrandMark size={34} /></span>
-        <b>Your bot</b>
-        <small>Runs on the executor in Tokyo</small>
+    <div ref={ref} className="vd-st__card is-gates">
+      <FeatureFx v={1} />
+      <div className="vd-st__top"><h3>When it trades</h3><p>Five gates. Each one takes the bot off the book when the market is wrong for it.</p></div>
+      <div className="vd-gt__tabs" role="group" aria-label="Gates" onPointerLeave={() => setHeld(false)}>
+        {GATES.map((x, i) => (
+          <button key={x.t} type="button" aria-pressed={i === at} className={cx(i === at && 'is-on')} onPointerEnter={(e) => { if (e.pointerType === 'mouse') { setHeld(true); setAt(i); } }} onClick={() => { setHeld(true); setAt(i); }}>{x.t}</button>
+        ))}
       </div>
-      {FEATURES.map((f, i) => {
-        const [c, r] = all[i]!;
-        return (
-          <div key={f.t} className={cx('vd-fm__tile', i === at && 'is-on')} style={{ gridColumn: c + 1, gridRow: r + 1 } as CSSProperties}>
-            <span className="vd-fm__ic">{f.ic}</span>
-            <b>{f.t}</b>
-            <small>{f.s}</small>
-          </div>
-        );
-      })}
+      <div className="vd-gt__plot" aria-hidden="true">
+        <svg viewBox="0 0 600 200" preserveAspectRatio="none">
+          <rect className="vd-gt__band" x={g.x[0]} y="0" width={g.x[1] - g.x[0]} height="200" />
+          {DAY.pts.map((p) => <rect key={p.x} className={cx('vd-gt__vol', p.x >= g.x[0] && p.x <= g.x[1] && 'is-in')} x={p.x - 2} y={198 - p.v} width="3.4" height={p.v} />)}
+          <path className="vd-gt__q" d={DAY.ask} /><path className="vd-gt__q" d={DAY.bid} />
+          <path className="vd-gt__p" d={DAY.mid} />
+          <line className="vd-gt__news" x1="338" x2="338" y1="14" y2="200" />
+        </svg>
+        <span className="vd-gt__flag" style={{ left: `${(338 / 600) * 100}%` }}>CPI</span>
+        <span className="vd-gt__pause" style={{ left: `${((g.x[0] + g.x[1]) / 12)}%` }}>paused</span>
+      </div>
+      <div className="vd-gt__run" aria-hidden="true">
+        <small>Bot</small>
+        <div><i style={{ left: `${g.x[0] / 6}%`, width: `${(g.x[1] - g.x[0]) / 6}%` }} /></div>
+      </div>
+      <p className="vd-gt__say"><b>{g.t}</b>{g.s}</p>
     </div>
   );
+}
+
+/** What ends a run: three dials filling to the line the user set. Drawings, no figures. */
+function StopStage() {
+  const rows: Array<[string, string, number, string]> = [['Loss limit', 'Stops at the loss you set', 0.36, 'is-neg'], ['Stop after volume', 'Stops once it has traded your amount', 0.72, 'is-pos'], ['Run for', 'An hour, a day, a week, or until you stop it', 0.54, '']];
+  return (
+    <div className="vd-st__card">
+      <FeatureFx v={4} />
+      <div className="vd-st__top"><h3>When it stops</h3></div>
+      <div className="vd-sp">
+        {rows.map(([t, s, k, tone], i) => (
+          <div key={t} className={tone}>
+            <p><b>{t}</b><small>{s}</small></p>
+            <div className="vd-sp__bar"><i style={{ '--k': k, '--d': `${i * -1.6}s` } as CSSProperties} /><em /></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** How big: the app's own kinds of control, drawn. */
+function SizeStage() {
+  const [p, setP] = useState(1);
+  const PRE = ['Steady', 'Balanced', 'Active'];
+  useEffect(() => {
+    if (reducedMotion()) return;
+    const id = window.setInterval(() => setP((x) => (x + 1) % 3), 2800);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <div className="vd-st__card">
+      <FeatureFx v={5} />
+      <div className="vd-st__top"><h3>How hard it works</h3></div>
+      <div className="vd-sz">
+        <div><p><b>Presets</b><small>A tested start; change anything after</small></p>
+          <div className="vd-sz__seg" style={{ '--at': p } as CSSProperties} aria-hidden="true"><i />{PRE.map((x, i) => <span key={x} className={cx(i === p && 'is-on')}>{x}</span>)}</div></div>
+        <div><p><b>Max holding</b><small>Caps the position it may build</small></p>
+          <div className="vd-sz__hold" aria-hidden="true">{Array.from({ length: 14 }, (_, i) => <i key={i} className={cx(i < [5, 8, 11][p]! && 'is-on')} />)}</div></div>
+        <div><p><b>Leverage</b><small>Yours, up to the market's maximum</small></p>
+          <div className="vd-sz__lev" style={{ '--k': [0.2, 0.46, 0.78][p] } as CSSProperties} aria-hidden="true"><i /></div></div>
+      </div>
+    </div>
+  );
+}
+
+/** Every setting of a bot as three questions: when it trades, when it stops, how hard it works. */
+export function BotSettingsMap() {
+  return <div className="vd-st"><GateStage /><StopStage /><SizeStage /></div>;
 }

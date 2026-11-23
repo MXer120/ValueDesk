@@ -161,8 +161,9 @@ export function Calculator({ makerBps, actions }: { makerBps: number | null; act
           <label className="v4-calc__l" htmlFor="v4-vol">Your bots' volume in {FEES.windowDays} days</label>
           <output className="v4-calc__vol" htmlFor="v4-vol">{volText(vol)}</output>
         </div>
-        <div className="v4-calc__slider" style={{ '--p': `${(t / STEPS) * 100}%` } as CSSProperties}>
+        <div className={cx('v4-calc__slider', vip && 'is-vip')} style={{ '--p': `${(t / STEPS) * 100}%` } as CSSProperties}>
           <Slider value={t} min={0} max={STEPS} step={1} onChange={setT} label={`Bot volume in ${FEES.windowDays} days: ${volText(vol)}`} className="v4-slider" />
+          <span className="v4-gold" aria-hidden="true"><i /></span>
           <div className="v4-calc__marks" aria-hidden="true">
             {marks.map((m) => (
               <span key={m.usd} className={cx(m.vip && 'is-vip')} style={{ left: `${(tOf(m.usd) / STEPS) * 100}%` }}>{usdStep(m.usd)}</span>

@@ -16,6 +16,7 @@ import '../v3/v3.css';
 import { bp, FEES, startFromText, useLiveDesk } from '../shared';
 import '../home.css';
 import './site.css';
+import './pages.css';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
 
@@ -46,7 +47,7 @@ export const IC = {
 };
 
 export const PRODUCTS = [
-  { key: 'bots', href: PAGE_PATHS.bots, t: 'Bots', s: 'Market maker and grid bots on SoDEX, running around the clock', ic: IC.bot },
+  { key: 'bots', href: PAGE_PATHS.bots, t: 'Bots', s: 'Market makers, grids and hedges on SoDEX perps and spot', ic: IC.bot },
   { key: 'copy', href: PAGE_PATHS.copy, t: 'Copy trading', s: 'Follow any Hyperliquid or SoDEX wallet at your size', ic: IC.copy },
   { key: 'analytics', href: PAGE_PATHS.analytics, t: 'Analytics', s: 'Liquidation map, who traded each candle, news and calendar. Free', ic: IC.heat },
   { key: 'cross', href: PAGE_PATHS.cross, t: 'Cross-venue', s: 'Five venues side by side: traders, liquidations, funding', ic: IC.cross },
@@ -139,7 +140,7 @@ export function SiteNav({ current }: { current?: string }) {
 /* --------------------------------------------------------------------------------------------- footer ----- */
 
 /** V1's footer: the closing call, the columns and the chrome wordmark. */
-export function SiteFooter({ title, sub }: { title?: ReactNode; sub?: ReactNode }) {
+export function SiteFooter({ title, sub, cta = { href: '/bots/new', label: 'Start a bot' } }: { title?: ReactNode; sub?: ReactNode; cta?: { href: string; label: string } }) {
   return (
     <footer className="h-foot">
       <div className="h-foot__cta">
@@ -148,8 +149,8 @@ export function SiteFooter({ title, sub }: { title?: ReactNode; sub?: ReactNode 
           {sub && <p className="h-lead">{sub}</p>}
         </div>
         <div className="h-cta">
-          <a href="/bots/new" className="h-btn is-light">Start a bot<Arrow /></a>
-          <a href="/trade" className="h-btn is-glass">Open the app</a>
+          <a href={cta.href} className="h-btn is-light">{cta.label}<Arrow /></a>
+          {cta.href !== '/trade' && <a href="/trade" className="h-btn is-glass">Open the app</a>}
         </div>
       </div>
       <div className="h-foot__cols">

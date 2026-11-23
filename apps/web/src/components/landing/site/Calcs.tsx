@@ -56,8 +56,9 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
             <label className="v4-calc__l" htmlFor="vd-pv">Futures volume in a week</label>
             <output className="v4-calc__vol" htmlFor="vd-pv">{usdText(futures)}</output>
           </div>
-          <div className="v4-calc__slider is-tight" style={{ '--p': `${(tv / STEPS) * 100}%` } as CSSProperties}>
+          <div className={vip ? 'v4-calc__slider is-tight is-vip' : 'v4-calc__slider is-tight'} style={{ '--p': `${(tv / STEPS) * 100}%` } as CSSProperties}>
             <Slider value={tv} min={0} max={STEPS} step={1} onChange={setTv} label={`Futures volume in a week: ${usdText(futures)}`} className="v4-slider" />
+            <span className="v4-gold" aria-hidden="true"><i /></span>
             <div className="v4-calc__ends" aria-hidden="true"><span>$1K</span><span>$10M</span></div>
           </div>
         </div>

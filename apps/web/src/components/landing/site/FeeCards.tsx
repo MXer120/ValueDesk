@@ -12,7 +12,7 @@ const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolea
 const VIP_RULE = FEES.vipCondition.replace(/^VIP:\s*/, '');
 
 const Check = () => <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.4 8.3 2.3 2.2 4.9-5" /></svg>;
-const Info = ({ tip }: { tip: string }) => <span className="vd-fc__info" title={tip} aria-label={tip}>i</span>;
+const Info = ({ tip }: { tip: string }) => <button type="button" className="vd-fc__info" data-tip={tip} aria-label={tip}>i</button>;
 
 interface Line { t: ReactNode; accent?: boolean; tip?: string }
 interface Card {
@@ -45,7 +45,7 @@ export function feeCards(start: string): Card[] {
       foot: 'Free, always',
     },
     {
-      k: 'bots', tone: 'gold', t: 'Bots', s: 'Market maker and grid, around the clock', lit: true,
+      k: 'bots', tone: 'gold', t: 'Bots', s: 'Market maker, grid and hedge, around the clock', lit: true,
       v: bp(FEES.botLowest), unit: '/order', sub: <>VIP · {VIP_RULE}</>,
       cta: { href: '/bots/new', label: `Start with just ${start}` },
       lines: [

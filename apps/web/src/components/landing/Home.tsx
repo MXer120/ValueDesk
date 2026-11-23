@@ -217,8 +217,8 @@ export function FollowViz() {
           <linearGradient id="gf-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#00b481" stopOpacity="0.28" /><stop offset="1" stopColor="#00b481" stopOpacity="0" /></linearGradient>
         </defs>
         <path d={`${d} L400 140 L0 140 Z`} fill="url(#gf-fill)" className="g-follow__area" />
-        <path d={d} className="g-follow__lead" pathLength={1} />
-        <path d={d} className="g-follow__copy" pathLength={1} transform="translate(0 6)" />
+        <path d={d} className="g-follow__lead" />
+        <path d={d} className="g-follow__copy" transform="translate(0 6)" />
       </svg>
       <span className="g-follow__tag is-l">Leader</span><span className="g-follow__tag is-c">Your copy</span>
     </div>
