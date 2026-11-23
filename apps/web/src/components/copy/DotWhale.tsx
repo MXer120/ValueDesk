@@ -31,24 +31,24 @@ import toneUrl from './whale-tone.png?inline';
 import { isStill, onStill } from '../../attention';
 
 /** The tone map's size, and its row on the surface; the box adds a little room either side. */
-const TW = 478;
-const TH = 755;
+export const TW = 478;
+export const TH = 755;
 const WATERLINE = 347;
 const PAD = 44;
 const W = TW + PAD * 2;
 /** The band below the surface over which sharp turns to under water (CSS px). */
 const SURFACE_BAND = 26;
 
-interface Tone { l: Float32Array; a: Float32Array }
+export interface Tone { l: Float32Array; a: Float32Array }
 
 const sm = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
 };
-interface Dot { x: number; y: number; r: number; a: number; ph: number; sp: number; dx: number; dy: number }
+export interface Dot { x: number; y: number; r: number; a: number; ph: number; sp: number; dx: number; dy: number }
 
 let toneOnce: Promise<Tone> | null = null;
-function loadTone(): Promise<Tone> {
+export function loadTone(): Promise<Tone> {
   toneOnce ??= new Promise<Tone>((ok, fail) => {
     const img = new Image();
     img.onload = () => {
@@ -101,7 +101,7 @@ function samp(f: Float32Array, x: number, y: number): number {
  * and dense along the outline whatever the skin there, so the silhouette reads as a
  * smooth line even where the whale is dark.
  */
-function stipple(t: Tone, count: number): Dot[] {
+export function stipple(t: Tone, count: number): Dot[] {
   const dots: Dot[] = [];
   let tries = 0;
   while (dots.length < count && tries < count * 40) {

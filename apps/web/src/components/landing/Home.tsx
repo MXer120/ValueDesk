@@ -26,6 +26,7 @@ import { VenueLogo } from '../VenueLogo';
 import { BrandMark } from '../BrandMark';
 import { COPY_VENUES, GRID_VENUES, scoreRows } from '../copy/gridModel';
 import { dropBootShell } from '../../bootShell';
+import { FEES, startFromText, SwimmingWhale, usdStep, useLiveDesk } from './shared';
 import './home.css';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
@@ -329,11 +330,14 @@ const FAQ: Array<{ q: string; a: string }> = [
   { q: 'Can I stop at any time?', a: 'Yes. Stop a bot or a copy in the app, and revoke the trading key and the fee approval on SoDEX whenever you like. The key also ends on its own after the days you chose, at most 180.' },
   { q: 'Do bots keep running when I close the tab?', a: 'Yes. Bots and hosted copies run on the ValueDesk executor in Tokyo around the clock. Browser copies run while their tab is open.' },
   { q: 'What does setting up take?', a: 'Connect a wallet you use on SoDEX and sign three times: the terms, the fee and the trading key. Signatures are free; nothing is a transaction.' },
+  { q: 'How much do I need to start?', a: `${startFromText(null)} is enough to start a market maker on the busiest markets; SoDEX's own minimum order on each market applies. Keep room for fees and your loss limit.` },
+  { q: 'Can a bot send my money anywhere?', a: 'No. The trading key places orders and, as SoDEX allows, moves funds only between your own SoDEX accounts and your wallet, never to anyone else. You can revoke it on SoDEX at any time.' },
   { q: 'Where is it available?', a: 'Not in the United States, the United Kingdom, Canada or sanctioned countries. The terms list every place it is not offered.' },
 ];
 
 export function Home() {
   const bots = useBotMarkets('24h');
+  const live = useLiveDesk();
   const rows = useMemo(() => (bots.data ? rankMarkets(bots.data.markets, bots.data.fee.builderBps, 14) : []), [bots.data]);
   const volH = useMemo(() => (bots.data ? bots.data.markets.reduce((s, m) => s + (m.volumeUsdH || 0), 0) : null), [bots.data]);
   const [copyRef, copyOn] = useOnScreen<HTMLDivElement>({ once: true, margin: '300px' });
@@ -352,6 +356,8 @@ export function Home() {
   return (
     <div className="h" data-no-i18n="">
       <div className="h-bg" aria-hidden="true"><div className="h-bg__grid" /><div className="h-bg__beam" /></div>
+      {/* The owner's dotted whale, swimming from the hero's right across to the footer as the page scrolls. */}
+      <SwimmingWhale from={[1.15, 0.3, -64, 0.9]} to={[-0.2, 0.75, -78, 1.15]} height={560} opacity={0.5} />
 
       <nav className={cx('h-nav', scrolled && 'is-solid')} aria-label="ValueDesk">
         <a href="/home" className="h-logo"><BrandMark size={22} /><span>ValueDesk</span></a>
@@ -370,10 +376,14 @@ export function Home() {
             <p className="h-sub">Market makers that run around the clock, copies of any Hyperliquid or SoDEX wallet, and the liquidation map to read it all. Every order lands in your own SoDEX account.</p>
           </div>
           <div className="h-up h-cta" style={{ '--d': '240ms' } as CSSProperties}>
-            <a href="/bots/new" className="h-btn is-light">Start a bot<Arrow /></a>
+            <a href="/bots/new" className="h-btn is-light">Start a bot with {startFromText(live.startFrom)}<Arrow /></a>
             <a href="/copy" className="h-btn is-glass">Copy a trader</a>
-            <a href="/trade" className="h-btn is-ghost">Open the terminal</a>
           </div>
+          <ul className="h-up h-trust" style={{ '--d': '320ms' } as CSSProperties}>
+            <li><i />Your funds stay in your SoDEX account</li>
+            <li><i />Up and running in 3 signatures</li>
+            <li><i />Bot fee from {bp(BOT_FEE_VIP)} <span className="h-dim">(VIP)</span></li>
+          </ul>
         </div>
         <ChromeV />
       </header>
@@ -473,19 +483,20 @@ export function Home() {
           </Reveal>
           <Reveal className="h-fee is-hot" delay={90}>
             <p className="h-fee__k">Bots</p>
-            <b className="h-fee__v">{bp(BOT_FEE_LADDER[0]!.fee)}<small> per order</small></b>
+            <b className="h-fee__v"><small>from </small>{bp(BOT_FEE_VIP)}<small> per order</small></b>
+            <p className="h-fee__c"><span className="h-vip">VIP</span> {FEES.vipCondition}</p>
             <ul>
-              {BOT_FEE_LADDER.slice(1).map((s) => <li key={s.fromUsd}>{bp(s.fee)} from ${s.fromUsd >= 1e6 ? `${s.fromUsd / 1e6}M` : `${s.fromUsd / 1e3}K`} in 14 days</li>)}
-              <li><span className="h-vip">VIP</span> {bp(BOT_FEE_VIP)} from $5M</li>
-              <li>Market maker and grid</li>
+              {BOT_FEE_LADDER.map((s) => <li key={s.fromUsd}>{bp(s.fee)} {s.fromUsd === 0 ? 'for a new wallet' : `from ${usdStep(s.fromUsd)} in 14 days`}</li>)}
+              <li>Market maker and grid, start with {startFromText(live.startFrom)}</li>
             </ul>
             <a href="/bots/new" className="h-btn is-dark is-block">Start a bot<Arrow /></a>
           </Reveal>
           <Reveal className="h-fee" delay={180}>
             <p className="h-fee__k">Copy trading</p>
-            <b className="h-fee__v">{bp(COPY_FEE_LADDER[0]!.fee)}<small> per copied order</small></b>
+            <b className="h-fee__v"><small>from </small>{bp(FEES.copyLowest)}<small> per order</small></b>
+            <p className="h-fee__c">{FEES.copyLowestCondition}</p>
             <ul>
-              <li>Down to {bp(COPY_FEE_LADDER[COPY_FEE_LADDER.length - 1]!.fee)} by {COPY_FEE_WINDOW_DAYS}-day volume</li>
+              <li>{bp(FEES.copyNew)} for a new wallet, lower by {COPY_FEE_WINDOW_DAYS}-day volume</li>
               <li>Hyperliquid and SoDEX leaders</li>
               <li>In your browser or hosted</li>
               <li>Your size, your leverage cap</li>

@@ -46,7 +46,7 @@ bootLanguage();
 // (beta/BetaGate.tsx). The site's own build folds this to null and never contains the door.
 const BetaGate = import.meta.env.VITE_CHANNEL === 'beta' ? lazy(() => import('./beta/BetaGate')) : null;
 // The landing page (/home, owner 2026-11-23): a page of its own, outside the app - no rail, navbar or terms popup.
-const Home = lazy(() => import('./components/landing/Home').then((m) => ({ default: m.Home })));
+const Home = lazy(() => import('./components/landing/Versions').then((m) => ({ default: m.HomeVersions })));
 const onHome = isHomePath(window.location.pathname);
 
 // Before the first render, so an error thrown while mounting is logged too.
