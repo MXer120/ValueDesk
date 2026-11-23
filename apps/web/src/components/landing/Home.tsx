@@ -337,7 +337,7 @@ export function Arrow() {
 
 const FAQ: Array<{ q: string; a: string }> = [
   { q: 'Do I deposit anything with ValueDesk?', a: 'No. Your funds stay in your own SoDEX account. Bots and copies place orders there with a trading key you register on SoDEX; that key can move funds only between your own SoDEX accounts and your wallet.' },
-  { q: 'What does it cost?', a: `The analytics are free. Bot orders pay ${bp(BOT_FEE_LADDER[0]!.fee)} of their value, down to ${bp(BOT_FEE_LADDER[BOT_FEE_LADDER.length - 1]!.fee)} by your 14-day volume and ${bp(BOT_FEE_VIP)} for VIP. Copied orders pay ${bp(COPY_FEE_LADDER[0]!.fee)} down to ${bp(COPY_FEE_LADDER[COPY_FEE_LADDER.length - 1]!.fee)}. SoDEX charges its own trading fee on top.` },
+  { q: 'What does it cost?', a: `The analytics are free. Bot orders pay ${bp(BOT_FEE_LADDER[0]!.fee)} of their value, and ${bp(BOT_FEE_VIP)} for VIP. Copied orders pay ${bp(COPY_FEE_LADDER[0]!.fee)} down to ${bp(COPY_FEE_LADDER[COPY_FEE_LADDER.length - 1]!.fee)}. SoDEX charges its own trading fee on top.` },
   { q: 'Can I stop at any time?', a: 'Yes. Stop a bot or a copy in the app, and revoke the trading key and the fee approval on SoDEX whenever you like. The key also ends on its own after the days you chose, at most 180.' },
   { q: 'Do bots keep running when I close the tab?', a: 'Yes. Bots and hosted copies run on the ValueDesk executor in Tokyo around the clock. Browser copies run while their tab is open.' },
   { q: 'What does setting up take?', a: 'Connect a wallet you use on SoDEX and sign three times: the terms, the fee and the trading key. Signatures are free; nothing is a transaction.' },
@@ -483,7 +483,7 @@ export function Home() {
         <Reveal as="header" className="h-head is-center">
           <Eyebrow>Fees</Eyebrow>
           <h2 className="h-h2">Pay on what runs.<br /><span>Nothing else.</span></h2>
-          <p className="h-lead">No subscription. A fee in basis points on the orders a bot or a copy places, lower as your 14-day volume grows.</p>
+          <p className="h-lead">No subscription. A fee in basis points on the orders a bot or a copy places, lower with volume.</p>
         </Reveal>
         <div className="h-fees">
           <Reveal className="h-fee">
@@ -497,7 +497,7 @@ export function Home() {
             <b className="h-fee__v"><small>from </small>{bp(BOT_FEE_VIP)}<small> per order</small></b>
             <p className="h-fee__c"><span className="h-vip">VIP</span> {FEES.vipCondition}</p>
             <ul>
-              {BOT_FEE_LADDER.map((s) => <li key={s.fromUsd}>{bp(s.fee)} {s.fromUsd === 0 ? 'for a new wallet' : `from ${usdStep(s.fromUsd)} in 14 days`}</li>)}
+              {BOT_FEE_LADDER.map((s) => <li key={s.fromUsd}>{bp(s.fee)} {s.fromUsd === 0 ? 'for everyone' : `from ${usdStep(s.fromUsd)} in 14 days`}</li>)}
               <li>Market maker and grid, start with {startFromText(live.startFrom)}</li>
             </ul>
             <a href="/bots/new" className="h-btn is-dark is-block">Start a bot<Arrow /></a>
