@@ -79,7 +79,8 @@ test('stop: the write backlog goes to the spill, and the next start writes every
 
     const s = new IndexStore(path, { aggRefreshMs: 0 });
     const ix = new Indexer(s, () => now) as unknown as IxPriv;
-    assert.equal(ix.replaySpill(), 152);
+    const held = spillRows(s);
+    assert.equal(ix.replaySpill(), held, 'every part');
     await until('the spill written', () => ix.writes.backlog === 0);
     assert.equal(fillCount(s), 150);
     assert.deepEqual(activity(s), { t: 5, v: 50 });
@@ -109,7 +110,7 @@ test('stop: a start that ends midway through the spill leaves only the rest, and
     s.close();
     s = new IndexStore(path, { aggRefreshMs: 0 });
     const ix = new Indexer(s, () => now) as unknown as IxPriv;
-    assert.equal(ix.replaySpill(), 152 - parts[0]!.rows - parts[1]!.rows);
+    assert.equal(ix.replaySpill(), parts.length - 2);
     await until('the rest written', () => ix.writes.backlog === 0);
     assert.equal(fillCount(s), 150);
     assert.deepEqual(activity(s), { t: 5, v: 50 });

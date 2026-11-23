@@ -241,6 +241,22 @@ const BUILD_TURN_MS = 120;
  */
 const FLUSH_FILLS = 50;
 const FLUSH_ACTIVITY = 300;
+/** How long the SoDEX checks wait for the catch-up to cover the newest break. */
+const BREAK_FRESH_MS = 20 * 60_000;
+/**
+ * The writer thread's queue is kept short (2026-11-23: every 5 s flush went to it at once; it fell behind and held 14.5M rows
+ * twice over, 18 GB, each flush's rows sorted among themselves only). Past WRITER_HOLD_ROWS the next flush waits here:
+ * activity of one account and hour adds up to one row, and the fills of all the waiting time go in one key order.
+ */
+export const WRITER_HOLD_ROWS = 20_000;
+/** Rows of one op to the thread: a longer list holds this thread while it is copied over. */
+const WRITER_SEND_ROWS = 5_000;
+/** Fills held past this go to the spill on disk (appends) and come back as the thread catches up. */
+export const FILLS_HELD_MAX = 400_000;
+const OVERFLOW_PART = 200;
+const OVERFLOW_TURN = 4_000;
+/** Spilled parts with the writer thread at once (all at once read the whole spill into memory: 22,003 parts on 2026-11-23). */
+const REPLAY_WINDOW = 64;
 /** A held range this fresh answers for "now" even without the stream. */
 const STALE_MS = 10 * 60_000;
 /** Candidates waiting for a trade check per board before the walk stops. */
@@ -459,6 +475,19 @@ export class Indexer {
   private spilling = false;
   /** Flushes through the writer thread, each one's rest after the one before (flushThrough). */
   private flushChain: Promise<void> = Promise.resolve();
+  /** Rows of the flush being handed to the writer thread and not sent yet (a stop spills them). */
+  private unsentFills: import('./store.js').FillRow[] = [];
+  private unsentActivity: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> = [];
+  private handing = false;
+  /** When each flush not written yet was taken, and since when rows wait here for the thread. */
+  private openFlushes: number[] = [];
+  private heldSince = 0;
+  /** Rows moved to the spill while running; replays of it under way (the coverage stands still meanwhile). */
+  private overflowed = 0;
+  private overflowing = false;
+  private replaying = 0;
+  /** Rows overflow() has not written to the spill yet (a stop spills them). */
+  private overflowLeft: import('./store.js').FillRow[] = [];
   /** When the last flush took its rows (a stop moves the streams' span to it). */
   private lastFlushAt = 0;
   /** Rows the last stop spilled (its timing line). */
@@ -534,7 +563,7 @@ export class Indexer {
     const sodexGate = () => Math.max(cooldownLeftMs(), sodex.cooldownLeft(), gatewayWeightSpent() > gatewayWeightLimit() / 3 ? 5_000 : 0);
     this.sgw = new Lane({ name: 'sgw', perMin: INDEXER_ENV.sodexClosesPerMin(), gate: sodexGate, rateLimitPauseMs: 15 * 60_000, creditTaskTime: true });
     // Not while a break may yet be answered: the check will not need the read.
-    this.scheck = new Lane({ name: 'scheck', perMin: INDEXER_ENV.sodexChecksPerMin(), gate: () => Math.max(sodexGate(), this.sodexBreaks.length ? 5_000 : 0), rateLimitPauseMs: 30 * 60_000 });
+    this.scheck = new Lane({ name: 'scheck', perMin: INDEXER_ENV.sodexChecksPerMin(), gate: () => Math.max(sodexGate(), this.breakFresh() ? 5_000 : 0), rateLimitPauseMs: 30 * 60_000 });
     // The indexer's only SoDEX `/trades` reader (off unless VALUESCAN_INDEX_SODEX_TRADES
     // is set). Each task reads ONE page (syncTrades maxPages: 1) and the lane then
     // rests, so its rate is `perMin`, capped at SODEX_HISTORY_PAIR_PER_MIN: the
@@ -690,7 +719,7 @@ export class Indexer {
       t.unref?.();
       this.timers.push(t);
     };
-    every(FLUSH_MS, () => this.flush(), 'flush');
+    every(FLUSH_MS, () => this.flushTick(), 'flush');
     if (this.flow) every(1_000, () => this.flow?.tick(), 'flow');
     // Traders' day aggregates build in the background, ~40 ms at a time.
     // (Both are synchronous: an error is noted, never thrown out of the timer - that would end the worker.)
@@ -999,6 +1028,12 @@ export class Indexer {
    * fills included, so the span runs on from before it. Until then it counts as one. Newest first, as the older ones' spans
    * end where the newer ones' begin; one that is lost ends the span there for good, and whatever came before it with it.
    */
+  /** A break the catch-up may still cover soon. Older ones hold no check back (2026-11-23: 540 of them, no check in 16 h). */
+  private breakFresh(): boolean {
+    const b = this.sodexBreaks[this.sodexBreaks.length - 1];
+    return b !== undefined && this.now() - b.to < BREAK_FRESH_MS;
+  }
+
   private settleBreaks(st: { since: number | null }): void {
     const c = this.sodexCatchup;
     if (!c || !this.sodexBreaks.length) return;
@@ -1050,7 +1085,10 @@ export class Indexer {
       writer: this.store.writerStatus,
       lockWaits: { n: this.store.lockWaits.n, maxMs: Math.round(this.store.lockWaits.maxMs), over100: this.store.lockWaits.over100 },
       // How long the oldest of those steps has waited (ms): the status page's write target (statusModel.ts FRESH_TARGETS).
-      flushOldestMs: this.writes.oldestWaitMs,
+      // With the writer thread on, also its flushes and the rows held for it: until 2026-11-23 they were not counted, and the
+      // status said "0 ms" with 14.5M rows waiting.
+      flushOldestMs: this.oldestUnwrittenMs(),
+      flushHeld: { fills: this.pendingFills.length + this.unsentFills.length, activity: this.act.size, overflowed: this.overflowed, replaying: this.replaying },
       streamUnderRest: this.store.streamUnderRest,
       retention: this.store.retention(this.now()),
       sodexBreaks: this.sodexBreaks.length,
@@ -1130,6 +1168,74 @@ export class Indexer {
     if (this.lastOrder.size > 300_000) this.lastOrder.clear();
   }
 
+  /** How long the oldest row not in the file yet has waited. */
+  private oldestUnwrittenMs(): number {
+    const now = this.now();
+    const held = this.heldSince ? now - this.heldSince : 0;
+    const open = this.openFlushes.length ? now - this.openFlushes[0]! : 0;
+    return Math.max(0, this.writes.oldestWaitMs, held, open);
+  }
+
+  /** The timer's flush: waits while the writer thread has enough to do, so its queue never grows past a few flushes. */
+  private flushTick(): void {
+    if (this.store.writerOn && !this.stopped && (this.handing || this.store.writerPendingRows > WRITER_HOLD_ROWS)) {
+      if (!this.heldSince) this.heldSince = this.now();
+      if (this.pendingFills.length > FILLS_HELD_MAX) void this.overflow();
+      return;
+    }
+    this.flush();
+    this.heldSince = 0;
+  }
+
+  /** The fills held past FILLS_HELD_MAX go to the spill, a turn at a time, and back once the thread has room. */
+  private async overflow(): Promise<void> {
+    if (this.overflowing || this.stopped) return;
+    this.overflowing = true;
+    this.replaying++;
+    const ids: number[] = [];
+    this.overflowLeft = inKeyOrder(this.pendingFills);
+    this.pendingFills = [];
+    try {
+      while (this.overflowLeft.length) {
+        const turn = this.overflowLeft.slice(0, OVERFLOW_TURN);
+        const parts: Array<{ kind: 'fills'; rows: typeof turn }> = [];
+        for (let i = 0; i < turn.length; i += OVERFLOW_PART) parts.push({ kind: 'fills', rows: turn.slice(i, i + OVERFLOW_PART) });
+        for (const id of this.store.spillWrites(parts)) ids.push(id);
+        this.overflowLeft = this.overflowLeft.slice(turn.length);
+        this.overflowed += turn.length;
+        await new Promise<void>((ok) => setImmediate(ok));
+        // A stop came first: it spilled what was left and the next start writes the parts back.
+        if (this.stopped) return;
+      }
+    } catch (e) {
+      this.lastError = `overflow: ${String(e)}`;
+      this.pendingFills = this.overflowLeft.concat(this.pendingFills);
+      this.overflowLeft = [];
+    } finally {
+      this.overflowing = false;
+    }
+    await this.replayParts(ids);
+    this.replaying--;
+  }
+
+  /** Spilled parts written back through the writer thread, REPLAY_WINDOW at a time and behind the live rows. */
+  private async replayParts(ids: readonly number[]): Promise<void> {
+    let next = 0;
+    const one = async (): Promise<void> => {
+      while (next < ids.length && !this.stopped) {
+        const id = ids[next++]!;
+        try {
+          await this.store.replaySpillAsync(id);
+        } catch (e) {
+          if (!this.stopped) this.lastError = `spill replay: ${String(e)}`;
+        }
+        // With the writer thread off the part was written in this turn: the loop gets its turn too.
+        await new Promise<void>((ok) => setImmediate(ok));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(REPLAY_WINDOW, ids.length) }, one));
+  }
+
   private flush(): void {
     const rows: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> = [];
     for (const [k, v] of this.act) {
@@ -1197,10 +1303,13 @@ export class Indexer {
    * what the coverage claims is in the file by then. A stop spills what is not (store.stopWriter).
    */
   private flushThrough(rows: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>, fills: import('./store.js').FillRow[], at: number): void {
-    const sent = Promise.allSettled([this.store.addActivityAsync(rows), this.store.putFillsAsync(fills, { stream: true })]);
+    const sent = Promise.allSettled([this.handOver(rows, fills)]);
+    this.openFlushes.push(this.heldSince || at);
+    this.heldSince = 0;
     this.lastFlushAt = at;
     this.flushChain = this.flushChain.then(() => sent).then((r) => {
       const bad = r.find((x): x is PromiseRejectedResult => x.status === 'rejected');
+      this.openFlushes.shift();
       if (bad) this.lastError = `flush: ${String(bad.reason)}`;
       if (this.stopped) return;
       this.writes.add([
@@ -1209,12 +1318,50 @@ export class Indexer {
           if (bad) return;
           this.store.tx(() => {
             this.trackStreams(at);
-            this.advanceCoverage(at);
+            // Rows in the spill are not in the file yet: nothing moves the held ranges over them.
+            if (!this.replaying) this.advanceCoverage(at);
           });
         },
         () => this.writeStats(),
       ]);
     });
+  }
+
+  /**
+   * A flush's rows to the writer thread, WRITER_SEND_ROWS at a time and no faster than it writes. Rows not sent yet stay in
+   * unsentFills / unsentActivity, where a stop finds them. Resolves once all of them are in the file.
+   */
+  private async handOver(rows: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }>, fills: import('./store.js').FillRow[]): Promise<void> {
+    this.unsentFills = this.unsentFills.concat(fills);
+    this.unsentActivity = this.unsentActivity.concat(rows);
+    // A stop's last flush: spillUnwritten takes them all.
+    if (this.spilling || this.handing) return;
+    this.handing = true;
+    const sent: Array<Promise<void>> = [];
+    const guard = (p: Promise<void>): void => {
+      p.catch(() => {});
+      sent.push(p);
+    };
+    try {
+      while (this.unsentActivity.length || this.unsentFills.length) {
+        while (!this.stopped && this.store.writerOn && this.store.writerPendingRows > WRITER_HOLD_ROWS) await new Promise<void>((ok) => setTimeout(ok, 50));
+        if (this.stopped) throw new Error('stopped before these rows were sent');
+        // Taken and sent in one turn: a stop finds a row in one place or the other.
+        if (this.unsentActivity.length) {
+          const part = this.unsentActivity.slice(0, WRITER_SEND_ROWS);
+          this.unsentActivity = this.unsentActivity.slice(part.length);
+          guard(this.store.addActivityAsync(part));
+        } else {
+          const part = this.unsentFills.slice(0, WRITER_SEND_ROWS);
+          this.unsentFills = this.unsentFills.slice(part.length);
+          guard(this.store.putFillsAsync(part, { stream: true }));
+        }
+        if (this.unsentActivity.length || this.unsentFills.length) await new Promise<void>((ok) => setImmediate(ok));
+      }
+    } finally {
+      this.handing = false;
+    }
+    await Promise.all(sent);
   }
 
   private writeStats(): void {
@@ -1236,12 +1383,17 @@ export class Indexer {
     const spill = (more: { fills: import('./store.js').FillRow[]; activity: Array<{ venue: Venue; acct: string; hour: number; trades: number; volume: number }> }) => {
       // The fills of every waiting flush in one key order, cut again into FLUSH_FILLS: the next start writes each wallet's
       // rows of the whole backlog together (stable: copies of one id keep their order).
-      const fills = inKeyOrder([...parts.flatMap((p) => (p.kind === 'fills' ? p.rows : [])), ...more.fills]);
+      const held = this.unsentFills.concat(this.overflowLeft);
+      const activity = this.unsentActivity.concat(more.activity);
+      const fills = inKeyOrder(parts.flatMap((p) => (p.kind === 'fills' ? p.rows : [])).concat(held, more.fills));
       const out: Parameters<IndexStore['spillWrites']>[0][number][] = parts.flatMap((p) => (p.kind === 'activity' ? [{ kind: 'activity' as const, rows: p.rows }] : []));
-      for (let i = 0; i < more.activity.length; i += FLUSH_ACTIVITY) out.push({ kind: 'activity', rows: more.activity.slice(i, i + FLUSH_ACTIVITY) });
+      for (let i = 0; i < activity.length; i += FLUSH_ACTIVITY) out.push({ kind: 'activity', rows: activity.slice(i, i + FLUSH_ACTIVITY) });
       for (let i = 0; i < fills.length; i += FLUSH_FILLS) out.push({ kind: 'fills', rows: fills.slice(i, i + FLUSH_FILLS) });
       this.store.spillWrites(out);
-      this.spilledRows += more.fills.length + more.activity.length;
+      this.spilledRows += held.length + more.fills.length + activity.length;
+      this.unsentFills = [];
+      this.unsentActivity = [];
+      this.overflowLeft = [];
     };
     try {
       if (thread) this.store.stopWriter(spill);
@@ -1249,6 +1401,13 @@ export class Indexer {
     } catch (e) {
       this.lastError = `spill: ${String(e)}`;
       console.warn(`[indexer] stop: spill failed, writing the rows instead: ${String(e)}`);
+      const fills = this.unsentFills.concat(this.overflowLeft);
+      const activity = this.unsentActivity;
+      this.unsentFills = [];
+      this.unsentActivity = [];
+      this.overflowLeft = [];
+      this.store.putFills(fills);
+      this.store.addActivity(activity);
       return;
     }
     for (const p of parts) {
@@ -1264,24 +1423,24 @@ export class Indexer {
    * written twice. Not tracked as unwritten: a stop meanwhile leaves them where they are.
    */
   private replaySpill(): number {
-    let parts: ReturnType<IndexStore['spilledWrites']>;
+    let parts: number[];
     try {
-      parts = this.store.spilledWrites();
+      parts = this.store.spilledIds();
     } catch (e) {
       this.lastError = `spill: ${String(e)}`;
       return 0;
     }
     if (!parts.length) return 0;
-    let rows = 0;
-    for (const p of parts) rows += p.rows;
     if (this.store.writerOn) {
-      // Sent now, ahead of anything new (the thread writes in the order sent). A stop before one is written leaves it there.
-      for (const p of parts) void this.store.replaySpillAsync(p.id).catch((e) => { if (!this.stopped) this.lastError = `spill replay: ${String(e)}`; });
+      // A window at a time beside the new rows: a fill is an upsert, and activity adds up in any order. A stop before one is
+      // written leaves it there; the coverage does not move until all are in.
+      this.replaying++;
+      void this.replayParts(parts).finally(() => { this.replaying--; });
     } else {
-      this.writes.add(parts.map((p) => () => { if (!this.stopped) this.store.replaySpill(p.id); }));
+      this.writes.add(parts.map((id) => () => { if (!this.stopped) this.store.replaySpill(id); }));
     }
-    console.log(`[indexer] start: ${rows} rows spilled by the last stop, written first (${parts.length} parts)`);
-    return rows;
+    console.log(`[indexer] start: ${parts.length} parts of rows spilled by the last stop, written back as the writer has room`);
+    return parts.length;
   }
 
   // --- trade checks -------------------------------------------------------------------
