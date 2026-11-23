@@ -324,13 +324,13 @@ export function CopyPage() {
 
 const AN_TILES: Array<{ t: string; s: string; ic: ReactNode; href: string }> = [
   { t: 'Liquidation map', s: 'Every open position\'s liquidation price, over the chart', ic: IC.heat, href: '/trade' },
-  { t: 'Liquidation history', s: 'The map as it was, for any past moment', ic: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>, href: '/trade' },
+  { t: 'Liquidation history', s: 'The recorded map, back in time', ic: <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg>, href: '/trade' },
   { t: 'Who traded each candle', s: 'Each candle\'s volume by the wallets behind it', ic: <svg viewBox="0 0 24 24"><path d="M6 20V9M12 20V4M18 20v-7" /></svg>, href: '/trade' },
   { t: 'Leaderboards', s: 'Traders on every venue, ranked', ic: <svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7" /></svg>, href: '/leaderboard' },
   { t: 'Wallet scan', s: 'Any wallet: trades, positions, history', ic: <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></svg>, href: '/scan' },
   { t: 'Cohorts', s: 'How the big wallets are positioned', ic: <svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3" /><circle cx="16" cy="9" r="3" /><path d="M3 19c1-3 3-4 5-4s4 1 5 4M11 19c1-3 3-4 5-4s4 1 5 4" /></svg>, href: '/explore?view=cohorts' },
   { t: 'Market map', s: 'Every SoDEX market and sector at a glance', ic: <svg viewBox="0 0 24 24"><rect x="3" y="4" width="10" height="9" rx="1" /><rect x="15" y="4" width="6" height="5" rx="1" /><rect x="15" y="11" width="6" height="9" rx="1" /><rect x="3" y="15" width="10" height="5" rx="1" /></svg>, href: '/explore' },
-  { t: 'Funding scanner', s: 'SoDEX against Hyperliquid, the live spread', ic: <svg viewBox="0 0 24 24"><path d="M4 8h12l-3-3M20 16H8l3 3" /></svg>, href: '/explore' },
+  { t: 'Funding scanner', s: 'SoDEX against Hyperliquid, a panel for your dashboard', ic: <svg viewBox="0 0 24 24"><path d="M4 8h12l-3-3M20 16H8l3 3" /></svg>, href: '/trade' },
   { t: 'News', s: 'The headlines that move coins', ic: <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M8 9h8M8 13h8M8 17h5" /></svg>, href: '/trade' },
   { t: 'Macro calendar', s: 'Releases, with the figures as they land', ic: <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M4 10h16M9 3v4M15 3v4" /></svg>, href: '/trade' },
   { t: 'FOMC odds and Fed live', s: 'Rate odds, and the press conference as it happens', ic: <svg viewBox="0 0 24 24"><path d="M4 10 12 5l8 5M6 10v8M10 10v8M14 10v8M18 10v8M4 20h16" /></svg>, href: '/trade' },
