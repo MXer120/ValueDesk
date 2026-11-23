@@ -416,7 +416,7 @@ export class ExecutorClient {
 
   acceptTerms = (request: SignedCopyRequest) => this.call<MeResponse>('POST', '/terms', { body: { request } });
   /** Whether `owner` accepted the copy terms in force here (public yes/no; 'terms-day-key' executors). */
-  termsStatus = (owner: string) => this.call<{ accepted: boolean; termsVersion: string }>('GET', `/terms/status?owner=${encodeURIComponent(owner.toLowerCase())}`);
+  termsStatus = (owner: string) => this.call<{ accepted: boolean; termsVersion: string; site?: string | null }>('GET', `/terms/status?owner=${encodeURIComponent(owner.toLowerCase())}`);
   /** ValueDesk's own terms (legal/acceptance.ts): recorded by the hosted executor only. */
   acceptSiteTerms = (request: SignedCopyRequest) => this.call<SiteTermsRecord>('POST', '/site-terms', { body: { request } });
   createKey = (request: SignedCopyRequest) => this.call<{ address: string; name: string; maxDays: number; days: number }>('POST', '/keys', { body: { request } });

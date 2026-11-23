@@ -27,7 +27,7 @@ export const RISK: LegalDoc = {
   page: 'risk',
   title: 'Risk disclosure',
   lang: 'en',
-  updated: 'Owner',
+  updated: '23 November 2026',
   intro: [
     { p: '**Trading crypto-assets and perpetual futures is high-risk and not suitable for most people. You can lose all the money you put in, quickly. Only trade with money you can afford to lose completely, and never with borrowed money.**' },
     { p: 'This disclosure describes the main risks of using ValueDesk at www.valuedesk.so: trading on the SoDEX exchange through it, algo orders, copy trading, and the data and third-party content it shows. It is part of the [Terms of use](/terms), which you accept before you use ValueDesk. It cannot name every risk, and the risks can change. It is not advice: nothing here, and nothing on ValueDesk, says that any product, trade or strategy is suitable for you.' },
@@ -71,7 +71,7 @@ export const RISK: LegalDoc = {
         {
           ul: [
             '**Funding.** Holders of perps positions pay or receive funding at intervals SoDEX sets. Funding can be large in volatile markets and is paid even when the price does not move.',
-            '**Trading fees.** SoDEX charges its own fees on every fill. ValueDesk charges a builder fee on orders placed through it, on top (Terms of use, section 6), and copied orders carry the copy fee. Frequent trading multiplies these costs, which can outweigh small gains.',
+            '**Trading fees.** SoDEX charges its own fees on every fill. ValueDesk charges a builder fee on orders placed through it, on top (Terms of use, section 6), and copied orders, bots and other functions carry the fee shown for them. Frequent trading multiplies these costs, which can outweigh small gains.',
             '**Network fees.** Deposits from other blockchains and some withdrawals cost network fees (gas), which change with demand and are not refunded when a transaction fails.',
           ],
         },
@@ -121,7 +121,7 @@ export const RISK: LegalDoc = {
       blocks: [
         {
           ul: [
-            '**The trading key.** When you enable trading, your browser keeps a trading key that SoDEX accepts for orders, for at most seven days. Anyone who controls your device while it is valid can trade with it. Turn trading off, or sign out, on a device others use.',
+            '**The trading key.** When you enable trading, your browser keeps a trading key that SoDEX accepts for orders, for the time shown when you enable it. Anyone who controls your device while it is valid can trade with it. Turn trading off, or sign out, on a device others use.',
             '**Phishing and fake sites.** Criminals copy trading sites and send fake messages, apps and support contacts. Check the address of the site before you connect a wallet or sign anything. ValueDesk will never ask for your recovery phrase or private key, and never contacts you first to ask you to sign something.',
             '**Read what you sign.** Your wallet shows every message and transaction before it is signed. A signature you did not understand can cost you your funds.',
             '**ValueDesk can be attacked too.** Like any online service, ValueDesk\'s servers, its hosting providers, its domain and the software components it uses can be broken into. An attacker could then change what the site shows or asks you to sign, or obtain the keys stored on the hosted executor and trade with them until they expire or are revoked. What your wallet shows you is what you sign - check it, whatever the page says.',
@@ -130,9 +130,9 @@ export const RISK: LegalDoc = {
       ],
     },
     {
-      title: '8. Algo orders',
+      title: '8. Algo orders, bots and other automated trading',
       blocks: [
-        { p: 'Algo orders (TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional and trailing orders, brackets and baskets) place and manage many child orders for you over time, according to the rules you set. They are tools, not strategies, and they do not reduce the risks above.' },
+        { p: 'Automated tools - algo orders, bots and others we may add - place and manage many orders for you over time, according to the rules you set. They do not reduce the risks above. A bot can lose money even when it trades as designed; its limits are checked while it runs and can be overrun in a fast market (section 7 of the [Copy trading and bot terms](/copy-terms)).' },
         {
           ul: [
             '**They act on their own.** Once started, an algo places orders without asking you before each one - in your browser while the tab is open, or on an executor around the clock.',
@@ -148,7 +148,7 @@ export const RISK: LegalDoc = {
     {
       title: '9. Copy trading',
       blocks: [
-        { p: 'Copying another address\'s trades adds risks of its own: the trader you copy does not know you and owes you nothing, past results do not predict future ones, your results will differ from theirs, copies run automatically and can stop at any time while positions stay open, and the key used for copying can trade your account. These risks are set out in full in section 7 of the [Copy trading terms and risk disclosure](/copy-terms), which you accept separately before your first copy.' },
+        { p: 'Copying another address\'s trades adds risks of its own: the trader you copy does not know you and owes you nothing, past results do not predict future ones, your results will differ from theirs, copies run automatically and can stop at any time while positions stay open, and the key used for copying can trade your account. These risks are set out in full in section 7 of the [Copy trading and bot terms](/copy-terms), which you accept together with the Terms of use.' },
       ],
     },
     {

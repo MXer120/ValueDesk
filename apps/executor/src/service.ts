@@ -25,6 +25,8 @@ import {
   COPY_FEE_WINDOW_DAYS,
   COPY_TERMS_EXECUTOR,
   COPY_TERMS_VERSION,
+  copyTermsValid,
+  copyTermsDoc,
   currentCopyTerms,
   type CopyTermsServed,
   EXECUTOR_FEATURES,
@@ -901,7 +903,8 @@ export class ExecutorService {
     const p = payload as Partial<AcceptTermsPayload>;
     // The web signs the version and text this executor serves (/info termsVersion, GET /terms/copy) and, on this
     // refusal, fetches them and asks again in the same flow: never a reload (owner 2026-11-09).
-    if (p.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', `ValueDesk's copy terms are now version ${COPY_TERMS_VERSION}. Read them and sign that version.`);
+    // A still-valid version this executor knows (the web one release behind) is taken too: nobody signs twice for a release.
+    if (!copyTermsValid(p.termsVersion) || !copyTermsDoc(p.termsVersion!)) throw new ApiError(400, 'terms-version', `ValueDesk's copy terms are now version ${COPY_TERMS_VERSION}. Read them and sign that version.`);
     if (typeof p.termsHash !== 'string' || !/^0x[0-9a-f]{64}$/.test(p.termsHash)) throw new ApiError(400, 'terms-hash', 'termsHash must be the keccak256 of the terms text.');
     const country = normaliseCountry(p.country);
     if (!country) throw new ApiError(400, 'country', 'Choose your country of residence.');
@@ -910,11 +913,13 @@ export class ExecutorService {
     }
     // ValueDesk's own terms signed in the same signature (a new wallet's one terms signature): checked as /site-terms
     // checks them; the consent log keeps the signed request with both.
-    if (p.siteTerms !== undefined) checkSiteTerms(p.siteTerms);
+    const site = p.siteTerms !== undefined ? checkSiteTerms(p.siteTerms) : null;
     this.screen(owner);
     const policy = regionPolicy(country, ctx.viewerCountry);
-    this.db.setTerms(owner, { termsVersion: p.termsVersion, termsHash: p.termsHash, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() });
+    this.db.setTerms(owner, { termsVersion: p.termsVersion!, termsHash: p.termsHash, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() });
     if (!policy.allowed) throw new ApiError(451, 'region', policy.reason ?? 'Copy trading is not available in your region.');
+    // Only a signature that was accepted counts on the wallet's other devices (the consent log holds refused ones too).
+    if (site) this.db.setMeta(`site-terms:${owner}`, site.termsVersion);
     return this.me(owner, ctx);
   }
 
@@ -929,8 +934,9 @@ export class ExecutorService {
    */
   acceptSiteTerms(req: unknown, ctx: RequestContext): SiteTermsRecord {
     if (this.cfg.kind !== 'hosted') throw new ApiError(404, 'path', 'ValueDesk\'s terms are recorded by ValueDesk\'s own executor.');
-    const { payload } = this.accept(req, 'accept-site-terms', ctx);
+    const { owner, payload } = this.accept(req, 'accept-site-terms', ctx);
     const p = checkSiteTerms(payload);
+    this.db.setMeta(`site-terms:${owner}`, p.termsVersion);
     return { recorded: true, termsVersion: p.termsVersion, country: p.country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() };
   }
 
@@ -939,16 +945,18 @@ export class ExecutorService {
    * A new wallet then signs the terms first - that one signature also approves its day key ('terms-day-key') - and a
    * wallet on record only signs in. That a wallet uses ValueDesk is public on SoDEX already (its builder approval).
    */
-  termsStatus(owner: string | null): { accepted: boolean; termsVersion: string } {
+  termsStatus(owner: string | null): { accepted: boolean; termsVersion: string; site: string | null } {
     const o = String(owner ?? '').toLowerCase();
     if (!/^0x[0-9a-f]{40}$/.test(o)) throw new ApiError(400, 'owner', 'owner must be a 0x address');
     const t = this.db.terms(o);
-    return { accepted: !!t && t.termsVersion === COPY_TERMS_VERSION, termsVersion: COPY_TERMS_VERSION };
+    // `site`: the version of ValueDesk's own terms this wallet signed last (the web decides whether it still counts), so a
+    // second browser or device never asks for a signature that exists. Never the country or anything else of the record.
+    return { accepted: !!t && copyTermsValid(t.termsVersion), termsVersion: COPY_TERMS_VERSION, site: this.db.meta(`site-terms:${o}`) ?? null };
   }
 
   me(owner: string, ctx: RequestContext): MeResponse {
     const terms = this.db.terms(owner);
-    const current = terms && terms.termsVersion === COPY_TERMS_VERSION ? terms : null;
+    const current = terms && copyTermsValid(terms.termsVersion) ? terms : null;
     return {
       owner,
       terms: current,
@@ -1801,7 +1809,7 @@ export class ExecutorService {
   private needTerms(owner: string, ctx: RequestContext): void {
     this.screen(owner);
     const t = this.db.terms(owner);
-    if (!t || t.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(412, 'terms', 'Accept the copy trading terms first.');
+    if (!t || !copyTermsValid(t.termsVersion)) throw new ApiError(412, 'terms', 'Accept the copy trading terms first.');
     const policy = regionPolicy(t.country, ctx.viewerCountry);
     if (!policy.allowed) throw new ApiError(451, 'region', policy.reason ?? 'Copy trading is not available in your region.');
   }
@@ -1831,7 +1839,7 @@ export class ExecutorService {
   private async subscribeAccepted({ owner, payload, consent }: ReturnType<ExecutorService['accept']>, ctx: RequestContext): Promise<CopyView> {
     if (this.cfg.kind === 'hosted' && !this.cfg.open) throw new ApiError(503, 'closed', 'The ValueDesk executor takes no new copies right now. Running copies continue.');
     this.needTerms(owner, ctx);
-    if (payload.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', `ValueDesk's copy terms are now version ${COPY_TERMS_VERSION}. Accept them in the setup, then start again.`);
+    if (!copyTermsValid(payload.termsVersion)) throw new ApiError(400, 'terms-version', `ValueDesk's copy terms are now version ${COPY_TERMS_VERSION}. Accept them in the setup, then start again.`);
     let settings;
     try {
       settings = parseSettings(payload.settings);
@@ -1869,7 +1877,7 @@ export class ExecutorService {
       startedAt: now,
       country: t.country,
       observedCountry: normaliseCountry(ctx.viewerCountry),
-      termsVersion: COPY_TERMS_VERSION,
+      termsVersion: t.termsVersion, // the version this wallet signed, not the newest text
       consent,
     };
     await this.runtime.add(sub);

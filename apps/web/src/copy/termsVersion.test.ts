@@ -38,9 +38,10 @@ test('web newer than the executor: the setup signs the executor\'s older version
   const a = activeCopyTerms();
   assert.equal(a.termsVersion, OLDER);
   assert.equal(a.termsHash, copyTermsHash(copyTermsDoc(OLDER)!));
-  // The executor's record of that version counts as accepted here; one of another version does not.
+  // The executor's record of that version counts here, and so does any version from COPY_TERMS_VALID_FROM on (signed once).
   assert.ok(adoptRecordedTerms('0x' + '11'.repeat(20), { termsVersion: OLDER, termsHash: a.termsHash, country: 'SG', acceptedAt: 1 } as never));
-  assert.equal(adoptRecordedTerms('0x' + '11'.repeat(20), { termsVersion: COPY_TERMS_VERSION, termsHash: copyTermsHashOfBuild(), country: 'SG', acceptedAt: 1 } as never), null);
+  assert.equal(adoptRecordedTerms('0x' + '11'.repeat(20), { termsVersion: COPY_TERMS_VERSION, termsHash: copyTermsHashOfBuild(), country: 'SG', acceptedAt: 1 } as never)?.termsVersion, COPY_TERMS_VERSION);
+  assert.equal(adoptRecordedTerms('0x' + '11'.repeat(20), { termsVersion: '2026-11-09', termsHash: '0x', country: 'SG', acceptedAt: 1 } as never), null, 'an older one does not');
   // Same version again: nothing changes.
   assert.equal(await followExecutorTerms({ termsVersion: OLDER, features: [] }, f.client), false);
 });

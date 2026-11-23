@@ -18,7 +18,7 @@ import { BotsVip } from './BotsVip';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AlgoView } from '@copy-engine';
-import { FINAL_STATUSES } from '@copy-engine';
+import { FINAL_STATUSES, copyTermsValid } from '@copy-engine';
 import type { Eip1193Provider } from '../../wallet';
 import { fmtUsd } from '../../format';
 import { useLiveCopy, readiness, signIn as signInExecutor, approveKey } from '../../copy/live';
@@ -260,7 +260,7 @@ function BotsPageOpen({ address, provider }: { address: string | null; provider:
   // A new version of terms the wallet accepted before: the setup opens once as a popup, over the bots (which stay
   // visible and stoppable). A first visit gets the "Start here" card instead.
   const recorded = live.hosted.me?.terms ?? null;
-  const outdated = seen && !!recorded && recorded.termsVersion !== activeCopyTerms().termsVersion && !live.terms;
+  const outdated = seen && !!recorded && !copyTermsValid(recorded.termsVersion) && !live.terms;
   useEffect(() => {
     if (!outdated || !address) return;
     const k = `vd.bots.termsPopup:${address.toLowerCase()}:${activeCopyTerms().termsVersion}`;

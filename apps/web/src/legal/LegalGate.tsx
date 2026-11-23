@@ -35,12 +35,12 @@ import {
   STATEMENTS,
   acceptBrowse,
   acceptedBefore,
+  adoptRecordedSiteTerms,
   browseAccepted,
   countryProblem,
   lookAround,
   lookedAround,
   setTermsGate,
-  signSiteTerms,
   signedTerms,
   useAcceptanceRevision,
   type TermsRequest,
@@ -198,7 +198,9 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
     setBusy(all ? 'all' : 'necessary');
     try {
       if (signer) {
-        await signSiteTerms({ provider: signer.provider, owner: signer.owner, country });
+        // One signature for everything: these terms and the copy and bot terms (loaded only now: the texts are large).
+        const { signAllTerms } = await import('../copy/terms');
+        await signAllTerms({ provider: signer.provider, owner: signer.owner, country });
       } else {
         acceptBrowse(STATEMENTS.map((s) => s.id));
       }
@@ -280,6 +282,7 @@ function TermsFoot({ onOpen }: { onOpen?: (p: LegalPage) => void }) {
     <p className="lg-foot">
       <LegalLink page="terms" onOpen={onOpen}>Terms</LegalLink>
       <LegalLink page="risk" onOpen={onOpen}>Risk</LegalLink>
+      <LegalLink page="copy-terms" onOpen={onOpen}>Copy and bots</LegalLink>
       <LegalLink page="privacy" onOpen={onOpen}>Privacy</LegalLink>
       <LegalLink page="cookies" onOpen={onOpen}>Cookies</LegalLink>
       <span>Version {SITE_TERMS_VERSION}</span>
@@ -329,18 +332,23 @@ export function TermsGate({ hidden, onOpen, address, provider }: {
   };
 
   /* The latest view of the props for the handler, which actions call at any time. */
-  const latest = useRef({ doneFor });
-  latest.current = { doneFor };
+  const latest = useRef({ doneFor, owner });
+  latest.current = { doneFor, owner };
   useEffect(() => {
     setTermsGate((r) => new Promise<boolean>((resolve) => {
       if (latest.current.doneFor(r.owner)) {
         resolve(true);
         return;
       }
-      setPending((cur) => {
+      const ask = () => setPending((cur) => {
         cur?.resolve(false);
         return { ...r, resolve };
       });
+      // Signed in another browser or on another device: known from the executor, not asked again (at most 4 s).
+      const o = r.owner ?? latest.current.owner;
+      if (!o) { ask(); return; }
+      void Promise.race([adoptRecordedSiteTerms(o), new Promise<boolean>((f) => setTimeout(() => f(false), 4_000))])
+        .then(() => (latest.current.doneFor(r.owner) ? resolve(true) : ask()));
     }));
     return () => setTermsGate(null);
   }, []);

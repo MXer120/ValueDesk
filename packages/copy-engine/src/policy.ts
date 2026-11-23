@@ -35,7 +35,31 @@
  * 2026-11-02: bots (the Bots page) - what they do, that they can lose, no wash trading, no fills between different
  * users' bots, and their 0.5 bp fee in place of the normal one (owner, 2026-11-02; charged 0.1 bp since 2026-11-04, BOT_FEE).
  */
-export const COPY_TERMS_VERSION = '2026-11-10';
+export const COPY_TERMS_VERSION = '2026-11-23';
+
+/**
+ * The oldest version whose signature still counts (owner 2026-11-23: "never need to sign it except once"). A new text
+ * no longer asks anybody again: a wallet that signed this version or any later one is done. Raise it ONLY when the law
+ * or a change that takes rights away really needs a new signature from everybody, and only on the owner's word:
+ * terms-docs.test.ts pins it.
+ */
+export const COPY_TERMS_VALID_FROM = '2026-11-23';
+
+/** A terms version as numbers: 2026-10-24.2 -> [2026, 10, 24, 2]. Null when it is not one. */
+const versionParts = (v: string): number[] | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:\.(\d+))?$/.exec(v);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4] ?? 0)] : null;
+};
+/** Whether a signed version is `from` or later. */
+export function termsVersionSince(v: unknown, from: string): boolean {
+  const a = typeof v === 'string' ? versionParts(v) : null;
+  const b = versionParts(from);
+  if (!a || !b) return false;
+  for (let i = 0; i < 4; i++) if (a[i] !== b[i]) return a[i]! > b[i]!;
+  return true;
+}
+/** A signature of this version of the copy and bot terms still counts. */
+export const copyTermsValid = (v: unknown): boolean => termsVersionSince(v, COPY_TERMS_VALID_FROM);
 
 /** US and its territories (US persons). */
 export const US_REGIONS: readonly string[] = ['US', 'PR', 'VI', 'GU', 'AS', 'MP', 'UM'];

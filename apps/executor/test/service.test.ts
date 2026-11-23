@@ -328,16 +328,18 @@ test('a new wallet signs once (owner 2026-11-22, shorter setup): the terms with 
   const { svc, db, cleanup } = make({ EXECUTOR_KIND: 'hosted' });
   const w = new Wallet();
   assert.ok(svc.info({ viewerCountry: 'SG' }).features?.includes('terms-day-key'));
-  assert.deepEqual(svc.termsStatus(w.address), { accepted: false, termsVersion: COPY_TERMS_VERSION });
+  assert.deepEqual(svc.termsStatus(w.address), { accepted: false, termsVersion: COPY_TERMS_VERSION, site: null });
   assert.equal(await code(() => svc.termsStatus('nope')), '400:owner');
   const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
   const pub = bytesToHex(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
   const dayKey = { alg: 'p256', key: pub, expiresAt: Date.now() + 23 * 3_600_000, executor: svc.executorId };
   // Bad site terms inside: refused as /site-terms refuses them.
   assert.equal(await code(() => svc.acceptTerms(w.sign(COPY_TERMS_EXECUTOR, 'accept-terms', { ...TERMS, dayKey, siteTerms: { ...SITE_TERMS, risks: false } }), { viewerCountry: 'SG' })), '400:statements');
+  assert.equal(svc.termsStatus(w.address).site, null, 'a refused signature counts nowhere');
   const terms = w.sign(COPY_TERMS_EXECUTOR, 'accept-terms', { ...TERMS, dayKey, siteTerms: SITE_TERMS });
   assert.equal(svc.acceptTerms(terms, { viewerCountry: 'SG' }).terms?.country, 'SG');
   assert.equal(svc.termsStatus(w.address).accepted, true);
+  assert.equal(svc.termsStatus(w.address).site, SITE_TERMS.termsVersion, 'known on every device');
   const rec = db.consents(w.address).find((c) => c.signature === terms.signature);
   assert.ok(rec && rec.action === 'accept-terms' && rec.payload.includes('"siteTerms"') && rec.payload.includes('"dayKey"'), 'one signed record carries both terms and the day key');
   const byDayKey = async (action: CopyAction, payload: unknown) => {

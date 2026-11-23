@@ -6,7 +6,10 @@ import { RISK } from './risk';
 import { TERMS } from './terms';
 import {
   SITE_TERMS_HASH,
+  SITE_TERMS_VALID_FROM,
   SITE_TERMS_VERSION,
+  adoptRecordedSiteTerms,
+  siteTermsValid,
   STATEMENTS,
   _resetAcceptanceForTests,
   acceptBrowse,
@@ -32,7 +35,7 @@ test('the pinned fingerprint is the keccak256 of the terms and the risk disclosu
   assert.equal(
     SITE_TERMS_HASH,
     hash,
-    `terms.ts or risk.ts changed: every visitor and every trading wallet must accept them again. Raise SITE_TERMS_VERSION in legal/acceptance.ts (a date, or ${SITE_TERMS_VERSION}.2 on the same day) and set SITE_TERMS_HASH to ${hash}.`,
+    `terms.ts or risk.ts changed: the text needs its own version (nobody signs again for it: SITE_TERMS_VALID_FROM). A change to the user's disadvantage that section 2 does not allow must not be made this way. Raise SITE_TERMS_VERSION in legal/acceptance.ts (a date, or ${SITE_TERMS_VERSION}.2 on the same day) and set SITE_TERMS_HASH to ${hash}.`,
   );
   assert.match(SITE_TERMS_VERSION, /^\d{4}-\d{2}-\d{2}(\.\d+)?$/);
 });
@@ -55,8 +58,8 @@ test('the wallet signs the statements word for word, without link syntax, with t
   assert.equal(text, signedText('SG'));
   assert.ok(text.includes(`version ${SITE_TERMS_VERSION}`) && text.includes(SITE_TERMS_HASH));
   assert.ok(text.includes('Country seen from my connection: SG.'));
-  assert.ok(text.includes('I agree to the Terms of use and the Risk disclosure, and have read the Privacy policy.'));
-  assert.ok(STATEMENTS.every((s) => s.label.length <= 130), 'each statement stays one short line in the gate');
+  assert.ok(text.includes('I agree to the Terms of use, the Risk disclosure and the Copy and bot terms; I read the Privacy policy.'));
+  assert.ok(STATEMENTS.every((s) => s.label.replace(/\]\(\/[a-z-]+\)/g, '').replace(/\[/g, '').length <= 135), 'each statement stays one short line in the gate');
   assert.doesNotMatch(text, /\]\(/, 'no markdown links');
   assert.match(text, /not a transaction and moves no funds/);
   assert.ok(text.length > 40 && text.length <= 4000, 'within what the executor accepts');
@@ -82,16 +85,40 @@ test('signing: ONE free wallet signature (typed data, no transaction) that verif
   };
   const t = await signSiteTerms({ provider: wallet, owner, country: 'sg' });
   assert.deepEqual(calls, ['eth_chainId', 'eth_accounts', 'eth_signTypedData_v4'], 'a signature only - never eth_sendTransaction');
-  const v = verifyCopyRequest(t.request, { executor: SITE_TERMS_EXECUTOR });
+  const v = verifyCopyRequest(t.request!, { executor: SITE_TERMS_EXECUTOR });
   assert.ok(v.ok, v.ok ? '' : v.error);
-  assert.equal(t.request.action, 'accept-site-terms');
-  const payload = JSON.parse(t.request.payload) as AcceptSiteTermsPayload;
+  assert.equal(t.request!.action, 'accept-site-terms');
+  const payload = JSON.parse(t.request!.payload) as AcceptSiteTermsPayload;
   assert.equal(payload.text, signedText('SG'), 'the readable statements are what the wallet signed');
   assert.equal(signedTerms(owner)?.country, 'SG');
   assert.equal(t.recorded, false, 'no executor in this test: kept, to be sent again');
   assert.equal(browseAccepted()?.signedBy, owner, 'the signature is this browser\'s acceptance too');
   await assert.rejects(signSiteTerms({ provider: wallet, owner, country: 'US' }), /United States/);
   _resetAcceptanceForTests();
+});
+
+test('signed once: later versions, another browser and a release never ask again', async () => {
+  // Raising this asks EVERY wallet to sign again. Only on the owner's word (owner 2026-11-23: "never except once").
+  assert.equal(SITE_TERMS_VALID_FROM, '2026-11-23');
+  assert.ok(siteTermsValid(SITE_TERMS_VERSION) && siteTermsValid('2027-05-01') && !siteTermsValid('2026-11-14'));
+  _resetAcceptanceForTests();
+  const real = globalThis.fetch;
+  const owner = '0x' + 'ab'.repeat(20);
+  const answer = (site: string | null) => { globalThis.fetch = (async () => new Response(JSON.stringify({ accepted: false, termsVersion: 'x', site }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch; };
+  try {
+    answer('2026-11-14');
+    assert.equal(await adoptRecordedSiteTerms(owner), false, 'a version before the last signature does not count');
+    answer(null);
+    assert.equal(await adoptRecordedSiteTerms(owner), false, 'never signed');
+    answer('2026-11-23');
+    assert.equal(await adoptRecordedSiteTerms(owner), true, 'signed on another device: adopted');
+    const t = signedTerms(owner);
+    assert.ok(t && t.recorded && t.request === null && t.country === null);
+    assert.ok(browseAccepted());
+  } finally {
+    globalThis.fetch = real;
+    _resetAcceptanceForTests();
+  }
 });
 
 test('looking around first: nothing accepted, the popup stays closed for this version, and an action asks the popup (its answer decides)', async () => {

@@ -9,13 +9,15 @@
  *   - recorded by ValueDesk's executor (its record of who accepted which terms,
  *     in every mode), and
  *   - handed to a self-hosted executor when one is used.
- * A new terms version needs a new signature. A wallet that accepted the current terms in another browser is not
+ * A new terms version needs NO new signature (policy.ts COPY_TERMS_VALID_FROM, owner 2026-11-23), and the terms popup
+ * signs these with ValueDesk's own in one signature (signAllTerms). A wallet that accepted in another browser is not
  * asked again: once it signs in to ValueDesk's executor, that record counts here too (adoptRecordedTerms).
  */
 import {
   COPY_TERMS_EXECUTOR,
   copyTermsDoc,
   copyTermsHash,
+  copyTermsValid,
   currentCopyTerms,
   normaliseCountry,
   regionPolicy,
@@ -28,7 +30,7 @@ import {
 } from '@copy-engine';
 import type { Eip1193Provider } from '../wallet';
 import { logger } from '../log';
-import { adoptSiteTermsFrom, siteTermsPayload } from '../legal/acceptance';
+import { adoptSiteTermsFrom, signSiteTerms, siteTermsPayload } from '../legal/acceptance';
 import { ExecutorError, hostedExecutor, signTermsWithDayKey, type ExecutorClient } from './executor';
 
 const log = logger('copy');
@@ -86,6 +88,9 @@ export class TermsChangedError extends Error {
   override name = 'TermsChangedError';
 }
 
+/** A version that counts for good, or the one ValueDesk's executor runs now (one release behind this web build). */
+const stillCounts = (v: string): boolean => copyTermsValid(v) || v === activeCopyTerms().termsVersion;
+
 export interface LocalTerms {
   termsVersion: string;
   termsHash: string;
@@ -99,15 +104,14 @@ export interface LocalTerms {
 
 const key = (owner: string) => `vd.copy.terms:${owner.toLowerCase()}`;
 
-/** This wallet's acceptance of the CURRENT terms in this browser, or null. */
+/** This wallet's acceptance of terms that still count, known in this browser, or null. */
 export function localTerms(owner: string | null | undefined): LocalTerms | null {
   if (!owner) return null;
   try {
     const raw = localStorage.getItem(key(owner));
     if (!raw) return null;
     const t = JSON.parse(raw) as LocalTerms;
-    const a = activeCopyTerms();
-    return t.termsVersion === a.termsVersion && t.termsHash === a.termsHash ? t : null;
+    return stillCounts(t.termsVersion) ? t : null;
   } catch {
     return null;
   }
@@ -124,7 +128,7 @@ function save(owner: string, t: LocalTerms): void {
 /** The region rule for this wallet (declared country here, IP country as the executor saw it). */
 export const termsPolicy = (t: LocalTerms | null, viewerCountry: string | null): RegionPolicy => regionPolicy(t?.country ?? null, viewerCountry);
 
-export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: string; country: string; withSiteTerms?: boolean }): Promise<LocalTerms> {
+export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: string; country: string; withSiteTerms?: boolean; dayKey?: boolean }): Promise<LocalTerms> {
   const owner = o.owner.toLowerCase();
   const country = normaliseCountry(o.country);
   if (!country) throw new Error('Choose your country of residence.');
@@ -142,8 +146,7 @@ export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: str
   // trading key's request and the bots' everyday actions then need no further popup (owner 2026-11-22: shorter setup).
   // A wallet that never signed ValueDesk's own terms signs them here too: one signature for both.
   const site = o.withSiteTerms ? siteTermsPayload(country) : null;
-  const request = await signTermsWithDayKey(o.provider, owner, COPY_TERMS_EXECUTOR, { ...payload, ...(site ? { siteTerms: site } : {}) }, hostedExecutor.executorIdNow());
-  if (site) adoptSiteTermsFrom(owner, request, site);
+  const request = await signTermsWithDayKey(o.provider, owner, COPY_TERMS_EXECUTOR, { ...payload, ...(site ? { siteTerms: site } : {}) }, o.dayKey === false ? null : hostedExecutor.executorIdNow());
   const t: LocalTerms = { termsVersion: terms.termsVersion, termsHash: terms.termsHash, country, acceptedAt: Date.now(), recorded: false, request };
   try {
     await hostedExecutor.acceptTerms(request);
@@ -161,8 +164,25 @@ export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: str
     if (e instanceof ExecutorError && (e.status === 451 || e.status === 400)) throw e;
     log.warn('copy terms: ValueDesk could not record the acceptance now; it is sent again later', { error: String(e) });
   }
+  // Kept only now: a refused signature (the region, a newer version) accepts neither of the two.
+  if (site) adoptSiteTermsFrom(owner, request, site);
   save(owner, t);
   return t;
+}
+
+/**
+ * The terms popup's one signature (owner 2026-11-23: "never need to sign it except once"): ValueDesk's own terms AND the
+ * copy and bot terms, whatever the wallet came for, so starting a copy or a bot later asks for no terms. No day key is
+ * approved by it: that stays the setup's. A wallet that has the copy terms already signs only what is missing.
+ */
+export async function signAllTerms(o: { provider: Eip1193Provider; owner: string; country: string }): Promise<void> {
+  if (localTerms(o.owner)) {
+    await signSiteTerms(o);
+    return;
+  }
+  // The executor's version is what is signed; unreachable: this build's.
+  await followExecutorTerms(await hostedExecutor.info().catch(() => null));
+  await acceptCopyTerms({ ...o, withSiteTerms: true, dayKey: false });
 }
 
 /**
@@ -170,8 +190,7 @@ export async function acceptCopyTerms(o: { provider: Eip1193Provider; owner: str
  * or on another of our addresses): keep it here, so the setup does not ask for the same signature twice.
  */
 export function adoptRecordedTerms(owner: string, r: TermsRecord | null): LocalTerms | null {
-  const a = activeCopyTerms();
-  if (!r || r.termsVersion !== a.termsVersion || r.termsHash !== a.termsHash) return null;
+  if (!r || !stillCounts(r.termsVersion)) return null;
   const t: LocalTerms = { termsVersion: r.termsVersion, termsHash: r.termsHash, country: r.country, acceptedAt: r.acceptedAt, recorded: true, request: null };
   save(owner.toLowerCase(), t);
   return t;

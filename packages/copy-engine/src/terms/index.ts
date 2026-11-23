@@ -7,6 +7,8 @@
  * versions here, so it signs an older executor's version without asking it for the text (executors before
  * 'terms-doc' serve none).
  *
+ * A new version asks nobody to sign again (policy.ts COPY_TERMS_VALID_FROM); it is what new wallets sign.
+ *
  * Changing the terms: add copy-<new version>.ts (copy the newest, then edit), list it below, set COPY_TERMS_VERSION
  * in policy.ts. Never edit a published file: its hash is what followers signed. Keep at least the version before
  * the newest, for an executor one release behind.
@@ -17,6 +19,7 @@ import { COPY_TERMS_VERSION } from '../policy.ts';
 import { COPY_TERMS_2026_11_02 } from './copy-2026-11-02.ts';
 import { COPY_TERMS_2026_11_09 } from './copy-2026-11-09.ts';
 import { COPY_TERMS_2026_11_10 } from './copy-2026-11-10.ts';
+import { COPY_TERMS_2026_11_23 } from './copy-2026-11-23.ts';
 import type { TermsDoc } from './doc.ts';
 
 export type { TermsBlock, TermsDoc } from './doc.ts';
@@ -25,6 +28,7 @@ export const COPY_TERMS_DOCS: Readonly<Record<string, TermsDoc>> = {
   '2026-11-02': COPY_TERMS_2026_11_02,
   '2026-11-09': COPY_TERMS_2026_11_09,
   '2026-11-10': COPY_TERMS_2026_11_10,
+  '2026-11-23': COPY_TERMS_2026_11_23,
 };
 
 /** The text of a version, or null when this build does not know it. */
