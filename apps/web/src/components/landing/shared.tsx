@@ -70,9 +70,17 @@ export interface LiveDesk {
   startFrom: { usd: number; symbol: string; base: string; leverage: number } | null;
 }
 
+/**
+ * The window the landing pages read the market costs over (owner 2026-11-23: ETH looked dearest though it usually is
+ * not). A day swings with one volatile move - on 2026-11-23 ETH read 19.6 bp over 1 h, 4.1 over 24 h and 2.3 over 7 d,
+ * level with BTC - so the pages use the week, and say so.
+ */
+export const DESK_WINDOW = '7d' as const;
+export const DESK_WINDOW_TEXT = 'the last 7 days';
+
 /** The live figures every version shows (one read of /api/vs/bots/markets and SoDEX's symbols). */
 export function useLiveDesk(): LiveDesk {
-  const bots = useBotMarkets('24h');
+  const bots = useBotMarkets(DESK_WINDOW);
   const { byName } = useSymbols('perps');
   const rows = useMemo<MarketRow[]>(() => {
     if (!bots.data) return [];

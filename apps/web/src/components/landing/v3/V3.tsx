@@ -18,7 +18,7 @@ import { GRID_VENUES, COPY_VENUES } from '../../copy/gridModel';
 import { VENUE_LABEL } from '../../../vsApi';
 import { dropBootShell } from '../../../bootShell';
 import type { BotLatencyResponse } from '../../../bots/data';
-import { FEES, bp, usdStep, usdShort, useLiveDesk, startFromText, reducedMotion, SwimmingWhale, type MarketRow } from '../shared';
+import { FEES, bp, usdStep, usdShort, useLiveDesk, startFromText, reducedMotion, SwimmingWhale, DESK_WINDOW_TEXT, type MarketRow } from '../shared';
 import './v3.css';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
@@ -206,7 +206,7 @@ export function BotPanel({ rows, loading, error }: { rows: MarketRow[]; loading:
       <div className="v3-bot__book">
         {[0.5, 0.8, 0.35, 0.95, 0.6, 0.4, 0.75, 0.55, 0.9, 0.3].map((w, i) => <span key={i} className={i < 5 ? 'is-ask' : 'is-bid'} style={{ '--w': w, '--i': i } as CSSProperties} />)}
       </div>
-      <p className="v3-bot__note">Lowest market maker cost of the {rows.length || 'busiest'} busiest SoDEX markets, last 24 h, at a new wallet's fee.</p>
+      <p className="v3-bot__note">Lowest market maker cost of the {rows.length || 'busiest'} busiest SoDEX markets over {DESK_WINDOW_TEXT}, at a new wallet's fee.</p>
     </div>
   );
 }

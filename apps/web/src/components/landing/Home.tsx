@@ -161,7 +161,7 @@ function perMillion(b: number | null): ReactNode {
 }
 
 /** The live tape under the hero: each busy SoDEX market, its hourly volume and what a market maker costs per $1M there. */
-export function Tape({ rows }: { rows: MarketRow[] }) {
+export function Tape({ rows, label }: { rows: MarketRow[]; label?: string }) {
   const [ref, on] = useOnScreen<HTMLDivElement>();
   if (!rows.length) return <div className="h-tape is-empty" />;
   const items = rows.map(({ m, bp: b }) => (
@@ -173,7 +173,8 @@ export function Tape({ rows }: { rows: MarketRow[] }) {
     </a>
   ));
   return (
-    <div ref={ref} className="h-tape" data-off={on ? undefined : ''} aria-label="SoDEX markets now: hourly volume and the market maker cost per $1M">
+    <div ref={ref} className={cx('h-tape', label && 'has-k')} data-off={on ? undefined : ''} aria-label="SoDEX markets now: hourly volume and the market maker cost per $1M">
+      {label && <span className="h-tape__k">{label}</span>}
       <div className="h-tape__run">{items}<span aria-hidden="true" className="h-tape__dup">{items}</span></div>
     </div>
   );

@@ -19,7 +19,7 @@ import { Arrow, BookViz, Count, Eyebrow, FollowViz, HeatViz, Reveal, TopTraders 
 import { Faq, Money } from '../v2/V2';
 import { BotPanel, CopyPanel, HubViz, PickerViz, SleepViz, V3SignTiles } from '../v3/V3';
 import { HeatGlass } from '../v4/heat';
-import { bp, FEES, startFromText, usdShort, usdStep, useLiveDesk, type MarketRow } from '../shared';
+import { bp, DESK_WINDOW_TEXT, FEES, startFromText, usdShort, usdStep, useLiveDesk, type MarketRow } from '../shared';
 import { Calcs } from './Calcs';
 import { qaFor } from './faq';
 import { Embed, IC, Row, SiteFooter, SitePage, Ticks, PAGE_PATHS } from './Site';
@@ -89,7 +89,7 @@ function MarketTable({ rows, error }: { rows: MarketRow[]; error: string | null 
         )) : [0, 1, 2, 3, 4].map((i) => <div key={i} className="v4-tr is-skel"><span /><span /><span /><span /><span /></div>)}
         {error && !table.length && <p className="v4-dim" style={{ padding: 16 }}>The live markets could not be read just now.</p>}
       </div>
-      <p className="v4-note">Estimated from the last 24 h at a new wallet's fee; green with a + is earned. <a href="/bots/explore" className="v4-link">Every market<Arrow /></a></p>
+      <p className="v4-note">Estimated over {DESK_WINDOW_TEXT} at a new wallet's fee, all fees included; green with a + is earned. <a href="/bots/explore" className="v4-link">Every market<Arrow /></a></p>
     </Embed>
   );
 }

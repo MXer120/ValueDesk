@@ -15,7 +15,7 @@ import { SetupScene, Money, Faq } from '../v2/V2';
 import { V3Features, V3Safety, V3SignTiles, HubViz } from '../v3/V3';
 import { Ticker } from '../v4/V4';
 import { HeatGlass } from '../v4/heat';
-import { bp, FEES, startFromText, useLiveDesk } from '../shared';
+import { bp, DESK_WINDOW_TEXT, FEES, startFromText, useLiveDesk } from '../shared';
 import { Calcs } from './Calcs';
 import { HeroDeck } from './HeroDeck';
 import { qaFor } from './faq';
@@ -86,7 +86,7 @@ export function V5() {
         </div>
         <Embed scope="v3" className="vd-hd"><HeroDeck live={live} /></Embed>
       </header>
-      <Tape rows={live.rows} />
+      <Tape rows={live.rows} label={`Bot cost per $1M traded · all fees · ${DESK_WINDOW_TEXT}`} />
 
       <div className="vd-layer"><Embed scope="v3"><V3Features live={live} /></Embed></div>
       <Embed scope="v2"><Money /></Embed>
