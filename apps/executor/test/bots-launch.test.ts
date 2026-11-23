@@ -319,7 +319,7 @@ test('B: /me carries the bot fee - the ladder by volume, or a program\'s (the be
   const h = make(env, { volume: { usd: 0 } });
   const fresh = (s: ExecutorService) => (s as unknown as { freshVolume(o: string): Promise<number | null> }).freshVolume(w.address);
   await fresh(h.svc);
-  assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 4, vip: false, until: null });
+  assert.deepEqual(h.svc.me(w.address, ctx).bots, { feeTenths: 2, vip: false, until: null });
   const until = Date.now() + 10 * 86_400_000;
   h.w.volume = { usd: 300_000, fees: { bots: { fee: 1, until } } };
   (h.svc as unknown as { volumes: Map<string, unknown> }).volumes.clear();

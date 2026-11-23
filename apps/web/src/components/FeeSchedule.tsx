@@ -12,7 +12,7 @@
 import { fmtFixed, localize } from '../numStyle';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { builderRateToFraction } from '@sodex-core';
-import { BOT_FEE_LADDER, BOT_FEE_VIP } from '@copy-engine';
+import { BOT_FEE_LADDER, BOT_FEE_VIP, BOT_VIP_MIN_USD } from '@copy-engine';
 import {
   BUILDER_LADDER,
   COPY_LADDER,
@@ -305,7 +305,7 @@ function botVolumeLabel(index: number): string {
   if (!row) return '-';
   const next = BOT_FEE_LADDER[index + 1];
   const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
-  if (index === 0 && next) return `< ${usd(next.fromUsd)}`;
+  if (index === 0) return `< ${usd(next?.fromUsd ?? BOT_VIP_MIN_USD)}`;
   return `≥ ${usd(row.fromUsd)}`;
 }
 
@@ -318,7 +318,7 @@ function ValueDesk({ address }: { address: string | null }) {
   const fromVolume = volume !== null ? ladderIndex(volume, BUILDER_LADDER.map((row) => row.minVolumeUsd)) : null;
   const row = inRange ? reported : fromVolume !== null ? fromVolume : address ? builderTierIndex(perpsFee, 'perps', null) : null;
   const copyRow = volume !== null ? ladderIndex(volume, COPY_LADDER.map((r) => r.minVolumeUsd)) : null;
-  const botRow = volume !== null ? ladderIndex(volume, BOT_FEE_LADDER.map((r) => r.fromUsd)) : null;
+  const botRow = volume !== null && volume < BOT_VIP_MIN_USD ? ladderIndex(volume, BOT_FEE_LADDER.map((r) => r.fromUsd)) : null;
 
   return (
     <>
@@ -375,7 +375,7 @@ function ValueDesk({ address }: { address: string | null }) {
               ))}
               <tr className="vip-row">
                 <td><b className="vip-text">VIP</b></td>
-                <td>≥ $5,000,000 own volume, or a VIP program</td>
+                <td>≥ $1,000,000 own volume, or a VIP program</td>
                 <td className="num">{fmtRate(builderRateToFraction(BOT_FEE_VIP))}</td>
               </tr>
             </tbody>

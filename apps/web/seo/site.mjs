@@ -21,9 +21,7 @@ export const FEES = {
     { fromUsd: 10_000_000, fee: 10 },
   ],
   bot: [
-    { fromUsd: 0, fee: 4 },
-    { fromUsd: 100_000, fee: 3 },
-    { fromUsd: 1_000_000, fee: 2 },
+    { fromUsd: 0, fee: 2 },
   ],
   windowDays: 14,
 };
@@ -45,7 +43,7 @@ export const FAQ = [
   ['Is ValueDesk non-custodial?', 'Yes. Orders go to your own SoDEX account, signed by a trading key you approve from your wallet. ValueDesk never holds your funds.'],
   ['Which exchanges does ValueDesk support?', `Trading runs on SoDEX, perps and spot. Analytics such as the leaderboard, wallet scans and the liquidation heatmap read ${VENUES_DATA.join(', ')}.`],
   ['What does ValueDesk cost?', `No subscription. A builder fee is added to orders placed through ValueDesk: ${bp(FEES.trade)} on manual trades, ` +
-    `${ladder(FEES.copy)} on copy trades and algo orders run by ValueDesk, and ${ladder(FEES.bot)} on bots, by ${FEES.windowDays}-day volume. SoDEX charges its own trading fee on top.`],
+    `${ladder(FEES.copy)} on copy trades and algo orders run by ValueDesk by ${FEES.windowDays}-day volume, and ${ladder(FEES.bot)} on bots (0.1 bp for VIP, from $1M in ${FEES.windowDays} days). SoDEX charges its own trading fee on top.`],
   ['Can I copy trade on SoDEX?', 'Yes. Pick a SoDEX or Hyperliquid trader and ValueDesk mirrors each of their trades into your SoDEX account, in your browser, on ValueDesk\'s executor or on your own server.'],
   ['Does ValueDesk have trading bots?', 'Yes: a volume market maker, a Binance-led market maker and a grid bot. They run around the clock in your own SoDEX account, and each can run as practice first with no real orders.'],
   ['What is a liquidation heatmap?', 'A chart layer that shows the price levels where open leveraged positions would be liquidated, estimated from positions on the venues ValueDesk reads. Bright levels hold more.'],
@@ -185,7 +183,7 @@ export const GUIDES = [
     cta: ['/trade', 'Open the desk'],
     text: [
       'An app that sends orders to SoDEX for you can add a small builder fee to each order. You approve the highest fee an app may charge once, from your wallet; SoDEX then adds the app\'s fee to the orders it places, and never more than you approved.',
-      `ValueDesk has no subscription. Its builder fee is ${FEES.trade / 10} bp on manual trades, ${ladder(FEES.copy)} on copy trades and algo orders run by ValueDesk, and ${ladder(FEES.bot)} on bots, by ${FEES.windowDays}-day volume. SoDEX charges its own maker and taker fee on top.`,
+      `ValueDesk has no subscription. Its builder fee is ${FEES.trade / 10} bp on manual trades, ${ladder(FEES.copy)} on copy trades and algo orders run by ValueDesk by ${FEES.windowDays}-day volume, and ${ladder(FEES.bot)} on bots (0.1 bp for VIP, from $1M in ${FEES.windowDays} days). SoDEX charges its own maker and taker fee on top.`,
       'One basis point (bp) is 0.01%: on $10,000 of volume, 1 bp is $1.',
     ],
   },

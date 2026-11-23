@@ -78,7 +78,7 @@ test('fees: VIP and a program from the same read lower copy and bot fees; a prog
   const fee = (spec: Record<string, unknown>) => (svc as unknown as { algoFee(a: { owner: string; spec: unknown }): Promise<number> }).algoFee({ owner: OWNER, spec });
   await fresh(OWNER);
   assert.equal(await fee({ kind: 'twap' }), 0, 'copy and algo orders: the program, 0');
-  assert.equal(await fee({ kind: 'mm', bot: true }), 4, 'bots: not in the program, the bot ladder ($50K: 0.4 bp)');
+  assert.equal(await fee({ kind: 'mm', bot: true }), 2, 'bots: not in the program, the bot ladder (0.2 bp)');
   const realNow = Date.now;
   Date.now = () => until + 1;
   try {
@@ -112,7 +112,7 @@ test('fees: the invite welcome and fee credits come with a budget - the lowered 
   s.noteFill(OWNER, 'bots', 600, Date.now());
   assert.equal(await s.algoFee({ owner: OWNER, spec: { kind: 'mm', bot: true } }), 0, '$600 of $1,000 used');
   s.noteFill(OWNER, 'copy', 400, Date.now());
-  assert.equal(await s.algoFee({ owner: OWNER, spec: { kind: 'mm', bot: true } }), 4, 'used up: the bot ladder ($50K: 0.4 bp), until a read says more is left');
+  assert.equal(await s.algoFee({ owner: OWNER, spec: { kind: 'mm', bot: true } }), 2, 'used up: the bot ladder (0.2 bp), until a read says more is left');
   assert.equal(await s.algoFee({ owner: OWNER, spec: { kind: 'twap' } }), 25, 'copy and algos too');
   cleanup();
 

@@ -113,8 +113,8 @@ function countedOf(cfg: TiersConfig, store: BuilderStore | null, w: WalletRow | 
 
 /** VIP (owner 2026-11-08, "No its $1m of 14day volume. ignore the 1% thing"): $1M of the wallet's own counted volume in 14 days. */
 export const VIP_DAYS = 14;
-/** VIP from $5M of the wallet's own 14-day volume (owner 2026-11-10; $1M before). */
-export const VIP_MIN_USD = 5_000_000;
+/** VIP from $1M of the wallet's own 14-day volume (owner 2026-11-23; $5M from 2026-11-10). */
+export const VIP_MIN_USD = 1_000_000;
 /** VIP by the wallet's own 14-day volume (only counts while vipByVolume() is on). */
 export const isVip = (v: { volumeUsd: number } | null): boolean => !!v && v.volumeUsd >= VIP_MIN_USD;
 

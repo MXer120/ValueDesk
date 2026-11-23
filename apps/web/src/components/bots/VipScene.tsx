@@ -81,7 +81,7 @@ function PerkTile({ kind }: { kind: PerkIcon }) {
 export interface VipPerk { icon: PerkIcon; title: string; sub?: string; chips?: string[] }
 
 /**
- * What VIP brings. The beta promotion lowers every product's fee; the $5M milestone the bot fee only
+ * What VIP brings. The beta promotion lowers every product's fee; the $1M milestone the bot fee only
  * (apps/server builder/programs.ts). Faster orders: the median signed write in our tests, 420 ms from the standard
  * servers against 265 ms from the VIP ones (Nov 6) - 1.6x faster, 37% less.
  */
@@ -89,7 +89,7 @@ export function vipPerks(promo: boolean): VipPerk[] {
   return [
     promo
       ? { icon: 'tag', title: 'Lowest fees everywhere', chips: ['Futures', 'Spot', 'Copy trading', 'Bots'] }
-      : { icon: 'tag', title: 'Bot fees slashed', sub: 'Down to 0.1 bp, 4× below the first tier' },
+      : { icon: 'tag', title: 'Bot fees slashed', sub: 'Down to 0.1 bp, 2× below the first tier' },
     { icon: 'server', title: 'VIP servers', sub: 'Dedicated to VIP wallets' },
     { icon: 'bolt', title: 'Orders 1.6× faster', sub: 'Latency down 37% in our tests' },
     ...(promo ? [{ icon: 'star' as const, title: 'Early access', sub: 'New features first' }] : []),

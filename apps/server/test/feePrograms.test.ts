@@ -97,11 +97,10 @@ test('admin store: programs for many wallets, the running ones by wallet and tim
   assert.equal(s.feePrograms().length, 2);
 });
 
-test('VIP: $1M of the wallet\'s own 14-day volume, nothing else (owner 2026-11-10: $5M; $1M before)', () => {
-  assert.ok(isVip({ volumeUsd: 5_000_000 }));
+test('VIP: $1M of the wallet\'s own 14-day volume, nothing else (owner 2026-11-23: $1M; $5M before)', () => {
+  assert.ok(isVip({ volumeUsd: 1_000_000 }));
   assert.ok(isVip({ volumeUsd: 9_500_000 }));
-  assert.ok(!isVip({ volumeUsd: 4_999_999 }));
-  assert.ok(!isVip({ volumeUsd: 1_000_000 }));
+  assert.ok(!isVip({ volumeUsd: 999_999 }));
   assert.ok(!isVip({ volumeUsd: 0 }));
   assert.ok(!isVip(null));
 });

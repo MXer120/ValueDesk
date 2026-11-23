@@ -383,7 +383,7 @@ export function CopySetupSteps({ mode, live, paper, bots, hideDone = false, onPr
               : r.fee
               ? `Approved on SoDEX up to ${localize(feePercent(Math.max(live.fee.perps ?? COPY_FEE_MAX, COPY_FEE_MAX)))}.`
               : bots
-                ? `Bot orders pay 0.1 to 0.5 bp of their value by your 14-day volume (0.2 bp from $500K; VIP and new beta testers 0.1 bp), instead of any other ValueDesk fee. SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
+                ? `Bot orders pay 0.2 bp of their value (VIP 0.1 bp, from $1M in 14 days), instead of any other ValueDesk fee. SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
                 : `Copied orders pay ${ladder} of their value (by your 14-day volume). SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
           }
           action={!r.fee && <Act label="Approve" primary={current === 'fee'} disabled={!owner} busy={working === 'fee'} onClick={() => void run('fee', approveFee, bots ? 'Fee approved on SoDEX.' : 'Copy fee approved on SoDEX.')} />}

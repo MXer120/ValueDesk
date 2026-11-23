@@ -1,5 +1,5 @@
 /**
- * VIP servers (owner 2026-11-08): a wallet with $5M of its own 14-day volume, or on the beta's 30 days of VIP, may
+ * VIP servers (owner 2026-11-08): a wallet with $1M of its own 14-day volume, or on the beta's 30 days of VIP, may
  * move its bots to the VIP executor (never named by host on the page: "VIP servers"). The panel shows how close the wallet is; the move is one signature, run
  * server to server (apps/executor vip.ts), and the page follows it full screen: the two server sites, the bots
  * travelling between them, each step as it lands and the clock (the owner's bar: under 20 seconds).
@@ -237,7 +237,7 @@ export interface VipStage { lit: (n: number) => void; fade: () => void }
 /**
  * Becoming VIP (owner 2026-11-08): the ValueDesk mark as it is, then it turns gold, then it glides to where the
  * card screen shows it (beside "ValueDesk") while the words and the gold pass come in. `promo`: the beta's VIP for
- * 30 days (every product's lowest fee, until a date); otherwise the $5M milestone. The ground is the stage's, the
+ * 30 days (every product's lowest fee, until a date); otherwise the $1M milestone. The ground is the stage's, the
  * same one the move scene stands on.
  */
 function UnlockScene({ onMove, onClose, onShare, volume, promo, stage, onVip = false }: { onMove: () => void; onClose: () => void; onShare: () => void; volume: number | null; promo: { until: number | null } | null; stage: VipStage; onVip?: boolean }) {
@@ -291,7 +291,7 @@ function UnlockScene({ onMove, onClose, onShare, volume, promo, stage, onVip = f
             <h2 className="vipx-win__h">You are VIP.<br /><span className="vipx-goldtext">{promo ? `Upgraded for ${days ?? 30} days.` : 'Bot fees slashed.'}</span></h2>
             <p className="vipx-win__p">{promo
               ? 'The lowest fees on futures, spot, copy trading and bots, the VIP servers and new features first.'
-              : `${volume !== null ? fmtUsd(volume, 0) : '$5M'} traded in 14 days. Your bots pay the lowest fee and may move to the VIP servers. It holds while you stay above $5M.`}</p>
+              : `${volume !== null ? fmtUsd(volume, 0) : '$1M'} traded in 14 days. Your bots pay the lowest fee and may move to the VIP servers. It holds while you stay above $1M.`}</p>
             <div className="vipx-win__act">
               {onVip
                 // Already there (owner 2026-11-10): nothing to move, the button says so and only closes the card.
@@ -302,7 +302,7 @@ function UnlockScene({ onMove, onClose, onShare, volume, promo, stage, onVip = f
             </div>
           </div>
           <div className="vipx-tilt" ref={tilt.ref}>
-            <VipPass delay={180} pill={promo ? `${days ?? 30} days` : '$5M · 14 days'} line={promo ? 'Early access pass' : 'Volume milestone'} perks={vipPerks(!!promo)} />
+            <VipPass delay={180} pill={promo ? `${days ?? 30} days` : '$1M · 14 days'} line={promo ? 'Early access pass' : 'Volume milestone'} perks={vipPerks(!!promo)} />
           </div>
         </div>
       )}
@@ -410,7 +410,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
       <div className="vipstrip" role="group" aria-label="VIP">
         <GoldMark size={22} />
         <b className="vipstrip__t">{onVip ? 'VIP' : vip ? 'VIP unlocked' : 'Become VIP'}</b>
-        {!vip && <><GoldBar value={volPct} /><span className="vipstrip__n">{el ? <><em>{fmtUsd(el.volumeUsd, 0)}</em> of {fmtUsd(el.minUsd, 0)} in 14 days</> : vipReadMissing ? 'Your progress shows with the next release' : <>$5M of your volume in 14 days</>}</span></>}
+        {!vip && <><GoldBar value={volPct} /><span className="vipstrip__n">{el ? <><em>{fmtUsd(el.volumeUsd, 0)}</em> of {fmtUsd(el.minUsd, 0)} in 14 days</> : vipReadMissing ? 'Your progress shows with the next release' : <>$1M of your volume in 14 days</>}</span></>}
         {vip && <span className="vipstrip__n">{onVip ? 'Your bots run on the VIP servers.' : el?.promo ? 'The lowest fees everywhere, and VIP servers.' : 'Bot fees slashed, and VIP servers.'}</span>}
         <button type="button" className="vipstrip__go" onClick={() => goBots({ page: 'savings' })}>{vip && !onVip ? 'Move to VIP' : 'Perks'}<Icon name="arrowRight" size={13} /></button>
       </div>
@@ -424,18 +424,18 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
       {share && <VipShare what={share} onClose={() => setShare(null)} />}
       {unlock && <UnlockScene onVip={onVip} stage={stageApi} onShare={() => setShare({ kind: 'unlock', promo: !!el?.promo })} promo={el?.promo ?? null} volume={el && el.volumeUsd >= el.minUsd ? el.volumeUsd : null} onClose={() => { setUnlock(false); setFading(false); }} onMove={() => { setUnlock(false); setHandoff(true); void move(); }} />}
       {!stage && <Shell className={`bots-vip${compact ? ' is-compact' : ''}`}>
-        <ShellHeader icon="bolt" title={onVip ? 'VIP' : 'Become VIP'} subtitle={onVip ? 'Your bots run on the VIP servers, at the lowest bot fee.' : el?.promo ? 'Your beta VIP: the lowest fee on everything, and VIP servers.' : 'At $5M of your volume in 14 days: bot fees slashed, and VIP servers.'} aside={onVip ? <StatusPill dot className="vip-pill">VIP servers</StatusPill> : el?.eligible ? <StatusPill dot className="vip-pill">Unlocked</StatusPill> : null} />
+        <ShellHeader icon="bolt" title={onVip ? 'VIP' : 'Become VIP'} subtitle={onVip ? 'Your bots run on the VIP servers, at the lowest bot fee.' : el?.promo ? 'Your beta VIP: the lowest fee on everything, and VIP servers.' : 'At $1M of your volume in 14 days: bot fees slashed, and VIP servers.'} aside={onVip ? <StatusPill dot className="vip-pill">VIP servers</StatusPill> : el?.eligible ? <StatusPill dot className="vip-pill">Unlocked</StatusPill> : null} />
         <Panel className="bots-vip__b">
           {onVip ? (
             <div className="bots-vip__on">
               <span className="bots-vip__badge" aria-hidden="true"><GoldMark size={26} /></span>
               <p>Your bots run on the dedicated VIP servers: orders 1.6× faster, latency down 37% in our tests.</p>
-              <small className="bots-fine">{assignedOnly ? 'Your VIP was assigned to this wallet (early access). When it ends, your bots move back to the standard servers with their books.' : 'VIP holds while you trade $5M in 14 days. Below it, your bots move back to the standard servers with their books (at most once a day, checked every 10 minutes), and you can move up again whenever you qualify.'}</small>
+              <small className="bots-fine">{assignedOnly ? 'Your VIP was assigned to this wallet (early access). When it ends, your bots move back to the standard servers with their books.' : 'VIP holds while you trade $1M in 14 days. Below it, your bots move back to the standard servers with their books (at most once a day, checked every 10 minutes), and you can move up again whenever you qualify.'}</small>
             </div>
           ) : (
             <>
               <div className="bots-vip__prog">
-                <div className="bots-vip__nums"><b>{el ? fmtUsd(el.volumeUsd, 0) : '—'}</b><span>of {fmtUsd(el?.minUsd ?? 5_000_000, 0)} in 14 days</span><em>{el ? `${Math.floor(volPct * 100)}%` : ''}</em></div>
+                <div className="bots-vip__nums"><b>{el ? fmtUsd(el.volumeUsd, 0) : '—'}</b><span>of {fmtUsd(el?.minUsd ?? 1_000_000, 0)} in 14 days</span><em>{el ? `${Math.floor(volPct * 100)}%` : ''}</em></div>
                 {!el && vipReadMissing && <small className="bots-fine">Your counted volume shows here with the next release of the servers.</small>}
                 <GoldBar value={volPct} />
                 {el && !el.eligible && <small className="bots-fine">{fmtUsd(Math.max(0, el.minUsd - el.volumeUsd), 0)} to go.</small>}
@@ -454,7 +454,7 @@ export function BotsVip({ ctx, compact, stage, strip }: { ctx: BotsCtx; compact?
                   : <Button variant="primary" size="md" icon="bolt" className="vip-btn" disabled={!canMove || !ctx.ready} onClick={() => void move()}>Move to VIP</Button>}
                 {canMove && !ctx.ready && <small className="bots-fine">VIP is unlocked. Sign in to the bot servers and accept the terms first, then move.</small>}
                 {!info?.vip?.canMove && <small className="bots-fine">The VIP servers open soon.</small>}
-                {info?.vip?.canMove && !canMove && !assignedOnly && <small className="bots-fine">Unlocks at $5M in 14 days.</small>}
+                {info?.vip?.canMove && !canMove && !assignedOnly && <small className="bots-fine">Unlocks at $1M in 14 days.</small>}
               </div>}
             </>
           )}
