@@ -578,7 +578,7 @@ export function PricingPage() {
         <div className="h-head is-center h-up">
           <Eyebrow>Fees</Eyebrow>
           <h1 className="h-h1">Pay on what runs.<br /><span>Nothing else.</span></h1>
-          <p className="h-lead">No subscription, no deposit. A fee in basis points on the orders a bot or a copy places, lower as your {FEES.windowDays}-day volume grows. 1 bp = 0.01% of the order's value.</p>
+          <p className="h-lead">No subscription, no deposit. A fee in basis points on the orders a bot or a copy places, lower with volume. 1 bp = 0.01% of the order's value.</p>
         </div>
       </header>
       <section className="vd-sec" style={{ paddingTop: 20 }}>

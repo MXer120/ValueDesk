@@ -84,8 +84,26 @@ const COHORT_SLICE_ROWS = 500;
 const COHORT_MIX_SLICE_ROWS = 50;
 const MIX_LAST_T_META = 'cohort_mix_last_t';
 const LIQ_HIST_LAST_T_META = 'liq_hist_last_t';
-/** Rows of a wallet's range read at a time when its stream copies are dropped (dropStreamRowsAsync). */
+/** Rows of a wallet's range read at a time when its stream copies are dropped (dropStreamRowsAsync): at most, at least, first. */
 const DROP_SCAN = 2_000;
+const DROP_SCAN_MIN = 50;
+const DROP_SCAN_FIRST = 250;
+/** What one slice of dropStreamRowsAsync (its read and its delete) should take on the indexer's thread, in ms. */
+export const DROP_SLICE_MS = 25;
+/** Keys counted per read by fillCountAsync before the loop is let in. */
+const FILL_COUNT_PAGE = 1_000;
+
+/**
+ * The next slice of dropStreamRowsAsync from how long the last one took: halved when it took over twice DROP_SLICE_MS,
+ * doubled when under half of it. Each row of the range read costs a lookup of its `src` in the table (fills_t does not hold
+ * it), and on rows out of the OS's cache that is milliseconds a row: 2,000 rows a read held the indexer's thread 10-17 s
+ * (production stall profiles 2026-11-22 21:20, 2026-11-23 00:45 and 01:11).
+ */
+export function nextDropPage(page: number, ms: number): number {
+  if (ms > 2 * DROP_SLICE_MS) return Math.max(DROP_SCAN_MIN, Math.floor(page / 2));
+  if (ms < DROP_SLICE_MS / 2) return Math.min(DROP_SCAN, page * 2);
+  return page;
+}
 /** The held rows read late (a handover) hand the thread back this often (ms). */
 const HELD_SLICE_MS = 20;
 /**
@@ -1225,12 +1243,31 @@ export class IndexStore {
   private checkpointer: Checkpointer | null = null;
 
   /** The WAL's checkpoints go to a thread of their own (checkpointer.ts). The production writer only. */
-  startCheckpointer(o: { everyMs?: number; restartFrames?: number; restartGapMs?: number; restartMaxBehind?: number } = {}): void {
+  startCheckpointer(o: { everyMs?: number; restartFrames?: number; restartGapMs?: number; restartMaxBehind?: number; restartMaxPassiveMs?: number } = {}): void {
     if (this.readOnly || this.path === ':memory:' || this.checkpointer) return;
     this.checkpointer = new Checkpointer(this.path, (on) => {
-      this.db.exec(`PRAGMA wal_autocheckpoint = ${on ? WAL_CHECKPOINT_PAGES : 0}`);
-      this.writer?.setAutoCheckpoint(on ? WAL_CHECKPOINT_PAGES : 0);
+      this.selfCheckpoint = on;
+      this.applyAutoCheckpoint();
     }, o);
+  }
+
+  /** False while the checkpoint thread does the WAL's checkpoints; true without one (none started, or it is gone). */
+  private selfCheckpoint = true;
+
+  /**
+   * Who checkpoints when the checkpoint thread does not: the writer thread while it is up, this connection only without it.
+   * A COMMIT that crosses wal_autocheckpoint copies the WAL into the file in the committing thread's time. On this
+   * connection that is the indexer's thread: on 2026-11-23 00:34 the checkpoint thread was ended after a 195 s run
+   * (checkpoint.maxMs), and the next two commits here took 32.4 s and 23.1 s - one 57 s stall (putPnlFlows,
+   * putCohortMembers). The writer thread commits all the time anyway (the stream rows), so it keeps the WAL bounded.
+   */
+  private applyAutoCheckpoint(): void {
+    if (this.readOnly) return;
+    const writerUp = this.writer?.state.running === true;
+    try {
+      this.db.exec(`PRAGMA wal_autocheckpoint = ${this.selfCheckpoint && !writerUp ? WAL_CHECKPOINT_PAGES : 0}`);
+    } catch { /* closed: nothing left to checkpoint here */ }
+    this.writer?.setAutoCheckpoint(this.selfCheckpoint ? WAL_CHECKPOINT_PAGES : 0);
   }
 
   // --- the writer thread (writerThread.ts) ------------------------------------------------------
@@ -1252,10 +1289,11 @@ export class IndexStore {
       committed: () => this.getMeta(WRITER_DONE_META),
       locked: (fn) => this.tx(fn),
       log: (line) => console.warn(line),
+      up: () => this.applyAutoCheckpoint(),
     }, {
       cacheKb: o.cacheKb ?? WRITER_CACHE_KB, busyMs: WRITER_BUSY_MS, walLimit: WAL_LIMIT_BYTES,
       liqPath: this.liqFile, liqCacheKb: o.liqCacheKb ?? liqCacheKb(), liqAutoCkpt: WAL_CHECKPOINT_PAGES,
-      autoCkpt: this.checkpointer?.state.running ? 0 : WAL_CHECKPOINT_PAGES,
+      autoCkpt: this.selfCheckpoint ? WAL_CHECKPOINT_PAGES : 0,
       targetMs: o.targetMs, maxRows: o.maxRows, hungMs: o.hungMs, restartAfterMs: o.restartAfterMs,
     });
     this.ctl = this.writer.ctl;
@@ -2984,6 +3022,43 @@ export class IndexStore {
     return { count: Math.min(cap, count + f.n), minT: first === null ? m : m === null ? first : Math.min(first, m) };
   }
 
+  /** fillExtent's minT alone: the oldest held fill of the address (raw or behind a frozen day), without counting rows. */
+  fillMinT(venue: Venue, address: string): number | null {
+    const first = this.oldestRaw(venue, address);
+    if (this.frozenUpTo(venue, address) === 0) return first;
+    const m = num((this.q('SELECT MIN(first_t) AS m FROM fill_day WHERE venue = ? AND address = ? AND frozen = 1').get(venue, address) as { m: number | null }).m);
+    return first === null ? m : m === null ? first : Math.min(first, m);
+  }
+
+  /**
+   * fillExtent's count, read in pages of keys from fills_t with `pause()` between them: the rows held for the address, raw
+   * plus those behind frozen days, counted up to `cap`. fillExtent counted up to 50,000 keys in one go at the end of every
+   * Hyperliquid fill sync, out of the OS's cache 6.5-19 s of the indexer's thread (production stall profiles 2026-11-23
+   * 01:00 and 01:11, hlSyncFills -> fillExtent).
+   */
+  async fillCountAsync(venue: Venue, address: string, cap: number, pause: () => Promise<void>): Promise<number> {
+    let count = 0;
+    const keys = this.q('SELECT t, id FROM fills INDEXED BY fills_t WHERE venue = ? AND address = ? AND (t, id) > (?, ?) AND t < ? ORDER BY t, id LIMIT ?');
+    for (const [a, b] of this.rawSpans(venue, address, 0, END)) {
+      let atT = a;
+      let atId = '';
+      while (count < cap) {
+        const want = Math.min(FILL_COUNT_PAGE, cap - count);
+        const rows = keys.all(venue, address, atT, atId, b, want) as Array<{ t: number; id: string }>;
+        count += rows.length;
+        if (rows.length < want) break;
+        const last = rows[rows.length - 1]!;
+        atT = last.t;
+        atId = last.id;
+        await pause();
+      }
+      if (count >= cap) return cap;
+    }
+    if (this.frozenUpTo(venue, address) === 0) return count;
+    const f = this.q('SELECT COALESCE(SUM(fills), 0) AS n FROM fill_day WHERE venue = ? AND address = ? AND frozen = 1').get(venue, address) as { n: number };
+    return Math.min(cap, count + f.n);
+  }
+
   /** The days in [fromT, toT] that can hold rows (from the trader's oldest raw row on) are summed again. */
   private markRange(venue: Venue, address: string, fromT: number, toT: number, first: number | null): void {
     if (first === null) return;
@@ -3048,8 +3123,10 @@ export class IndexStore {
     // range from its start through every REST row (src is not in fills_t), and each was a write transaction of its own -
     // 39 s of a 60 s production profile on the indexer's thread (2026-11-09), holding the lock the writer thread waited on.
     // Nearly always nothing is dropped (the REST read already replaced the copies): then nothing is written at all.
-    const scan = this.q(`SELECT id, t, src FROM fills WHERE venue = ? AND address = ? AND (t, id) > (?, ?) AND t <= ? ORDER BY t, id LIMIT ${DROP_SCAN}`);
+    // Slices sized by time (nextDropPage), not a fixed 2,000 rows: a read of rows out of the OS's cache is milliseconds a row.
+    const scan = this.q('SELECT id, t, src FROM fills WHERE venue = ? AND address = ? AND (t, id) > (?, ?) AND t <= ? ORDER BY t, id LIMIT ?');
     const del = this.q('DELETE FROM fills WHERE venue = ? AND address = ? AND id = ? AND src = 0');
+    let page = DROP_SCAN_FIRST;
     for (const v of venue === 'hyperliquid' ? [venue, 'tradexyz' as Venue] : [venue]) {
       this.noteRestSpan(v, address, fromT, toT);
       const first = this.oldestRaw(v, address);
@@ -3057,14 +3134,16 @@ export class IndexStore {
       let atT = fromT;
       let atId = '';
       for (;;) {
-        const rows = scan.all(v, address, atT, atId, toT) as Array<{ id: string; t: number; src: number }>;
+        const t0 = performance.now();
+        const rows = scan.all(v, address, atT, atId, toT, page) as Array<{ id: string; t: number; src: number }>;
         if (!rows.length) break;
         const ids = rows.filter((r) => r.src === 0).map((r) => r.id);
         if (ids.length) this.tx(() => { for (const id of ids) gone += Number(del.run(v, address, id).changes); });
         const last = rows[rows.length - 1]!;
         atT = last.t;
         atId = last.id;
-        if (rows.length < DROP_SCAN) break;
+        if (rows.length < page) break;
+        page = nextDropPage(page, performance.now() - t0);
         await pause();
       }
       // The partial-day sums are keyed on their day's version, which markRange moves. Until

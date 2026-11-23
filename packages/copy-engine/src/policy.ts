@@ -232,18 +232,17 @@ export const BOT_FEE = 1;
 
 /**
  * THE BOT FEE LADDER (owner 2026-11-08, replacing the flat BOT_FEE): tenths of a bp by 14-day volume, from 0.5 bp
- * down to 0.1 bp in steps SoDEX can carry (a builder fee is a whole number of tenths), most users at 0.2 bp. VIP pays
- * the lowest step; a wallet on the beta list is VIP for its first 30 days (BETA_VIP_DAYS, from its first bot).
+ * down to 0.1 bp in steps SoDEX can carry (a builder fee is a whole number of tenths); since 2026-11-23 one step. VIP
+ * pays the lowest; a wallet on the beta list is VIP for its first 30 days (BETA_VIP_DAYS, from its first bot).
  * The terms name 0.5 bp: the top step stays within them. Not live until the executor that uses it ships.
  */
 export const BOT_FEE_LADDER: readonly CopyFeeStep[] = [
-  // Owner 2026-11-10: every step 0.1 bp (0.001%) higher than 2026-11-09's 0.3 / 0.2 bp, and a third step from $1M;
-  // the lowest fee (0.1 bp) is VIP's only, from $5M (server builder/service.ts VIP_MIN_USD). Within the terms' 0.5 bp.
-  { fromUsd: 0, fee: 4 },
-  { fromUsd: 100_000, fee: 3 },
-  { fromUsd: 1_000_000, fee: 2 },
+  // Owner 2026-11-23: "Only have Tier 0 and vip": one step at 0.2 bp (0.002%); VIP pays 0.1 bp, from BOT_VIP_MIN_USD.
+  { fromUsd: 0, fee: 2 },
 ];
 export const BOT_FEE_VIP = 1;
+/** VIP from this much of the wallet's own 14-day volume (owner 2026-11-23; the server's builder/service.ts VIP_MIN_USD). */
+export const BOT_VIP_MIN_USD = 1_000_000;
 export const BETA_VIP_DAYS = 30;
 
 /** The bot fee for a wallet: VIP (or beta in its first 30 days) the lowest step, else by its 14-day volume. */

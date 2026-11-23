@@ -49,7 +49,7 @@ export function feeCards(start: string): Card[] {
       v: bp(FEES.botLowest), unit: '/order', sub: <>VIP · {VIP_RULE}</>,
       cta: { href: '/bots/new', label: `Start with just ${start}` },
       lines: [
-        ...FEES.botLadder.map((x): Line => ({ t: <><b>{bp(x.fee)}</b> {x.fromUsd === 0 ? 'for a new wallet' : `from ${usdStep(x.fromUsd)}`}</>, accent: true, tip: x.fromUsd === 0 ? undefined : `Your bots' volume over ${FEES.windowDays} days` })),
+        ...FEES.botLadder.map((x): Line => ({ t: <><b>{bp(x.fee)}</b> {x.fromUsd === 0 ? 'for everyone' : `from ${usdStep(x.fromUsd)}`}</>, accent: true, tip: x.fromUsd === 0 ? undefined : `Your bots' volume over ${FEES.windowDays} days` })),
         { t: <><b>{bp(FEES.botLowest)}</b> VIP</>, accent: true, tip: `${VIP_RULE}; applied by itself` },
         { t: 'Runs with the laptop closed' },
         { t: 'Your size, your loss limit' },

@@ -19,11 +19,7 @@ import './v4.css';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
 
-/** The VIP volume, read from the condition text the page shows beside it (so the two never disagree). */
-const VIP_MIN_USD = (() => {
-  const m = /\$(\d+(?:\.\d+)?)\s*([KM])/.exec(FEES.vipCondition);
-  return m ? Number(m[1]) * (m[2] === 'M' ? 1e6 : 1e3) : 5e6;
-})();
+const VIP_MIN_USD = FEES.vipMinUsd;
 const VIP_WHEN = FEES.vipCondition.replace(/^VIP:\s*/, '');
 
 /* ------------------------------------------------------------------------------------------- helpers ----- */
@@ -175,13 +171,13 @@ export function Calculator({ makerBps, actions }: { makerBps: number | null; act
         <p className={cx('v4-calc__auto', vip && 'is-vip')}>
           {vip
             ? <><span className="v4-vip vip-pill">VIP</span>Applied automatically: {VIP_WHEN}.</>
-            : <>Your fee step follows your volume by itself; <span className="vip-text">VIP</span> applies automatically from {usdStep(VIP_MIN_USD)} in {FEES.windowDays} days.</>}
+            : <><span className="vip-text">VIP</span> applies automatically from {usdStep(VIP_MIN_USD)} in {FEES.windowDays} days.</>}
         </p>
 
         <ol className="v4-ladder" aria-label="Bot fee ladder">
           {FEES.botLadder.map((s, i) => (
             <li key={s.fromUsd} className={cx(!vip && i === ladderIx && 'is-on')}>
-              <small>{s.fromUsd === 0 ? 'New wallet' : `From ${usdStep(s.fromUsd)}`}</small>
+              <small>{s.fromUsd === 0 ? 'Everyone' : `From ${usdStep(s.fromUsd)}`}</small>
               <b>{bp(s.fee)}</b>
             </li>
           ))}
@@ -197,7 +193,7 @@ export function Calculator({ makerBps, actions }: { makerBps: number | null; act
         <div className="v4-calc__res">
           <p className="v4-calc__k">ValueDesk fee on {volText(vol)}</p>
           <p className="v4-calc__big"><Glide value={ours} fmt={money} /></p>
-          <p className="v4-calc__eq">{volText(vol)} × <b className={cx(vip && 'vip-text')}>{bp(fee)}</b> ÷ 10,000 {vip ? <span className="v4-vip vip-pill">VIP</span> : <span className="v4-step">{ladderIx === 0 ? 'new wallet' : `from ${usdStep(FEES.botLadder[ladderIx]!.fromUsd)}`}</span>}</p>
+          <p className="v4-calc__eq">{volText(vol)} × <b className={cx(vip && 'vip-text')}>{bp(fee)}</b> ÷ 10,000 {vip ? <span className="v4-vip vip-pill">VIP</span> : <span className="v4-step">{ladderIx === 0 ? 'everyone' : `from ${usdStep(FEES.botLadder[ladderIx]!.fromUsd)}`}</span>}</p>
           <div className="v4-calc__split">
             <div>
               <small>SoDEX maker fee, paid to SoDEX</small>
@@ -253,7 +249,7 @@ function faqItems(start: string): Array<{ q: string; a: string }> {
   const ladder = FEES.botLadder;
   return [
     { q: 'Do I deposit anything with ValueDesk?', a: 'No. Your funds stay in your own SoDEX account. Bots and copies place orders there with a trading key you register on SoDEX; that key can move funds only between your own SoDEX accounts and your wallet, never to anyone else.' },
-    { q: 'What does it cost?', a: `The analytics are free. Bot orders pay ${bp(ladder[0]!.fee)} of their value for a new wallet, down to ${bp(ladder[ladder.length - 1]!.fee)} by your ${FEES.windowDays}-day volume, and ${bp(FEES.botLowest)} for VIP (${VIP_WHEN}). Copied orders pay ${bp(FEES.copyNew)} down to ${bp(FEES.copyLowest)} (${FEES.copyLowestCondition}). SoDEX charges its own trading fee on top.` },
+    { q: 'What does it cost?', a: `The analytics are free. Bot orders pay ${bp(ladder[0]!.fee)} of their value, and ${bp(FEES.botLowest)} for VIP (${VIP_WHEN}). Copied orders pay ${bp(FEES.copyNew)} down to ${bp(FEES.copyLowest)} (${FEES.copyLowestCondition}). SoDEX charges its own trading fee on top.` },
     { q: 'Can I stop at any time?', a: 'Yes. Stop a bot or a copy in the app, and revoke the trading key and the fee approval on SoDEX whenever you like. The key also ends on its own after the days you chose, at most 180.' },
     { q: 'Do bots keep running when I close the tab?', a: 'Yes. Bots and hosted copies run on the ValueDesk executor in Tokyo around the clock. Browser copies run while their tab is open.' },
     { q: 'How long does setting up take?', a: 'Connect a wallet you use on SoDEX and sign three times: the terms, the fee and the trading key. One click asks for each in turn. Signatures are free; none is a transaction.' },
@@ -312,7 +308,7 @@ export function V4() {
                 <span className="v4-h1__b">Start with {start}.</span>
               </h1>
               <p className="v4-sub v4-up" style={{ '--d': '160ms' } as CSSProperties}>
-                A new wallet pays <b>{bp(FEES.botNew)}</b> per bot order, lower as your {FEES.windowDays}-day volume grows. Your funds stay in your SoDEX account, and the bots run around the clock on our executor in Tokyo.
+                Everyone else pays <b>{bp(FEES.botNew)}</b> per bot order. Your funds stay in your SoDEX account, and the bots run around the clock on our executor in Tokyo.
               </p>
               <div className="v4-cta v4-up" style={{ '--d': '240ms' } as CSSProperties}>
                 <a href="/bots/new" className="v4-btn is-light">Start a bot<Arrow /></a>
@@ -331,7 +327,7 @@ export function V4() {
           <Reveal as="header" className="v4-head">
             <Kicker>Fee calculator</Kicker>
             <h2 className="v4-h2">Drag your volume.<br /><span>See the fee.</span></h2>
-            <p className="v4-lead">The bot fee falls as your {FEES.windowDays}-day volume grows. Pick a volume and see which step applies and what it comes to in dollars.</p>
+            <p className="v4-lead">One bot fee for everyone, half of it for VIP. Pick a volume and see which applies and what it comes to in dollars.</p>
           </Reveal>
           <Reveal><Calculator makerBps={live.makerBps} /></Reveal>
         </section>
@@ -367,7 +363,7 @@ export function V4() {
                 <p className="v4-plan__s"><span className="v4-vip vip-pill">VIP</span> {VIP_WHEN}</p>
                 <a href="/bots/new" className="v4-btn is-light is-block">Start a bot<Arrow /></a>
                 <ul>
-                  {FEES.botLadder.map((s) => <li key={s.fromUsd}><Check /><span><b>{bp(s.fee)}</b> {s.fromUsd === 0 ? "for a new wallet" : `from ${usdStep(s.fromUsd)} in ${FEES.windowDays} days`}</span></li>)}
+                  {FEES.botLadder.map((s) => <li key={s.fromUsd}><Check /><span><b>{bp(s.fee)}</b> {s.fromUsd === 0 ? "for everyone" : `from ${usdStep(s.fromUsd)} in ${FEES.windowDays} days`}</span></li>)}
                   <li><Check />Start with {start}</li>
                   <li><Check />Runs with the tab closed, on the executor in Tokyo</li>
                   <li><Check />Your loss limit, your size</li>
@@ -476,7 +472,7 @@ export function V4() {
           <HeatGlass layout="wide" rib={30} className="v4-final__heat" />
           <div className="v4-final__in">
             <h2 className="v4-h2">Your first bot,<br /><span>with {start}.</span></h2>
-            <p className="v4-lead">A new wallet pays {bp(FEES.botNew)} per bot order; VIP pays {bp(FEES.botLowest)} ({VIP_WHEN}).</p>
+            <p className="v4-lead">Everyone pays {bp(FEES.botNew)} per bot order; VIP pays {bp(FEES.botLowest)} ({VIP_WHEN}).</p>
             <div className="v4-cta is-center">
               <a href="/bots/new" className="v4-btn is-light">Start a bot<Arrow /></a>
               <a href="/copy" className="v4-btn is-glass">Copy a trader</a>

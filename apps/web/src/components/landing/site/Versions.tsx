@@ -32,7 +32,7 @@ function Trust() {
   return (
     <ul className="h-trust">
       <li><i />Your funds stay in your SoDEX account</li>
-      <li><i />Bot fee from {bp(FEES.botLowest)}</li>
+      <li><i />Bot fee from {bp(FEES.botLowest)} (VIP)</li>
     </ul>
   );
 }

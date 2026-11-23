@@ -204,7 +204,7 @@ function BotFeeLadder() {
         {BOT_FEE_LADDER.map((s) => (
           <li key={s.fromUsd}><span>{from(s.fromUsd)}</span><b className="lp-num">{bpOf(s.fee)}</b></li>
         ))}
-        <li className="vip-row"><span><span className="tf-pill is-sm vip-pill">VIP</span> $5M in 14 days</span><b className="lp-num vip-text">{bpOf(BOT_FEE_VIP)}</b></li>
+        <li className="vip-row"><span><span className="tf-pill is-sm vip-pill">VIP</span> $1M in 14 days</span><b className="lp-num vip-text">{bpOf(BOT_FEE_VIP)}</b></li>
       </ol>
       <p className="lp-ladder__note">On top of SoDEX's own maker fee, on each bot fill.</p>
     </Panel>

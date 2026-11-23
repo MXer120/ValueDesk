@@ -41,7 +41,7 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
   const e = estimate({ futures, oi });
   // The fee the executor would charge: the step for 14 days of this volume (two weeks like this one), VIP from its volume.
   const vol14 = futures * 2;
-  const vipMin = Number(/\$(\d+(?:\.\d+)?)\s*M/.exec(FEES.vipCondition)?.[1] ?? 5) * 1e6;
+  const vipMin = FEES.vipMinUsd;
   const vip = vol14 >= vipMin;
   const step = FEES.botLadder.reduce((ix, x, i) => (vol14 >= x.fromUsd ? i : ix), 0);
   const fee = vip ? FEES.botLowest : FEES.botLadder[step]!.fee;

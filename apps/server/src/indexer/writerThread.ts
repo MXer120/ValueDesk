@@ -122,6 +122,8 @@ export interface WriterHooks<X> {
   /** Run `fn` holding the write lock (the store's tx). */
   locked(fn: () => void): void;
   log(line: string): void;
+  /** The thread is up (true: its connection is open and taking ops) or gone (false: died or stopped). */
+  up?(on: boolean): void;
 }
 
 /** An op the thread did not write before a stop: its rows went to the spill (or nowhere, for a replay or a liq step). */
@@ -547,7 +549,7 @@ export class WriterThread<X = unknown> {
 
   private onMessage(m: Msg): void {
     this.lastAt = Date.now();
-    if (m.ready) { this.state.running = true; return; }
+    if (m.ready) { this.state.running = true; this.hooks.up?.(true); return; }
     if (m.txError !== undefined) { this.state.lastError = m.txError; return; }
     if (m.tx) {
       this.state.txs++;
@@ -656,6 +658,7 @@ export class WriterThread<X = unknown> {
     this.port = null;
     this.worker = null;
     this.state.running = false;
+    this.hooks.up?.(false);
     if (this.stopped) return;
     this.state.restarts++;
     try {
@@ -747,6 +750,7 @@ export class WriterThread<X = unknown> {
     this.port = null;
     this.worker = null;
     this.state.running = false;
+    this.hooks.up?.(false);
     void w?.terminate();
     if (threw) throw threw;
   }

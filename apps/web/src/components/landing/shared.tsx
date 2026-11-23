@@ -4,7 +4,7 @@
  *
  * THE FACTS. Every figure is live or a constant the executor charges; nothing is rounded in our favour:
  *   - fees: @copy-engine BOT_FEE_LADDER / BOT_FEE_VIP / COPY_FEE_LADDER. The LOWEST fee may be advertised only WITH its
- *     condition ("from 0.1 bp" + "VIP, $5M 14-day volume"); the fee a new wallet pays is the ladder's first step.
+ *     condition ("from 0.1 bp" + "VIP, $1M 14-day volume"); the fee a new wallet pays is the ladder's first step.
  *   - startFrom: the smallest margin a real market maker needs today, computed with the New bot page's own code
  *     (presets.ts planMarkets): the balanced draft at SoDEX's minimum order, max holding one order, the market's
  *     highest leverage, on every market the bots run on; the lowest one wins. Live, so it follows prices.
@@ -14,7 +14,7 @@
  *   - setup: connect + 3 signatures (terms, fee, key), one click asks for each; free, no transaction.
  */
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { BOT_FEE_LADDER, BOT_FEE_VIP, COPY_FEE_LADDER, COPY_FEE_WINDOW_DAYS } from '@copy-engine';
+import { BOT_FEE_LADDER, BOT_FEE_VIP, BOT_VIP_MIN_USD, COPY_FEE_LADDER, COPY_FEE_WINDOW_DAYS } from '@copy-engine';
 import { useSymbols } from '../../hooks';
 import { useBotMarkets, type BotMarket } from '../../bots/data';
 import { bestOf, feeAdjOf, rankRecipes } from '../../bots/estimate';
@@ -27,13 +27,14 @@ import { loadTone, stipple, TH, TW, type Dot } from '../copy/DotWhale';
 
 export const bp = (tenths: number): string => `${(tenths / 10).toFixed(1)} bp`;
 export const FEES = {
-  /** What a new wallet's bot orders pay (the ladder's first step). */
+  /** What everyone's bot orders pay until VIP (one step since 2026-11-23). */
   botNew: BOT_FEE_LADDER[0]!.fee,
   /** The ladder (volume steps), for tables. */
   botLadder: BOT_FEE_LADDER,
   /** The lowest bot fee: VIP only. Advertise it only with VIP_CONDITION beside it. */
   botLowest: BOT_FEE_VIP,
-  vipCondition: 'VIP: $5M bot volume in 14 days',
+  vipMinUsd: BOT_VIP_MIN_USD,
+  vipCondition: `VIP: $${BOT_VIP_MIN_USD / 1e6}M volume in 14 days`,
   copyNew: COPY_FEE_LADDER[0]!.fee,
   copyLowest: COPY_FEE_LADDER[COPY_FEE_LADDER.length - 1]!.fee,
   copyLowestCondition: `from $${COPY_FEE_LADDER[COPY_FEE_LADDER.length - 1]!.fromUsd / 1e6}M copied volume in ${COPY_FEE_WINDOW_DAYS} days`,

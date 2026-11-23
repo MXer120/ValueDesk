@@ -506,7 +506,8 @@ test('store: a REST-read range with no stream rows left is read once and nothing
   let pauses = 0;
   await s.dropStreamRowsAsync('hyperliquid', '0xa', T0, T0 + 8_998, async () => { pauses++; });
   assert.equal(changes(), before, 'no write: only REST rows in the range');
-  assert.equal(pauses, 4, 'one pass in slices, not the range again per slice');
+  // Slices sized by time since 2026-11-23 (store.ts nextDropPage): 250 rows first, doubling while quick, 50 at the least.
+  assert.ok(pauses >= 4 && pauses <= 9_000 / 50, `one pass in slices, not the range again per slice (${pauses})`);
   await s.dropStreamRowsAsync('hyperliquid', '0xa', T0, T0 + 9_000, async () => {});
   assert.equal(changes() - before, 1, 'the one stream row in range goes');
   assert.equal(Number((s.db.prepare("SELECT COUNT(*) AS n FROM fills WHERE venue = 'hyperliquid'").get() as { n: number }).n), 9_000);

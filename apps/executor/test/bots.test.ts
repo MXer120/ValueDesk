@@ -77,7 +77,7 @@ const code = async (p: Promise<unknown> | (() => unknown)): Promise<string> => {
   }
 };
 
-test('bots: the executor advertises them and their fee ladder; a bot is charged by the bot ladder (0.5 bp with no volume known), every other algo the copy ladder', async () => {
+test('bots: the executor advertises them and their fee ladder; a bot is charged by the bot ladder (0.2 bp with no volume known), every other algo the copy ladder', async () => {
   const { svc, cleanup } = make();
   const ctx = { viewerCountry: 'SG' };
   const info = svc.info(ctx);

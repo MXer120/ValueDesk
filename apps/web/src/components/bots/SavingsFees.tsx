@@ -5,7 +5,7 @@
  * marked on each, and what the next step needs. The marks come from the wallet's own figures: SoDEX's fee and staking
  * tier (useVenueFees), the bot fee the executor charges now, its bots' pace.
  */
-import { BOT_FEE_LADDER, BOT_FEE_VIP } from '@copy-engine';
+import { BOT_FEE_LADDER, BOT_FEE_VIP, BOT_VIP_MIN_USD } from '@copy-engine';
 import { FEE_TIERS, STAKING_TIERS, fmtSoso, type FeeTierRow } from '../../fees';
 import { fmtUsd } from '../../format';
 import type { ReactNode } from 'react';
@@ -82,12 +82,12 @@ export function SavingsFees({ sodexTier, stakeTier, makerFee, perDay, volumeUsd,
   credit: { fee: string; words: string } | null;
 }) {
   const v = volumeUsd ?? 0;
-  const botRows: LadderRow[] = [...BOT_FEE_LADDER.map((s) => ({ key: `b${s.fromUsd}`, when: from(s.fromUsd), fee: bp(s.fee) })), { key: 'vip', when: 'VIP', fee: bp(BOT_FEE_VIP), sub: '$5M in 14 days', vip: true }];
+  const botRows: LadderRow[] = [...BOT_FEE_LADDER.map((s) => ({ key: `b${s.fromUsd}`, when: s.fromUsd ? from(s.fromUsd) : 'Standard', fee: bp(s.fee) })), { key: 'vip', when: 'VIP', fee: bp(BOT_FEE_VIP), sub: '$1M in 14 days', vip: true }];
   const botAt = vip ? botRows.length - 1 : (() => { const i = BOT_FEE_LADDER.findIndex((s) => s.fee === botTenths); return i >= 0 ? i : null; })();
   const botNext = botAt !== null && !vip
     ? botAt + 1 < BOT_FEE_LADDER.length
       ? { words: `${fmtUsd(Math.max(0, BOT_FEE_LADDER[botAt + 1]!.fromUsd - v), 0)} more 14-day volume to ${bp(BOT_FEE_LADDER[botAt + 1]!.fee)}`, reach: Math.min(1, v / BOT_FEE_LADDER[botAt + 1]!.fromUsd) }
-      : { words: <>{fmtUsd(Math.max(0, 5e6 - v), 0)} more 14-day volume to <b className="vip-text">VIP</b></>, reach: Math.min(1, v / 5e6), vip: true }
+      : { words: <>{fmtUsd(Math.max(0, BOT_VIP_MIN_USD - v), 0)} more 14-day volume to <b className="vip-text">VIP</b></>, reach: Math.min(1, v / BOT_VIP_MIN_USD), vip: true }
     : null;
   // SoDEX: the next tier at the bots' pace (SoDEX's own 14-day volume is not public; the bots' is what this page knows).
   const sNext = sodexTier !== null ? FEE_TIERS.find((t) => t.tier === sodexTier + 1) ?? null : null;
