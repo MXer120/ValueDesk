@@ -37,6 +37,7 @@ import './theme';
 import './appearance';
 
 import { useNumStyle } from './numStyle';
+import { isHomePath } from './router';
 
 /* Before React renders, so a chosen language is on the page as early as its catalogue allows. */
 bootLanguage();
@@ -44,6 +45,9 @@ bootLanguage();
 // beta.valuedesk.so (VITE_CHANNEL=beta, deploy/vercel/beta.settings): the beta list's door before the app
 // (beta/BetaGate.tsx). The site's own build folds this to null and never contains the door.
 const BetaGate = import.meta.env.VITE_CHANNEL === 'beta' ? lazy(() => import('./beta/BetaGate')) : null;
+// The landing page (/home, owner 2026-11-23): a page of its own, outside the app - no rail, navbar or terms popup.
+const Home = lazy(() => import('./components/landing/Home').then((m) => ({ default: m.Home })));
+const onHome = isHomePath(window.location.pathname);
 
 // Before the first render, so an error thrown while mounting is logged too.
 // See log.ts for levels, ?debug=<ns>, and the __vs console handle.
@@ -74,7 +78,7 @@ function Root() {
   return (
     // In a sanctioned place the app is not mounted at all: only the legal pages (legal/LegalGate.tsx).
     <SiteGate>
-      {BetaGate ? <Suspense fallback={null}><BetaGate><App /></BetaGate></Suspense> : <App />}
+      {onHome ? <Suspense fallback={null}><Home /></Suspense> : BetaGate ? <Suspense fallback={null}><BetaGate><App /></BetaGate></Suspense> : <App />}
       {/* Analytics, asked once of visitors who accepted the terms before it existed (legal/AnalyticsPrompt.tsx). */}
       <AnalyticsPrompt />
     </SiteGate>

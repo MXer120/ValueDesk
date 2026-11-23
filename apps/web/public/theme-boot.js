@@ -19,7 +19,7 @@
   try {
     // Which page index.html's static shell draws (src/bootShell.ts): its cards, its lit tab, the market type.
     var s = (location.pathname.split('/')[1] || '').toLowerCase();
-    var p = s === '' || s === 'trade' ? 'trade' : /^(bots|points|portfolio|explore)$/.test(s) ? s : 'page';
+    var p = s === '' || s === 'trade' ? 'trade' : s === 'home' ? 'home' : /^(bots|points|portfolio|explore)$/.test(s) ? s : 'page';
     document.documentElement.setAttribute('data-boot', p);
     document.documentElement.setAttribute('data-boot-tab', p === 'explore' || p === 'page' ? 'more' : p);
     var e = null;

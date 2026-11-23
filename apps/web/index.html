@@ -22,6 +22,9 @@
       data-theme; the page from its data-boot. No text but the Beta pill, so nothing to translate.
     -->
     <style id="vs-boot-css">
+      /* The landing page (/home) is not the app: no picture of the app before it, just its ink. */
+      html[data-boot='home'] .vsb { display: none; }
+      html[data-boot='home'], html[data-boot='home'] body { background: #050505; }
       :root {
         --vb-bg: #0e0e0e; --vb-text: #f7f7f7; --vb-muted: #bcbcbc; --vb-ink: #f4f4f4; --vb-accent: #e6e6e6;
         --vb-fill: #1a1a1b; --vb-bone: rgba(247, 247, 247, 0.08); --vb-line: rgba(78, 78, 78, 0.4);
