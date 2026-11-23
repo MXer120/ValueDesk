@@ -290,20 +290,24 @@
 
 /* V5 hero: the product's parts floating over the heat (HeroDeck.tsx) */
 .hd { --mx: 0; --my: 0; position: relative; height: 540px; perspective: 1600px; }
-.hd-stage { position: absolute; inset: 0; transform-style: preserve-3d; transform: rotateX(calc(var(--my) * -6deg)) rotateY(calc(var(--mx) * 8deg)); transition: transform 0.8s var(--ease); }
-.hd-slot { position: absolute; transform-style: preserve-3d;
-  transform: translate3d(calc(var(--mx) * var(--z) * 22px), calc(var(--my) * var(--z) * 16px), calc(var(--z) * 60px));
+.hd-stage { position: absolute; inset: 0; }
+/* 2D only: backdrop blur does not work inside a 3D scene. Depth comes from parallax and scale. */
+.hd-slot { position: absolute;
+  transform: translate(calc(var(--mx) * var(--z) * 26px), calc(var(--my) * var(--z) * 18px));
   transition: transform 0.8s var(--ease); animation: hd-in 1.3s var(--ease) both; animation-delay: calc(0.25s + var(--i) * 0.14s); }
-@keyframes hd-in { from { opacity: 0; transform: translate3d(0, 40px, -240px) rotateX(-24deg); } }
+@keyframes hd-in { from { opacity: 0; transform: translateY(40px) scale(0.92); filter: blur(8px); } }
 .hd-float { animation: hd-bob 7s ease-in-out infinite; animation-delay: calc(var(--i) * -1.4s); }
 @keyframes hd-bob { 50% { transform: translateY(-12px) rotate(0.4deg); } }
 .hd[data-off] *, .hd[data-off] { animation-play-state: paused !important; }
-.hd-slot.is-copy { left: 0; top: 6%; width: 280px; }
-.hd-slot.is-venues { right: 0; top: 0; width: 260px; }
-.hd-slot.is-bot { right: 3%; bottom: 0; width: 290px; }
-.hd-slot.is-tiers { left: 5%; bottom: 3%; width: 270px; }
-/* opaque: backdrop blur does not work inside a 3D scene, and see-through cards read as a mess */
-.hd .v3-card { background: linear-gradient(180deg, #2a2a2c, #141415); border-color: rgba(255, 255, 255, 0.13); box-shadow: 0 40px 80px -24px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.14); }
+.hd { height: 600px; }
+.hd-slot.is-copy { left: 0; top: 4%; width: 270px; }
+.hd-slot.is-venues { right: 0; top: 0; width: 250px; }
+.hd-slot.is-bot { right: 0; bottom: 0; width: 275px; }
+.hd-slot.is-tiers { left: 2%; bottom: 4%; width: 262px; }
+/* frosted glass: a little of the heat shows through, blurred (owner 2026-11-23) */
+.hd .v3-card { background: linear-gradient(180deg, rgba(38, 38, 42, 0.7), rgba(16, 16, 18, 0.78)); border-color: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: 0 40px 80px -24px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.16); }
 .hd-auto { font-size: 11.5px; color: var(--fg-3); }
 .hd-venues ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .hd-venues li { display: grid; grid-template-columns: 16px 1fr 70px; align-items: center; gap: 8px; font-size: 12.5px; color: var(--fg-2); }

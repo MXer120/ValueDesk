@@ -74,7 +74,6 @@ export function V5() {
       <header className="h-hero vd-hh">
         <div className="vd-hh__heat" aria-hidden="true"><HeatGlass layout="calm" rib={28} /></div>
         <div className="h-hero__t">
-          <div className="h-up"><Eyebrow>Live on SoDEX · bots, copy trading, analytics</Eyebrow></div>
           <div className="h-up" style={{ '--d': '80ms' } as CSSProperties}><h1 className="h-h1">The market,<br /><span>on one desk.</span></h1></div>
           <div className="h-up" style={{ '--d': '160ms' } as CSSProperties}>
             <p className="h-sub">Market makers that run around the clock, copies of any Hyperliquid or SoDEX wallet, and the liquidation map to read it all. Every order lands in your own SoDEX account.</p>
@@ -90,7 +89,6 @@ export function V5() {
       <Tape rows={live.rows} />
 
       <div className="vd-layer"><Embed scope="v3"><V3Features live={live} /></Embed></div>
-      <Embed scope="v2"><SetupScene /></Embed>
       <Embed scope="v2"><Money /></Embed>
       <CalcSection makerBps={live.makerBps} />
       <Products />
