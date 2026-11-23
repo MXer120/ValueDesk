@@ -100,7 +100,7 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
         </div>
       </div>
       <p className="v4-calc__note">
-        An estimate, not a promise. SoPoints are SoDEX's and SoDEX decides them; it publishes no formula. This uses ValueDesk's model fitted on {SOPOINTS_MODEL.fittedOn} ({SOPOINTS_MODEL.fittedAt}): a week paid {SOPOINTS_MODEL.rateLow} to {SOPOINTS_MODEL.rateHigh} points per $10K of futures so far, depending on everyone else's activity. Referral points and squad boosts come on top. A bot's own profit or loss is not shown.
+        An estimate, not a promise. SoPoints are SoDEX's and SoDEX decides them; it publishes no formula. This uses ValueDesk's model fitted on {SOPOINTS_MODEL.fittedOn}.
       </p>
     </div>
   );
@@ -116,7 +116,11 @@ export function Calcs({ makerBps, initial = 'fees' }: { makerBps: number | null;
       <div className="vd-calcs__tabs tf">
         <Segmented<Tab> options={[{ value: 'fees', label: 'Fee calculator' }, { value: 'points', label: 'SoPoints estimate' }]} value={tab} onChange={setTab} label="Calculator" size="md" />
       </div>
-      {tab === 'fees' ? <Calculator makerBps={makerBps} /> : <PointsCalc makerBps={makerBps} />}
+      {/* Both stay mounted in one grid cell: the switch cross-fades them and the height never jumps. */}
+      <div className="vd-calcs__panes">
+        <div className={tab === 'fees' ? 'vd-calcs__pane is-on' : 'vd-calcs__pane'} aria-hidden={tab !== 'fees'} {...(tab !== 'fees' ? { inert: '' } : {})}><Calculator makerBps={makerBps} /></div>
+        <div className={tab === 'points' ? 'vd-calcs__pane is-on' : 'vd-calcs__pane'} aria-hidden={tab !== 'points'} {...(tab !== 'points' ? { inert: '' } : {})}><PointsCalc makerBps={makerBps} /></div>
+      </div>
     </div>
   );
 }

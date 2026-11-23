@@ -17,7 +17,7 @@ export const SOPOINTS_MODEL = {
   ratePer10k: 37.5,
   rateLow: 31,
   rateHigh: 55,
-  fittedOn: '290 settled wallet-weeks, Layer 1 weeks 1-10',
+  fittedOn: '290 settled wallet-weeks',
   fittedAt: '2026-11-20',
 } as const;
 

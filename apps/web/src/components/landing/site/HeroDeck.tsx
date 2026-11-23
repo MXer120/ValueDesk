@@ -1,41 +1,60 @@
 /**
- * V5's hero visual (owner 2026-11-23: "instead of the logo maybe components or something with cool animations"): the
- * product's own parts floating in depth over the heat - the live bot card (the cheapest busy SoDEX market now), the
- * copy card, the three signatures ticking, a bot running with the tab closed, and the bot fee ladder stepping down to
- * VIP. Each card flies in, floats on its own beat and leans with the pointer by its depth.
+ * V5's hero visual (owner 2026-11-23): the product's parts floating in depth over the heat - balanced across the
+ * product, not mostly bots: the copy card, the live bot card (the cheapest busy SoDEX market now), cross-venue
+ * analytics (the five venues the map and the leaderboards read) and the fee tiers (each lowest fee with its condition).
+ * Cards are opaque (backdrop blur does not work inside a 3D scene). Each card flies in, floats on its own beat and leans
+ * with the pointer by its depth.
  *
- * Figures: only live ones (BotPanel, useLiveDesk) and the fee ladder (FEES). The rest are drawings without numbers.
+ * Figures: only live ones (BotPanel) and the fee constants (FEES). The heat strip is a drawing.
  * Motion pauses off screen and stops for prefers-reduced-motion. Sits inside a `.v3` scope (V3's card styles).
  */
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { BrandMark } from '../../BrandMark';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { VenueLogo } from '../../VenueLogo';
+import { GRID_VENUES } from '../../copy/gridModel';
+import { VENUE_LABEL } from '../../../vsApi';
 import { BotPanel, CopyPanel } from '../v3/V3';
 import { bp, FEES, reducedMotion, type LiveDesk } from '../shared';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
-const Check = () => <svg className="v3-check" viewBox="0 0 20 20" aria-hidden="true"><path d="m5 10.4 3.2 3.1L15 6.7" /></svg>;
+const VIP_RULE = FEES.vipCondition.replace(/^VIP:\s*/, '');
 
-/** The fee ladder as steps, the lit one walking down to VIP. */
-function FeeSteps() {
-  const steps = [...FEES.botLadder.map((s) => ({ k: s.fromUsd === 0 ? 'New' : `$${s.fromUsd >= 1e6 ? `${s.fromUsd / 1e6}M` : `${s.fromUsd / 1e3}K`}`, v: bp(s.fee), vip: false })), { k: 'VIP', v: bp(FEES.botLowest), vip: true }];
-  const [at, setAt] = useState(reducedMotion() ? steps.length - 1 : 0);
+/** Cross-venue analytics: the five venues and a strip of liquidation heat drifting under them. */
+function VenuesCard() {
+  return (
+    <div className="v3-card hd-venues">
+      <div className="v3-card__top"><span className="v3-chip">Cross-venue analytics</span><span className="v3-chip is-sm is-g">Free</span></div>
+      <ul>
+        {GRID_VENUES.map((v, i) => (
+          <li key={v} style={{ '--i': i } as CSSProperties}><VenueLogo venue={v} size={16} /><span>{VENUE_LABEL[v]}</span><i /></li>
+        ))}
+      </ul>
+      <div className="hd-strip"><i /></div>
+      <small className="hd-cap">Liquidation map and leaderboards, every venue</small>
+    </div>
+  );
+}
+
+/** The fee tiers: analytics free, copy and bots each from their lowest fee, with the condition beside it. */
+function TiersCard() {
+  const rows: Array<{ k: string; v: ReactNode; c: ReactNode }> = [
+    { k: 'Analytics', v: 'Free', c: 'no wallet needed' },
+    { k: 'Copy trading', v: <><small>from </small>{bp(FEES.copyLowest)}</>, c: FEES.copyLowestCondition },
+    { k: 'Bots', v: <><small>from </small><span className="vip-text">{bp(FEES.botLowest)}</span></>, c: <><span className="vip-pill">VIP</span> {VIP_RULE}</> },
+  ];
+  const [at, setAt] = useState(0);
   useEffect(() => {
     if (reducedMotion()) return;
-    const id = window.setInterval(() => setAt((a) => (a + 1) % steps.length), 1400);
+    const id = window.setInterval(() => setAt((a) => (a + 1) % rows.length), 2200);
     return () => window.clearInterval(id);
-  }, [steps.length]);
+  }, [rows.length]);
   return (
-    <div className="v3-card hd-fee">
-      <div className="v3-card__top"><span className="v3-chip is-sm">Bot fee</span><span className="hd-auto">applies by itself</span></div>
-      <div className="hd-steps">
-        {steps.map((s, i) => (
-          <span key={s.k} className={cx(i === at && 'is-on', s.vip && 'is-vip', i < at && 'is-past')}>
-            <small>{s.vip ? <b className="vip-pill">VIP</b> : s.k}</small>
-            <b className={s.vip ? 'vip-text' : undefined}>{s.v}</b>
-          </span>
-        ))}
-      </div>
-      <div className="hd-bar"><i style={{ width: `${((at + 1) / steps.length) * 100}%` }} /></div>
+    <div className="v3-card hd-tiers">
+      <div className="v3-card__top"><span className="v3-chip">Fees</span><span className="hd-auto">lower as volume grows</span></div>
+      {rows.map((r, i) => (
+        <div key={r.k} className={cx('hd-tier', i === at && 'is-on')}>
+          <span>{r.k}</span><b>{r.v}</b><small>{r.c}</small>
+        </div>
+      ))}
     </div>
   );
 }
@@ -60,7 +79,7 @@ export function HeroDeck({ live }: { live: LiveDesk }) {
     window.addEventListener('pointermove', move, { passive: true });
     return () => { io?.disconnect(); window.removeEventListener('pointermove', move); cancelAnimationFrame(raf); };
   }, []);
-  const card = (cls: string, z: number, i: number, child: React.ReactNode) => (
+  const card = (cls: string, z: number, i: number, child: ReactNode) => (
     <div className={cx('hd-slot', cls)} style={{ '--z': z, '--i': i } as CSSProperties}>
       <div className="hd-float">{child}</div>
     </div>
@@ -69,16 +88,9 @@ export function HeroDeck({ live }: { live: LiveDesk }) {
     <div ref={box} className="hd" data-off={on ? undefined : ''} aria-hidden="true">
       <div className="hd-stage">
         {card('is-copy', 0.5, 0, <CopyPanel />)}
-        {card('is-bot', 1.2, 1, <BotPanel rows={live.rows} loading={live.loading} error={live.error} />)}
-        {card('is-run', 1.6, 2, (
-          <div className="v3-card hd-run">
-            <span className="hd-run__mark"><BrandMark size={18} /></span>
-            <div><b>Bot running</b><small>on the executor in Tokyo</small></div>
-            <span className="v3-chip is-sm is-g"><span className="v3-dot is-on" />Tab closed</span>
-          </div>
-        ))}
-        {card('is-fee', 1.7, 3, <FeeSteps />)}
-        {card('is-sign', 1.9, 4, <div className="v3-signchip">{['Terms', 'Fee', 'Key'].map((t, i) => <span key={t} style={{ '--i': i } as CSSProperties}><Check />{t}</span>)}</div>)}
+        {card('is-venues', 0.8, 1, <VenuesCard />)}
+        {card('is-bot', 1.3, 2, <BotPanel rows={live.rows} loading={live.loading} error={live.error} />)}
+        {card('is-tiers', 1.8, 3, <TiersCard />)}
       </div>
     </div>
   );

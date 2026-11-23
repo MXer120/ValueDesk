@@ -212,7 +212,6 @@ export function Calculator({ makerBps }: { makerBps: number | null }) {
           <a href="/bots/new" className="v4-btn is-light is-block">Start a bot<Arrow /></a>
         </div>
       </div>
-      <p className="v4-calc__note">A calculation, not a forecast: volume × fee ÷ 10,000 on the fee ladder ValueDesk charges and SoDEX's maker fee read now. A bot's profit or loss also depends on its fills and the price, and is not shown here.</p>
     </div>
   );
 }

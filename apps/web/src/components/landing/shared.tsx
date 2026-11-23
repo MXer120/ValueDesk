@@ -231,10 +231,10 @@ export const VERSIONS = [
   { n: 2, name: 'Version 2' },
   { n: 3, name: 'Version 3' },
   { n: 4, name: 'Version 4' },
-  { n: 5, name: 'Chrome on heat' },
-  { n: 6, name: 'Heat, then convert' },
-  { n: 7, name: 'One desk, long' },
-  { n: 8, name: 'V5 with the aurora header' },
+  { n: 5, name: 'Features as cards' },
+  { n: 6, name: 'Features as tabs' },
+  { n: 7, name: 'Features as bento' },
+  { n: 8, name: 'Features on scroll' },
 ] as const;
 
 /** The version in the path: /home -> 1, /home/2 -> 2 ... */

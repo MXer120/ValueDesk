@@ -11,7 +11,7 @@ import { BrandMark } from '../../BrandMark';
 import { dropBootShell } from '../../../bootShell';
 import { Arrow, Reveal } from '../Home';
 import { HeatGlass } from '../v4/heat';
-import { bp, FEES, SwimmingWhale, startFromText, useLiveDesk } from '../shared';
+import { bp, FEES, startFromText, useLiveDesk } from '../shared';
 import '../home.css';
 import './site.css';
 
@@ -176,14 +176,12 @@ export function SitePage({ title, children, whale, current, footer, home }: { ti
   return (
     <div className="h vd" data-no-i18n="">
       <div className="h-bg" aria-hidden="true"><div className="h-bg__grid" /><div className="h-bg__beam" /></div>
-      {whale !== null && <SwimmingWhale from={(whale ?? DEFAULT_WHALE).from} to={(whale ?? DEFAULT_WHALE).to} height={560} opacity={(whale ?? DEFAULT_WHALE).opacity ?? 0.4} color={(whale ?? DEFAULT_WHALE).color} />}
       <SiteNav current={current} />
       <main className="vd-layer">{children}</main>
       {footer ?? <SiteFooter />}
     </div>
   );
 }
-const DEFAULT_WHALE: Whale = { from: [1.15, 0.3, -64, 0.9], to: [-0.2, 0.75, -78, 1.15], opacity: 0.4 };
 
 /** A section borrowed from version 2, 3 or 4, in its own style scope. */
 export function Embed({ scope, children, className }: { scope: 'v2' | 'v3' | 'v4'; children: ReactNode; className?: string }) {
@@ -216,7 +214,6 @@ export function ProductCards({ art }: { art: Partial<Record<(typeof PRODUCTS)[nu
       {PRODUCTS.map((p, i) => (
         <Reveal key={p.key} delay={i * 80}><a href={p.href} className="vd-prod">
           {art[p.key] && <div className="vd-prod__art" aria-hidden="true">{art[p.key]}</div>}
-          <span className="vd-ic">{p.ic}</span>
           <h3>{p.t}</h3>
           <p>{p.s}.</p>
           <span className="h-link">See {p.t.toLowerCase()}<Arrow /></span>

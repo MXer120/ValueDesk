@@ -111,7 +111,7 @@ function GridViz() {
 }
 
 /** Who traded a candle: each candle's volume split by kind of trader. A drawing; the bars are not data. */
-function CandleViz() {
+export function CandleViz() {
   const bars = [[30, 22, 8], [18, 30, 4], [42, 16, 12], [26, 26, 6], [50, 20, 16], [22, 36, 5], [34, 24, 10], [16, 18, 3]];
   return (
     <>

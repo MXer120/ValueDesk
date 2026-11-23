@@ -396,3 +396,7 @@ html:has(.h), body:has(.h) { background: #050505; }
 .h-fee__c { margin: 2px 0 0; font-size: 12.5px; color: var(--fg-3); display: flex; align-items: center; gap: 8px; }
 .h-fee.is-hot .h-fee__c { color: rgba(10, 10, 10, 0.6); }
 .h-fee__v small:first-child { margin-right: 4px; }
+
+/* The app's global `footer` rule (styles.css: flex, top border, small muted text) must not reach the landing footer. */
+.h footer.h-foot { display: block; border-top: 0; padding-top: 0; color: inherit; font-size: inherit; line-height: inherit; }
+.h .h-foot__cols { margin-top: 72px; border-top: 1px solid var(--line); padding-top: 48px; }
