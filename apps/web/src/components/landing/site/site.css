@@ -287,3 +287,58 @@
 .vd-hh.is-aurora + .h-tape { background: var(--ink); }
 .vd-nav:not(.is-solid) .vd-links > a, .vd-nav:not(.is-solid) .vd-dd__btn { color: rgba(244, 244, 242, 0.78); }
 @media (prefers-reduced-motion: reduce) { .vd-aurora i { animation: none; } }
+
+/* V5 hero: the product's parts floating over the heat (HeroDeck.tsx) */
+.hd { --mx: 0; --my: 0; position: relative; height: 540px; perspective: 1600px; }
+.hd-stage { position: absolute; inset: 0; transform-style: preserve-3d; transform: rotateX(calc(var(--my) * -6deg)) rotateY(calc(var(--mx) * 8deg)); transition: transform 0.8s var(--ease); }
+.hd-slot { position: absolute; transform-style: preserve-3d;
+  transform: translate3d(calc(var(--mx) * var(--z) * 22px), calc(var(--my) * var(--z) * 16px), calc(var(--z) * 60px));
+  transition: transform 0.8s var(--ease); animation: hd-in 1.3s var(--ease) both; animation-delay: calc(0.25s + var(--i) * 0.14s); }
+@keyframes hd-in { from { opacity: 0; transform: translate3d(0, 40px, -240px) rotateX(-24deg); } }
+.hd-float { animation: hd-bob 7s ease-in-out infinite; animation-delay: calc(var(--i) * -1.4s); }
+@keyframes hd-bob { 50% { transform: translateY(-12px) rotate(0.4deg); } }
+.hd[data-off] *, .hd[data-off] { animation-play-state: paused !important; }
+.hd-slot.is-copy { left: 0; top: 4%; width: 270px; opacity: 0.9; }
+.hd-slot.is-bot { left: 34%; top: 20%; width: 300px; }
+.hd-slot.is-run { right: -4%; top: 0; }
+.hd-slot.is-fee { left: 2%; bottom: 0; width: 290px; }
+.hd-slot.is-sign { right: 0; bottom: 6%; }
+.hd .v3-card { backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); background: linear-gradient(180deg, rgba(44, 44, 46, 0.86), rgba(16, 16, 17, 0.9)); }
+.hd-run { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 18px; }
+.hd-run__mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: #0a0a0a; border: 1px solid rgba(255, 255, 255, 0.12); }
+.hd-run b { display: block; font-size: 14px; font-weight: 500; }
+.hd-run small { display: block; font-size: 11.5px; color: var(--fg-3); }
+.hd-auto { font-size: 11.5px; color: var(--fg-3); }
+.hd-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.hd-steps > span { display: flex; flex-direction: column; gap: 3px; padding: 9px 8px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.03); transition: background 0.5s, border-color 0.5s, transform 0.5s var(--ease); }
+.hd-steps small { font-size: 10.5px; color: var(--fg-3); min-height: 16px; display: flex; align-items: center; }
+.hd-steps b { font-family: var(--num); font-weight: 500; font-size: 15px; }
+.hd-steps .vip-pill { font-size: 9.5px; padding: 1px 6px; }
+.hd-steps > span.is-past { opacity: 0.55; }
+.hd-steps > span.is-on { background: rgba(0, 180, 129, 0.14); border-color: rgba(0, 180, 129, 0.45); transform: translateY(-3px); }
+.hd-steps > span.is-on.is-vip { background: rgba(227, 182, 90, 0.14); border-color: rgba(227, 182, 90, 0.5); }
+.hd-bar { margin-top: 12px; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.hd-bar i { display: block; height: 100%; background: linear-gradient(90deg, #00b481, #5cf0c0); border-radius: 3px; transition: width 0.9s var(--ease); }
+@media (max-width: 1100px) { .hd-slot.is-copy { display: none; } .hd-slot.is-bot { left: 6%; } }
+@media (max-width: 980px) {
+  .hd { height: 460px; order: -1; margin: -10px 0 -20px; }
+  .hd-slot.is-bot { left: 50%; top: 12%; margin-left: -165px; }
+  .hd-slot.is-run { right: auto; left: 0; top: 0; }
+  .hd-slot.is-fee { right: 0; bottom: 0; width: 280px; }
+  .hd-slot.is-sign { display: none; }
+}
+@media (max-width: 640px) {
+  .hd { height: 420px; }
+  .hd-slot.is-bot { width: 300px; margin-left: -150px; top: 14%; }
+  .hd-slot.is-fee { width: 260px; right: -6px; }
+  .hd-slot.is-run { left: -6px; }
+}
+@media (prefers-reduced-motion: reduce) { .hd-slot, .hd-float { animation: none !important; } }
+.vd-hd { position: relative; z-index: 1; } .vd-matrix td small { font-size: 11.5px; color: var(--fg-3); }
+@media (max-width: 980px) { .vd-hd { order: -1; min-width: 0; } }
+@media (max-width: 640px) {
+  .hd { height: 430px; }
+  .hd-slot.is-fee, .hd-slot.is-sign, .hd-slot.is-copy { display: none; }
+  .hd-slot.is-run { left: 0; top: 0; }
+  .hd-slot.is-bot { top: 70px; }
+}

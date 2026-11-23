@@ -16,7 +16,15 @@ export const HEAT = ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'] as c
 interface Blob { x: number; y: number; r: number; c: string; a: number; dx: number; dy: number; sp: number; ph: number }
 
 /** Where the heat sits. `right`: the hero (the field leans right, the hot point small and away from the type). */
-const LAYOUTS: Record<'right' | 'card' | 'wide', Blob[]> = {
+const LAYOUTS: Record<'right' | 'card' | 'wide' | 'calm', Blob[]> = {
+  /** The site hero (owner 2026-11-23: no white glow): indigo and blue across the whole width, a teal body, no hot point. */
+  calm: [
+    { x: 0.45, y: 0.25, r: 0.6, c: HEAT[0], a: 0.95, dx: 0.06, dy: 0.05, sp: 0.06, ph: 0 },
+    { x: 0.95, y: 0.35, r: 0.55, c: HEAT[0], a: 0.9, dx: 0.04, dy: 0.06, sp: 0.05, ph: 2.6 },
+    { x: 0.75, y: 0.7, r: 0.5, c: HEAT[1], a: 0.75, dx: 0.06, dy: 0.05, sp: 0.06, ph: 1.7 },
+    { x: 0.3, y: 0.85, r: 0.38, c: HEAT[1], a: 0.55, dx: 0.06, dy: 0.04, sp: 0.05, ph: 3.1 },
+    { x: 0.62, y: 0.55, r: 0.26, c: HEAT[2], a: 0.38, dx: 0.06, dy: 0.05, sp: 0.07, ph: 0.8 },
+  ],
   right: [
     { x: 0.62, y: 0.28, r: 0.62, c: HEAT[0], a: 0.95, dx: 0.06, dy: 0.05, sp: 0.07, ph: 0 },
     { x: 0.9, y: 0.62, r: 0.55, c: HEAT[1], a: 0.9, dx: 0.05, dy: 0.06, sp: 0.06, ph: 1.7 },

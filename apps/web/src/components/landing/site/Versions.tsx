@@ -17,6 +17,7 @@ import { Ticker } from '../v4/V4';
 import { HeatGlass } from '../v4/heat';
 import { bp, FEES, startFromText, useLiveDesk } from '../shared';
 import { Calcs } from './Calcs';
+import { HeroDeck } from './HeroDeck';
 import { qaFor } from './faq';
 import { Embed, ProductCards, Row, SitePage, Ticks, PAGE_PATHS } from './Site';
 import '../v2/v2.css';
@@ -74,7 +75,7 @@ export function V5({ header = 'heat' }: { header?: 'heat' | 'aurora' } = {}) {
       <header className={header === 'aurora' ? 'h-hero vd-hh is-aurora' : 'h-hero vd-hh'}>
         {header === 'aurora'
           ? <div className="vd-aurora" aria-hidden="true"><i /><i /><i /><i /></div>
-          : <div className="vd-hh__heat" aria-hidden="true"><HeatGlass layout="right" rib={28} /></div>}
+          : <div className="vd-hh__heat" aria-hidden="true"><HeatGlass layout="calm" rib={28} /></div>}
         <div className="h-hero__t">
           <div className="h-up"><Eyebrow>Live on SoDEX · bots, copy trading, analytics</Eyebrow></div>
           <div className="h-up" style={{ '--d': '80ms' } as CSSProperties}><h1 className="h-h1">The market,<br /><span>on one desk.</span></h1></div>
@@ -87,7 +88,7 @@ export function V5({ header = 'heat' }: { header?: 'heat' | 'aurora' } = {}) {
           </div>
           <div className="h-up" style={{ '--d': '320ms' } as CSSProperties}><Trust /></div>
         </div>
-        <ChromeV />
+        <Embed scope="v3" className="vd-hd"><HeroDeck live={live} /></Embed>
       </header>
       <Tape rows={live.rows} />
 

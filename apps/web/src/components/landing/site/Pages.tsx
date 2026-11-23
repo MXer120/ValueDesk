@@ -312,10 +312,11 @@ export function AnalyticsPage() {
 
 /* ----------------------------------------------------------------------------------------- cross-venue ----- */
 
-const MATRIX: Array<{ t: string; on: readonly string[] }> = [
+const MATRIX: Array<{ t: string; on: readonly string[]; off?: string }> = [
   { t: 'Traders and leaderboards', on: GRID_VENUES },
   { t: 'Liquidation map', on: GRID_VENUES },
-  { t: 'Copy a trader from', on: COPY_VENUES },
+  // Discover tags the others "View only": copying them is not supported yet (copy/Discover.tsx).
+  { t: 'Copy a trader from', on: COPY_VENUES, off: 'view only' },
   { t: 'Funding compared', on: ['sodex', 'hyperliquid'] },
   { t: 'Bots and copies trade on', on: ['sodex'] },
 ];
@@ -345,7 +346,7 @@ export function CrossVenuePage() {
             <thead><tr><th />{GRID_VENUES.map((v) => <th key={v}><span><VenueLogo venue={v} size={16} />{VENUE_LABEL[v]}</span></th>)}</tr></thead>
             <tbody>
               {MATRIX.map((r) => (
-                <tr key={r.t}><td>{r.t}</td>{GRID_VENUES.map((v) => <td key={v} className={r.on.includes(v) ? 'y' : 'n'} aria-label={r.on.includes(v) ? 'yes' : 'no'}>{r.on.includes(v) ? '●' : '–'}</td>)}</tr>
+                <tr key={r.t}><td>{r.t}</td>{GRID_VENUES.map((v) => <td key={v} className={r.on.includes(v) ? 'y' : 'n'} aria-label={r.on.includes(v) ? 'yes' : r.off ?? 'no'}>{r.on.includes(v) ? '●' : r.off ? <small>{r.off}</small> : '–'}</td>)}</tr>
               ))}
             </tbody>
           </table>
