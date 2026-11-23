@@ -14,9 +14,6 @@ const PAGES = {
   3: lazy(() => import('./v3/V3').then((m) => ({ default: m.V3 }))),
   4: lazy(() => import('./v4/V4').then((m) => ({ default: m.V4 }))),
   5: lazy(() => import('./site/Versions').then((m) => ({ default: m.V5 }))),
-  6: lazy(() => import('./site/Versions').then((m) => ({ default: m.V6 }))),
-  7: lazy(() => import('./site/Versions').then((m) => ({ default: m.V7 }))),
-  8: lazy(() => import('./site/Versions').then((m) => ({ default: m.V8 }))),
 } as const;
 
 const SITE = {

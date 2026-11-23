@@ -18,7 +18,7 @@ import { HeatGlass } from '../v4/heat';
 import { bp, FEES, startFromText, useLiveDesk } from '../shared';
 import { Calcs } from './Calcs';
 import { HeroDeck } from './HeroDeck';
-import { FeaturesBento, FeaturesCards, FeaturesScroll, FeaturesTabs } from './Features';
+import { FeaturesCards } from './Features';
 import { qaFor } from './faq';
 import { Embed, ProductCards, Row, SitePage, Ticks, PAGE_PATHS } from './Site';
 import '../v2/v2.css';
@@ -67,11 +67,11 @@ const FAQ_HOME = qaFor('home');
 
 /* ------------------------------------------------------------------------------------------- version 5 ----- */
 
-export function V5({ features = 'cards' }: { features?: 'cards' | 'tabs' | 'bento' | 'scroll' } = {}) {
+export function V5() {
   const live = useLiveDesk();
   const start = startFromText(live.startFrom);
   return (
-    <SitePage title="ValueDesk: bots, copy trading and analytics on SoDEX" home={HOME[features]}>
+    <SitePage title="ValueDesk: bots, copy trading and analytics on SoDEX" home="/home/5">
       <header className="h-hero vd-hh">
         <div className="vd-hh__heat" aria-hidden="true"><HeatGlass layout="calm" rib={28} /></div>
         <div className="h-hero__t">
@@ -90,7 +90,7 @@ export function V5({ features = 'cards' }: { features?: 'cards' | 'tabs' | 'bent
       </header>
       <Tape rows={live.rows} />
 
-      {features === 'cards' ? <FeaturesCards /> : features === 'tabs' ? <FeaturesTabs /> : features === 'bento' ? <FeaturesBento live={live} /> : <FeaturesScroll />}
+      <FeaturesCards />
       <Embed scope="v2"><SetupScene /></Embed>
       <Embed scope="v2"><Money /></Embed>
       <CalcSection makerBps={live.makerBps} />
@@ -101,9 +101,3 @@ export function V5({ features = 'cards' }: { features?: 'cards' | 'tabs' | 'bent
 }
 
 
-const HOME = { cards: '/home/5', tabs: '/home/6', bento: '/home/7', scroll: '/home/8' } as const;
-
-/** Versions 6-8 (owner 2026-11-23): V5 with the features section in another form each. */
-export const V6 = () => <V5 features="tabs" />;
-export const V7 = () => <V5 features="bento" />;
-export const V8 = () => <V5 features="scroll" />;
