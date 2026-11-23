@@ -447,3 +447,33 @@ html:has(.v3), body:has(.v3) { background: #050505; }
 .v3-fx.is-5 .v3-fx__dots { opacity: 1; -webkit-mask-image: radial-gradient(30% 55% at 100% 45%, #000, transparent 75%); mask-image: radial-gradient(30% 55% at 100% 45%, #000, transparent 75%); }
 .v3-fx.is-5 i { --dx: -28px; --dy: 22px; }
 @media (prefers-reduced-motion: reduce) { .v3-fx i { animation: none; opacity: var(--a); } }
+
+/* gauge: the needle's colour follows where it points - green on the fast left, amber in the middle, red on the slow
+   right; the idle needle swings up, then settles in the green (owner 2026-11-23: "change state, colour, depending on the
+   needle"). Segments carry their zone's colour. */
+.v3-gauge__dial > i.is-fast { background: linear-gradient(180deg, rgba(79, 227, 179, 0.85), rgba(79, 227, 179, 0.12)); }
+.v3-gauge__dial > i.is-mid { background: linear-gradient(180deg, rgba(243, 200, 110, 0.8), rgba(243, 200, 110, 0.1)); }
+.v3-gauge__dial > i.is-slow { background: linear-gradient(180deg, rgba(255, 120, 110, 0.75), rgba(255, 120, 110, 0.1)); }
+.v3-gauge__needle { color: #4fe3b3; background: linear-gradient(0deg, rgba(255, 255, 255, 0.25), currentColor); box-shadow: 0 0 26px currentColor; animation-name: v3-needle-c; animation-duration: 7s; }
+@keyframes v3-needle-c {
+  0% { transform: rotate(-80deg); color: #4fe3b3; }
+  22% { transform: rotate(10deg); color: #f3c86e; }
+  30% { transform: rotate(34deg); color: #ff7a6e; }
+  42% { transform: rotate(-12deg); color: #f3c86e; }
+  56% { transform: rotate(-46deg); color: #4fe3b3; }
+  64% { transform: rotate(-38deg); color: #4fe3b3; }
+  86% { transform: rotate(-44deg); color: #4fe3b3; }
+  100% { transform: rotate(-80deg); color: #4fe3b3; }
+}
+.v3-gauge__dot { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; vertical-align: 1px; background: #4fe3b3; box-shadow: 0 0 10px currentColor; color: #4fe3b3; animation: v3-gauge-dot 7s linear infinite; }
+@keyframes v3-gauge-dot { 0%, 18% { background: #4fe3b3; color: #4fe3b3; } 22%, 40% { background: #f3c86e; color: #f3c86e; } 30% { background: #ff7a6e; color: #ff7a6e; } 50%, 100% { background: #4fe3b3; color: #4fe3b3; } }
+.v3-gauge.is-real .v3-gauge__dot { animation: none; }
+
+/* everything connected: the mark in the brand green */
+.v3-hub__mark { background: radial-gradient(70% 70% at 50% 30%, #12614a, #073326 70%); border-color: rgba(79, 227, 179, 0.45); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 60px -6px rgba(0, 180, 129, 0.7); }
+.v3-hub__ring { border-color: rgba(79, 227, 179, 0.22); background: radial-gradient(circle, rgba(0, 180, 129, 0.12), transparent 70%); }
+.v3-hub__ring.is-2 { border-color: rgba(79, 227, 179, 0.1); }
+
+/* feature cards: no default top glow (each card has its own ground now); the copy card's glare softer, less of a beam */
+.v3-feat .v3-viz::before { display: none; }
+.v3-fx.is-3::before { background: radial-gradient(70% 55% at 30% 0%, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.02) 50%, transparent 75%); }

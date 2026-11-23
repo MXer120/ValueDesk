@@ -143,7 +143,7 @@ const volOf = (t: number): number => {
 const tOf = (usd: number): number => Math.round(((Math.log10(usd) - LOG_MIN) / (LOG_MAX - LOG_MIN)) * STEPS);
 const volText = (v: number): string => (v >= 1e6 ? `$${+(v / 1e6).toFixed(2)}M` : `$${+(v / 1e3).toFixed(1)}K`);
 
-export function Calculator({ makerBps }: { makerBps: number | null }) {
+export function Calculator({ makerBps, actions }: { makerBps: number | null; actions?: ReactNode }) {
   const [t, setT] = useState(() => tOf(500_000));
   const vol = volOf(t);
   // As the executor does (VIP_BY_VOLUME): the ladder step by 14-day bot volume, and VIP on its own from the VIP volume.
@@ -209,7 +209,7 @@ export function Calculator({ makerBps }: { makerBps: number | null }) {
               <span className="v4-dim">before the bot's own result</span>
             </div>
           </div>
-          <a href="/bots/new" className="v4-btn is-light is-block">Start a bot<Arrow /></a>
+          {actions ?? <a href="/bots/new" className="v4-btn is-light is-block">Start a bot<Arrow /></a>}
         </div>
       </div>
     </div>

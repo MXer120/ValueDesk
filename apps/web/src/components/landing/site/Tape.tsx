@@ -39,7 +39,21 @@ export function SiteTape({ rows }: { rows: MarketRow[] }) {
     [],
     { enabled: on, pollMs: 300_000 },
   );
-  const traders = useMemo(() => scoreRows((boards.data ?? []).flat(), WIN, 'copy').sort((a, b) => b.score.score - a.score.score).slice(0, 6).map((s) => s.row), [boards.data]);
+  const worst = useAsync(
+    () => Promise.all(COPY_VENUES.map((venue) => vsApi.leaderboard({ venue, window: WIN, sort: 'pnl', side: 'worst', limit: 20 }).then((b) => b.rows, () => [] as TraderRow[]))),
+    [],
+    { enabled: on, pollMs: 300_000 },
+  );
+  // Copy picks: the best copy scores. Counter picks (owner 2026-11-23: "also counter traders sometimes"): the wallets that
+  // lost the most over the same 30 days - the app's Counter direction trades against them.
+  const traders = useMemo(() => {
+    const all = (boards.data ?? []).flat();
+    const copy = scoreRows(all, WIN, 'copy').sort((a, b) => b.score.score - a.score.score).slice(0, 4).map((s) => ({ row: s.row, counter: false }));
+    const counter = (worst.data ?? []).flat().filter((r) => (r.pnl[WIN] ?? 0) < 0).sort((a, b) => (a.pnl[WIN] ?? 0) - (b.pnl[WIN] ?? 0)).slice(0, 3).map((row) => ({ row, counter: true }));
+    const out: Array<{ row: TraderRow; counter: boolean }> = [];
+    for (let i = 0; i < Math.max(copy.length, counter.length); i++) { if (copy[i]) out.push(copy[i]!); if (counter[i]) out.push(counter[i]!); }
+    return out;
+  }, [boards.data, worst.data]);
 
   const items = useMemo(() => {
     const out: ReactNode[] = [];
@@ -47,21 +61,21 @@ export function SiteTape({ rows }: { rows: MarketRow[] }) {
     rows.forEach((r, i) => {
       out.push(
         <a key={`m${r.m.symbol}`} href={botHref(r)} className="h-tape__i" title={r.recipe ? `${r.recipe} on ${r.m.base}` : undefined}>
-          <CoinIcon coin={r.m.base} size={18} />
+          <CoinIcon coin={r.m.base} venue="SODEX" size={18} className="vd-coin" />
           <b>{r.m.base}</b>
           <span className="h-dim">{usdShort(r.m.volumeUsdH)}/h</span>
           <span className="h-tape__c">{perMillion(r.bp)}<small> per $1M</small></span>
         </a>,
       );
       if ((i + 1) % EVERY === 0 && t < traders.length) {
-        const x = traders[t++]!;
+        const { row: x, counter } = traders[t++]!;
         const pnl = x.pnl[WIN] ?? null;
         out.push(
-          <a key={`t${x.venue}${x.address}`} href={`/scan?address=${encodeURIComponent(x.address)}&venue=${x.venue}`} className="h-tape__i is-trader">
+          <a key={`t${x.venue}${x.address}`} href={`/scan?address=${encodeURIComponent(x.address)}&venue=${x.venue}`} className={counter ? 'h-tape__i is-trader is-counter' : 'h-tape__i is-trader'}>
             <VenueLogo venue={x.venue} size={18} />
             <b>{x.label || `${x.address.slice(0, 6)}…${x.address.slice(-4)}`}</b>
-            <span className={pnl !== null && pnl >= 0 ? 'h-tape__c h-pos' : 'h-tape__c'}>{pnl === null ? '—' : `${pnl >= 0 ? '+' : '−'}${usdShort(Math.abs(pnl))}`}<small> 30d</small></span>
-            <span className="h-tape__copy">Copy</span>
+            <span className={pnl !== null && pnl >= 0 ? 'h-tape__c h-pos' : 'h-tape__c h-neg'}>{pnl === null ? '—' : `${pnl >= 0 ? '+' : '−'}${usdShort(Math.abs(pnl))}`}<small> 30d</small></span>
+            <span className="h-tape__copy">{counter ? 'Counter' : 'Copy'}</span>
           </a>,
         );
       }

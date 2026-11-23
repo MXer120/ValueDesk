@@ -96,12 +96,31 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
               <span className="v4-dim">at the central estimate</span>
             </div>
           </div>
-          <a href="/bots/new" className="v4-btn is-light is-block">Start a bot</a>
+          <div className="vd-acts">
+            <a href="/points" className="v4-btn is-light is-block">Analyze my SoPoints</a>
+            <div className="vd-acts__row">
+              <a href="/trade" className="v4-btn is-glass">Trade</a>
+              <a href="/bots/new" className="v4-btn is-glass">Start a bot</a>
+            </div>
+          </div>
         </div>
       </div>
       <p className="v4-calc__note">
         An estimate, not a promise. SoPoints are SoDEX's and SoDEX decides them; it publishes no formula. This uses ValueDesk's model fitted on {SOPOINTS_MODEL.fittedOn}.
       </p>
+    </div>
+  );
+}
+
+/** The fee calculator's way on: Trade, and one split button - a bot on one half, copy trading on the other. */
+function FeeActions() {
+  return (
+    <div className="vd-acts__row">
+      <a href="/trade" className="v4-btn is-light">Trade</a>
+      <div className="vd-split" role="group" aria-label="Start a bot or copy a trader">
+        <a href="/bots/new">Start a bot</a>
+        <a href="/copy">Copy a trader</a>
+      </div>
     </div>
   );
 }
@@ -118,7 +137,7 @@ export function Calcs({ makerBps, initial = 'fees' }: { makerBps: number | null;
       </div>
       {/* Both stay mounted in one grid cell: the switch cross-fades them and the height never jumps. */}
       <div className="vd-calcs__panes">
-        <div className={tab === 'fees' ? 'vd-calcs__pane is-on' : 'vd-calcs__pane'} aria-hidden={tab !== 'fees'} {...(tab !== 'fees' ? { inert: '' } : {})}><Calculator makerBps={makerBps} /></div>
+        <div className={tab === 'fees' ? 'vd-calcs__pane is-on' : 'vd-calcs__pane'} aria-hidden={tab !== 'fees'} {...(tab !== 'fees' ? { inert: '' } : {})}><Calculator makerBps={makerBps} actions={<FeeActions />} /></div>
         <div className={tab === 'points' ? 'vd-calcs__pane is-on' : 'vd-calcs__pane'} aria-hidden={tab !== 'points'} {...(tab !== 'points' ? { inert: '' } : {})}><PointsCalc makerBps={makerBps} /></div>
       </div>
     </div>

@@ -347,12 +347,13 @@ export function GaugeViz({ latency }: { latency: { p50: number; label: string } 
   return (
     <Live className={cx('v3-viz v3-gauge', angle !== null && 'is-real')}>
       <div className="v3-gauge__dial">
-        {Array.from({ length: 26 }, (_, i) => <i key={i} style={{ '--a': `${-90 + (i * 180) / 25}deg`, '--i': i } as CSSProperties} />)}
+        {/* Zones by where the needle points (owner 2026-11-23): left fast (green), middle amber, right slow (red). */}
+        {Array.from({ length: 26 }, (_, i) => <i key={i} className={i < 11 ? 'is-fast' : i < 17 ? 'is-mid' : 'is-slow'} style={{ '--a': `${-90 + (i * 180) / 25}deg`, '--i': i } as CSSProperties} />)}
         <div className="v3-gauge__arc" />
         <div className="v3-gauge__needle" style={angle !== null ? ({ '--to': `${angle}deg` } as CSSProperties) : undefined} />
         <div className="v3-gauge__hub" />
       </div>
-      <span className="v3-gauge__tag">{latency ? `${Math.round(latency.p50)} ms p50 · ${latency.label}` : 'Executor in Tokyo'}</span>
+      <span className="v3-gauge__tag"><i className="v3-gauge__dot" />{latency ? `${Math.round(latency.p50)} ms p50 · ${latency.label}` : 'Executor in Tokyo'}</span>
     </Live>
   );
 }
@@ -419,7 +420,7 @@ const FX_DUST = Array.from({ length: 9 }, (_, i) => {
   const r = (k: number) => { const x = Math.sin(i * 91.7 + k * 47.3) * 43758.5453; return x - Math.floor(x); };
   return { x: r(1) * 100, y: r(2) * 100, s: 1 + r(3) * 1.6, d: 22 + r(4) * 26, o: -r(5) * 40, a: 0.2 + r(6) * 0.45 };
 });
-function FeatureFx({ v }: { v: number }) {
+export function FeatureFx({ v }: { v: number }) {
   return (
     <span className={`v3-fx is-${v}`} aria-hidden="true">
       <span className="v3-fx__dots" />

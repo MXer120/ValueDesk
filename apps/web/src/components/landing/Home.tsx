@@ -182,16 +182,26 @@ export function Tape({ rows, label }: { rows: MarketRow[]; label?: string }) {
 
 /* ---------------------------------------------------------------------------------------------- graphics ----- */
 
-/** A book with quotes resting on both sides of the mid and filling: what a market maker does. Drawing, no figures. */
+/**
+ * What a market maker does, as a book (owner 2026-11-23: the old "your bid / your ask" over two depth charts made no
+ * sense): asks above, bids below, the spread between. Your two quotes rest at the best price on each side; a trade
+ * takes one (it lights up and empties: filled), the bot quotes again, then the other side. Drawing, no figures.
+ */
 export function BookViz() {
   const [ref, on] = useOnScreen<HTMLDivElement>();
-  const asks = [0.92, 0.66, 0.8, 0.44, 0.58, 0.3];
-  const bids = [0.34, 0.6, 0.48, 0.84, 0.62, 0.95];
+  const asks = [0.86, 0.58, 0.74, 0.42]; // far -> near the spread
+  const bids = [0.5, 0.78, 0.62, 0.9]; // near -> far
   return (
-    <div ref={ref} className="g-book" data-off={on ? undefined : ''} aria-hidden="true">
-      <div className="g-book__side is-ask">{asks.map((w, i) => <span key={i} style={{ '--w': w, '--i': i } as CSSProperties} />)}</div>
-      <div className="g-book__mid"><i /><span className="g-book__q is-a">your ask</span><span className="g-book__q is-b">your bid</span></div>
-      <div className="g-book__side is-bid">{bids.map((w, i) => <span key={i} style={{ '--w': w, '--i': i } as CSSProperties} />)}</div>
+    <div ref={ref} className="g-book g-ob" data-off={on ? undefined : ''} aria-hidden="true">
+      <div className="g-ob__side is-ask">
+        {asks.map((w, i) => <span key={i} className="g-ob__row" style={{ '--w': w, '--i': i } as CSSProperties}><i /></span>)}
+        <span className="g-ob__row is-mine" style={{ '--w': 0.34 } as CSSProperties}><i /><em className="g-ob__tag"><b>Your ask</b><b className="is-done">Filled</b></em></span>
+      </div>
+      <div className="g-ob__spread"><span>spread</span></div>
+      <div className="g-ob__side is-bid">
+        <span className="g-ob__row is-mine" style={{ '--w': 0.34 } as CSSProperties}><i /><em className="g-ob__tag"><b>Your bid</b><b className="is-done">Filled</b></em></span>
+        {bids.map((w, i) => <span key={i} className="g-ob__row" style={{ '--w': w, '--i': i + 4 } as CSSProperties}><i /></span>)}
+      </div>
     </div>
   );
 }

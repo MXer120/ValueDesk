@@ -21,6 +21,7 @@ import { BotPanel, CopyPanel, HubViz, PickerViz, SleepViz, V3SignTiles } from '.
 import { HeatGlass } from '../v4/heat';
 import { botHref, bp, DESK_WINDOW_TEXT, FEES, startFromText, usdShort, usdStep, useLiveDesk, type MarketRow } from '../shared';
 import { Calcs } from './Calcs';
+import { FeeCards } from './FeeCards';
 import { qaFor } from './faq';
 import { Embed, IC, Row, SiteFooter, SitePage, Ticks, PAGE_PATHS } from './Site';
 import '../v2/v2.css';
@@ -245,14 +246,7 @@ export function CopyPage() {
 
       <section className="vd-sec">
         <Head k="Fees" title={<>{bp(FEES.copyNew)} per copied order,<br /><span>less as you copy more.</span></>} lead={`Volume counts over ${FEES.windowDays} days. SoDEX charges its own trading fee on top.`} />
-        <Embed scope="v2">
-          <div className="v2-price" style={{ maxWidth: 560 }}>
-            <span className="v2-price__k">Copy trading</span>
-            <div className="v2-price__big"><small>from</small> {bp(FEES.copyLowest)}</div>
-            <ul className="v2-ladder">{FEES.copyLadder.map((s) => <li key={s.fromUsd}><span>{s.fromUsd === 0 ? 'New wallet' : `From ${usdStep(s.fromUsd)}`}</span><b>{bp(s.fee)}</b></li>)}</ul>
-            <a href="/copy" className="v2-btn is-light is-block">Copy a trader</a>
-          </div>
-        </Embed>
+        <FeeCards start={startFromText(null)} only="copy" />
       </section>
 
       <Embed scope="v2"><Money /></Embed>
@@ -381,7 +375,7 @@ export function PricingPage() {
   const live = useLiveDesk();
   const start = startFromText(live.startFrom);
   return (
-    <SitePage title={`Fees · bots from ${bp(FEES.botLowest)} (VIP) · ValueDesk`} current="fees">
+    <SitePage title={`Fees · bots from ${bp(FEES.botLowest)} · ValueDesk`} current="fees">
       <header className="vd-sec" style={{ paddingTop: 56 }}>
         <p className="vd-crumb h-up"><a href="/home">ValueDesk</a><span>/</span><span>Fees</span></p>
         <div className="h-head is-center h-up">
@@ -391,31 +385,7 @@ export function PricingPage() {
         </div>
       </header>
       <section className="vd-sec" style={{ paddingTop: 20 }}>
-        <div className="h-fees">
-          <Reveal className="h-fee">
-            <p className="h-fee__k">Analytics</p>
-            <b className="h-fee__v">Free</b>
-            <ul><li>Liquidation map, live and history</li><li>Who traded each candle</li><li>Leaderboards and wallet scan</li><li>News, calendar, ETF flows</li></ul>
-            <a href={PAGE_PATHS.analytics} className="h-btn is-glass is-block">About the analytics</a>
-          </Reveal>
-          <Reveal className="h-fee is-hot" delay={90}>
-            <p className="h-fee__k">Bots</p>
-            <b className="h-fee__v"><small>from </small>{bp(FEES.botLowest)}<small> per order</small></b>
-            <p className="h-fee__c"><span className="h-vip">VIP</span> {FEES.vipCondition}</p>
-            <ul>
-              {FEES.botLadder.map((s) => <li key={s.fromUsd}>{bp(s.fee)} {s.fromUsd === 0 ? 'for a new wallet' : `from ${usdStep(s.fromUsd)} in ${FEES.windowDays} days`}</li>)}
-              <li>Start with {start}</li>
-            </ul>
-            <a href="/bots/new" className="h-btn is-dark is-block">Start a bot<Arrow /></a>
-          </Reveal>
-          <Reveal className="h-fee" delay={180}>
-            <p className="h-fee__k">Copy trading</p>
-            <b className="h-fee__v"><small>from </small>{bp(FEES.copyLowest)}<small> per order</small></b>
-            <p className="h-fee__c">{FEES.copyLowestCondition}</p>
-            <ul>{FEES.copyLadder.map((s) => <li key={s.fromUsd}>{bp(s.fee)} {s.fromUsd === 0 ? 'for a new wallet' : `from ${usdStep(s.fromUsd)} copied`}</li>)}</ul>
-            <a href="/copy" className="h-btn is-glass is-block">Copy a trader</a>
-          </Reveal>
-        </div>
+        <FeeCards start={start} />
         <p className="h-note">SoDEX charges its own trading fee on every fill, on top{live.makerBps === null ? '' : ` (maker ${live.makerBps} bp now)`}.</p>
       </section>
       <section className="vd-sec">

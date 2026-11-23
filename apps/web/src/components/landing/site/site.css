@@ -305,7 +305,7 @@
 .hd-slot.is-bot { right: 0; bottom: 0; width: 275px; }
 .hd-slot.is-tiers { left: 2%; bottom: 4%; width: 262px; }
 /* frosted glass: a little of the heat shows through, blurred (owner 2026-11-23) */
-.hd .v3-card { background: linear-gradient(180deg, rgba(34, 34, 38, 0.66), rgba(14, 14, 16, 0.74)); border-color: rgba(255, 255, 255, 0.16);
+.hd .v3-card { background: linear-gradient(180deg, rgba(22, 22, 25, 0.8), rgba(9, 9, 11, 0.88)); border-color: rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(28px) saturate(160%); -webkit-backdrop-filter: blur(28px) saturate(160%);
   box-shadow: 0 40px 80px -24px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.16); }
 .hd-auto { font-size: 11.5px; color: var(--fg-3); }
@@ -357,3 +357,66 @@
 .vd-tape .h-tape__run { animation-duration: 70s; animation-direction: normal; }
 .h-tape__i.is-trader { background: linear-gradient(180deg, rgba(0, 180, 129, 0.06), transparent); }
 .h-tape__copy { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid rgba(0, 180, 129, 0.4); color: #4fe3b3; }
+
+/* the hero's main button: a clear hover - lifts, brightens, a light sweeps across, the arrow moves */
+.vd-cta-main { overflow: hidden; isolation: isolate; transition: transform 0.25s var(--ease), box-shadow 0.3s, background 0.3s; }
+.vd-cta-main::after { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.9) 50%, transparent 70%); transform: translateX(-120%); transition: transform 0.7s var(--ease); }
+.vd-cta-main:hover { transform: translateY(-2px) scale(1.02); background: linear-gradient(180deg, #ffffff, #e9fff6); box-shadow: 0 0 0 1px #fff inset, 0 18px 50px -12px rgba(0, 180, 129, 0.55), 0 0 30px -8px rgba(255, 255, 255, 0.6); }
+.vd-cta-main:hover::after { transform: translateX(120%); }
+.vd-cta-main:active { transform: translateY(0) scale(0.99); }
+
+/* tape: counter picks marked in red; coin logos on a light disc so dark ones (NEAR) stay visible */
+.h-tape__i.is-counter { background: linear-gradient(180deg, rgba(255, 110, 100, 0.06), transparent); }
+.h-tape__i.is-counter .h-tape__copy { border-color: rgba(255, 120, 110, 0.45); color: #ff9a90; }
+.h-neg { color: #ff8a80; }
+.vd-tape .vd-coin { border-radius: 50%; background: #e9e9e6; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25); }
+
+/* nav: the hover pill clear of the bar's bottom line (owner 2026-11-23) - a slimmer pill, more room in the bar */
+.vd-nav__in { padding-top: 18px; padding-bottom: 18px; }
+.vd-links > a, .vd-dd__btn { height: 32px; padding: 0 13px; }
+.vd-nav.is-solid .vd-nav__in { padding-top: 14px; padding-bottom: 14px; }
+
+/* calculator actions */
+.vd-acts { display: grid; gap: 8px; }
+.vd-acts__row { display: grid; grid-template-columns: auto 1fr; gap: 8px; }
+.vd-acts .vd-acts__row { grid-template-columns: 1fr 1fr; }
+.vd-acts__row .v4-btn { justify-content: center; }
+.vd-split { display: grid; grid-template-columns: 1fr 1fr; height: 48px; border-radius: 999px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.22); background: rgba(0, 0, 0, 0.35); backdrop-filter: blur(10px); }
+.vd-split a { display: grid; place-items: center; padding: 0 12px; font-size: 14.5px; font-weight: 500; white-space: nowrap; color: #f4f4f2; transition: background 0.2s; }
+.vd-split a + a { border-left: 1px solid rgba(255, 255, 255, 0.22); }
+.vd-split a:hover { background: rgba(255, 255, 255, 0.1); }
+@media (max-width: 640px) { .vd-acts__row { grid-template-columns: 1fr; } .vd-split a { font-size: 13px; } }
+
+/* ---------------------------------------------------------------------------------------- fee cards ----- */
+.vd-fc { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.vd-fc.is-one { grid-template-columns: minmax(0, 440px); }
+.vd-fc__card { position: relative; overflow: hidden; isolation: isolate; display: flex; flex-direction: column; padding: 26px; border-radius: 24px; border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, #19191b, #0b0b0c 60%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 30px 60px -30px rgba(0, 0, 0, 0.9); }
+.vd-fc__card::before { content: ''; position: absolute; inset: 0; z-index: -1; background: radial-gradient(60% 40% at 100% 0%, rgba(255, 255, 255, 0.08), transparent 70%); }
+.vd-fc__spark { position: absolute; right: 0; top: 0; width: 55%; height: 45%; z-index: -1; background-image: radial-gradient(rgba(255, 255, 255, 0.35) 1px, transparent 1.4px); background-size: 9px 9px;
+  -webkit-mask-image: radial-gradient(80% 80% at 100% 0%, #000, transparent 70%); mask-image: radial-gradient(80% 80% at 100% 0%, #000, transparent 70%); opacity: 0.5; }
+.vd-fc__card.is-lit { border-color: rgba(167, 139, 250, 0.45); background: linear-gradient(180deg, #2a1d57 0%, #17123a 30%, #0e0b1f 65%, #0a0912 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 30px 80px -30px rgba(91, 64, 214, 0.7); }
+.vd-fc__card.is-lit::before { background: radial-gradient(70% 45% at 85% 0%, rgba(150, 120, 255, 0.45), transparent 70%), radial-gradient(60% 40% at 50% 105%, rgba(91, 64, 214, 0.45), transparent 70%); }
+.vd-fc__card.is-lit .vd-fc__spark { opacity: 0.9; }
+.vd-fc__card header h3 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 20px; letter-spacing: -0.02em; }
+.vd-fc__card header p { margin: 4px 0 0; color: var(--fg-2); font-size: 13.5px; }
+.vd-fc__v { margin: 22px 0 0 !important; font-family: var(--num); font-weight: 500; font-size: 42px; letter-spacing: -0.02em; line-height: 1; }
+.vd-fc__v small { font-family: 'IBM Plex Sans', sans-serif; font-size: 15px; color: var(--fg-2); letter-spacing: 0; }
+.vd-fc__cond { margin: 8px 0 0 !important; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-3); min-height: 20px; }
+.vd-fc__btn { margin: 20px 0 22px; display: flex; align-items: center; justify-content: center; gap: 8px; height: 42px; border-radius: 12px; font-size: 14.5px; font-weight: 500; color: #0a0a0a;
+  background: linear-gradient(180deg, #ffffff, #d9d9d6); box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.15); transition: transform 0.2s, box-shadow 0.25s; }
+.vd-fc__btn:hover { transform: translateY(-1px); box-shadow: 0 12px 30px -10px rgba(255, 255, 255, 0.45); }
+.vd-fc__card ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 11px; font-size: 13.5px; color: var(--fg-2); flex: 1; }
+.vd-fc__card li { display: flex; align-items: flex-start; gap: 10px; }
+.vd-fc__card li.is-step { color: #c9bfff; }
+.vd-fc__card li.is-step b { font-family: var(--num); font-weight: 500; color: #e3dcff; margin-right: 2px; }
+.vd-fc__ck { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(255, 255, 255, 0.1); }
+.vd-fc__ck svg { width: 12px; height: 12px; fill: none; stroke: #f4f4f2; stroke-width: 2; }
+li.is-step .vd-fc__ck { background: rgba(140, 110, 255, 0.35); }
+.vd-fc__foot { margin: 22px 0 0 !important; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 12.5px; color: var(--fg-3); }
+@media (max-width: 980px) { .vd-fc { grid-template-columns: 1fr; max-width: 480px; margin: 0 auto; } }
+
+/* product pages: each row card gets its own ground like the feature cards */
+.vd-row { position: relative; overflow: hidden; isolation: isolate; }
+.vd-row > :not(.v3-fx) { position: relative; z-index: 1; }
+.vd .vd-fc__btn { color: #0a0a0a; }

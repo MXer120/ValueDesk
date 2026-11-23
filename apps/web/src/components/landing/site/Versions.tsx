@@ -32,7 +32,7 @@ function Trust() {
   return (
     <ul className="h-trust">
       <li><i />Your funds stay in your SoDEX account</li>
-      <li><i />Bot fee from {bp(FEES.botLowest)} <span className="h-dim">(VIP)</span></li>
+      <li><i />Bot fee from {bp(FEES.botLowest)}</li>
     </ul>
   );
 }
@@ -80,7 +80,7 @@ export function V5() {
             <p className="h-sub">Market makers that run around the clock, copies of any Hyperliquid or SoDEX wallet, and the liquidation map to read it all. Every order lands in your own SoDEX account.</p>
           </div>
           <div className="h-up h-cta" style={{ '--d': '240ms' } as CSSProperties}>
-            <a href="/bots/new" className="h-btn is-light">Start with as low as {start}<Arrow /></a>
+            <a href="/bots/new" className="h-btn is-light vd-cta-main">Start with just {start}<Arrow /></a>
             <a href="/copy" className="h-btn is-glass">Copy a trader</a>
           </div>
           <div className="h-up" style={{ '--d': '320ms' } as CSSProperties}><Trust /></div>

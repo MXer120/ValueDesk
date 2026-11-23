@@ -11,6 +11,8 @@ import { BrandMark } from '../../BrandMark';
 import { dropBootShell } from '../../../bootShell';
 import { Arrow, Reveal } from '../Home';
 import { HeatGlass } from '../v4/heat';
+import { FeatureFx } from '../v3/V3';
+import '../v3/v3.css';
 import { bp, FEES, startFromText, useLiveDesk } from '../shared';
 import '../home.css';
 import './site.css';
@@ -102,7 +104,7 @@ export function SiteNav({ current }: { current?: string }) {
             </div>
           </div>
           <a href={PAGE_PATHS.pricing} className={cx(current === 'fees' && 'is-on')}>Fees</a>
-          <a href="/leaderboard">Leaderboard</a>
+          <a href="/points">SoPoints</a>
           <a href={`${home}#faq`}>FAQ</a>
         </nav>
         <div className="vd-nav__cta">
@@ -122,7 +124,7 @@ export function SiteNav({ current }: { current?: string }) {
             <a key={p.key} href={p.href} className="vd-dd__item"><span className="vd-ic">{p.ic}</span><div><b>{p.t}</b><span>{p.s}</span></div></a>
           ))}
           <div className="vd-sheet__links">
-            <a href={PAGE_PATHS.pricing}>Fees</a><a href="/leaderboard">Leaderboard</a><a href={`${home}#faq`} onClick={() => setSheet(false)}>FAQ</a>
+            <a href={PAGE_PATHS.pricing}>Fees</a><a href="/points">SoPoints</a><a href={`${home}#faq`} onClick={() => setSheet(false)}>FAQ</a>
           </div>
           <div className="vd-sheet__cta">
             <a href="/bots/new" className="h-btn is-light is-block">Start a bot with {start}<Arrow /></a>
@@ -197,6 +199,7 @@ export function Ticks({ items }: { items: ReactNode[] }) {
 export function Row({ k, title, children, vis, flip, visClass }: { k: string; title: ReactNode; children: ReactNode; vis: ReactNode; flip?: boolean; visClass?: string }) {
   return (
     <Reveal className={cx('vd-row', flip && 'is-flip')}>
+      <FeatureFx v={1 + ([...k].reduce((n, ch) => n + ch.charCodeAt(0), 0) % 5)} />
       <div className="vd-row__t">
         <p className="vd-row__k">{k}</p>
         <h3>{title}</h3>
