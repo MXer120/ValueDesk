@@ -48,8 +48,8 @@ export const READY_MAX_MS = Number(process.env.VALUESCAN_HANDOVER_READY_MS) || 1
 export const REQUEST_WAIT_MS = Number(process.env.VALUESCAN_HANDOVER_REQUEST_MS) || 180_000;
 /** How long the standby waits for the running process to let a batch of Hyperliquid markets go (same thread as above). */
 export const LEND_WAIT_MS = Number(process.env.VALUESCAN_HANDOVER_LEND_MS) || 120_000;
-/** Once taken, how long the standby waits for the lock: the stop of 2026-11-08 22:46 took 351 s with its close. */
-export const LOCK_WAIT_MS = Number(process.env.VALUESCAN_HANDOVER_LOCK_MS) || 15 * 60_000;
+/** Once taken, how long the standby waits for the lock: a stop that spills a large backlog (1.8M rows took 79 s on 2026-11-23, and 14.8M waited then) must not be cut short. */
+export const LOCK_WAIT_MS = Number(process.env.VALUESCAN_HANDOVER_LOCK_MS) || 50 * 60_000;
 /**
  * The buffer's cap. Measured 2026-11-09 against the live venues (a standby on this laptop, all four sockets): 40,285
  * prints buffered in 123 s (~330 a second), the process 142 MB resident in all - so at most ~1.5 KB a print with the

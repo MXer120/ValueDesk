@@ -252,7 +252,7 @@ restart_indexer_and_api() {
 # supervisor writes where it stands to $HANDOVER_STATE; this waits for `promoted` (done) or `failed`, and on failure,
 # or no answer in HANDOVER_WAIT_S, does the classic restart below. VS_INDEXER_HANDOVER=0 (ops.local.env): always classic.
 HANDOVER_STATE="${HANDOVER_STATE:-/var/lib/valuescan/state/indexer-handover.json}"
-HANDOVER_WAIT_S="${HANDOVER_WAIT_S:-1500}"
+HANDOVER_WAIT_S="${HANDOVER_WAIT_S:-3900}"
 
 # One field of the handover state file ('' when there is none).
 handover_field() {
