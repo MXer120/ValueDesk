@@ -59,9 +59,14 @@ if (!isMainThread && (workerData as { liqHistThread?: boolean } | null)?.liqHist
 // --- the API side ------------------------------------------------------------------------------
 
 interface Waiting { ok: (json: string) => void; no: (e: Error) => void }
-let worker: Worker | null = null;
+/**
+ * THREADS of them since 2026-11-23: the heatmap's fine tiles wait on the disk (8-18 s each cold, one after the other), so a
+ * screen of them took minutes to its first column. Each with its own read-only connection; a job goes to the one with the fewest.
+ */
+export const THREADS = 3;
+const pool: Array<Worker | null> = new Array<Worker | null>(THREADS).fill(null);
 let nextId = 1;
-const running = new Map<number, { key: string; started: number; timer: NodeJS.Timeout; waiting: Waiting[] }>();
+const running = new Map<number, { slot: number; key: string; started: number; timer: NodeJS.Timeout; waiting: Waiting[] }>();
 const byKey = new Map<string, number>();
 /** Jobs done, failed and refused, for the health answer. */
 export const liqThreadStats = { done: 0, busy: 0, failed: 0, restarts: 0, longestMs: 0 };
@@ -84,10 +89,21 @@ function settle(id: number, f: (w: Waiting) => void): void {
   for (const w of r.waiting) f(w);
 }
 
-function thread(): Worker {
-  if (worker) return worker;
-  const w = new Worker(new URL(import.meta.url), { workerData: { liqHistThread: true }, resourceLimits: { maxOldGenerationSizeMb: 1536 } });
-  worker = w;
+function settleSlot(slot: number): void {
+  for (const [id, r] of [...running]) if (r.slot === slot) settle(id, (x) => x.no(new LiqBusy()));
+}
+
+function leastBusy(): number {
+  const n = new Array<number>(THREADS).fill(0);
+  for (const r of running.values()) n[r.slot]!++;
+  return n.indexOf(Math.min(...n));
+}
+
+function thread(slot: number): Worker {
+  const on = pool[slot];
+  if (on) return on;
+  const w = new Worker(new URL(import.meta.url), { workerData: { liqHistThread: true }, resourceLimits: { maxOldGenerationSizeMb: 1024 } });
+  pool[slot] = w;
   w.unref();
   w.on('message', (m: { id: number; json?: string; error?: string }) => {
     if (m.error !== undefined) { liqThreadStats.failed++; settle(m.id, (x) => x.no(new Error(m.error))); return; }
@@ -95,9 +111,9 @@ function thread(): Worker {
     settle(m.id, (x) => x.ok(m.json ?? 'null'));
   });
   const gone = () => {
-    if (worker !== w) return;
-    worker = null;
-    for (const id of [...running.keys()]) settle(id, (x) => x.no(new LiqBusy()));
+    if (pool[slot] !== w) return;
+    pool[slot] = null;
+    settleSlot(slot);
   };
   w.on('error', gone);
   w.on('exit', gone);
@@ -112,21 +128,22 @@ export async function liqJob(job: LiqJob): Promise<string> {
   if (same !== undefined) return new Promise((ok, no) => running.get(same)!.waiting.push({ ok, no }));
   if (running.size >= MAX_QUEUE) { liqThreadStats.busy++; throw new LiqBusy(); }
   const id = nextId++;
+  const slot = leastBusy();
   const p = new Promise<string>((ok, no) => {
     const timer = setTimeout(() => {
       // A statement cannot be stopped from here: the thread goes, and every ask on it is answered busy.
       liqThreadStats.busy++;
       liqThreadStats.restarts++;
-      const w = worker;
-      worker = null;
-      for (const rid of [...running.keys()]) settle(rid, (x) => x.no(new LiqBusy()));
+      const w = pool[slot];
+      pool[slot] = null;
+      settleSlot(slot);
       void w?.terminate();
     }, JOB_MS);
     timer.unref();
-    running.set(id, { key, started: Date.now(), timer, waiting: [{ ok, no }] });
+    running.set(id, { slot, key, started: Date.now(), timer, waiting: [{ ok, no }] });
   });
   byKey.set(key, id);
-  thread().postMessage({ id, job });
+  thread(slot).postMessage({ id, job });
   return p;
 }
 
@@ -138,8 +155,7 @@ export function okJson(json: string): string | null {
 
 /** Tests: stop the thread. */
 export async function stopLiqThread(): Promise<void> {
-  const w = worker;
-  worker = null;
+  const ws = pool.splice(0, THREADS, ...new Array<Worker | null>(THREADS).fill(null));
   for (const id of [...running.keys()]) settle(id, (x) => x.no(new LiqBusy()));
-  await w?.terminate();
+  await Promise.all(ws.map((w) => w?.terminate()));
 }

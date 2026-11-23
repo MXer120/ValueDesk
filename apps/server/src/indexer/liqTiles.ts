@@ -349,8 +349,8 @@ function putMeta(coin: string, venues: readonly Venue[], m: Meta): void {
  * Times and data lengths of a coin's snapshots in [from, to), read on the snapshot reader's thread (liqReadThread.ts):
  * one page per snapshot, seconds from disk, so never on this one.
  */
-async function listed(coin: string, from: number, to: number): Promise<Array<{ t: number; n: number }>> {
-  return (await liqRead({ op: 'list', coin, from, to }, reader)) ?? [];
+async function listed(coin: string, from: number, to: number, bg = false): Promise<Array<{ t: number; n: number }>> {
+  return (await liqRead({ op: 'list', coin, from, to, ...(bg ? { bg } : {}) }, reader)) ?? [];
 }
 
 /**
@@ -362,21 +362,48 @@ async function listed(coin: string, from: number, to: number): Promise<Array<{ t
  * synchronous statement per ask.
  */
 export const RELIST_MS = 10 * 60_000;
-const lists = new Map<string, { at: number; from: number; rows: Array<{ t: number; n: number }> }>();
+interface Listing { at: number; from: number; rows: Array<{ t: number; n: number }>; provisional: boolean }
+const lists = new Map<string, Listing>();
+/** A whole listing under way per coin, on the background lane. */
+const relisting = new Map<string, Promise<void>>();
 
-async function listing(coin: string, now: number): Promise<Array<{ t: number; n: number }>> {
+function relist(coin: string, now: number, from: number): Promise<void> {
+  const run = relisting.get(coin);
+  if (run) return run;
+  const p = listed(coin, from, Number.MAX_SAFE_INTEGER, true)
+    .then((rows) => { lists.set(coin, { at: now, from, rows, provisional: false }); })
+    .finally(() => { if (relisting.get(coin) === p) relisting.delete(coin); });
+  relisting.set(coin, p);
+  return p;
+}
+
+/**
+ * The coin's listing, never a view waiting for 30 days of it where one is held (2026-11-23: on a cold file the whole
+ * listing is ~2,600 page reads): the one held and its tail, listed again behind the answer past RELIST_MS; right after a
+ * restart the times and lengths of the metas' file (`provisional`: it may miss a snapshot whose meta was never made).
+ */
+async function listing(coin: string, now: number): Promise<Listing> {
   const from = now - RANGE_MS - tileMs(T_LEVELS - 1);
-  const held = lists.get(coin);
-  const last = held?.rows.at(-1);
-  if (held && last && now - held.at < RELIST_MS && from >= held.from) {
-    const tail = await listed(coin, last.t, Number.MAX_SAFE_INTEGER);
-    const keep = held.rows.filter((x) => x.t >= from && x.t < last.t);
-    held.rows = keep.concat(tail);
-    return held.rows;
+  let held = lists.get(coin);
+  if (!held) {
+    const pr = presence.get(coin);
+    if (pr?.size) {
+      const rows = [...pr].map(([t, x]) => ({ t, n: x.n })).filter((x) => x.t >= from).sort((a, b) => a.t - b.t);
+      if (rows.length) { held = { at: Number.NEGATIVE_INFINITY, from, rows, provisional: true }; lists.set(coin, held); }
+    }
   }
-  const rows = await listed(coin, from, Number.MAX_SAFE_INTEGER);
-  lists.set(coin, { at: now, from, rows });
-  return rows;
+  const last = held?.rows.at(-1);
+  if (held && last && from >= held.from) {
+    if (now - held.at >= RELIST_MS) void relist(coin, now, from).catch(() => {});
+    const tail = await listed(coin, last.t, Number.MAX_SAFE_INTEGER);
+    const h = lists.get(coin) ?? held;
+    // A whole listing that came in meanwhile already holds the tail.
+    if (h !== held) return h;
+    held.rows = held.rows.filter((x) => x.t >= from && x.t < last.t).concat(tail);
+    return held;
+  }
+  await relist(coin, now, from);
+  return lists.get(coin)!;
 }
 
 /** The coins with snapshots, kept a minute. */
@@ -676,8 +703,9 @@ async function walkMetas(coin: string, sets: ReadonlyArray<readonly Venue[]>, li
   // This thread's work since it was last given back: the stretches between waits (a read run inline is one of them).
   let worked = 0;
   let since = performance.now();
-  for (let i = 0; i < list.length;) {
-    const end = Math.min(list.length, i + READ_BATCH);
+  // Newest first: the right edge is what a view opens on, and the index can be answered from it (partialIndex).
+  for (let end = list.length; end > 0;) {
+    const i = Math.max(0, end - READ_BATCH);
     const need: number[] = [];
     const needPairs: Array<[number, number]> = [];
     const needSets = new Set<number>();
@@ -725,8 +753,8 @@ async function walkMetas(coin: string, sets: ReadonlyArray<readonly Venue[]>, li
       await Promise.all(joins);
       since = performance.now();
     }
-    i = end;
-    if (prog) prog.done = i;
+    if (prog) prog.done += end - i;
+    end = i;
     if (worked + performance.now() - since > YIELD_MS) {
       if (restMs > 0) await pause(restMs, undefined, { ref: false });
       else await nextTurn();
@@ -777,6 +805,11 @@ export interface LiqTileIndex {
   scale: Record<string, number>;
   /** Coins with snapshots (as the history route's `coins`). */
   coins: string[];
+  /**
+   * Still being read: every snapshot is listed (one not read yet with p and st 0, the newest always read), so the tiles
+   * on screen can be asked at once; `scale` is of the snapshots read so far. Asked again shortly, never cached.
+   */
+  partial?: { done: number; of: number };
 }
 
 export interface TileAsk {
@@ -816,7 +849,7 @@ export const INDEX_MEMO_MS = 10_000;
 const INDEX_MEMO_MAX = 64;
 const indexMemo = new Map<string, { at: number; body: LiqTileIndex }>();
 /** An index walk under way: how many of its listed snapshots are done. */
-const building = new Map<string, { done: number; of: number }>();
+const building = new Map<string, { done: number; of: number; list: ReadonlyArray<{ t: number; n: number }>; coins: string[] }>();
 
 /**
  * The index of `coin`'s history over `venues` (null: no index file yet). One walk per set at a time: an ask while one
@@ -832,15 +865,29 @@ export function liqTileIndex(coin: string, venues: readonly Venue[], now = Date.
     readMetas();
     let list: Array<{ t: number; n: number }> = [];
     let coins: string[] = [];
+    let provisional = false;
+    const inRange = (l: Listing) => l.rows.filter((x) => x.t >= now - RANGE_MS);
     try {
-      list = (await listing(coin, now)).filter((x) => x.t >= now - RANGE_MS);
+      const l = await listing(coin, now);
+      list = inRange(l);
+      provisional = l.provisional;
       coins = await coinsOf(now);
     } catch { /* the table arrives with the indexer's first start */ }
-    const prog = { done: 0, of: list.length };
+    const prog = { done: 0, of: list.length, list, coins };
     building.set(vk, prog);
     let snaps: Meta[];
     try {
       snaps = (await walkMetas(coin, [venues], list, 0, prog))[0]!;
+      if (provisional) {
+        // The metas' file may miss a snapshot: the whole index is of the listing itself.
+        await relist(coin, now, now - RANGE_MS - tileMs(T_LEVELS - 1)).catch(() => {});
+        const l = lists.get(coin);
+        if (l) list = inRange(l);
+        prog.done = 0;
+        prog.of = list.length;
+        prog.list = list;
+        snaps = (await walkMetas(coin, [venues], list, 0, prog))[0]!;
+      }
     } finally {
       if (building.get(vk) === prog) building.delete(vk);
     }
@@ -864,6 +911,28 @@ export function liqTileIndex(coin: string, venues: readonly Venue[], now = Date.
 
 /** The route waits this long for an index; past it, the answer is how far the walk is, and the walk goes on. */
 export const INDEX_BUDGET_MS = 4_000;
+/** Past this, the index as far as it is read (partialIndex) once its newest snapshot is. */
+export const PARTIAL_AFTER_MS = 400;
+
+/** The index of a walk under way: every snapshot listed, the scale of those read; null until the newest is read. */
+function partialIndex(coin: string, venues: readonly Venue[]): LiqTileIndex | null {
+  const b = building.get(venueKey(coin, venues));
+  const tip = b?.list.at(-1);
+  const last = tip && heldMeta(coin, venues, tip);
+  if (!b || !last) return null;
+  const read: Meta[] = [];
+  const points = b.list.map((x) => {
+    const m = heldMeta(coin, venues, x);
+    if (m) read.push(m);
+    return { t: x.t, p: m?.p ?? 0, st: m?.st ?? 0 };
+  });
+  return {
+    coin, venues: [...venues], newest: last.t,
+    slot: SLOT_MS, bw: bandWidth(last.p), tLevels: T_LEVELS, pLevels: P_LEVELS,
+    points, scale: histScales(read), coins: b.coins,
+    partial: { done: read.length, of: b.list.length },
+  };
+}
 
 /**
  * liqTileIndex within `budgetMs`: the index, null (no index file), or how far its walk is ('building': the route answers
@@ -872,11 +941,18 @@ export const INDEX_BUDGET_MS = 4_000;
  */
 export async function liqTileIndexIn(coin: string, venues: readonly Venue[], budgetMs = INDEX_BUDGET_MS, now = Date.now()): Promise<LiqTileIndex | null | { building: { done: number; of: number } }> {
   const p = liqTileIndex(coin, venues, now);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<'late'>((ok) => { timer = setTimeout(() => ok('late'), budgetMs); timer.unref?.(); });
-  const r = await Promise.race([p, late]);
-  clearTimeout(timer);
-  if (r !== 'late') return r;
+  const until = performance.now() + budgetMs;
+  // In steps: the whole index when it is ready, else as far as it is read, as soon as its newest snapshot is.
+  for (let wait = Math.min(budgetMs, PARTIAL_AFTER_MS); ; wait = Math.min(200, until - performance.now())) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<'late'>((ok) => { timer = setTimeout(() => ok('late'), Math.max(0, wait)); timer.unref?.(); });
+    const r = await Promise.race([p, late]);
+    clearTimeout(timer);
+    if (r !== 'late') return r;
+    const part = partialIndex(coin, venues);
+    if (part) { void p.catch(() => {}); return part; }
+    if (performance.now() >= until) break;
+  }
   void p.catch(() => {});
   const prog = building.get(venueKey(coin, venues));
   return { building: { done: prog?.done ?? 0, of: prog?.of ?? 0 } };
@@ -898,7 +974,10 @@ export async function warmLiqMetas(now = Date.now(), restMs = WARM_REST_MS): Pro
   try { coins = await coinsOf(now); } catch { return 0; }
   for (const coin of coins) {
     let list: Array<{ t: number; n: number }>;
-    try { list = (await listing(coin, now)).filter((x) => x.t >= now - RANGE_MS); } catch { continue; }
+    try {
+      if (!lists.has(coin)) await relist(coin, now, now - RANGE_MS - tileMs(T_LEVELS - 1));
+      list = (await listing(coin, now)).rows.filter((x) => x.t >= now - RANGE_MS);
+    } catch { continue; }
     if (!list.length) continue;
     await walkMetas(coin, [[...VENUES], ...askedSets(coin, now)], list, restMs);
     trimCoin(coin, new Set(list.map((x) => x.t)));
@@ -1029,7 +1108,13 @@ export function liqTile(coin: string, venues: readonly Venue[], ask: TileAsk): P
     readMetas();
     const end = ask.tt + tileMs(ask.tl);
     let after: Array<{ t: number; n: number }> = [];
-    try { after = (await listing(coin, Date.now())).filter((x) => x.t >= ask.tt); } catch { /* no table yet */ }
+    try {
+      const l = lists.get(coin);
+      // Without the whole listing held: the slot's own stretch of it (a tile never waits for the 30 days, and a final one is never cut of a listing with gaps).
+      after = l && !l.provisional
+        ? (await listing(coin, Date.now())).rows.filter((x) => x.t >= ask.tt)
+        : await listed(coin, ask.tt, end + SLOT_MS);
+    } catch { /* no table yet */ }
     const newest = after.at(-1)?.t ?? null;
     const upTo = Math.min(end - 1, ask.v ?? Number.MAX_SAFE_INTEGER);
     const list = after.filter((x) => x.t <= upTo);
@@ -1057,6 +1142,7 @@ export function resetLiqTiles(): void {
   pendingMetas.clear();
   resetLiqReadThread();
   lists.clear();
+  relisting.clear();
   coinsHeld = null;
   metasFile = undefined;
   metasRead = false;

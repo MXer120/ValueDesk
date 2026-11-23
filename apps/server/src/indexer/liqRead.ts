@@ -1024,11 +1024,18 @@ export function liqHistoryFine(coin: string, venues: readonly Venue[], t0: numbe
     let going = true;
     if (bandFrom !== null) {
       // The bands overlapping the window, newest snapshot first: each snapshot's put back together.
-      const rows = s.liqHistFineBands(coin, t0, t1, ask.from, ask.to);
+      // Only the snapshots drawn are read: one whose bar is already drawn adds nothing (add), and its data is a disk read
+      // (production 2026-11-23: a 6 h tile 8-10 s cold; a 1 h chart read four snapshots for each it drew).
+      const rows = s.liqHistFineBandKeys(coin, t0, t1, ask.from, ask.to);
       for (let k = 0; k < rows.length && going;) {
         const t = rows[k]!.t;
+        if (barOf(t) === lastBar) { k++; continue; }
         const parts: FineSnap[] = [];
-        for (; k < rows.length && rows[k]!.t === t; k++) { const f = parse(rows[k]!.data); if (f) parts.push(f); }
+        for (; k < rows.length && rows[k]!.t === t; k++) {
+          const data = s.liqHistFineBandAt(coin, t, rows[k]!.lo);
+          const f = data && parse(data);
+          if (f) parts.push(f);
+        }
         const f = mergeFine(parts);
         if (f) going = add(t, f);
       }

@@ -4325,6 +4325,17 @@ export class IndexStore {
       .all(coin, fromT, toT, hi, lo) as Array<{ t: number; lo: number; hi: number; data: Uint8Array }>;
   }
 
+  /** The bands of liqHistFineBands without their data (newest snapshot first): what a tile reads is picked from them. */
+  liqHistFineBandKeys(coin: string, fromT: number, toT: number, lo: number, hi: number): Array<{ t: number; lo: number }> {
+    return this.q('SELECT t, lo FROM liq_hist_fine_band WHERE coin = ? AND t >= ? AND t <= ? AND lo < ? AND hi > ? ORDER BY t DESC, lo')
+      .all(coin, fromT, toT, hi, lo) as Array<{ t: number; lo: number }>;
+  }
+
+  /** One fine band's data (null: gone). */
+  liqHistFineBandAt(coin: string, t: number, lo: number): Uint8Array | null {
+    return (this.q('SELECT data FROM liq_hist_fine_band WHERE coin = ? AND t = ? AND lo = ?').get(coin, t, lo) as { data: Uint8Array } | undefined)?.data ?? null;
+  }
+
   /** When a coin's fine bands begin (null: none yet). */
   liqHistFineBandFrom(coin: string): number | null {
     return (this.q('SELECT MIN(t) AS t FROM liq_hist_fine_band WHERE coin = ?').get(coin) as { t: number | null }).t;

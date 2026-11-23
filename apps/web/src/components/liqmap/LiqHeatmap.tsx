@@ -488,7 +488,7 @@ export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbo
             strip={histOn ? stripData : profile}
             profile={!histOn}
             fmt={histOn ? fmtUsdShort : (v) => fmtVal(v, unit, coin)}
-            note={histOn ? histEmpty ?? (hf.waiting && fineView ? `Reading the ${stepLabel(fineView.step)} levels…` : null) : profile ? null : nowEmpty}
+            note={histOn ? histEmpty ?? (fineView && hf.reading ? `Reading the ${stepLabel(fineView.step)} levels: ${hf.reading.done} of ${hf.reading.of}` : hist.reading ? `Reading the levels: ${hist.reading.done} of ${hist.reading.of}` : null) : profile ? null : nowEmpty}
             onWindow={onWindow}
             onTimes={onTimes}
             onPick={setPick}

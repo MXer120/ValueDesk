@@ -54,6 +54,8 @@ export interface TileCut {
    * what it gained since are held, those instead of its 6 h tile. Needs the index's points.
    */
   singles?: boolean;
+  /** Narrower time slots (up to TIME_TILES_DENSE across) and less around them (MARGIN_DENSE): the map fills in smaller pieces, as many in all. */
+  dense?: boolean;
   /** Is this tile held? */
   has?: (k: TileKey) => boolean;
   /** The newest `v` of a tile held for this key's 6 h slot, band and cut (its own `v` aside); null: none. */
@@ -76,9 +78,11 @@ export function drawnIn(points: ReadonlyArray<{ t: number }>, t0: number, t1: nu
 export const RANGE_MS = 30 * 86_400_000;
 /** Tiles across the window at most, before a level of wider ones is taken. */
 const TIME_TILES = 4;
+const TIME_TILES_DENSE = 8;
 const PRICE_TILES = 3;
 /** Read around the window, this share of it each side (to the left in time: the right edge is now). */
 export const MARGIN = 0.5;
+const MARGIN_DENSE = 0.25;
 
 export const tileMsOf = (g: Pick<TileGrid, 'slot'>, tl: number): number => g.slot * 4 ** tl;
 export const bandSpanOf = (bw: number, pl: number): number => +(bw * 4 ** pl).toPrecision(12);
@@ -100,17 +104,19 @@ export function tilesFor(g: TileGrid, w: TileWindow, cut: TileCut = {}): TileKey
   if (newest === null || !(g.bw > 0) || !(w.t1 > w.t0) || !(w.hi > w.lo)) return [];
   const tSpan = Math.max(w.t1 - w.t0, g.slot);
   const pSpan = w.hi - w.lo;
-  let tl = 0;
-  while (tl < g.tLevels - 1 && tSpan / tileMsOf(g, tl) > TIME_TILES) tl++;
   let pl = 0;
   while (pl < g.pLevels - 1 && pSpan / bandSpanOf(g.bw, pl) > PRICE_TILES) pl++;
+  const margin = cut.dense ? MARGIN_DENSE : MARGIN;
+  const across = cut.dense ? TIME_TILES_DENSE : TIME_TILES;
+  let tl = 0;
+  while (tl < g.tLevels - 1 && tSpan / tileMsOf(g, tl) > across) tl++;
   // Never before the oldest snapshot listed: a daily chart spans months, and the tiles before it are empty.
-  const from = Math.max(w.t0 - tSpan * MARGIN, newest - RANGE_MS, g.points?.[0]?.t ?? -Infinity);
-  const to = Math.min(w.t1 + tSpan * MARGIN, newest + 1);
+  const from = Math.max(w.t0 - tSpan * margin, newest - RANGE_MS, g.points?.[0]?.t ?? -Infinity);
+  const to = Math.min(w.t1 + tSpan * margin, newest + 1);
   if (!(to > from)) return [];
   const span = bandSpanOf(g.bw, pl);
-  const b0 = Math.max(0, Math.floor(Math.max(0, w.lo - pSpan * MARGIN) / span));
-  const b1 = Math.max(b0, Math.floor((w.hi + pSpan * MARGIN) / span));
+  const b0 = Math.max(0, Math.floor(Math.max(0, w.lo - pSpan * margin) / span));
+  const b1 = Math.max(b0, Math.floor((w.hi + pSpan * margin) / span));
   const fields = cut.slim ? { fields: 'ls' as const } : {};
   const bars = cut.draw ? { every: cut.draw.every, off: cut.draw.off } : {};
   const singlesOn = !!cut.singles && !!g.points?.length && !!cut.heldV;
@@ -154,8 +160,10 @@ export function tilesFor(g: TileGrid, w: TileWindow, cut: TileCut = {}): TileKey
       else out.push(keyOf(s, band));
     }
   }
-  // On screen first, the newest first (the right edge is where the eye is).
-  return out.sort((a, b) => Number(b.near) - Number(a.near) || b.t0 - a.t0 || a.band - b.band);
+  // On screen first, the newest first (the right edge is where the eye is), from the middle of the price axis out.
+  const mid = (w.lo + w.hi) / 2;
+  const off = (k: TileKey) => Math.abs((k.lo + k.hi) / 2 - mid);
+  return out.sort((a, b) => Number(b.near) - Number(a.near) || b.t0 - a.t0 || off(a) - off(b) || a.band - b.band);
 }
 
 /** A tile's cache key: the URL's parts. */

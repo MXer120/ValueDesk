@@ -50,14 +50,19 @@ export type { DrawGrid, TileWindow } from './tileGrid';
 export const INDEX_POLL_MS = 60_000;
 /** Rows kept in the tab (~60 bytes each): BTC's 30 days at every price are ~0.4M. */
 export const MAX_ROWS = 600_000;
-/** A tile that failed is asked again after this. */
-const RETRY_MS = 20_000;
+/** A tile that failed is asked again after this, doubling to RETRY_MAX_MS. */
+const RETRY_MS = 3_000;
+const RETRY_MAX_MS = 24_000;
+/** Tiles asked at once: in the order wanted (on screen, newest first), so what is looked at is never behind what is not. */
+const PARALLEL = 6;
+/** A window that rests this long is read. */
+const SETTLE_MS = 350;
 /** An index the server is still reading (its answer 'building': a venue set read for the first time) is asked again after this. */
 export const BUILD_RETRY_MS = 2_000;
 
 // --- the tiles held in this tab ------------------------------------------------------------
 
-interface Held { tile: LiqTile | null; rows: number; failedAt: number; loading: Promise<void> | null; t0: number; t1: number; lo: number; hi: number; slot?: string; v?: number }
+interface Held { tile: LiqTile | null; rows: number; failedAt: number; fails: number; loading: Promise<void> | null; t0: number; t1: number; lo: number; hi: number; slot?: string; v?: number }
 const held = new Map<string, Held>();
 let rowsHeld = 0;
 /** The `v` of each tile held of a 6 h slot still filling, by slot, band and cut (tileGrid.ts slotId): what singles grow it from. */
@@ -92,14 +97,17 @@ function trim(keep: ReadonlySet<string>): void {
   }
 }
 
-/** Read a tile unless held or on its way: a promise when a read starts, null when there is nothing to do. */
+/**
+ * Read a tile unless held: its promise, also when it is already on its way - asked by the window before, whose own
+ * redraw is off by then (2026-11-23: a tile that landed after the window moved was held but not drawn). Null: nothing to wait for.
+ */
 function fetchTile(coin: string, venues: readonly Venue[], vkey: string, k: TileKey, wallets: readonly string[]): Promise<void> | null {
   const id = tileId(coin, vkey, k);
   const h = held.get(id);
   if (h?.tile) { touch(id, h); return null; }
-  if (h?.loading) return null;
-  if (h && Date.now() - h.failedAt < RETRY_MS) return null;
-  const entry: Held = { tile: null, rows: 0, failedAt: 0, loading: null, t0: k.t0, t1: k.t1, lo: k.lo, hi: k.hi, ...(k.v !== undefined ? { slot: slotId(coin, vkey, k), v: k.v } : {}) };
+  if (h?.loading) return h.loading;
+  if (h && Date.now() - h.failedAt < Math.min(RETRY_MAX_MS, RETRY_MS * 2 ** (h.fails - 1))) return null;
+  const entry: Held = { tile: null, rows: 0, failedAt: 0, fails: h?.fails ?? 0, loading: null, t0: k.t0, t1: k.t1, lo: k.lo, hi: k.hi, ...(k.v !== undefined ? { slot: slotId(coin, vkey, k), v: k.v } : {}) };
   entry.loading = vsApi.liquidationTile(coin, venues, { tl: k.tl, tt: k.tt, pl: k.pl, band: k.band, bw: k.bw, v: k.v, at: k.at, fields: k.fields, every: k.every, off: k.off }, undefined, wallets).then(
     (tile) => {
       entry.tile = tile;
@@ -112,7 +120,7 @@ function fetchTile(coin: string, venues: readonly Venue[], vkey: string, k: Tile
         vs.add(entry.v);
       }
     },
-    () => { entry.failedAt = Date.now(); entry.loading = null; },
+    () => { entry.failedAt = Date.now(); entry.fails++; entry.loading = null; },
   );
   held.set(id, entry);
   return entry.loading;
@@ -155,6 +163,8 @@ export interface HistTiles {
   grid: TileGrid | null;
   /** The server is reading the index for the first time: how many of its snapshots are done (asked again shortly). */
   building: { done: number; of: number } | null;
+  /** The tiles on screen: how many are in, while some are not (null: all in). */
+  reading: { done: number; of: number } | null;
   error: string | null;
 }
 
@@ -199,6 +209,13 @@ export function useHistTiles(coin: string | null, venues: readonly Venue[], view
     const t = window.setTimeout(ir.retry, BUILD_RETRY_MS);
     return () => window.clearTimeout(t);
   }, [building]); // eslint-disable-line react-hooks/exhaustive-deps
+  // An index still being read ('partial'): every snapshot listed, so the tiles on screen are asked now; its scale follows.
+  const partial = !!idx?.partial;
+  useEffect(() => {
+    if (!partial) return;
+    const t = window.setTimeout(ir.retry, BUILD_RETRY_MS);
+    return () => window.clearTimeout(t);
+  }, [idx]); // eslint-disable-line react-hooks/exhaustive-deps
   // The one-piece history: only for a server without the tile route (404). Not when the tile index failed or timed out:
   // then every open view asked the heaviest answer there is (30 days of snapshots: BTC 64.6 MB) of a server already
   // slow - on 2026-11-07, while tiles took 4-19 s, history asks held the API 12-53 s each.
@@ -211,7 +228,7 @@ export function useHistTiles(coin: string | null, venues: readonly Venue[], view
   const draw = typeof o.draw === 'function' ? o.draw(last ? { st: last.st, p: last.p } : null) : o.draw ?? null;
   const slim = !!o.slim;
   const want = useMemo(() => (idx && w && coin
-    ? tilesFor(idx, w, { slim, draw, singles: true, has: (k) => !!held.get(tileId(coin, vkey, k))?.tile, heldV: (k) => heldV(coin, vkey, k) })
+    ? tilesFor(idx, w, { slim, draw, singles: true, dense: true, has: (k) => !!held.get(tileId(coin, vkey, k))?.tile, heldV: (k) => heldV(coin, vkey, k) })
     : []), [idx?.newest, idx?.bw, idx?.slot, idx?.points[0]?.t, idx?.points.length, w?.t0, w?.t1, w?.lo, w?.hi, slim, draw?.every, draw?.off]); // eslint-disable-line react-hooks/exhaustive-deps
   const wantKey = idx ? want.map((k) => tileId(coin!, vkey, k)).join(' ') : '';
   const [ver, setVer] = useState(0);
@@ -223,12 +240,33 @@ export function useHistTiles(coin: string | null, venues: readonly Venue[], view
     if (!idx || !want.length || !coin) return;
     let alive = true;
     const bump = () => { if (alive) setVer((v) => v + 1); };
-    const read = (ks: readonly TileKey[]) => ks.map((k) => fetchTile(coin, venuesRef.current, vkey, k, walletsRef.current)).filter((p): p is Promise<void> => !!p).map((p) => p.then(bump));
-    // On screen first; around it once that is in. A tile that failed is asked again while it is wanted.
-    void Promise.allSettled(read(want.filter((k) => k.near))).then(() => { if (alive) read(want.filter((k) => !k.near)); });
+    // A few at once, in order: on screen first, around it once none of those is on its way; each drawn as it lands. A tile
+    // that failed is asked again while it is wanted; one not begun when the window moves is never asked.
+    const waiting = new Set<string>();
+    let nearLeft = 0;
+    const pump = () => {
+      if (!alive) return;
+      for (const k of want) {
+        if (waiting.size >= PARALLEL || (!k.near && nearLeft > 0)) return;
+        const id = tileId(coin, vkey, k);
+        if (waiting.has(id)) continue;
+        const p = fetchTile(coin, venuesRef.current, vkey, k, walletsRef.current);
+        if (!p) continue;
+        waiting.add(id);
+        if (k.near) nearLeft++;
+        void p.then(() => {
+          waiting.delete(id);
+          if (k.near) nearLeft--;
+          bump();
+          pump();
+        });
+      }
+    };
+    // Once the window rests: a timeframe switch or a drag passes through windows nobody looks at.
+    const rest = window.setTimeout(pump, SETTLE_MS);
     trim(new Set(want.map((k) => tileId(coin, vkey, k))));
-    const again = window.setInterval(() => read(want), RETRY_MS);
-    return () => { alive = false; window.clearInterval(again); };
+    const again = window.setInterval(pump, RETRY_MS);
+    return () => { alive = false; window.clearTimeout(rest); window.clearInterval(again); };
   }, [wantKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const memo = useRef<Memo>(new Map());
@@ -252,6 +290,9 @@ export function useHistTiles(coin: string | null, venues: readonly Venue[], view
     return (side: 'both' | 'long' | 'short', lev: LevFilter) => sc?.[scaleKeyOf(side, lev)] ?? 1;
   }, [hist, idx]);
 
+  const near = coin && idx && !hist ? want.filter((k) => k.near) : [];
+  const nearIn = near.reduce((n, k) => n + (held.get(tileId(coin!, vkey, k))?.tile ? 1 : 0), 0);
+
   return {
     list: hist ? hist.points : idx?.points ?? EMPTY,
     points,
@@ -259,6 +300,7 @@ export function useHistTiles(coin: string | null, venues: readonly Venue[], view
     ready: !!(hist || idx),
     grid: hist ? null : idx,
     building: buildingNow ? { done: buildingNow.done, of: buildingNow.of } : null,
+    reading: nearIn < near.length ? { done: nearIn, of: near.length } : null,
     error: whole ? (hist ? null : hr.error) : idx || buildingNow ? null : ir.error,
   };
 }

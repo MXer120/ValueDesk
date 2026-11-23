@@ -46,6 +46,10 @@ export type FinePart = NonNullable<HeatPoint['f']>;
 
 /** Tests: how long a failed tile waits before it is asked again. */
 export const FINE_RETRY_MS = 20_000;
+/** Tiles asked at once: the server reads three at a time (liqHistThread.ts THREADS). */
+const PARALLEL = 4;
+/** A window that rests this long is read (histTiles.ts). */
+const SETTLE_MS = 350;
 
 /**
  * The pool for a step and the price a pixel spans: the largest power of two of steps within a
@@ -109,7 +113,7 @@ export function withParts(points: readonly HeatPoint[], parts: ReadonlyMap<numbe
 
 // --- the tiles held in this tab ------------------------------------------------------------------
 
-interface Held { tile: LiqHistoryFine | null; failedAt: number; loading: boolean; rows: number }
+interface Held { tile: LiqHistoryFine | null; failedAt: number; loading: Promise<void> | null; rows: number }
 const held = new Map<string, Held>();
 let rowsHeld = 0;
 /** Rows kept (as histTiles.ts MAX_ROWS). */
@@ -141,6 +145,8 @@ export interface HistFine {
   step: number | null;
   /** The step asked is still being read (what is drawn is the step before, or blank). */
   waiting: boolean;
+  /** The tiles of it on screen, while some are not in (null: all in, or none asked). */
+  reading: { done: number; of: number } | null;
   /** When the coin's fine levels begin (null: not known yet). */
   since: number | null;
 }
@@ -152,7 +158,7 @@ export interface HistFine {
 export function useHistFine(coin: string, venues: readonly Venue[], grid: TileGrid | null, w: TileWindow | null, view: FineView | null, points: readonly HeatPoint[]): HistFine {
   const vkey = venues.join(',');
   const vk = view ? viewKey(coin, vkey, view) : null;
-  const ks = useMemo(() => (grid && w && view ? tilesFor(grid, w) : []), [grid?.newest, grid?.bw, grid?.slot, grid?.points?.[0]?.t, w?.t0, w?.t1, w?.lo, w?.hi, !!view]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ks = useMemo(() => (grid && w && view ? tilesFor(grid, w, { dense: true }) : []), [grid?.newest, grid?.bw, grid?.slot, grid?.points?.[0]?.t, w?.t0, w?.t1, w?.lo, w?.hi, !!view]); // eslint-disable-line react-hooks/exhaustive-deps
   const wantKey = vk ? `${vk}~${ks.map((k) => tileId('', '', k)).join(' ')}` : '';
   const [ver, setVer] = useState(0);
   const viewRef = useRef(view);
@@ -165,31 +171,50 @@ export function useHistFine(coin: string, venues: readonly Venue[], grid: TileGr
     if (!vk || !v || !ks.length) return;
     let alive = true;
     const bump = () => { if (alive) setVer((n) => n + 1); };
-    const read = (list: readonly TileKey[]): Array<Promise<void>> => list.flatMap((k) => {
+    /** A tile's read, also when the window before began it (its redraw is off by then: histTiles.ts); null: nothing to wait for. */
+    const read = (k: TileKey): Promise<void> | null => {
       const id = fineTileId(vk, k);
       const h = held.get(id);
-      if (h && (h.tile || h.loading || Date.now() - h.failedAt < FINE_RETRY_MS)) return [];
-      const e: Held = { tile: null, failedAt: 0, loading: true, rows: 0 };
+      if (h?.loading) return h.loading;
+      if (h && (h.tile || Date.now() - h.failedAt < FINE_RETRY_MS)) return null;
+      const e: Held = { tile: null, failedAt: 0, loading: null, rows: 0 };
       held.set(id, e);
       // Inclusive times (store.liqHistFineBands): the slot's last millisecond, not the next slot's first snapshot.
-      return [vsApi.liquidationHistoryFine(coin, venuesRef.current, {
+      e.loading = vsApi.liquidationHistoryFine(coin, venuesRef.current, {
         step: v.step, from: k.lo, to: k.hi, t0: k.t0, t1: k.t1 - 1,
         every: v.every, off: v.off, pool: v.pool || undefined, side: v.side, lev: v.lev, v: k.v, wallets: v.wallets,
       }).then(
-        (tile) => { e.tile = tile; e.loading = false; e.rows = tile.points.reduce((n, q) => n + q.b.length, 0); rowsHeld += e.rows; },
-        () => { e.failedAt = Date.now(); e.loading = false; },
-      ).then(bump)];
-    });
-    void Promise.allSettled(read(ks.filter((k) => k.near))).then(() => { if (alive) read(ks.filter((k) => !k.near)); });
+        (tile) => { e.tile = tile; e.loading = null; e.rows = tile.points.reduce((n, q) => n + q.b.length, 0); rowsHeld += e.rows; },
+        () => { e.failedAt = Date.now(); e.loading = null; },
+      );
+      return e.loading;
+    };
+    // A few at once, in order (on screen, newest first), as histTiles.ts: each drawn as it lands.
+    const waiting = new Set<string>();
+    let nearLeft = 0;
+    const pump = () => {
+      if (!alive) return;
+      for (const k of ks) {
+        if (waiting.size >= PARALLEL || (!k.near && nearLeft > 0)) return;
+        const id = fineTileId(vk, k);
+        if (waiting.has(id)) continue;
+        const p = read(k);
+        if (!p) continue;
+        waiting.add(id);
+        if (k.near) nearLeft++;
+        void p.then(() => { waiting.delete(id); if (k.near) nearLeft--; bump(); pump(); });
+      }
+    };
+    const rest = window.setTimeout(pump, SETTLE_MS);
     trim(new Set(ks.map((k) => fineTileId(vk, k))));
-    const again = window.setInterval(() => read(ks), FINE_RETRY_MS);
-    return () => { alive = false; window.clearInterval(again); };
+    const again = window.setInterval(pump, FINE_RETRY_MS);
+    return () => { alive = false; window.clearTimeout(rest); window.clearInterval(again); };
   }, [wantKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The view whose tiles on screen were last all in: drawn while another is read.
   const shown = useRef<{ vk: string; step: number } | null>(null);
   return useMemo((): HistFine => {
-    if (!vk || !view) return { points: points as HeatPoint[], step: null, waiting: false, since: null };
+    if (!vk || !view) return { points: points as HeatPoint[], step: null, waiting: false, reading: null, since: null };
     const r = fineFrame(points, vk, view.step, ks, shown.current, heldState);
     if (!r.waiting) shown.current = { vk, step: view.step };
     return r;
@@ -203,14 +228,16 @@ export function useHistFine(coin: string, venues: readonly Venue[], grid: TileGr
  */
 export function fineFrame(points: readonly HeatPoint[], vk: string, step: number, ks: readonly TileKey[], prev: { vk: string; step: number } | null, get: (id: string) => TileState): HistFine {
   const near = ks.filter((k) => k.near);
-  if (!near.length) return { points: points as HeatPoint[], step: null, waiting: false, since: null };
+  if (!near.length) return { points: points as HeatPoint[], step: null, waiting: false, reading: null, since: null };
+  const nearIn = near.reduce((n, k) => n + (get(fineTileId(vk, k))?.tile ? 1 : 0), 0);
+  const reading = nearIn < near.length ? { done: nearIn, of: near.length } : null;
   // A tile that failed counts as in: it is asked again, its columns at their own step meanwhile.
   const allIn = (v: string) => near.every((k) => { const h = get(fineTileId(v, k)); return !!h && (!!h.tile || h.failed); });
   const tiles = (v: string) => ks.flatMap((k) => { const t = get(fineTileId(v, k))?.tile; return t ? [t] : []; });
   const frame = (v: string, st: number, waiting: boolean, blank: boolean): HistFine => {
     const ts = tiles(v);
     const since = ts.find((t) => t.since !== null)?.since ?? null;
-    return { points: withParts(points, partsOf(ts), since, st, blank), step: st, waiting, since };
+    return { points: withParts(points, partsOf(ts), since, st, blank), step: st, waiting, reading, since };
   };
   if (allIn(vk)) return frame(vk, step, false, false);
   if (prev && prev.vk !== vk && allIn(prev.vk)) return frame(prev.vk, prev.step, true, false);

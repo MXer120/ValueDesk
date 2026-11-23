@@ -156,11 +156,20 @@ test('an index not ready within the budget is answered with how far it is, and i
   };
   try {
     const r = await T.liqTileIndexIn('SLOW', ['hyperliquid'], 1);
-    assert.ok(r && 'building' in r, 'past the budget: how far it is');
-    assert.equal(r.building.of, ts.length);
-    assert.ok(r.building.done >= 0 && r.building.done < ts.length, JSON.stringify(r.building));
+    // As soon as the newest batch is read: every snapshot listed, those read with their price, the grid of the newest.
+    assert.ok(r && !('building' in r) && r.partial, 'past the budget: the index as far as it is read');
+    assert.equal(r.partial.of, ts.length);
+    assert.ok(r.partial.done > 0 && r.partial.done < ts.length, JSON.stringify(r.partial));
+    assert.deepEqual(r.points.map((q) => q.t), ts, 'every snapshot listed');
+    assert.equal(r.newest, ts.at(-1));
+    assert.ok(r.bw > 0 && r.points.at(-1)!.p > 0 && r.points[0]!.p === 0, 'newest first');
+    // Its tiles are the whole index's: the same rows, asked while the walk still runs.
+    const ask = { tl: 0, tt: Math.floor(r.newest! / T.tileMs(0)) * T.tileMs(0), pl: 0, band: Math.floor(r.points.at(-1)!.p / r.bw), bw: r.bw, v: r.newest! };
+    const early = (await T.liqTile('SLOW', ['hyperliquid'], ask))!;
+    assert.ok(early.final && early.points.length > 0);
     const done = await T.liqTileIndexIn('SLOW', ['hyperliquid'], 60_000);
-    assert.ok(done && !('building' in done) && done.points.length === ts.length, 'the next ask joins the walk and gets the index');
+    assert.ok(done && !('building' in done) && done.points.length === ts.length && !done.partial, 'the next ask joins the walk and gets the index');
+    assert.deepEqual((await T.liqTile('SLOW', ['hyperliquid'], ask))!.points, early.points);
   } finally {
     IndexStore.prototype.liqHistRange = range;
   }

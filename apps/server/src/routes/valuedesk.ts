@@ -803,7 +803,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
           const { done, of } = body.building;
           return { ok: false, code: 'building', error: `Reading the snapshots: ${done} of ${of}`, done, of };
         }
-        reply.header('Cache-Control', ws.length ? TILE_WALLET_CACHE : TILE_INDEX_CACHE);
+        reply.header('Cache-Control', body.partial ? 'no-store' : ws.length ? TILE_WALLET_CACHE : TILE_INDEX_CACHE);
         return { ok: true, ...body };
       }
       const ask = tileAskOf(q);

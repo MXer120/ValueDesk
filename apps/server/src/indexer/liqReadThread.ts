@@ -29,7 +29,8 @@ export type TileRowsWire = { p: number; st: number; b: SnapRow[] };
 export type TileRowsAsk = { op: 'tileRows'; coin: string; venues: Venue[]; ts: number[]; ns: number[]; span: number; band: number; slim: boolean; range: boolean };
 
 export type LiqRead =
-  | { op: 'list'; coin: string; from: number; to: number }
+  /** `bg`: a whole listing nobody waits for, on the background lane. */
+  | { op: 'list'; coin: string; from: number; to: number; bg?: boolean }
   | { op: 'coins' }
   | { op: 'snaps'; coin: string; ts: number[] }
   /**
@@ -149,7 +150,10 @@ if (!isMainThread && (workerData as { liqReadThread?: boolean } | null)?.liqRead
 // --- the API side ------------------------------------------------------------------------------
 
 /** Each lane has its own thread and connection: the copy fills never wait behind a heatmap read, nor it behind them. */
-export type ReadLane = 'liq' | 'fills' | 'scan';
+/* 'liq' answers what a view waits for (a listing's tail, a tile's rows); the metas - 30 days of snapshots of every coin,
+   read ahead and walked for a cold index - are on 'meta': in one queue a tile waited behind them (production 2026-11-23:
+   ETH's and SOL's index 'building, 0 of 0' for over a minute, the listing itself not reached). */
+export type ReadLane = 'liq' | 'meta' | 'fills' | 'scan';
 type Waiting = { ok: (v: unknown) => void; no: (e: Error) => void; timer: NodeJS.Timeout };
 const lanes = new Map<ReadLane, { worker: Worker | null; waiting: Map<number, Waiting> }>();
 let nextId = 1;
@@ -208,7 +212,7 @@ export function liqRead<R extends LiqRead>(read: R, inline: () => IndexStore | n
     const s = inline();
     return Promise.resolve(s ? (runRead(s, read) as Answer<R>) : null);
   }
-  const l: ReadLane = FILLS_OPS.has(read.op) ? 'fills' : read.op === 'activeAccounts' ? 'scan' : 'liq';
+  const l: ReadLane = FILLS_OPS.has(read.op) ? 'fills' : read.op === 'activeAccounts' ? 'scan' : read.op === 'metas' || (read.op === 'list' && read.bg) ? 'meta' : 'liq';
   const x = laneOf(l);
   const id = nextId++;
   const started = Date.now();
