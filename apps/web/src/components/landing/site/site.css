@@ -294,7 +294,7 @@
 /* 2D only: backdrop blur does not work inside a 3D scene. Depth comes from parallax and scale. */
 .hd-slot { position: absolute;
   transform: translate(calc(var(--mx) * var(--z) * 26px), calc(var(--my) * var(--z) * 18px));
-  transition: transform 0.8s var(--ease); animation: hd-in 1.3s var(--ease) both; animation-delay: calc(0.25s + var(--i) * 0.14s); }
+  transition: transform 0.8s var(--ease); animation: hd-in 1.3s var(--ease) backwards; /* backwards, not both: a filling opacity animation makes the slot a backdrop root and the card blur sees nothing */ animation-delay: calc(0.25s + var(--i) * 0.14s); }
 @keyframes hd-in { from { opacity: 0; transform: translateY(40px) scale(0.92); } }
 .hd-float { animation: hd-bob 7s ease-in-out infinite; animation-delay: calc(var(--i) * -1.4s); }
 @keyframes hd-bob { 50% { transform: translateY(-12px) rotate(0.4deg); } }
@@ -305,7 +305,7 @@
 .hd-slot.is-bot { right: 0; bottom: 0; width: 275px; }
 .hd-slot.is-tiers { left: 2%; bottom: 4%; width: 262px; }
 /* frosted glass: a little of the heat shows through, blurred (owner 2026-11-23) */
-.hd .v3-card { background: linear-gradient(180deg, rgba(34, 34, 38, 0.8), rgba(14, 14, 16, 0.86)); border-color: rgba(255, 255, 255, 0.16);
+.hd .v3-card { background: linear-gradient(180deg, rgba(34, 34, 38, 0.66), rgba(14, 14, 16, 0.74)); border-color: rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(28px) saturate(160%); -webkit-backdrop-filter: blur(28px) saturate(160%);
   box-shadow: 0 40px 80px -24px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.16); }
 .hd-auto { font-size: 11.5px; color: var(--fg-3); }
