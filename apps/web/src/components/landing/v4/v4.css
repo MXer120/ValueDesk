@@ -326,3 +326,6 @@ a.v4-tr:hover .v4-tr__go { color: var(--fg); }
   .v4-tk__run, .v4-live i, .v4-flow__l i, .v4-tk__skel span { animation: none !important; }
   .v4-tk__win { overflow-y: auto; }
 }
+
+.v4-calc__auto { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13.5px; color: var(--fg-2); min-height: 28px; }
+.v4-calc__auto.is-vip { color: var(--fg); }

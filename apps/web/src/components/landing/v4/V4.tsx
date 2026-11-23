@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { BrandMark } from '../../BrandMark';
 import { CoinIcon } from '../../CoinIcon';
-import { Slider, Switch } from '../../bots/kit/kit';
+import { Slider } from '../../bots/kit/kit';
 import { dropBootShell } from '../../../bootShell';
 import { bp, FEES, reducedMotion, startFromText, SwimmingWhale, usdShort, usdStep, useLiveDesk, type MarketRow } from '../shared';
 import { HeatGlass } from './heat';
@@ -145,13 +145,13 @@ const volText = (v: number): string => (v >= 1e6 ? `$${+(v / 1e6).toFixed(2)}M` 
 
 export function Calculator({ makerBps }: { makerBps: number | null }) {
   const [t, setT] = useState(() => tOf(500_000));
-  const [vip, setVip] = useState(false);
   const vol = volOf(t);
+  // As the executor does (VIP_BY_VOLUME): the ladder step by 14-day bot volume, and VIP on its own from the VIP volume.
+  const vip = vol >= VIP_MIN_USD;
   const ladderIx = FEES.botLadder.reduce((ix, s, i) => (vol >= s.fromUsd ? i : ix), 0);
   const fee = vip ? FEES.botLowest : FEES.botLadder[ladderIx]!.fee; // tenths of a bp
   const ours = (vol * (fee / 10)) / 10_000;
   const sodex = makerBps === null ? null : (vol * makerBps) / 10_000;
-  const meetsVip = vol >= VIP_MIN_USD;
   const marks = [...FEES.botLadder.slice(1).map((s) => ({ usd: s.fromUsd, vip: false })), { usd: VIP_MIN_USD, vip: true }];
 
   return (
@@ -171,11 +171,11 @@ export function Calculator({ makerBps }: { makerBps: number | null }) {
           <div className="v4-calc__ends" aria-hidden="true"><span>$10K</span><span>$10M</span></div>
         </div>
 
-        <div className="v4-calc__vip">
-          <Switch checked={vip} onChange={setVip} label="VIP" description={VIP_WHEN} className={cx('v4-vipsw', vip && 'is-on')} />
-          {!vip && meetsVip && <button type="button" className="v4-vipnote" onClick={() => setVip(true)}>This volume meets the VIP condition<Arrow /></button>}
-          {vip && !meetsVip && <span className="v4-calc__warn">VIP needs {usdStep(VIP_MIN_USD)} of bot volume in {FEES.windowDays} days.</span>}
-        </div>
+        <p className={cx('v4-calc__auto', vip && 'is-vip')}>
+          {vip
+            ? <><span className="v4-vip vip-pill">VIP</span>Applied automatically: {VIP_WHEN}.</>
+            : <>Your fee step follows your volume by itself; <span className="vip-text">VIP</span> applies automatically from {usdStep(VIP_MIN_USD)} in {FEES.windowDays} days.</>}
+        </p>
 
         <ol className="v4-ladder" aria-label="Bot fee ladder">
           {FEES.botLadder.map((s, i) => (

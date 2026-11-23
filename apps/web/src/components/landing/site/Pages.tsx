@@ -380,11 +380,11 @@ export function PricingPage() {
   const live = useLiveDesk();
   const start = startFromText(live.startFrom);
   return (
-    <SitePage title={`Pricing · bots from ${bp(FEES.botLowest)} (VIP) · ValueDesk`} current="pricing">
+    <SitePage title={`Fees · bots from ${bp(FEES.botLowest)} (VIP) · ValueDesk`} current="fees">
       <header className="vd-sec" style={{ paddingTop: 56 }}>
-        <p className="vd-crumb h-up"><a href="/home">ValueDesk</a><span>/</span><span>Pricing</span></p>
+        <p className="vd-crumb h-up"><a href="/home">ValueDesk</a><span>/</span><span>Fees</span></p>
         <div className="h-head is-center h-up">
-          <Eyebrow>Pricing</Eyebrow>
+          <Eyebrow>Fees</Eyebrow>
           <h1 className="h-h1">Pay on what runs.<br /><span>Nothing else.</span></h1>
           <p className="h-lead">No subscription, no deposit. A fee in basis points on the orders a bot or a copy places, lower as your {FEES.windowDays}-day volume grows. 1 bp = 0.01% of the order's value.</p>
         </div>
@@ -426,5 +426,5 @@ export function PricingPage() {
   );
 }
 
-export const SITE_PAGES = { bots: BotsPage, 'copy-trading': CopyPage, analytics: AnalyticsPage, 'cross-venue': CrossVenuePage, pricing: PricingPage } as const;
+export const SITE_PAGES = { bots: BotsPage, 'copy-trading': CopyPage, analytics: AnalyticsPage, 'cross-venue': CrossVenuePage, fees: PricingPage } as const;
 export { IC };

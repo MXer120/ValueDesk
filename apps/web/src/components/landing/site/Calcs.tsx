@@ -39,7 +39,13 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
   const futures = VOL.of(tv);
   const oi = POS.of(tp);
   const e = estimate({ futures, oi });
-  const ours = (futures * (FEES.botNew / 10)) / 10_000;
+  // The fee the executor would charge: the step for 14 days of this volume (two weeks like this one), VIP from its volume.
+  const vol14 = futures * 2;
+  const vipMin = Number(/\$(\d+(?:\.\d+)?)\s*M/.exec(FEES.vipCondition)?.[1] ?? 5) * 1e6;
+  const vip = vol14 >= vipMin;
+  const step = FEES.botLadder.reduce((ix, x, i) => (vol14 >= x.fromUsd ? i : ix), 0);
+  const fee = vip ? FEES.botLowest : FEES.botLadder[step]!.fee;
+  const ours = (futures * (fee / 10)) / 10_000;
   const sodex = makerBps === null ? null : (futures * makerBps) / 10_000;
   const perPoint = sodex === null || e.mid <= 0 ? null : (ours + sodex) / e.mid;
   return (
@@ -82,7 +88,7 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
             <div>
               <small>Fees on that volume</small>
               <b>{sodex === null ? '—' : <Glide value={ours + sodex} fmt={money} />}</b>
-              <span className="v4-dim">{bp(FEES.botNew)} new-wallet bot fee{makerBps === null ? '' : ` + ${makerBps} bp SoDEX maker`}</span>
+              <span className="v4-dim">{vip ? <span className="vip-text">{bp(fee)} VIP</span> : `${bp(fee)} bot fee`}{makerBps === null ? '' : ` + ${makerBps} bp SoDEX maker`}, two weeks like this one</span>
             </div>
             <div>
               <small>Fees per point</small>

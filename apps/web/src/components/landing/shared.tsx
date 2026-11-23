@@ -234,6 +234,7 @@ export const VERSIONS = [
   { n: 5, name: 'Chrome on heat' },
   { n: 6, name: 'Heat, then convert' },
   { n: 7, name: 'One desk, long' },
+  { n: 8, name: 'V5 with the aurora header' },
 ] as const;
 
 /** The version in the path: /home -> 1, /home/2 -> 2 ... */

@@ -16,6 +16,7 @@ const PAGES = {
   5: lazy(() => import('./site/Versions').then((m) => ({ default: m.V5 }))),
   6: lazy(() => import('./site/Versions').then((m) => ({ default: m.V6 }))),
   7: lazy(() => import('./site/Versions').then((m) => ({ default: m.V7 }))),
+  8: lazy(() => import('./site/Versions').then((m) => ({ default: m.V8 }))),
 } as const;
 
 const SITE = {
@@ -23,6 +24,7 @@ const SITE = {
   'copy-trading': lazy(() => import('./site/Pages').then((m) => ({ default: m.CopyPage }))),
   analytics: lazy(() => import('./site/Pages').then((m) => ({ default: m.AnalyticsPage }))),
   'cross-venue': lazy(() => import('./site/Pages').then((m) => ({ default: m.CrossVenuePage }))),
+  fees: lazy(() => import('./site/Pages').then((m) => ({ default: m.PricingPage }))),
   pricing: lazy(() => import('./site/Pages').then((m) => ({ default: m.PricingPage }))),
 } as const;
 

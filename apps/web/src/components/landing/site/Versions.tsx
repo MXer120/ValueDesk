@@ -66,13 +66,15 @@ const FAQ_HOME = qaFor('home');
 
 /* ------------------------------------------------------------------------------------------- version 5 ----- */
 
-export function V5() {
+export function V5({ header = 'heat' }: { header?: 'heat' | 'aurora' } = {}) {
   const live = useLiveDesk();
   const start = startFromText(live.startFrom);
   return (
-    <SitePage title="ValueDesk: bots, copy trading and analytics on SoDEX" home="/home/5" whale={{ from: [1.2, 0.35, -64, 0.9], to: [-0.2, 0.78, -80, 1.15], opacity: 0.36 }}>
-      <header className="h-hero vd-hh">
-        <div className="vd-hh__heat" aria-hidden="true"><HeatGlass layout="right" rib={28} /></div>
+    <SitePage title="ValueDesk: bots, copy trading and analytics on SoDEX" home={header === 'aurora' ? '/home/8' : '/home/5'} whale={{ from: [1.2, 0.35, -64, 0.9], to: [-0.2, 0.78, -80, 1.15], opacity: 0.36 }}>
+      <header className={header === 'aurora' ? 'h-hero vd-hh is-aurora' : 'h-hero vd-hh'}>
+        {header === 'aurora'
+          ? <div className="vd-aurora" aria-hidden="true"><i /><i /><i /><i /></div>
+          : <div className="vd-hh__heat" aria-hidden="true"><HeatGlass layout="right" rib={28} /></div>}
         <div className="h-hero__t">
           <div className="h-up"><Eyebrow>Live on SoDEX · bots, copy trading, analytics</Eyebrow></div>
           <div className="h-up" style={{ '--d': '80ms' } as CSSProperties}><h1 className="h-h1">The market,<br /><span>on one desk.</span></h1></div>
@@ -203,4 +205,9 @@ export function V7() {
       <Embed scope="v2"><Faq items={FAQ_HOME} title="Questions, answered." /></Embed>
     </SitePage>
   );
+}
+
+/** Version 8 (owner 2026-11-23: "another version of the header that isn't black but also not that map style"): V5 with the aurora header. */
+export function V8() {
+  return <V5 header="aurora" />;
 }

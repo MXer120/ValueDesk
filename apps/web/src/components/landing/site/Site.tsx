@@ -19,7 +19,7 @@ const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolea
 
 /* ---------------------------------------------------------------------------------------------- paths ----- */
 
-export const PAGE_PATHS = { bots: '/home/bots', copy: '/home/copy-trading', analytics: '/home/analytics', cross: '/home/cross-venue', pricing: '/home/pricing' } as const;
+export const PAGE_PATHS = { bots: '/home/bots', copy: '/home/copy-trading', analytics: '/home/analytics', cross: '/home/cross-venue', pricing: '/home/fees' } as const;
 const HOME_KEY = 'vd.home';
 /** The landing version this tab came from (/home/5 ...), for the logo and the FAQ link. */
 export function homePath(): string {
@@ -101,7 +101,7 @@ export function SiteNav({ current }: { current?: string }) {
               </a>
             </div>
           </div>
-          <a href={PAGE_PATHS.pricing} className={cx(current === 'pricing' && 'is-on')}>Pricing</a>
+          <a href={PAGE_PATHS.pricing} className={cx(current === 'fees' && 'is-on')}>Fees</a>
           <a href="/leaderboard">Leaderboard</a>
           <a href={`${home}#faq`}>FAQ</a>
         </nav>
@@ -122,7 +122,7 @@ export function SiteNav({ current }: { current?: string }) {
             <a key={p.key} href={p.href} className="vd-dd__item"><span className="vd-ic">{p.ic}</span><div><b>{p.t}</b><span>{p.s}</span></div></a>
           ))}
           <div className="vd-sheet__links">
-            <a href={PAGE_PATHS.pricing}>Pricing</a><a href="/leaderboard">Leaderboard</a><a href={`${home}#faq`} onClick={() => setSheet(false)}>FAQ</a>
+            <a href={PAGE_PATHS.pricing}>Fees</a><a href="/leaderboard">Leaderboard</a><a href={`${home}#faq`} onClick={() => setSheet(false)}>FAQ</a>
           </div>
           <div className="vd-sheet__cta">
             <a href="/bots/new" className="h-btn is-light is-block">Start a bot with {start}<Arrow /></a>
@@ -152,7 +152,7 @@ export function SiteFooter({ title, sub }: { title?: ReactNode; sub?: ReactNode 
       </div>
       <div className="h-foot__cols">
         <div><a href={homePath()} className="h-logo"><BrandMark size={20} /><span>ValueDesk</span></a><p className="h-dim">Bots, copy trading and analytics for SoDEX.</p></div>
-        <div><p>Products</p>{PRODUCTS.map((p) => <a key={p.key} href={p.href}>{p.t}</a>)}<a href={PAGE_PATHS.pricing}>Pricing</a></div>
+        <div><p>Products</p>{PRODUCTS.map((p) => <a key={p.key} href={p.href}>{p.t}</a>)}<a href={PAGE_PATHS.pricing}>Fees</a></div>
         <div><p>Legal</p><a href="/terms">Terms of use</a><a href="/risk">Risk disclosure</a><a href="/privacy">Privacy</a><a href="/copy-terms">Copy and bot terms</a></div>
         <div><p>More</p><a href="/trade">Open the app</a><a href="/leaderboard">Leaderboard</a><a href="/status">Status</a><a href="/licenses">Licences</a></div>
       </div>
