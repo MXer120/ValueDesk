@@ -341,20 +341,54 @@ export function SleepViz() {
   );
 }
 
+/**
+ * Speed as a speedometer (owner 2026-11-23): further right is faster, and the dial fills up from the left as the needle
+ * rises. Without a public latency read it is a drawing: the needle sweeps up once it comes on screen and holds near the
+ * fast end with a small live jitter. With a real p50, lower is faster, so it points further right.
+ */
+const SEGS = 26;
 export function GaugeViz({ latency }: { latency: { p50: number; label: string } | null }) {
-  // A real p50 points the needle on a 0..1000 ms scale (log-ish); without one the needle only idles.
-  const angle = latency ? -90 + 180 * Math.min(1, Math.log10(1 + latency.p50) / 3) : null;
+  const dial = useRef<HTMLDivElement>(null);
+  const [ref, on] = useOnScreen<HTMLDivElement>();
+  // A real p50 on a 0..1000 ms log scale: 0 ms far right (fast), 1000 ms far left.
+  const real = latency ? 90 - 180 * Math.min(1, Math.log10(1 + latency.p50) / 3) : null;
+  useEffect(() => {
+    const el = dial.current;
+    if (!el) return;
+    const needle = el.querySelector<HTMLElement>('.v3-gauge__needle');
+    const segs = Array.from(el.querySelectorAll<HTMLElement>('i'));
+    const paint = (deg: number) => {
+      if (needle) needle.style.transform = `rotate(${deg.toFixed(2)}deg)`;
+      const lit = Math.round(((deg + 90) / 180) * (SEGS - 1));
+      segs.forEach((s, i) => s.classList.toggle('is-on', i <= lit));
+    };
+    if (real !== null || reducedMotion()) { paint(real ?? 64); return; }
+    if (!on) return;
+    let raf = 0;
+    const t0 = performance.now();
+    const step = (t: number) => {
+      const k = (t - t0) / 1000;
+      // Sweep up over ~1.6 s (ease out), then hold near 64 deg with a slow wobble and a little flutter.
+      const sweep = Math.min(1, k / 1.6);
+      const base = -90 + (64 + 90) * (1 - Math.pow(1 - sweep, 3));
+      const hold = sweep < 1 ? 0 : Math.sin(k * 0.9) * 5 + Math.sin(k * 5.3) * 1.2;
+      paint(base + hold);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [on, real]);
   return (
-    <Live className={cx('v3-viz v3-gauge', angle !== null && 'is-real')}>
-      <div className="v3-gauge__dial">
-        {/* Zones by where the needle points (owner 2026-11-23): left fast (green), middle amber, right slow (red). */}
-        {Array.from({ length: 26 }, (_, i) => <i key={i} className={i < 11 ? 'is-fast' : i < 17 ? 'is-mid' : 'is-slow'} style={{ '--a': `${-90 + (i * 180) / 25}deg`, '--i': i } as CSSProperties} />)}
+    <div ref={ref} className={cx('v3-viz v3-gauge is-speedo', real !== null && 'is-real')} aria-hidden="true">
+      <div ref={dial} className="v3-gauge__dial">
+        {Array.from({ length: SEGS }, (_, i) => <i key={i} style={{ '--a': `${-90 + (i * 180) / (SEGS - 1)}deg`, '--k': i / (SEGS - 1) } as CSSProperties} />)}
         <div className="v3-gauge__arc" />
-        <div className="v3-gauge__needle" style={angle !== null ? ({ '--to': `${angle}deg` } as CSSProperties) : undefined} />
+        <div className="v3-gauge__needle" />
         <div className="v3-gauge__hub" />
+        <span className="v3-gauge__end is-l">slower</span><span className="v3-gauge__end is-r">faster</span>
       </div>
       <span className="v3-gauge__tag"><i className="v3-gauge__dot" />{latency ? `${Math.round(latency.p50)} ms p50 · ${latency.label}` : 'Executor in Tokyo'}</span>
-    </Live>
+    </div>
   );
 }
 

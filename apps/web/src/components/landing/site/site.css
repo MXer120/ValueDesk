@@ -294,7 +294,7 @@
 /* 2D only: backdrop blur does not work inside a 3D scene. Depth comes from parallax and scale. */
 .hd-slot { position: absolute;
   transform: translate(calc(var(--mx) * var(--z) * 26px), calc(var(--my) * var(--z) * 18px));
-  transition: transform 0.8s var(--ease); animation: hd-in 1.3s var(--ease) backwards; /* backwards, not both: a filling opacity animation makes the slot a backdrop root and the card blur sees nothing */ animation-delay: calc(0.25s + var(--i) * 0.14s); }
+  transition: transform 0.8s var(--ease); animation-delay: calc(0.25s + var(--i) * 0.14s); }
 @keyframes hd-in { from { opacity: 0; transform: translateY(40px) scale(0.92); } }
 .hd-float { animation: hd-bob 7s ease-in-out infinite; animation-delay: calc(var(--i) * -1.4s); }
 @keyframes hd-bob { 50% { transform: translateY(-12px) rotate(0.4deg); } }
@@ -388,35 +388,50 @@
 @media (max-width: 640px) { .vd-acts__row { grid-template-columns: 1fr; } .vd-split a { font-size: 13px; } }
 
 /* ---------------------------------------------------------------------------------------- fee cards ----- */
-.vd-fc { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
-.vd-fc.is-one { grid-template-columns: minmax(0, 440px); }
-.vd-fc__card { position: relative; overflow: hidden; isolation: isolate; display: flex; flex-direction: column; padding: 26px; border-radius: 24px; border: 1px solid rgba(255, 255, 255, 0.12);
-  background: linear-gradient(180deg, #19191b, #0b0b0c 60%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 30px 60px -30px rgba(0, 0, 0, 0.9); }
-.vd-fc__card::before { content: ''; position: absolute; inset: 0; z-index: -1; background: radial-gradient(60% 40% at 100% 0%, rgba(255, 255, 255, 0.08), transparent 70%); }
-.vd-fc__spark { position: absolute; right: 0; top: 0; width: 55%; height: 45%; z-index: -1; background-image: radial-gradient(rgba(255, 255, 255, 0.35) 1px, transparent 1.4px); background-size: 9px 9px;
-  -webkit-mask-image: radial-gradient(80% 80% at 100% 0%, #000, transparent 70%); mask-image: radial-gradient(80% 80% at 100% 0%, #000, transparent 70%); opacity: 0.5; }
-.vd-fc__card.is-lit { border-color: rgba(167, 139, 250, 0.45); background: linear-gradient(180deg, #2a1d57 0%, #17123a 30%, #0e0b1f 65%, #0a0912 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 30px 80px -30px rgba(91, 64, 214, 0.7); }
-.vd-fc__card.is-lit::before { background: radial-gradient(70% 45% at 85% 0%, rgba(150, 120, 255, 0.45), transparent 70%), radial-gradient(60% 40% at 50% 105%, rgba(91, 64, 214, 0.45), transparent 70%); }
-.vd-fc__card.is-lit .vd-fc__spark { opacity: 0.9; }
-.vd-fc__card header h3 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 20px; letter-spacing: -0.02em; }
-.vd-fc__card header p { margin: 4px 0 0; color: var(--fg-2); font-size: 13.5px; }
-.vd-fc__v { margin: 22px 0 0 !important; font-family: var(--num); font-weight: 500; font-size: 42px; letter-spacing: -0.02em; line-height: 1; }
-.vd-fc__v small { font-family: 'IBM Plex Sans', sans-serif; font-size: 15px; color: var(--fg-2); letter-spacing: 0; }
-.vd-fc__cond { margin: 8px 0 0 !important; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-3); min-height: 20px; }
-.vd-fc__btn { margin: 20px 0 22px; display: flex; align-items: center; justify-content: center; gap: 8px; height: 42px; border-radius: 12px; font-size: 14.5px; font-weight: 500; color: #0a0a0a;
-  background: linear-gradient(180deg, #ffffff, #d9d9d6); box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.15); transition: transform 0.2s, box-shadow 0.25s; }
-.vd-fc__btn:hover { transform: translateY(-1px); box-shadow: 0 12px 30px -10px rgba(255, 255, 255, 0.45); }
-.vd-fc__card ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 11px; font-size: 13.5px; color: var(--fg-2); flex: 1; }
-.vd-fc__card li { display: flex; align-items: flex-start; gap: 10px; }
-.vd-fc__card li.is-step { color: #c9bfff; }
-.vd-fc__card li.is-step b { font-family: var(--num); font-weight: 500; color: #e3dcff; margin-right: 2px; }
-.vd-fc__ck { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(255, 255, 255, 0.1); }
-.vd-fc__ck svg { width: 12px; height: 12px; fill: none; stroke: #f4f4f2; stroke-width: 2; }
-li.is-step .vd-fc__ck { background: rgba(140, 110, 255, 0.35); }
-.vd-fc__foot { margin: 22px 0 0 !important; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 12.5px; color: var(--fg-3); }
-@media (max-width: 980px) { .vd-fc { grid-template-columns: 1fr; max-width: 480px; margin: 0 auto; } }
+/* After the owner's reference, detail by detail: dark glossy card, a fine dot field fading from the top-right corner,
+   a hairline border, the lit card washed in its colour from the top-right and glowing up from the bottom. Gold for bots. */
+.vd-fc { --acc: #b9c6d6; --acc-bg: rgba(185, 198, 214, 0.2); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; max-width: 1080px; margin: 0 auto; }
+.vd-fc.is-one { grid-template-columns: minmax(0, 380px); margin: 0; }
+.vd-fc__card { position: relative; overflow: hidden; isolation: isolate; display: flex; flex-direction: column; padding: 22px 22px 20px; border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.13); background: linear-gradient(180deg, #161618 0%, #0c0c0d 38%, #080809 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 24px 50px -28px rgba(0, 0, 0, 0.9); }
+.vd-fc__dots { position: absolute; right: 0; top: 0; width: 60%; height: 42%; z-index: -1; background-image: radial-gradient(rgba(255, 255, 255, 0.4) 0.8px, transparent 1.1px); background-size: 6px 6px;
+  -webkit-mask-image: radial-gradient(90% 90% at 100% 0%, rgba(0, 0, 0, 0.75), transparent 72%); mask-image: radial-gradient(90% 90% at 100% 0%, rgba(0, 0, 0, 0.75), transparent 72%); opacity: 0.55; }
+.vd-fc__glow { position: absolute; inset: 0; z-index: -2; background: radial-gradient(70% 34% at 100% 0%, rgba(255, 255, 255, 0.07), transparent 70%); }
+.vd-fc__card h3 { margin: 0; font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; font-size: 17px; letter-spacing: -0.01em; color: #fff; }
+.vd-fc__s { margin: 3px 0 0 !important; font-size: 12.5px; color: rgba(244, 244, 242, 0.55); }
+.vd-fc__v { margin: 22px 0 0 !important; font-family: 'IBM Plex Sans', sans-serif; font-weight: 700; font-size: 34px; letter-spacing: -0.02em; line-height: 1; color: #fff; }
+.vd-fc__v small { margin-left: 2px; font-size: 15px; font-weight: 500; letter-spacing: 0; color: rgba(244, 244, 242, 0.85); }
+.vd-fc__sub { margin: 7px 0 0 !important; font-size: 12px; color: rgba(244, 244, 242, 0.5); min-height: 16px; }
+.vd .vd-fc__btn { display: flex; align-items: center; justify-content: center; margin: 18px 0 20px; height: 34px; border-radius: 9px; font-size: 13px; font-weight: 500; color: #111;
+  background: linear-gradient(180deg, #f3f3f1, #dcdcd9); box-shadow: inset 0 1px 0 #fff, 0 1px 2px rgba(0, 0, 0, 0.5); transition: background 0.2s, transform 0.2s; }
+.vd .vd-fc__btn:hover { background: #fff; transform: translateY(-1px); }
+.vd-fc__card ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; font-size: 12.5px; color: rgba(244, 244, 242, 0.82); flex: 1; align-content: start; }
+.vd-fc__card li { display: flex; align-items: center; gap: 9px; }
+.vd-fc__card li > span:nth-child(2) { flex: 0 1 auto; }
+.vd-fc__card li b { font-weight: 600; }
+.vd-fc__ck { flex: none; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: rgba(255, 255, 255, 0.16); }
+.vd-fc__ck svg { width: 11px; height: 11px; fill: none; stroke: #f4f4f2; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.vd-fc__card li.is-accent { color: var(--acc); }
+.vd-fc__card li.is-accent .vd-fc__ck { background: var(--acc-bg); }
+.vd-fc__card li.is-accent .vd-fc__ck svg { stroke: var(--acc); }
+.vd-fc__info { flex: none; display: inline-grid; place-items: center; width: 13px; height: 13px; border-radius: 50%; background: rgba(255, 255, 255, 0.18); color: rgba(255, 255, 255, 0.75); font: 600 9px/1 'IBM Plex Sans', sans-serif; cursor: help; }
+.vd-fc__foot { margin: 20px 0 0 !important; font-size: 12.5px; color: rgba(244, 244, 242, 0.75); }
+/* the lit card: gold */
+.vd-fc__card.is-gold { --acc: #f3d48f; --acc-bg: rgba(227, 182, 90, 0.28); }
+.vd-fc__card.is-lit { border-color: rgba(243, 212, 143, 0.38); background: linear-gradient(180deg, #2b2210 0%, #171208 26%, #0d0b07 55%, #1c150a 82%, #3a2a10 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 240, 200, 0.18), 0 30px 70px -30px rgba(227, 182, 90, 0.45); }
+.vd-fc__card.is-lit .vd-fc__glow { background: radial-gradient(75% 36% at 100% 0%, rgba(243, 212, 143, 0.32), transparent 70%), radial-gradient(90% 38% at 50% 112%, rgba(227, 182, 90, 0.55), transparent 70%); }
+.vd-fc__card.is-lit .vd-fc__dots { opacity: 0.85; background-image: radial-gradient(rgba(255, 236, 190, 0.55) 0.8px, transparent 1.1px); }
+.vd-fc__card.is-lit .vd-fc__s, .vd-fc__card.is-lit .vd-fc__sub { color: rgba(255, 240, 210, 0.6); }
+.vd-fc__card.is-lit .vd-fc__foot { color: rgba(255, 240, 210, 0.85); }
+@media (max-width: 980px) { .vd-fc { grid-template-columns: 1fr; max-width: 420px; } }
 
 /* product pages: each row card gets its own ground like the feature cards */
 .vd-row { position: relative; overflow: hidden; isolation: isolate; }
 .vd-row > :not(.v3-fx) { position: relative; z-index: 1; }
-.vd .vd-fc__btn { color: #0a0a0a; }
+
+/* The entrance runs on the card itself, not on its slot: an opacity animation on an ancestor makes it a backdrop root,
+   so the blur would only switch on once the fade ended (owner 2026-11-23: "the blur of hero cards is delayed"). The
+   card's own opacity fades the blurred result with it, so the glass is there from the first frame. */
+.hd-slot > .hd-float > * { animation: hd-in 1.3s var(--ease) backwards; animation-delay: calc(0.25s + var(--i) * 0.14s); }

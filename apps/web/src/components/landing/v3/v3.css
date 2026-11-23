@@ -477,3 +477,12 @@ html:has(.v3), body:has(.v3) { background: #050505; }
 /* feature cards: no default top glow (each card has its own ground now); the copy card's glare softer, less of a beam */
 .v3-feat .v3-viz::before { display: none; }
 .v3-fx.is-3::before { background: radial-gradient(70% 55% at 30% 0%, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.02) 50%, transparent 75%); }
+
+/* speedometer: dim segments light up from the left as the needle rises, darker teal to bright green on the fast end */
+.v3-gauge.is-speedo .v3-gauge__dial > i { animation: none; opacity: 1; background: rgba(255, 255, 255, 0.07); transition: background 0.18s, box-shadow 0.18s; }
+.v3-gauge.is-speedo .v3-gauge__dial > i.is-on { background: linear-gradient(180deg, hsl(calc(170 - var(--k) * 20) 70% calc(38% + var(--k) * 26%)), hsl(160 60% 22% / 0.4)); box-shadow: 0 0 calc(4px + var(--k) * 12px) hsl(158 80% 55% / calc(0.15 + var(--k) * 0.45)); }
+.v3-gauge.is-speedo .v3-gauge__needle { animation: none; color: #5cf0c0; transition: none; }
+.v3-gauge.is-speedo .v3-gauge__dot { animation: none; background: #4fe3b3; }
+.v3-gauge__end { position: absolute; bottom: -2px; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-3); }
+.v3-gauge__end.is-l { left: 14px; }
+.v3-gauge__end.is-r { right: 14px; color: #4fe3b3; }
