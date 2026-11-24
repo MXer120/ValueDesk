@@ -70,7 +70,7 @@ test('the plan shows what runs beside what', { skip: SKIP }, () => {
   assert.match(late, /main -> v9\.9\.9, Vercel builds the web \(8-10 min\) - not early: no Vercel token/);
 
   const webOnly = flow(`${BASE}; EARLY_WEB=0 SITE_CHANGED=0; U1=() U2=() PARTS=(web)`);
-  assert.match(webOnly, /1\. tag, CI\n/);
+  assert.match(webOnly, /1\. tag, tests here\n/);
   assert.match(webOnly, /2\. main -> v9\.9\.9 \(no web build\)/);
 });
 

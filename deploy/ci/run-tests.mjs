@@ -203,6 +203,7 @@ async function runSuite(s) {
     } else {
       const args = [
         ...(s.tsx ? ['--import', 'tsx'] : []),
+        ...(process.platform === 'win32' ? ['--import', new URL('./windows-rm.mjs', import.meta.url).href] : []),
         '--disable-warning=ExperimentalWarning',
         '--test',
         '--test-reporter=spec',
