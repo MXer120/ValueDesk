@@ -52,7 +52,7 @@ const BASE = 'BIN=0 STA=0 FEED=0 WEB=1 MOVE_MAIN=1 SITE_CHANGED=1 EARLY_INSTALL=
 
 test('the plan shows what runs beside what', { skip: SKIP }, () => {
   const out = flow(`${BASE}; U1=(api) U2=(executor) PARTS=(api executor web)`);
-  assert.match(out, /1\. tag, CI - meanwhile: tarball to the servers, installed beside the running release \(nothing switched\); the web built on Vercel, not live/);
+  assert.match(out, /1\. tag, tests here - meanwhile: tarball to the servers, installed beside the running release \(nothing switched\); the web built on Vercel, not live/);
   assert.match(out, /2\. scripts, maintenance window/);
   assert.match(out, /3\. server 1: api \+ its gates \| beside it, server 2: executor \(its own guards\)/);
   assert.match(out, /4\. the web live: Vercel's promote of the early build \(seconds\), main -> v9\.9\.9/);
@@ -66,7 +66,7 @@ test('the plan shows what runs beside what', { skip: SKIP }, () => {
   assert.match(both, /\(indexer gate 20 min\) \| beside it, server 2: executor/);
 
   const late = flow(`${BASE}; EARLY_WEB=0 EARLY_WEB_WHY="no Vercel token"; EARLY_INSTALL=0; U1=(api) U2=() PARTS=(api web)`);
-  assert.match(late, /1\. tag, CI - meanwhile: tarball to the servers$/m);
+  assert.match(late, /1\. tag, tests here - meanwhile: tarball to the servers$/m);
   assert.match(late, /main -> v9\.9\.9, Vercel builds the web \(8-10 min\) - not early: no Vercel token/);
 
   const webOnly = flow(`${BASE}; EARLY_WEB=0 SITE_CHANGED=0; U1=() U2=() PARTS=(web)`);

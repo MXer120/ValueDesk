@@ -1,11 +1,10 @@
 // node --test deploy/release/ci-flake.test.mjs
 //
-// The test gate's one automatic rerun (deploy/release/ci-flake.mjs): only a CI job whose test step failed in nothing
-// but a known network flake is run again; a type error, another failing test, a timed-out suite, an install error or
-// an unreadable log is not. Then the GitHub calls, against a fake fetch: the log read, the rerun asked once per run.
+// The test gate's one second run (deploy/release/ci-flake.mjs): only when nothing but a known network flake failed; a
+// type error, another failing test, a timed-out suite, an install error or a cut output is not.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { failedSuites, judgeLog, retry, runAndJob } from './ci-flake.mjs';
+import { failedSuites, judgeLog } from './ci-flake.mjs';
 
 const FLAKE = 'the live registry decodes into usable routes';
 // run-tests.mjs's output as GitHub's job log shows it: a timestamp in front of every line.
@@ -48,47 +47,4 @@ test('the parser reads the suites and their failing tests', () => {
   const { suites, finished } = failedSuites(log([...head, ...serverFail(1, [FLAKE]), ...tail()]));
   assert.equal(finished, true);
   assert.deepEqual(suites, [{ id: 'server-tests', detail: '1201 passed, 1 failed (exit 1)', tests: [FLAKE] }]);
-});
-
-test('run and job from a check run page', () => {
-  assert.deepEqual(runAndJob('https://github.com/MXer120/ValueDesk/actions/runs/19200000001/job/54800000002'), { run: '19200000001', job: '54800000002' });
-  assert.equal(runAndJob('https://github.com/MXer120/ValueDesk/runs/1'), null);
-});
-
-/** A fake GitHub: job logs by job id, the rerun answering `rerunStatus`; records the calls. */
-function fakeGitHub(logs, rerunStatus = 201) {
-  const calls = [];
-  const fetchImpl = async (url, init = {}) => {
-    calls.push(`${init.method ?? 'GET'} ${url.replace('https://api.github.com/repos/o/r/', '')}`);
-    const job = /actions\/jobs\/(\d+)\/logs$/.exec(url);
-    if (job) return logs[job[1]] == null ? { ok: false, status: 404, text: async () => '' } : { ok: true, status: 200, text: async () => logs[job[1]] };
-    if (/rerun-failed-jobs$/.test(url)) return { ok: rerunStatus < 300, status: rerunStatus };
-    return { ok: false, status: 404 };
-  };
-  return { calls, fetchImpl };
-}
-const URL1 = 'https://github.com/o/r/actions/runs/11/job/21';
-
-test('retry: a flake is rerun once; anything else is not', async () => {
-  const flaky = log([...head, ...serverFail(1, [FLAKE]), ...tail()]);
-  let g = fakeGitHub({ 21: flaky });
-  assert.equal((await retry('o/r', [URL1], { token: 't', fetchImpl: g.fetchImpl })).rerun, true);
-  assert.deepEqual(g.calls, ['GET actions/jobs/21/logs', 'POST actions/runs/11/rerun-failed-jobs']);
-
-  g = fakeGitHub({ 21: log([...head, ...serverFail(1, ['another test']), ...tail()]) });
-  assert.equal((await retry('o/r', [URL1], { token: 't', fetchImpl: g.fetchImpl })).rerun, false);
-  assert.deepEqual(g.calls, ['GET actions/jobs/21/logs']);
-
-  // The log cannot be read (token without "Actions: read"): no rerun.
-  g = fakeGitHub({});
-  const v = await retry('o/r', [URL1], { token: 't', fetchImpl: g.fetchImpl });
-  assert.equal(v.rerun, false);
-  assert.match(v.why, /could not be read \(404\)/);
-
-  // GitHub refuses the rerun (token without "Actions: write"): reported as no rerun.
-  g = fakeGitHub({ 21: flaky }, 403);
-  assert.match((await retry('o/r', [URL1], { token: 't', fetchImpl: g.fetchImpl })).why, /refused the rerun of run 11 \(403\)/);
-
-  // Not a job's page.
-  assert.equal((await retry('o/r', ['https://example.com/x'], { token: 't', fetchImpl: g.fetchImpl })).rerun, false);
 });

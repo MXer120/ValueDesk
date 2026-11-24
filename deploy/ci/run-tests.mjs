@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 // Every type check and every offline test suite of the repository, one after another.
-// The one gate in front of a deploy: GitHub Actions runs it on every push and pull
-// request (.github/workflows/ci.yml), Vercel runs it before it builds production
-// (deploy/vercel/build.sh), and deploy/release/release-server.sh runs it (or checks
-// that CI passed for the tag) before a server release.
+// The one gate in front of a deploy: deploy/release/test-gate.sh runs it on the tag, on the machine that ships
+// (no GitHub Actions since 2026-11-24).
 //
 //   node deploy/ci/run-tests.mjs                 everything; exit 0 only when all passed
 //   node deploy/ci/run-tests.mjs --list          the suites it found, run none
@@ -52,7 +50,7 @@ for (const a of argv) {
   }
 }
 if (opt('help')) {
-  console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 15).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+  console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 13).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
   process.exit(0);
 }
 const words = (v) => (typeof v === 'string' ? v.split(',').map((w) => w.trim()).filter(Boolean) : []);

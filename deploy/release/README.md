@@ -8,7 +8,7 @@ bash deploy/release/ship.sh                # the same plan, one question, then a
 bash deploy/release/ship.sh web            # only the parts named: web, api, indexer, executor, all
 ```
 
-One command from a committed HEAD to every place it runs: the next tag, GitHub's CI for it,
+One command from a committed HEAD to every place it runs: the next tag, every test on it (here, not on GitHub Actions),
 the server tarball to server 1 (indexer, API) and server 2 (executor) within the laptop's
 upload cap, the operations scripts (`deploy/server/bin`) into `/opt/valuescan/bin`, each
 service restarted only when code it imports changed (`parts.mjs` reads the import graphs),
@@ -25,12 +25,12 @@ another). Nothing is switched earlier and no check is shorter; only the waiting 
 
 | While | Now also | Off with |
 |---|---|---|
-| CI runs (~10 min) | the tarball goes to both servers and is installed beside the running release (`release.sh --install-only`: npm ci, import checks, nothing switched) - where the server's `release.sh` is the tag's | `SHIP_EARLY_INSTALL=0` |
-| CI runs | Vercel builds the web as a staged production deployment (`vercel-web.mjs`); after the servers it is promoted in seconds instead of an 8-10 min build of main | `SHIP_EARLY_WEB=0` |
+| before the tests (~5 min) | the tarball goes to both servers and is installed beside the running release (`release.sh --install-only`: npm ci, import checks, nothing switched) - where the server's `release.sh` is the tag's | `SHIP_EARLY_INSTALL=0` |
+| the tests run | Vercel builds the web as a staged production deployment (`vercel-web.mjs`); after the servers it is promoted in seconds instead of an 8-10 min build of main | `SHIP_EARLY_WEB=0` |
 | server 1 restarts and its gates watch (10-20 min) | server 2's executor step with all its guards; told to switch nothing should server 1 stop the ship first | `SHIP_EXECUTOR_PARALLEL=0` |
-| CI failed | a rerun of the failed job, once, when only a known network flake failed (`ci-flake.mjs`) | - |
+| the tests failed | a second run, once, when only a known network flake failed (`ci-flake.mjs`) | - |
 
-A CI failure after the early install leaves `/opt/valuescan/releases/<tag>` installed but not
+A test failure after the early install leaves `/opt/valuescan/releases/<tag>` installed but not
 current: it runs nowhere, a rerun of the same tag uses it, `release.sh`'s prune removes it later.
 A web build that fails on Vercel stops the ship before anything restarts.
 
@@ -49,8 +49,6 @@ A web build that fails on Vercel stops the ship before anything restarts.
    "trial passed" writes `~/.valuescan/vercel-early.ok`; from then on `ship.sh --dry-run`
    shows "the web live: Vercel's promote of the early build". A ship that ever sees a staged
    build go live by itself removes the mark again.
-3. For the CI rerun the GitHub token needs "Actions: read and write" on the repository
-   (without it the gate stops as before).
 
 **The maintenance notice.** A ship that restarts anything posts one maintenance on the
 status page (`status.sh ship <tag> --parts=...`, `apps/server/src/ops/shipNotice.ts`): each

@@ -7,7 +7,7 @@
 #
 # BETA (HEAD, or the tag it has):
 #   1. the tag: the next vX.Y.Z (as ship.sh), pushed with this branch - main does not move;
-#   2. the test gate (test-gate.sh): GitHub's CI for the tag - no beta without it;
+#   2. the test gate (test-gate.sh): every suite, run here on the tag - no beta without it;
 #   3. the server tarball to server 1 (scp -l 8000), its operations scripts (deploy/server/bin) synced, then
 #      `release.sh <tag> --beta`: /opt/valuescan/beta-current -> the tag and the beta API
 #      (valuescan-api-beta.service, port 8798) restarted. Nothing else on either server is touched: the
@@ -137,10 +137,6 @@ refs=("refs/tags/$TAG")
 
 # 2. the test gate
 say "test gate"
-for _ in $(seq 1 18); do
-  [ "$(gh_api "$REPO/actions/runs?head_sha=$HEAD_SHA" | json 'v ? v.total_count : 0')" -gt 0 ] && break
-  sleep 10
-done
 test_gate "$TAG"
 
 # 3. server 1: the beta API

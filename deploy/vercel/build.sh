@@ -2,7 +2,7 @@
 # What Vercel runs when it builds a commit of this repository itself (vercel.json,
 # buildCommand) - a deployment from git instead of publish-vercel.sh's upload:
 #
-#   0. NO TEST RUN HERE BY DEFAULT: main only moves after ship.sh's test gate (GitHub CI for the
+#   0. NO TEST RUN HERE BY DEFAULT: main only moves after ship.sh's test gate (every suite, for the
 #      tag, every type check and offline test) has passed for that same commit, so running
 #      deploy/ci/run-tests.mjs again on Vercel only bought billed build minutes, 2-4 per build
 #      (owner 2026-11-02: "reduce cost as much as possible"). The web typecheck still runs in
@@ -40,7 +40,7 @@ name="commit-${sha:0:12}"
 echo "building $name (${VERCEL_GIT_COMMIT_REF:-local}, channel $CHANNEL) for https://$VALUESCAN_ORIGIN" >&2
 
 if [ "${VS_RUN_TESTS:-0}" != 1 ]; then
-  echo "tests: not run here - ship.sh's gate (GitHub CI for the tag) passed this commit before main moved" >&2
+  echo "tests: not run here - ship.sh's gate (every suite, on the tag) passed this commit before main moved" >&2
 else
   if ! node deploy/ci/run-tests.mjs --jobs="${VS_TEST_JOBS:-3}" --skip=web-typecheck; then
     echo "error: the tests failed - $name is not deployed (the failing suites are listed above)" >&2

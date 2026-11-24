@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // A build machine without these tools (Vercel's, perhaps) skips this file and says so;
-// CI (.github/workflows/ci.yml, Ubuntu) and the servers have them all.
+// A Linux machine and the servers have them all.
 const TOOLS = spawnSync("bash", ["-c", "command -v tar find stat sha256sum head >/dev/null && tar --version | grep -q GNU"], { encoding: "utf8" });
 const SKIP = TOOLS.status === 0 ? false : "needs bash with GNU tar, find, stat and sha256sum";
 // Bash on Windows wants /c/... paths; elsewhere a path is a path.

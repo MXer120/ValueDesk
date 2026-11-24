@@ -29,8 +29,8 @@
 # indexer costs its Lighter stream 3.5-8 minutes; restarting the API costs seconds.
 # --executor-only: when the release changes the copy executor only.
 #
-# THE TEST GATE (deploy/release/test-gate.sh): nothing is released unless CI passed for
-# the tag's commit (with GITHUB_TOKEN set), or every suite passes here on exactly the tag.
+# THE TEST GATE (deploy/release/test-gate.sh): nothing is released unless every
+# suite passes here on exactly the tag.
 # Emergencies only: VS_SKIP_TESTS=1 VS_SKIP_TESTS_REASON="..." - logged here and on the server.
 #
 # Roll back: deploy/release/rollback.sh server

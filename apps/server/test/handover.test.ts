@@ -142,6 +142,20 @@ test('status row while handing over: the last status, no `stopping`, a socket th
   assert.equal(row.lastBuildAt, 9);
 });
 
+/**
+ * A run again, up to twice, on Windows only, when a child died of SQLite's 1546 (SQLITE_IOERR_TRUNCATE): Windows refuses
+ * to shorten a file the process that is just ending still has mapped; Linux, where the indexer runs, allows it. Any other
+ * failure stands.
+ */
+async function windowsAgain(run: () => Promise<void>): Promise<void> {
+  for (let i = 0; ; i++) {
+    try { return await run(); } catch (e) {
+      if (process.platform !== 'win32' || i >= 2 || !/errcode: 1546/.test(String((e as Error)?.message))) throw e;
+      console.log('HANDOVER-WINDOWS a truncate was refused (1546): once more');
+    }
+  }
+}
+
 // --- two real processes --------------------------------------------------------------------------------------------
 
 const TRACKED = Array.from({ length: 6 }, (_, i) => `0x${(i + 1).toString(16).padStart(40, '0')}`);
@@ -298,7 +312,7 @@ function seed(db: string): void {
   s.close();
 }
 
-test('handover between two indexer processes: every print exactly once (fills, activity, who traded), no long gap, the lock refuses a third writer', { timeout: 180_000 }, async () => {
+test('handover between two indexer processes: every print exactly once (fills, activity, who traded), no long gap, the lock refuses a third writer', { timeout: 360_000 }, () => windowsAgain(async () => {
   const dir = mkdtempSync(join(tmpdir(), 'vs-handover-'));
   const db = join(dir, 'index.db');
   const venue = new FakeVenue();
@@ -390,9 +404,9 @@ test('handover between two indexer processes: every print exactly once (fills, a
     await sleep(300);
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}));
 
-test('handover fallback: a running indexer that does not answer leaves the standby to give up (exit 75), and it carries on writing', { timeout: 120_000 }, async () => {
+test('handover fallback: a running indexer that does not answer leaves the standby to give up (exit 75), and it carries on writing', { timeout: 120_000 }, () => windowsAgain(async () => {
   const dir = mkdtempSync(join(tmpdir(), 'vs-handover-fb-'));
   const db = join(dir, 'index.db');
   const venue = new FakeVenue();
@@ -424,7 +438,7 @@ test('handover fallback: a running indexer that does not answer leaves the stand
     await sleep(300);
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}));
 
 test('standby with no writer running: it simply starts as the writer', { timeout: 120_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'vs-handover-solo-'));
@@ -450,7 +464,7 @@ test('standby with no writer running: it simply starts as the writer', { timeout
   }
 });
 
-test('supervisor: a reload hands over to a standby from the same unit, the state file says so, a second reload meanwhile is ignored; every print once', { timeout: 180_000 }, async () => {
+test('supervisor: a reload hands over to a standby from the same unit, the state file says so, a second reload meanwhile is ignored; every print once', { timeout: 360_000 }, () => windowsAgain(async () => {
   const dir = mkdtempSync(join(tmpdir(), 'vs-supervisor-'));
   const db = join(dir, 'index.db');
   const stateFile = join(dir, 'state', 'indexer-handover.json');
@@ -516,4 +530,4 @@ test('supervisor: a reload hands over to a standby from the same unit, the state
     await sleep(300);
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}));

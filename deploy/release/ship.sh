@@ -25,7 +25,7 @@
 #      the commits since then which services run changed code - a change only the indexer imports restarts the
 #      indexer, not the API;
 #   2. the tag: the next vX.Y.Z (or the one HEAD has), pushed with this branch - main does not move yet;
-#   3. the test gate (deploy/release/test-gate.sh): GitHub's CI for the tag, waited for - no release without it;
+#   3. the test gate (deploy/release/test-gate.sh): every suite, run here on the tag - no release without it;
 #   4. the server tarball (git archive of the tag, lib.sh server_tarball), uploaded within the laptop's cap
 #      (scp -l 8000), its checksum checked on arrival;
 #   5. the operations scripts (deploy/server/bin) from the tarball into /opt/valuescan/bin where they differ -
@@ -42,13 +42,13 @@
 #
 # WHAT RUNS SIDE BY SIDE (2026-11-09: a release took 45-60 min, nearly all of it one wait after another). Nothing is
 # switched or restarted earlier than before, and no check is shorter; only waiting is overlapped:
-#   - WHILE CI RUNS (step 3, ~10 min): the tarball goes to both servers (step 4) and is INSTALLED beside the running
+#   - BEFORE THE TESTS (step 3, ~5 min): the tarball goes to both servers (step 4) and is INSTALLED beside the running
 #     release (release.sh --install-only: unpacked, npm ci, the import checks - nothing switched, nothing restarted).
-#     After CI the switch finds it installed. Only where the server's release.sh is byte for byte the tag's (else the
-#     tag's own, synced after CI, installs it as before). If CI fails, the installed release is not current and runs
+#     After the tests the switch finds it installed. Only where the server's release.sh is byte for byte the tag's (else the
+#     tag's own, synced after them, installs it as before). If they fail, the installed release is not current and runs
 #     nowhere: a rerun of the same tag uses it ("already installed"), release.sh's prune removes it later (it keeps
-#     the 3 newest besides current, previous and whatever runs). SHIP_EARLY_INSTALL=0: install after CI as before.
-#   - WHILE CI RUNS, the web is built by Vercel as a staged production deployment (deploy/release/vercel-web.mjs: built
+#     the 3 newest besides current, previous and whatever runs). SHIP_EARLY_INSTALL=0: install after the tests as before.
+#   - WHILE THE TESTS RUN, the web is built by Vercel as a staged production deployment (deploy/release/vercel-web.mjs: built
 #     with production's settings, not live). After the servers, Vercel's promote makes exactly that build live in
 #     seconds, then main moves (still to the tag). A build that fails is known before anything restarts: the ship stops
 #     with nothing switched. Needs a Vercel token and the one-time trial (vercel-web.mjs); without, main's build as before.
@@ -59,7 +59,7 @@
 #     watch (10-20 min), with every one of its own guards. Should server 1 stop the ship first, the executor is told
 #     before its brake and switch: it then switches nothing; one already switched passed its own checks and stays (the
 #     Telegram message says so). ship.sh waits for it before it ends either way. SHIP_EXECUTOR_PARALLEL=0: one after the other.
-#   - THE TEST GATE reruns a CI job that failed only in a known network flake, once (deploy/release/ci-flake.mjs).
+#   - THE TEST GATE runs the suites once more when only a known network flake failed (deploy/release/ci-flake.mjs).
 #
 # TELEGRAM: what a ship is, on the first line of each message (deploy/server/bin/telegram.mjs LABELS). Before
 # it restarts anything, it opens a maintenance window on both servers (maint.sh on - they watch each other):
@@ -257,7 +257,7 @@ print_flow() {
     else during+=("tarball to the servers"); fi
   fi
   [ "$EARLY_WEB" = 0 ] || during+=("the web built on Vercel, not live")
-  note "  flow      1. tag, CI$([ ${#during[@]} = 0 ] || printf ' - meanwhile: %s' "$(IFS=';'; echo "${during[*]}" | sed 's/;/; /g')")"
+  note "  flow      1. tag, tests here$([ ${#during[@]} = 0 ] || printf ' - meanwhile: %s' "$(IFS=';'; echo "${during[*]}" | sed 's/;/; /g')")"
   local n=2
   if [ -n "$s1$s2" ] || [ "$BIN" = 1 ]; then note "            $n. scripts, maintenance window"; n=$((n + 1)); fi
   if [ -n "$s1" ] && [ -n "$s2" ] && [ "$PARALLEL" = 1 ]; then
@@ -410,7 +410,7 @@ refs=("refs/tags/$TAG")
 # The branch Vercel builds the early web from (vercel-web.mjs THE GIT REF); a push of it deploys nothing by itself.
 [ "$EARLY_WEB" = 0 ] || refs+=("+$HEAD_SHA:refs/heads/ship")
 "${G[@]}" push -q origin "${refs[@]}"
-# (3. the test gate: below, after the work that runs while CI does)
+# (3. the test gate: below, after the work that runs before and beside it)
 
 # --- 4.-6. the servers ----------------------------------------------------------------------------
 TARBALL=""
@@ -794,11 +794,11 @@ site_check() {
   [ "$code" = 200 ] || die "$SITE answers $code after the deployment"
 }
 
-# --- 3.-4. while CI runs: the tarball to both servers and installed there, the web built (the header) ------------
-phase "ci + beside it"
+# --- 3.-4. before and beside the tests: the tarball to both servers and installed there, the web built (the header) ------------
+phase "tests + beside them"
 WEB_DEP="" WEB_PROMOTED=0 WEB_LIVE=0 WEB_EARLY_LIVE=0 EARLY_INSTALLED=""
 if [ "$EARLY_WEB" = 1 ]; then
-  say "web: built on Vercel while CI runs (staged: not live)"
+  say "web: built on Vercel while the tests run (staged: not live)"
   if WEB_DEP="$(node deploy/release/vercel-web.mjs stage "$HEAD_SHA" "$REPO" "$TAG")"; then note "web: staged production deployment $WEB_DEP of ${HEAD_SHA:0:7} building"
   else WEB_DEP=""; note "!! web: no early build - main's own build after the servers, as before"; fi
 fi
@@ -808,14 +808,14 @@ early_install() {   # host, 1 when a unit is released there
   local tb="$INBOX/$(basename "$TARBALL")" same
   upload "$1"
   [ "$2" = 1 ] && [ "$EARLY_INSTALL" = 1 ] || return 0
-  # The server's own release.sh installs it now; the tag's comes only after CI (sync_bin), and a release already
-  # installed is not installed again. So only where the two are the same file: the same install as after CI.
+  # The server's own release.sh installs it now; the tag's comes only after the tests (sync_bin), and a release already
+  # installed is not installed again. So only where the two are the same file: the same install as after the tests.
   same="$(remote "$1" "a=\$(sudo tar -xzOf $tb --wildcards '*/deploy/server/bin/release.sh' | sha256sum); b=\$(sha256sum < /opt/valuescan/bin/release.sh); [ \"\$a\" = \"\$b\" ] && echo same || echo differs" 2>/dev/null || echo unknown)"
-  if [ "$same" != same ]; then note "$1: $TAG brings another release.sh ($same): it installs $TAG after CI, as before"; return 0; fi
+  if [ "$same" != same ]; then note "$1: $TAG brings another release.sh ($same): it installs $TAG after the tests, as before"; return 0; fi
   if remote "$1" "sudo /opt/valuescan/bin/release.sh $TAG --install-only --from=$tb" >&2; then
     EARLY_INSTALLED="$EARLY_INSTALLED $1"
   else
-    note "!! $1: $TAG did not install now - it is installed again after CI, where a failure stops the ship as before"
+    note "!! $1: $TAG did not install now - it is installed again after the tests, where a failure stops the ship as before"
   fi
 }
 NEED1=0 NEED2=0 REL1=0 REL2=0
@@ -827,21 +827,16 @@ if [ "$NEED1" = 1 ] || [ "$NEED2" = 1 ]; then
   t_early="$(date -u +%s)"
   need_tarball
   # One upload after the other: the laptop's cap.
-  if [ "$NEED1" = 1 ]; then say "server 1 ($S1): upload$([ "$REL1$EARLY_INSTALL" = 11 ] && echo ", install beside the running release") while CI runs"; early_install "$S1" "$REL1"; fi
-  if [ "$NEED2" = 1 ]; then say "server 2 ($S2): upload$([ "$REL2$EARLY_INSTALL" = 11 ] && echo ", install beside the running release") while CI runs"; early_install "$S2" "$REL2"; fi
-  phase_add "beside CI: uploads + installs" $(( $(date -u +%s) - t_early ))
+  if [ "$NEED1" = 1 ]; then say "server 1 ($S1): upload$([ "$REL1$EARLY_INSTALL" = 11 ] && echo ", install beside the running release")"; early_install "$S1" "$REL1"; fi
+  if [ "$NEED2" = 1 ]; then say "server 2 ($S2): upload$([ "$REL2$EARLY_INSTALL" = 11 ] && echo ", install beside the running release")"; early_install "$S2" "$REL2"; fi
+  phase_add "before the tests: uploads + installs" $(( $(date -u +%s) - t_early ))
 fi
 
 # --- 3. the test gate -----------------------------------------------------------------------------
 say "test gate"
-# GitHub creates the tag's CI run a few seconds after the push; test_gate would take "no run" for "no CI".
-for _ in $(seq 1 18); do
-  [ "$(gh_api "$REPO/actions/runs?head_sha=$HEAD_SHA" | json 'v ? v.total_count : 0')" -gt 0 ] && break
-  sleep 10
-done
 test_gate "$TAG"
 
-# The early web after CI: a build that failed stops the ship here, before anything is switched or restarted.
+# The early web after the tests: a build that failed stops the ship here, before anything is switched or restarted.
 if [ -n "$WEB_DEP" ]; then
   ws="$(node deploy/release/vercel-web.mjs wait "$WEB_DEP" 0 2>/dev/null || echo unknown)"
   case "$ws" in
@@ -952,7 +947,7 @@ phase "web"
 if [ "$MOVE_MAIN" = 1 ]; then
   # The early build (vercel-web.mjs): made live by Vercel's promote - no rebuild - and read back as production.
   if [ -n "$WEB_DEP" ]; then
-    say "web: $TAG live (the build made while CI ran)"
+    say "web: $TAG live (the build made while the tests ran)"
     if [ "$WEB_EARLY_LIVE" = 1 ]; then WEB_LIVE=1
     else
       ws="$(node deploy/release/vercel-web.mjs wait "$WEB_DEP" 900 || echo unknown)"
@@ -974,7 +969,7 @@ if [ "$MOVE_MAIN" = 1 ]; then
     "${G[@]}" push -q --atomic origin "$HEAD_SHA:refs/heads/main" "+$HEAD_SHA:refs/heads/ship-live"
     site_check
     note "web live on $SITE (promoted)"
-    done_note "web live (built while CI ran, promoted)"
+    done_note "web live (built while the tests ran, promoted)"
     WEB=0
   else
     "${G[@]}" push -q origin "$HEAD_SHA:refs/heads/main"
