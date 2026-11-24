@@ -45,7 +45,7 @@ test('and on the light page itself, and on a row hovered there', () => {
 
 test('the sheets make hairlines of the ink, never of literal white', () => {
   const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
-  // The admin suite is dark only (admin/), and TradingView's sheet goes into its own frame.
+  // The admin suite and the landing pages are dark only (admin/, landing/), and TradingView's sheet goes into its own frame.
   const bad = walk(SRC)
     .filter((f) => f.endsWith('.css') && !/[\\/]admin[\\/]|tv-theme\.css$/.test(f))
     .flatMap((f) => {
