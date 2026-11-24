@@ -26,6 +26,7 @@ import { MarketBook, notListedLine, snapPrice } from '../markets.ts';
 import type { RegionPolicy } from '../policy.ts';
 import type { SodexClient, VenueHold } from '../sodex.ts';
 import type { MarketInfo } from '../types.ts';
+import { drawLatency, gapBps, PrintBasis, queueChance, takeRate, type FillCurve } from './paperFill.ts';
 import { AlgoFeed, BOT_QUOTE_MAX_AGE_MS, type AlgoMarket, type OrderUpdate, type Print } from './feed.ts';
 import {
   DAY_MS,
@@ -328,6 +329,10 @@ export interface AlgoHost {
    * Absent: such a maker holds.
    */
   reference?: ReferenceSource;
+  /** Measured fills for practice bots, per market (paperFill.ts paperCurve). Absent or null: only a print through the price fills. */
+  paperCurve?: (symbol: string) => FillCurve | null;
+  /** 0..1 draws for practice fills (tests); Math.random otherwise. */
+  paperRandom?: () => number;
   /** Extra sockets for SoDEX account channels, each from its own address (AlgoFeedOptions.accountFactories). */
   accountFactories?: WebSocketFactory[];
   log: Logger;
@@ -440,6 +445,9 @@ function onTick(p: number, side: Side, tickSize: string): number {
   return side === 'buy' ? snapDown(p, tickSize) || Number(tickSize) : snapUp(p, tickSize);
 }
 
+/** Practice orders with measured fills are looked at this often besides every oracle tick and print. */
+const PAPER_TAKE_MS = 100;
+
 interface PaperOrder {
   algoId: string;
   clOrdID: string;
@@ -449,6 +457,8 @@ interface PaperOrder {
   left: number;
   filled: number;
   value: number;
+  /** A practice bot's order on a market with measured fills (paperFill.ts): when it landed, its queue draw, its last look. */
+  m?: { curve: FillCurve; landedAt: number; u: number; at: number };
 }
 
 export class AlgoRuntime {
@@ -516,6 +526,10 @@ export class AlgoRuntime {
   /** Bots whose refused reduce-only order is being checked against the account's position (reduceRefused). */
   private reduceChecks = new Set<string>();
   private paper = new Map<string, PaperOrder>();
+  /** The fair price practice fills are judged by, per market: the basis from prints, and the price in force since. */
+  private paperBasis = new Map<string, PrintBasis>();
+  private paperFair = new Map<string, { fair: number; move: number }>();
+  private paperTimer = false;
   private timers: unknown[] = [];
   private running = false;
   /** The sweep oracle's last quotes per coin, and the read in flight. */
@@ -593,7 +607,8 @@ export class AlgoRuntime {
         if (a.spec.paper && LIVE.has(c.state)) {
           if (c.tif !== 'ioc' && !c.cancelling) {
             c.state = 'open';
-            this.paper.set(c.clOrdID, { algoId: a.id, clOrdID: c.clOrdID, symbol: a.spec.symbol, side: c.side, price: c.price, left: Math.max(0, c.quantity - c.filled), filled: c.filled, value: c.value });
+            this.paper.set(c.clOrdID, { algoId: a.id, clOrdID: c.clOrdID, symbol: a.spec.symbol, side: c.side, price: c.price, left: Math.max(0, c.quantity - c.filled), filled: c.filled, value: c.value, ...this.paperMeasured(a, Date.now()) });
+            this.armPaper();
           } else {
             c.state = 'done';
             c.cancelling = false;
@@ -702,6 +717,20 @@ export class AlgoRuntime {
     b.update(mid(q), refMid, now);
     this.fairAt.set(symbol, now);
     return b.fair(refMid);
+  }
+
+  /** How far the reference stands from where it was `ms` ago (the last quote by then), bp (+ up). 0 with too little history. */
+  private refMoveOver(market: string, midNow: number, ms: number, now: number): number {
+    const trail = this.refTrail.get(market);
+    if (!trail?.length) return 0;
+    let from = trail[0]!;
+    for (let i = trail.length - 1; i >= 0; i--) {
+      if (trail[i]![0] <= now - ms) {
+        from = trail[i]!;
+        break;
+      }
+    }
+    return ((midNow - from[1]) / from[1]) * 10_000;
   }
 
   /** How far the reference moved over the last `ms`, bp (+ up). 0 with too little history. */
@@ -855,6 +884,7 @@ export class AlgoRuntime {
       trail.push([rq.at, (rq.bid + rq.ask) / 2]);
       while (trail.length > 2 && trail[1]![0] < rq.at - 120_000) trail.shift();
     }
+    if (this.paper.size) this.paperTakes(market);
     const q = this.market.quote(market);
     const m = this.markets.get(market);
     if (!q || !m) return;
@@ -4356,7 +4386,7 @@ export class AlgoRuntime {
       return [];
     }
     let results: ChildResult[];
-    if (s.paper) results = this.paperPlace(a, m, children);
+    if (s.paper) results = await this.paperPlace(a, m, children);
     else results = await sink!.place(a, m, reqs);
     let limit: LimitRefusal | null = null;
     for (const c of children) {
@@ -4604,6 +4634,8 @@ export class AlgoRuntime {
     }
     this.dirty.add(a.id);
     if (a.spec.paper) {
+      const curve = this.paperCurveOf(a);
+      if (curve && !FINAL_STATUSES.has(a.status)) await sleep(drawLatency(curve, this.paperRnd()));
       for (const c of open) this.paperCancel(c.clOrdID);
       return;
     }
@@ -5699,7 +5731,29 @@ export class AlgoRuntime {
 
   /* -------------------------------------------------------------- paper ----- */
 
-  private paperPlace(a: AlgoRecord, m: MarketInfo, children: ChildOrder[]): ChildResult[] {
+  private paperRnd(): number {
+    return (this.host.paperRandom ?? Math.random)();
+  }
+
+  /** The measured fills that hold for this algo: a practice maker or grid on a futures market with the reference feed. */
+  private paperCurveOf(a: AlgoRecord): FillCurve | null {
+    if (!a.spec.paper || !a.spec.bot || (a.spec.kind !== 'mm' && a.spec.kind !== 'grid') || isSpotSpec(a.spec)) return null;
+    return this.host.reference ? this.host.paperCurve?.(a.spec.symbol) ?? null : null;
+  }
+
+  private paperMeasured(a: AlgoRecord, now: number): { m?: PaperOrder['m'] } {
+    const curve = this.paperCurveOf(a);
+    return curve ? { m: { curve, landedAt: now, u: this.paperRnd(), at: now } } : {};
+  }
+
+  private async paperPlace(a: AlgoRecord, m: MarketInfo, children: ChildOrder[]): Promise<ChildResult[]> {
+    // Measured: the order reaches the book only now, and is judged against the book as it is then.
+    const curve = this.paperCurveOf(a);
+    if (curve) {
+      await sleep(drawLatency(curve, this.paperRnd()));
+      // Stopped while it was on its way: it never rests (a real one is cancelled again).
+      if (this.stopped(a)) return children.map((c) => ({ clOrdID: c.clOrdID, ok: false, orderId: null, error: 'stopped', outcomeUnknown: false }));
+    }
     const q = this.market.quote(m.name);
     const out: ChildResult[] = [];
     for (const c of children) {
@@ -5723,7 +5777,8 @@ export class AlgoRuntime {
         }
         continue;
       }
-      this.paper.set(c.clOrdID, { algoId: a.id, clOrdID: c.clOrdID, symbol: m.name, side: c.side, price: c.price, left: c.quantity, filled: 0, value: 0 });
+      this.paper.set(c.clOrdID, { algoId: a.id, clOrdID: c.clOrdID, symbol: m.name, side: c.side, price: c.price, left: c.quantity, filled: 0, value: 0, ...this.paperMeasured(a, Date.now()) });
+      this.armPaper();
       emit('NEW', 0, 0, null);
     }
     return out;
@@ -5733,7 +5788,59 @@ export class AlgoRuntime {
     a.k.paperPos = Number(a.k.paperPos ?? 0) + (side === 'buy' ? qty : -qty);
   }
 
+  private armPaper(): void {
+    if (this.paperTimer || ![...this.paper.values()].some((o) => o.m)) return;
+    this.paperTimer = true;
+    timers.after(PAPER_TAKE_MS, () => {
+      this.paperTimer = false;
+      if (!this.running) return;
+      for (const s of new Set([...this.paper.values()].filter((o) => o.m).map((o) => o.symbol))) this.paperTakes(s);
+      this.armPaper();
+    });
+  }
+
+  /**
+   * The informed taker at its measured rate: each measured order stood, since its last look, at the fair price in force
+   * until now; that stretch may have been taken. Then the fair price moves on to the reference as it is now.
+   */
+  private paperTakes(symbol: string, now = Date.now()): void {
+    const fair = this.paperFair.get(symbol);
+    for (const o of [...this.paper.values()]) {
+      if (!o.m || o.symbol !== symbol) continue;
+      const dt = (now - o.m.at) / 1_000;
+      if (dt <= 0) continue;
+      o.m.at = now;
+      if (fair === undefined) continue;
+      const rate = takeRate(o.m.curve, gapBps(o.side, o.price, fair.fair), o.side === 'buy' ? -fair.move : fair.move, now - o.m.landedAt);
+      if (rate > 0 && this.paperRnd() < 1 - Math.exp(-rate * dt)) this.paperFill(o, o.left, INFORMED_TAKER_ACCOUNT, now);
+    }
+    const r = this.host.reference?.quote(symbol);
+    const next = r && now - r.at <= REF_MAX_AGE_MS ? this.paperBasis.get(symbol)?.fair((r.bid + r.ask) / 2) ?? null : null;
+    if (next === null) this.paperFair.delete(symbol);
+    else this.paperFair.set(symbol, { fair: next, move: this.refMoveOver(symbol, (r!.bid + r!.ask) / 2, this.host.paperCurve?.(symbol)?.moveMs ?? 300, now) });
+  }
+
+  private paperFill(o: PaperOrder, qty: number, taker: number, at: number): void {
+    const q = Math.min(o.left, qty);
+    if (q <= 1e-12) return;
+    o.left -= q;
+    o.filled += q;
+    o.value += q * o.price;
+    const a = this.algos.get(o.algoId);
+    if (a) this.paperPosition(a, o.side, q);
+    if (a && (a.spec.kind === 'mm' || a.spec.kind === 'grid')) this.countTaker(a, taker, q * o.price);
+    const done = o.left <= 1e-12;
+    if (done) this.paper.delete(o.clOrdID);
+    this.onOrderUpdate({ clOrdID: o.clOrdID, orderId: `paper-${o.clOrdID}`, symbol: o.symbol, status: done ? 'FILLED' : 'PARTIALLY_FILLED', filledQty: o.filled, filledValue: o.value, maker: true, reason: null, at });
+  }
+
   private paperCancel(clOrdID: string): void {
+    // A measured order may still be taken while its cancel is on the way; filled in full, nothing is left to cancel.
+    const resting = this.paper.get(clOrdID);
+    if (resting?.m) {
+      this.paperTakes(resting.symbol);
+      if (resting.left <= 1e-12) return;
+    }
     const o = this.paper.get(clOrdID);
     this.paper.delete(clOrdID);
     const id = this.byClOrd.get(clOrdID);
@@ -5750,26 +5857,37 @@ export class AlgoRuntime {
    * longer filled each of them in full.
    */
   private paperOnPrint(p: Print): void {
-    const isBot = (o: PaperOrder) => this.algos.get(o.algoId)?.spec.bot === true;
-    const hit = [...this.paper.values()].filter((o) => o.symbol === p.symbol && (isBot(o) ? (o.side === 'buy' ? p.price < o.price - 1e-12 && p.taker === 'sell' : p.price > o.price + 1e-12 && p.taker === 'buy') : o.side === 'buy' ? p.price <= o.price && p.taker === 'sell' : p.price >= o.price && p.taker === 'buy'));
+    const taker = p.taker === 'buy' ? p.buyer : p.seller;
+    const now = Date.now();
+    if ([...this.paper.values()].some((o) => o.m && o.symbol === p.symbol)) {
+      this.paperTakes(p.symbol, now);
+      const r = this.host.reference?.quote(p.symbol);
+      const hl = this.host.paperCurve?.(p.symbol)?.basisMs;
+      if (r && hl && now - r.at <= REF_MAX_AGE_MS) {
+        let b = this.paperBasis.get(p.symbol);
+        if (!b) this.paperBasis.set(p.symbol, (b = new PrintBasis()));
+        b.update(p.price, (r.bid + r.ask) / 2, now, hl);
+      }
+    }
+    const reached = (o: PaperOrder): boolean => {
+      if (o.symbol !== p.symbol || p.taker === o.side) return false;
+      const through = o.side === 'buy' ? p.price < o.price - 1e-12 : p.price > o.price + 1e-12;
+      const here = !through && (o.side === 'buy' ? p.price <= o.price : p.price >= o.price);
+      // Measured: the informed taker's prints are its rate (paperTakes); anyone else's reach an order whose queue is gone.
+      if (o.m) return taker !== INFORMED_TAKER_ACCOUNT && (through || Math.abs(p.price - o.price) <= 1e-12) && o.m.u < queueChance(o.m.curve, now - o.m.landedAt);
+      return through || (here && this.algos.get(o.algoId)?.spec.bot !== true);
+    };
+    const hit = [...this.paper.values()].filter(reached);
     if (!hit.length) return;
     // Best price first (a sell print reaches the highest bid first); Array.sort is stable, so equal prices keep their order.
     hit.sort((x, y) => (x.side === 'buy' ? y.price - x.price : x.price - y.price));
     let size = p.qty;
     for (const o of hit) {
-      const bot = isBot(o);
+      const bot = this.algos.get(o.algoId)?.spec.bot === true;
       if (bot && size <= 1e-12) continue;
       const q = Math.min(o.left, bot ? size : p.qty);
       if (bot) size -= q;
-      o.left -= q;
-      o.filled += q;
-      o.value += q * o.price;
-      const a = this.algos.get(o.algoId);
-      if (a) this.paperPosition(a, o.side, q);
-      if (a && (a.spec.kind === 'mm' || a.spec.kind === 'grid')) this.countTaker(a, p.taker === 'buy' ? p.buyer : p.seller, q * o.price);
-      const done = o.left <= 1e-12;
-      if (done) this.paper.delete(o.clOrdID);
-      this.onOrderUpdate({ clOrdID: o.clOrdID, orderId: `paper-${o.clOrdID}`, symbol: o.symbol, status: done ? 'FILLED' : 'PARTIALLY_FILLED', filledQty: o.filled, filledValue: o.value, maker: true, reason: null, at: p.at });
+      this.paperFill(o, q, taker, p.at);
     }
   }
 

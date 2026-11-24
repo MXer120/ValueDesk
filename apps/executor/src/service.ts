@@ -30,6 +30,7 @@ import {
   currentCopyTerms,
   type CopyTermsServed,
   EXECUTOR_FEATURES,
+  paperCurve,
   SITE_TERMS_EXECUTOR,
   CopyRuntime,
   FINAL_STATUSES,
@@ -643,6 +644,8 @@ export class ExecutorService {
       // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
       oracle: (coin) => oracleFeed.quotes(coin),
       ...(this.reference ? { reference: this.reference } : {}),
+      // Practice bots fill at the rates measured on real orders, where a market has them (paperFill.ts).
+      paperCurve,
       // A bot's news gate: the API server's economic calendar, read every 30 minutes.
       events: () => this.calendar?.events() ?? null,
       // An algo failed, stopped, held or finished: kept for the follower to read after signing in.

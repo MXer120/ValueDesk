@@ -13,4 +13,5 @@ export * from './refusals.ts';
 export * from './sizes.ts';
 export * from './bots.ts';
 export * from './reference.ts';
+export * from './paperFill.ts';
 export * from './hedge.ts';
