@@ -9,11 +9,11 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAsync } from '../../../hooks';
-import { vsApi, type BoardWindow, type TraderRow } from '../../../vsApi';
+import type { BoardWindow, TraderRow } from '../../../vsApi';
 import { CoinIcon } from '../../CoinIcon';
 import { VenueLogo } from '../../VenueLogo';
-import { COPY_VENUES, scoreRows } from '../../copy/gridModel';
-import { botHref, usdShort, type MarketRow } from '../shared';
+import { scoreRows } from '../../copy/gridModel';
+import { botHref, readBoards, usdShort, type MarketRow } from '../shared';
 
 const WIN: BoardWindow = '30d';
 const EVERY = 3; // a trader after every 3 markets
@@ -34,22 +34,14 @@ export function SiteTape({ rows }: { rows: MarketRow[] }) {
     io.observe(el);
     return () => io.disconnect();
   }, []);
-  const boards = useAsync(
-    () => Promise.all(COPY_VENUES.map((venue) => vsApi.leaderboard({ venue, window: WIN, sort: 'pnl', limit: 100 }).then((b) => b.rows, () => [] as TraderRow[]))),
-    [],
-    { enabled: on, pollMs: 300_000 },
-  );
-  const worst = useAsync(
-    () => Promise.all(COPY_VENUES.map((venue) => vsApi.leaderboard({ venue, window: WIN, sort: 'pnl', side: 'worst', limit: 20 }).then((b) => b.rows, () => [] as TraderRow[]))),
-    [],
-    { enabled: on, pollMs: 300_000 },
-  );
+  const boards = useAsync(() => readBoards('best', 100), [], { enabled: on });
+  const worst = useAsync(() => readBoards('worst', 20), [], { enabled: on });
   // Copy picks: the best copy scores. Counter picks (owner 2026-11-23: "also counter traders sometimes"): the wallets that
   // lost the most over the same 30 days - the app's Counter direction trades against them.
   const traders = useMemo(() => {
-    const all = (boards.data ?? []).flat();
+    const all = boards.data ?? [];
     const copy = scoreRows(all, WIN, 'copy').sort((a, b) => b.score.score - a.score.score).slice(0, 4).map((s) => ({ row: s.row, counter: false }));
-    const counter = (worst.data ?? []).flat().filter((r) => (r.pnl[WIN] ?? 0) < 0).sort((a, b) => (a.pnl[WIN] ?? 0) - (b.pnl[WIN] ?? 0)).slice(0, 3).map((row) => ({ row, counter: true }));
+    const counter = (worst.data ?? []).filter((r) => (r.pnl[WIN] ?? 0) < 0).sort((a, b) => (a.pnl[WIN] ?? 0) - (b.pnl[WIN] ?? 0)).slice(0, 3).map((row) => ({ row, counter: true }));
     const out: Array<{ row: TraderRow; counter: boolean }> = [];
     for (let i = 0; i < Math.max(copy.length, counter.length); i++) { if (copy[i]) out.push(copy[i]!); if (counter[i]) out.push(counter[i]!); }
     return out;

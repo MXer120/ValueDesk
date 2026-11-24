@@ -18,7 +18,8 @@ import { GRID_VENUES, COPY_VENUES } from '../../copy/gridModel';
 import { VENUE_LABEL } from '../../../vsApi';
 import { dropBootShell } from '../../../bootShell';
 import type { BotLatencyResponse } from '../../../bots/data';
-import { FEES, bp, usdStep, usdShort, useLiveDesk, startFromText, reducedMotion, SwimmingWhale, DESK_WINDOW_TEXT, type MarketRow } from '../shared';
+import { FEES, bp, usdStep, usdShort, useLiveDesk, startFromText, frameMs, liteDevice, reducedMotion, SwimmingWhale, DESK_WINDOW_TEXT, type MarketRow } from '../shared';
+import { TerminalDesk } from './Terminal';
 import './v3.css';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
@@ -134,7 +135,11 @@ export function HeatField({ className }: { className?: string }) {
     const bands = Array.from({ length: 30 }, (_, i) => ({ y: (i / 30) * H, h: 3 + rnd() * 8, k: rnd() ** 2.3, ph: rnd() * 6.28, sp: 0.2 + rnd() * 0.6 }));
     const still = reducedMotion();
     let raf = 0;
+    let drawn = -1e9;
     const draw = (t: number) => {
+      if (!still) raf = requestAnimationFrame(draw);
+      if (!still && t - drawn < frameMs()) return;
+      drawn = t;
       ctx.fillStyle = '#0d0420';
       ctx.fillRect(0, 0, W, H);
       for (const b of bands) {
@@ -157,7 +162,6 @@ export function HeatField({ className }: { className?: string }) {
         if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
       ctx.stroke();
-      if (!still) raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
@@ -437,7 +441,7 @@ const WHALE_TO: [number, number, number, number] = [0.3, 0.42, -78, 1.1];
 
 const FAQ: Array<{ q: string; a: ReactNode }> = [
   { q: 'Do I deposit anything with ValueDesk?', a: 'No. Your funds stay in your own SoDEX account. Bots and copies place orders there with a trading key you register on SoDEX; that key can move funds only between your own SoDEX accounts and your wallet, never to anyone else.' },
-  { q: 'What does it cost?', a: `The analytics are free. Bot orders pay ${bp(FEES.botNew)} of their value for a new wallet, down to ${bp(FEES.botLadder[FEES.botLadder.length - 1]!.fee)} by your ${FEES.windowDays}-day volume, and ${bp(FEES.botLowest)} for VIP (${FEES.vipCondition}). Copied orders pay ${bp(FEES.copyNew)}, down to ${bp(FEES.copyLowest)} ${FEES.copyLowestCondition}. SoDEX charges its own trading fee on top.` },
+  { q: 'What does it cost?', a: `The analytics are free. Bot orders pay ${bp(FEES.botNew)} of their value for a new wallet, down to ${bp(FEES.botLadder[FEES.botLadder.length - 1]!.fee)} by your ${FEES.windowDays}-day volume, and ${bp(FEES.botLowest)} for VIP (${FEES.vipCondition}). Copied orders pay from ${bp(FEES.copyLowest)} ${FEES.copyLowestCondition}. SoDEX charges its own trading fee on top.` },
   { q: 'Can I stop at any time?', a: 'Yes. Stop a bot or a copy in the app, and revoke the trading key and the fee approval on SoDEX whenever you like. The key also ends on its own after the days you chose, at most 180.' },
   { q: 'Do bots keep running when I close the tab?', a: "Yes. Bots and hosted copies run on ValueDesk's executor in Tokyo around the clock. Browser copies run while their tab is open." },
   { q: 'How long does setting up take?', a: 'Connect a wallet you use on SoDEX and sign three times: the terms, the fee and the trading key. One click asks your wallet for each. Signatures are free; none is a transaction.' },
@@ -455,6 +459,7 @@ const FX_DUST = Array.from({ length: 9 }, (_, i) => {
   return { x: r(1) * 100, y: r(2) * 100, s: 1 + r(3) * 1.6, d: 22 + r(4) * 26, o: -r(5) * 40, a: 0.2 + r(6) * 0.45 };
 });
 export function FeatureFx({ v }: { v: number }) {
+  if (liteDevice()) return <span className={`v3-fx is-${v}`} aria-hidden="true"><span className="v3-fx__dots" /></span>;
   return (
     <span className={`v3-fx is-${v}`} aria-hidden="true">
       <span className="v3-fx__dots" />
@@ -615,7 +620,7 @@ export function V3() {
       <nav className={cx('v3-nav', scrolled && 'is-solid')} aria-label="ValueDesk">
         <a href="/home" className="v3-logo"><BrandMark size={22} /><span>ValueDesk</span></a>
         <div className="v3-nav__links"><a href="#features">Features</a><a href="#safety">Your funds</a><a href="#fees">Fees</a><a href="#faq">FAQ</a></div>
-        <a href="/trade" className="v3-btn is-glass is-sm">Open app</a>
+        <a href="/trade" className="v3-btn is-glass is-sm">Launch app</a>
       </nav>
 
       {/* --------------------------------------------------------------------------------------------- hero */}
@@ -633,7 +638,7 @@ export function V3() {
           </div>
           <p className="v3-hero__fine v3-up" style={{ '--d': '340ms' } as CSSProperties}>No deposit · three free signatures · stop any time</p>
         </div>
-        <Desk live={live} />
+        <TerminalDesk live={live} />
       </header>
 
       {/* ---------------------------------------------------------------------------------------- live strip */}
@@ -657,7 +662,7 @@ export function V3() {
             <Eyebrow>Fees</Eyebrow>
             <h2 className="v3-h2 v3-feehead">Bot fee from <span className="v3-num">{bp(FEES.botLowest)}</span></h2>
             <p className="v3-vipline"><span className="v3-vip">VIP</span>{FEES.vipCondition}</p>
-            <p className="v3-lead">No subscription. A fee in basis points on the orders that run, lower as your {FEES.windowDays}-day volume grows.</p>
+            <p className="v3-lead">No subscription. A fee in basis points on the orders that run.</p>
           </Reveal>
           <div className="v3-fees">
             <Reveal className="v3-fee is-hot">
@@ -671,7 +676,7 @@ export function V3() {
             </Reveal>
             <Reveal className="v3-fee" delay={90}>
               <p className="v3-fee__k">Copy trading</p>
-              <b className="v3-fee__v">{bp(FEES.copyNew)}<small> per copied order</small></b>
+              <b className="v3-fee__v"><small>from </small>{bp(FEES.copyLowest)}<small> per copied order</small></b>
               <ul>
                 {FEES.copyLadder.slice(1).map((s) => <li key={s.fromUsd}><span>{bp(s.fee)}</span>from {usdStep(s.fromUsd)} copied in {FEES.windowDays} days</li>)}
               </ul>

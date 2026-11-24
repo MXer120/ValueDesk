@@ -13,7 +13,7 @@
  *     the user's OWN SoDEX accounts and wallet - never to anyone else. Never say "the bot can only trade".
  *   - setup: connect + 3 signatures (terms, fee, key), one click asks for each; free, no transaction.
  */
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { BOT_FEE_LADDER, BOT_FEE_VIP, BOT_VIP_MIN_USD, COPY_FEE_LADDER, COPY_FEE_WINDOW_DAYS } from '@copy-engine';
 import { useSymbols } from '../../hooks';
 import { useBotMarkets, type BotMarket } from '../../bots/data';
@@ -21,6 +21,8 @@ import { bestOf, feeAdjOf, rankRecipes } from '../../bots/estimate';
 import { RECIPE } from '../../bots/recipes';
 import { draftFor, minQuoteUsd, planMarkets } from '../../bots/presets';
 import { marketOf } from '../algo/draft';
+import { scoreRows, COPY_VENUES } from '../copy/gridModel';
+import { vsApi, type TraderRow } from '../../vsApi';
 import { loadTone, stipple, TH, TW, type Dot } from '../copy/DotWhale';
 
 /* -------------------------------------------------------------------------------------------------- fees ----- */
@@ -147,6 +149,46 @@ export function startFromText(s: LiveDesk['startFrom']): string {
 
 export const reducedMotion = (): boolean => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+/** A phone or laptop with little memory or few cores, or a visitor saving data: fewer frames, no dust, no blur. */
+let lite: boolean | null = null;
+export function liteDevice(): boolean {
+  if (lite === null) {
+    const n = typeof navigator === 'undefined' ? null : (navigator as Navigator & { deviceMemory?: number; connection?: { saveData?: boolean } });
+    lite = !!n && ((n.deviceMemory ?? 8) <= 4 || (n.hardwareConcurrency ?? 8) <= 4 || n.connection?.saveData === true);
+  }
+  return lite;
+}
+/** A canvas loop's least time between two frames: half a 60 Hz display's on a good device, a few a second on a small one. */
+export const frameMs = (): number => (liteDevice() ? 120 : 32);
+
+/* ---------------------------------------------------------------------------------- the public boards ----- */
+
+/** The copy venues' 30-day boards: read once per page load, whoever asks (the tape, the consoles, the lists). */
+const boardReads = new Map<string, Promise<TraderRow[]>>();
+export function readBoards(side: 'best' | 'worst', limit: number): Promise<TraderRow[]> {
+  const key = `${side}|${limit}`;
+  let p = boardReads.get(key);
+  if (!p) {
+    p = Promise.all(COPY_VENUES.map((venue) => vsApi.leaderboard({ venue, window: '30d', sort: 'pnl', ...(side === 'worst' ? { side } : {}), limit }).then((b) => b.rows, () => [] as TraderRow[]))).then((x) => x.flat());
+    boardReads.set(key, p);
+  }
+  return p;
+}
+export interface TopTrader { venue: TraderRow['venue']; address: string; label: string | null; pnl: number; row: TraderRow }
+/** The best copy scores of the last 30 days (empty until read). */
+export function useTopTraders(on: boolean): TopTrader[] {
+  const [xs, setXs] = useState<TopTrader[]>([]);
+  useEffect(() => {
+    if (!on || xs.length) return;
+    let alive = true;
+    void readBoards('best', 100).then((rows) => {
+      if (alive) setXs(scoreRows(rows, '30d', 'copy').sort((a, b) => b.score.score - a.score.score).slice(0, 5).map(({ row }) => ({ venue: row.venue, address: row.address, label: row.label ?? null, pnl: row.pnl['30d'] ?? 0, row })));
+    });
+    return () => { alive = false; };
+  }, [on, xs.length]);
+  return xs;
+}
+
 /* ------------------------------------------------------------------------------------------ the whale ----- */
 
 /**
@@ -182,7 +224,7 @@ export function SwimmingWhale({
     let dots: Dot[] = [];
     let raf = 0;
     let alive = true;
-    const still = reducedMotion();
+    const still = reducedMotion() || liteDevice();
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const size = () => {
       canvas.width = Math.round(window.innerWidth * dpr);

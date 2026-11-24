@@ -249,7 +249,7 @@ function faqItems(start: string): Array<{ q: string; a: string }> {
   const ladder = FEES.botLadder;
   return [
     { q: 'Do I deposit anything with ValueDesk?', a: 'No. Your funds stay in your own SoDEX account. Bots and copies place orders there with a trading key you register on SoDEX; that key can move funds only between your own SoDEX accounts and your wallet, never to anyone else.' },
-    { q: 'What does it cost?', a: `The analytics are free. Bot orders pay ${bp(ladder[0]!.fee)} of their value, and ${bp(FEES.botLowest)} for VIP (${VIP_WHEN}). Copied orders pay ${bp(FEES.copyNew)} down to ${bp(FEES.copyLowest)} (${FEES.copyLowestCondition}). SoDEX charges its own trading fee on top.` },
+    { q: 'What does it cost?', a: `The analytics are free. Bot orders pay ${bp(ladder[0]!.fee)} of their value, and ${bp(FEES.botLowest)} for VIP (${VIP_WHEN}). Copied orders pay from ${bp(FEES.copyLowest)} (${FEES.copyLowestCondition}). SoDEX charges its own trading fee on top.` },
     { q: 'Can I stop at any time?', a: 'Yes. Stop a bot or a copy in the app, and revoke the trading key and the fee approval on SoDEX whenever you like. The key also ends on its own after the days you chose, at most 180.' },
     { q: 'Do bots keep running when I close the tab?', a: 'Yes. Bots and hosted copies run on the ValueDesk executor in Tokyo around the clock. Browser copies run while their tab is open.' },
     { q: 'How long does setting up take?', a: 'Connect a wallet you use on SoDEX and sign three times: the terms, the fee and the trading key. One click asks for each in turn. Signatures are free; none is a transaction.' },
@@ -378,7 +378,6 @@ export function V4() {
               <p className="v4-plan__s">{FEES.copyLowestCondition}</p>
               <a href="/copy" className="v4-btn is-glass is-block">Copy a trader</a>
               <ul>
-                <li><Check /><span><b>{bp(FEES.copyNew)}</b> for a new wallet</span></li>
                 <li><Check />Lower by {FEES.windowDays}-day copied volume</li>
                 <li><Check />In your browser or hosted</li>
                 <li><Check />Your size, your leverage cap</li>

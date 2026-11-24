@@ -26,7 +26,7 @@ import { VenueLogo } from '../VenueLogo';
 import { BrandMark } from '../BrandMark';
 import { COPY_VENUES, GRID_VENUES, scoreRows } from '../copy/gridModel';
 import { dropBootShell } from '../../bootShell';
-import { FEES, startFromText, SwimmingWhale, usdStep, useLiveDesk } from './shared';
+import { readBoards, FEES, startFromText, SwimmingWhale, usdStep, useLiveDesk } from './shared';
 import './home.css';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
@@ -299,12 +299,8 @@ export function SignViz() {
 /* --------------------------------------------------------------------------------------------- copy list ----- */
 
 export function TopTraders({ on }: { on: boolean }) {
-  const boards = useAsync(
-    () => Promise.all(COPY_VENUES.map((venue) => vsApi.leaderboard({ venue, window: BOARD_WINDOW, sort: 'pnl', limit: 100 }).then((b) => b.rows, () => [] as TraderRow[]))),
-    [],
-    { enabled: on, pollMs: 120_000 },
-  );
-  const top = useMemo(() => scoreRows((boards.data ?? []).flat(), BOARD_WINDOW, 'copy').sort((a, b) => b.score.score - a.score.score).slice(0, 3), [boards.data]);
+  const boards = useAsync(() => readBoards('best', 100), [], { enabled: on });
+  const top = useMemo(() => scoreRows(boards.data ?? [], BOARD_WINDOW, 'copy').sort((a, b) => b.score.score - a.score.score).slice(0, 3), [boards.data]);
   if (!boards.data) return <ul className="h-traders is-skel">{[0, 1, 2].map((i) => <li key={i} />)}</ul>;
   if (!top.length) return null;
   return (
@@ -337,7 +333,7 @@ export function Arrow() {
 
 const FAQ: Array<{ q: string; a: string }> = [
   { q: 'Do I deposit anything with ValueDesk?', a: 'No. Your funds stay in your own SoDEX account. Bots and copies place orders there with a trading key you register on SoDEX; that key can move funds only between your own SoDEX accounts and your wallet.' },
-  { q: 'What does it cost?', a: `The analytics are free. Bot orders pay ${bp(BOT_FEE_LADDER[0]!.fee)} of their value, and ${bp(BOT_FEE_VIP)} for VIP. Copied orders pay ${bp(COPY_FEE_LADDER[0]!.fee)} down to ${bp(COPY_FEE_LADDER[COPY_FEE_LADDER.length - 1]!.fee)}. SoDEX charges its own trading fee on top.` },
+  { q: 'What does it cost?', a: `The analytics are free. Bot orders pay ${bp(BOT_FEE_LADDER[0]!.fee)} of their value, and ${bp(BOT_FEE_VIP)} for VIP. Copied orders pay from ${bp(COPY_FEE_LADDER[COPY_FEE_LADDER.length - 1]!.fee)} (${FEES.copyLowestCondition}); your rate is shown before you approve it. SoDEX charges its own trading fee on top.` },
   { q: 'Can I stop at any time?', a: 'Yes. Stop a bot or a copy in the app, and revoke the trading key and the fee approval on SoDEX whenever you like. The key also ends on its own after the days you chose, at most 180.' },
   { q: 'Do bots keep running when I close the tab?', a: 'Yes. Bots and hosted copies run on the ValueDesk executor in Tokyo around the clock. Browser copies run while their tab is open.' },
   { q: 'What does setting up take?', a: 'Connect a wallet you use on SoDEX and sign three times: the terms, the fee and the trading key. Signatures are free; nothing is a transaction.' },
@@ -507,7 +503,7 @@ export function Home() {
             <b className="h-fee__v"><small>from </small>{bp(FEES.copyLowest)}<small> per order</small></b>
             <p className="h-fee__c">{FEES.copyLowestCondition}</p>
             <ul>
-              <li>{bp(FEES.copyNew)} for a new wallet, lower by {COPY_FEE_WINDOW_DAYS}-day volume</li>
+              <li>Lower by {COPY_FEE_WINDOW_DAYS}-day volume</li>
               <li>Hyperliquid and SoDEX leaders</li>
               <li>In your browser or hosted</li>
               <li>Your size, your leverage cap</li>

@@ -8,7 +8,7 @@
  * shade of every rib on top. Pauses off screen and while the tab is hidden; under reduced motion it paints once.
  */
 import { useEffect, useRef } from 'react';
-import { reducedMotion } from '../shared';
+import { frameMs, liteDevice, reducedMotion } from '../shared';
 
 export const HEAT = ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'] as const;
 
@@ -78,6 +78,7 @@ export function HeatGlass({ layout = 'right', rib = 26, className }: { layout?: 
     let sw = rib;
     let shade: CanvasPattern | null = null;
     let raf = 0;
+    let drawn = -1e9;
     let visible = false;
     let alive = true;
 
@@ -85,7 +86,7 @@ export function HeatGlass({ layout = 'right', rib = 26, className }: { layout?: 
       const r = cv.getBoundingClientRect();
       W = Math.max(1, r.width);
       H = Math.max(1, r.height);
-      dpr = Math.min(1.5, window.devicePixelRatio || 1);
+      dpr = Math.min(liteDevice() ? 1 : 1.5, window.devicePixelRatio || 1);
       cv.width = Math.round(W * dpr);
       cv.height = Math.round(H * dpr);
       sw = W < 560 ? Math.max(14, rib * 0.66) : rib;
@@ -130,6 +131,9 @@ export function HeatGlass({ layout = 'right', rib = 26, className }: { layout?: 
 
     const draw = (t: number) => {
       if (!alive) return;
+      if (!still && visible && document.visibilityState === 'visible') raf = requestAnimationFrame(draw);
+      if (!still && t - drawn < frameMs()) return;
+      drawn = t;
       paintField(still ? 8000 : t);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.imageSmoothingEnabled = true;
@@ -145,9 +149,8 @@ export function HeatGlass({ layout = 'right', rib = 26, className }: { layout?: 
         ctx.fillStyle = shade;
         ctx.fillRect(0, 0, cv.width, cv.height);
       }
-      if (!still && visible && document.visibilityState === 'visible') raf = requestAnimationFrame(draw);
     };
-    const kick = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); };
+    const kick = () => { drawn = -1e9; cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); };
 
     size();
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { size(); kick(); }) : null;

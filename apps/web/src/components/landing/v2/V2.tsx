@@ -338,9 +338,9 @@ function Fees({ makerBps }: { makerBps: number | null }) {
             <span className="v2-price__k">Copy trading</span>
             <div className="v2-price__big"><small>from</small> {bp(FEES.copyLowest)}</div>
             <p className="v2-price__cond">{FEES.copyLowestCondition.replace(/^from/, 'From')}</p>
-            <p className="v2-price__new">A new wallet pays <b>{bp(FEES.copyNew)}</b> per copied order, less as volume grows:</p>
+            <p className="v2-price__new">Less as your copied volume grows:</p>
             <ul className="v2-ladder">
-              {FEES.copyLadder.map((s) => <li key={s.fromUsd}><span>{s.fromUsd === 0 ? 'New wallet' : `From ${usdStep(s.fromUsd)}`}</span><b>{bp(s.fee)}</b></li>)}
+              {FEES.copyLadder.slice(1).map((s) => <li key={s.fromUsd}><span>{s.fromUsd === 0 ? 'New wallet' : `From ${usdStep(s.fromUsd)}`}</span><b>{bp(s.fee)}</b></li>)}
             </ul>
             <a href="/copy" className="v2-btn is-glass is-block">Copy a trader</a>
           </Reveal>
@@ -367,7 +367,7 @@ function Fees({ makerBps }: { makerBps: number | null }) {
 
 const FAQ: Array<{ q: string; a: ReactNode }> = [
   { q: 'Do I deposit money with ValueDesk?', a: 'No. Your funds stay in your own SoDEX account. Bots and copies trade from it with a trading key you create.' },
-  { q: 'What does it cost?', a: <>Bots: {bp(FEES.botNew)} per order for a new wallet, down to {bp(FEES.botLowest)} for VIP ({VIP_RULE}). Copy trading: {bp(FEES.copyNew)} down to {bp(FEES.copyLowest)} ({FEES.copyLowestCondition}). Analytics are free. SoDEX charges its own trading fee on top.</> },
+  { q: 'What does it cost?', a: <>Bots: {bp(FEES.botNew)} per order for a new wallet, down to {bp(FEES.botLowest)} for VIP ({VIP_RULE}). Copy trading: from {bp(FEES.copyLowest)} ({FEES.copyLowestCondition}). Analytics are free. SoDEX charges its own trading fee on top.</> },
   { q: 'Can I stop any time?', a: 'Yes. Stop a bot or a copy with one click, and revoke the trading key and the fee on SoDEX whenever you like. The key also ends by itself after the days you choose, at most 180.' },
   { q: 'Does it keep running when I close the tab?', a: "Bots and hosted copies do: they run on ValueDesk's executor in Tokyo." },
   { q: 'How long does setup take?', a: 'Connect your wallet and sign three times (terms, fee, key); one click asks for each. The signatures are free: no transaction.' },

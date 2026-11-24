@@ -10,7 +10,7 @@
  *   ArbVenue = sodex | hyperliquid; bots and copies trade on SoDEX only).
  * The drawings carry no figures.
  */
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { CoinIcon } from '../../CoinIcon';
 import { VenueLogo } from '../../VenueLogo';
 import { GRID_VENUES, COPY_VENUES } from '../../copy/gridModel';
@@ -27,7 +27,7 @@ import '../../bots/botsPages.css';
 import { HeatGlass } from '../v4/heat';
 import { botHref, bp, DESK_WINDOW_TEXT, FEES, startFromText, usdShort, usdStep, useLiveDesk, type MarketRow } from '../shared';
 import { Calcs } from './Calcs';
-import { BotConsole, BotSettingsMap, CopyConsole, LiqMapViz } from './viz';
+import { BotConsole, BotSettingsMap, CopyConsole, LiqMapViz, LiveLiqViz } from './viz';
 import './pages.css';
 import { FeeCards } from './FeeCards';
 import { qaFor } from './faq';
@@ -240,7 +240,7 @@ export function BotsPage() {
   const live = useLiveDesk();
   const start = startFromText(live.startFrom);
   return (
-    <SitePage title={`Trading bots on SoDEX · start with ${start} · ValueDesk`} current="bots" footer={<SiteFooter title={<>Your first bot,<br /><span>with {start}.</span></>} />}>
+    <SitePage title={`Trading bots on SoDEX · start with ${start} · ValueDesk`} current="bots" footer={<SiteFooter title={<>Your first bot,<br /><span>with {start}.</span></>} cta={{ href: '/bots/new', label: 'Start a bot' }} />}>
       <PageHero
         title={<>Bots that trade<br /><span>while you sleep.</span></>}
         sub="Market makers, grids and hedges on SoDEX perps and spot, around the clock from your own account."
@@ -318,6 +318,30 @@ function CopyOrCounter() {
   );
 }
 
+/** The copy fee as the stair it is: each step down with the copied volume it starts at (the ladder's own), the way in beside it. */
+function CopyFees() {
+  const steps = FEES.copyLadder.slice(1);
+  const top = Math.max(...steps.map((x) => x.fee));
+  return (
+    <div className="vd-cf">
+      <FeatureFx v={3} />
+      <div className="vd-cf__t">
+        <p className="vd-cf__v"><small>from</small>{bp(FEES.copyLowest)}</p>
+        <p className="vd-cf__c">per copied order, {FEES.copyLowestCondition}</p>
+        <ul><li>Copy or counter any wallet</li><li>Your size, your leverage cap</li><li>In your browser or hosted</li><li>Your rate is shown before you approve it</li></ul>
+        <a href="/copy" className="h-btn is-light">Copy a trader<Arrow /></a>
+      </div>
+      <div className="vd-cf__steps">
+        {steps.map((x, i) => (
+          <div key={x.fromUsd} className={i === steps.length - 1 ? 'is-low' : undefined} style={{ '--h': 0.3 + 0.7 * (x.fee / top), '--i': i } as CSSProperties}>
+            <b>{bp(x.fee)}</b><i /><small>from {usdStep(x.fromUsd)}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function CopyPage() {
   const copyNames = venueList(COPY_VENUES);
   return (
@@ -330,7 +354,7 @@ export function CopyPage() {
       />
       <Facts items={[
         { v: COPY_VENUES.length, l: `venues to copy from: ${copyNames}` },
-        { v: bp(FEES.copyNew), l: 'per copied order, new wallet' },
+        { v: 'Milliseconds', l: 'order latency, from our executor in Tokyo' },
         { v: bp(FEES.copyLowest), l: FEES.copyLowestCondition },
         { v: '24/7', l: 'hosted copies, on our executor' },
       ]} />
@@ -370,8 +394,8 @@ export function CopyPage() {
       </section>
 
       <section className="vd-sec">
-        <Head k="Fees" title={<>{bp(FEES.copyNew)} per copied order,<br /><span>less as you copy more.</span></>} lead={`Volume counts over ${FEES.windowDays} days. SoDEX charges its own trading fee on top.`} />
-        <FeeCards start={startFromText(null)} only="copy" />
+        <Head k="Fees" title={<>From {bp(FEES.copyLowest)} a copied order.<br /><span>Less as you copy more.</span></>} lead={`Volume counts over ${FEES.windowDays} days. SoDEX charges its own trading fee on top.`} />
+        <Reveal><Embed scope="v3"><CopyFees /></Embed></Reveal>
       </section>
 
       <Embed scope="v2"><Money /></Embed>
@@ -399,26 +423,33 @@ const AN_TILES: Array<{ t: string; s: string; ic: ReactNode; href: string }> = [
 
 /** The analytics hero: the liquidation map in a terminal frame, with the controls the real one has. */
 function MapFrame() {
+  const [view, setView] = useState<'live' | 'history'>('live');
+  const [held, setHeld] = useState(false);
+  useEffect(() => {
+    if (held || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const id = window.setInterval(() => setView((v) => (v === 'live' ? 'history' : 'live')), 7000);
+    return () => window.clearInterval(id);
+  }, [held]);
   return (
     <div className="vd-frame">
       <div className="vd-frame__bar">
         <span className="vd-frame__coin"><CoinIcon coin="BTC" venue="SODEX" size={18} />BTC</span>
-        <span className="vd-frame__seg"><b>Live</b><span>History</span></span>
+        <span className="vd-frame__seg">{(['live', 'history'] as const).map((v) => <button key={v} type="button" aria-pressed={view === v} className={view === v ? 'is-on' : undefined} onClick={() => { setHeld(true); setView(v); }}>{v === 'live' ? 'Live' : 'Historical'}</button>)}</span>
         <span className="vd-frame__venues">{GRID_VENUES.map((v) => <VenueLogo key={v} venue={v} size={16} />)}</span>
-        <span className="vd-frame__legend"><small>fewer</small><i /><small>more liquidations</small></span>
+        {view === 'history' ? <span className="vd-frame__legend"><small>fewer</small><i /><small>more liquidations</small></span> : <span className="vd-frame__legend is-live"><small><i className="is-long" />long liquidations</small><small><i className="is-short" />short liquidations</small></span>}
       </div>
-      <LiqMapViz className="vd-frame__map" />
+      {view === 'live' ? <LiveLiqViz className="vd-frame__map" /> : <LiqMapViz className="vd-frame__map" />}
     </div>
   );
 }
 
 export function AnalyticsPage() {
   return (
-    <SitePage title="Crypto liquidation map, order flow and macro calendar · free · ValueDesk" current="analytics" footer={<SiteFooter title={<>Read the market.<br /><span>Free.</span></>} cta={{ href: '/trade', label: 'Open the terminal' }} />}>
+    <SitePage title="Crypto liquidation map, order flow and macro calendar · free · ValueDesk" current="analytics" footer={<SiteFooter title={<>Read the market.<br /><span>Free.</span></>} cta={{ href: '/trade', label: 'Launch app' }} />}>
       <header className="vd-ahero">
         <h1 className="h-h1 h-up">See where the<br /><span>liquidations sit.</span></h1>
         <p className="h-sub h-up" style={{ '--d': '80ms' } as CSSProperties}>Five venues, one map, and everything else around the price. Free, no wallet needed.</p>
-        <div className="h-cta h-up" style={{ '--d': '140ms' } as CSSProperties}><a href="/trade" className="h-btn is-light vd-cta-main">Open the terminal<Arrow /></a><a href={PAGE_PATHS.cross} className="h-btn is-glass">Cross-venue</a></div>
+        <div className="h-cta h-up" style={{ '--d': '140ms' } as CSSProperties}><a href="/trade" className="h-btn is-light vd-cta-main">Launch app<Arrow /></a><a href={PAGE_PATHS.cross} className="h-btn is-glass">Cross-venue</a></div>
         <div className="h-up vd-ahero__frame" style={{ '--d': '200ms' } as CSSProperties}><MapFrame /></div>
       </header>
 

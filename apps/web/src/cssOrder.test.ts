@@ -18,6 +18,14 @@ const EXEMPT = new Set([
   'theme-light.css', // main.tsx, right after styles.css: its selectors outrank :root, whatever the order
   'chart/tv/tv.css', // the optional TradingView chart loads its own sheets on demand
   'chart/tv/tv-theme.css',
+  // The landing pages (/home...): each loads its own sheets with its chunk, so the app's visitors never download them; every rule starts at the pages' own roots and classes.
+  'components/landing/home.css',
+  'components/landing/site/site.css',
+  'components/landing/site/pages.css',
+  'components/landing/v2/v2.css',
+  'components/landing/v3/v3.css',
+  'components/landing/v3/terminal.css',
+  'components/landing/v4/v4.css',
   'legal/legal.css', // loads with the legal pages; only `.legal*` selectors (see below)
 ]);
 

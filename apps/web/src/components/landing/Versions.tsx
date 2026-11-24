@@ -22,6 +22,7 @@ const SITE = {
   analytics: lazy(() => import('./site/Pages').then((m) => ({ default: m.AnalyticsPage }))),
   'cross-venue': lazy(() => import('./site/Pages').then((m) => ({ default: m.CrossVenuePage }))),
   fees: lazy(() => import('./site/Pages').then((m) => ({ default: m.PricingPage }))),
+  faq: lazy(() => import('./site/FaqPage').then((m) => ({ default: m.FaqPage }))),
   pricing: lazy(() => import('./site/Pages').then((m) => ({ default: m.PricingPage }))),
 } as const;
 

@@ -64,7 +64,7 @@ export function feeCards(start: string): Card[] {
       v: bp(FEES.copyLowest), unit: '/copied order', sub: <>{FEES.copyLowestCondition.replace(/^from/, 'From')}</>,
       cta: { href: '/copy', label: 'Copy a trader' },
       lines: [
-        ...FEES.copyLadder.map((x): Line => ({ t: <><b>{bp(x.fee)}</b> {x.fromUsd === 0 ? 'for a new wallet' : `from ${usdStep(x.fromUsd)} copied`}</>, accent: true, tip: x.fromUsd === 0 ? undefined : `Copied volume over ${FEES.windowDays} days` })),
+        ...FEES.copyLadder.slice(1).map((x): Line => ({ t: <><b>{bp(x.fee)}</b> {x.fromUsd === 0 ? 'for a new wallet' : `from ${usdStep(x.fromUsd)} copied`}</>, accent: true, tip: x.fromUsd === 0 ? undefined : `Copied volume over ${FEES.windowDays} days` })),
         { t: 'Copy or counter any wallet' },
         { t: 'Your size, your leverage cap' },
         { t: 'In your browser or hosted' },

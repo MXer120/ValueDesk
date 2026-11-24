@@ -8,16 +8,14 @@
  *   CopyConsole - the Copy hero: a live top trader, the copy below it, switching between Copy and Counter.
  *   BotSettingsMap - the Bots page: every setting as three questions (when it trades, when it stops, how hard it works).
  */
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { useAsync } from '../../../hooks';
-import { vsApi, type BoardWindow, type TraderRow } from '../../../vsApi';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import type { BoardWindow } from '../../../vsApi';
 import { BrandMark } from '../../BrandMark';
 import { CoinIcon } from '../../CoinIcon';
 import { VenueLogo } from '../../VenueLogo';
-import { COPY_VENUES, scoreRows } from '../../copy/gridModel';
 import { BookViz } from '../Home';
 import { FeatureFx } from '../v3/V3';
-import { DESK_WINDOW_TEXT, reducedMotion, usdShort, type MarketRow } from '../shared';
+import { DESK_WINDOW_TEXT, frameMs, liteDevice, reducedMotion, usdShort, useTopTraders, type MarketRow } from '../shared';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
 
@@ -80,9 +78,13 @@ export function LiqMapViz({ className, cols = 72 }: { className?: string; cols?:
     const still = reducedMotion();
     let raf = 0, last = 0;
     const draw = (t: number) => {
-      const W = (c.width = c.clientWidth * Math.min(2, devicePixelRatio || 1));
-      const H = (c.height = c.clientHeight * Math.min(2, devicePixelRatio || 1));
-      if (!still && t - last > 420) { pushCol(); last = t; }
+      if (!still) raf = requestAnimationFrame(draw);
+      // Drawn only when a column came in (it was every frame), never on a hidden tab.
+      if (!still && last && t - last < 420) return;
+      if (!still && last) pushCol();
+      last = t || 1;
+      const W = (c.width = c.clientWidth * Math.min(liteDevice() ? 1 : 2, devicePixelRatio || 1));
+      const H = (c.height = c.clientHeight * Math.min(liteDevice() ? 1 : 2, devicePixelRatio || 1));
       const cw = W / cols, rh = H / ROWS;
       ctx.fillStyle = '#0a0612';
       ctx.fillRect(0, 0, W, H);
@@ -113,12 +115,52 @@ export function LiqMapViz({ className, cols = 72 }: { className?: string; cols?:
       const lp = prices[prices.length - 1]!;
       ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(0, (ROWS - lp) * rh); ctx.lineTo(W, (ROWS - lp) * rh); ctx.stroke(); ctx.setLineDash([]);
-      if (!still) raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
   }, [on, cols]);
   return <div ref={ref} className={cx('vd-lq', className)} aria-hidden="true"><canvas ref={cv} /></div>;
+}
+
+/**
+ * The map's Live view as the app draws it: the price along the bottom, a bar per price (longs below it, shorts above),
+ * and the two running totals stepping away from the price. A drawing, breathing.
+ */
+export function LiveLiqViz({ className }: { className?: string }) {
+  const [ref, on] = useOn<HTMLDivElement>('100px');
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!on || reducedMotion()) return;
+    const id = window.setInterval(() => setTick((x) => x + 1), liteDevice() ? 2400 : 1000);
+    return () => window.clearInterval(id);
+  }, [on]);
+  const n = 92;
+  const mid = 46;
+  const v = (i: number) => {
+    const d = Math.abs(i - mid);
+    if (d < 2) return 0;
+    const h = ((i * 7919 + 13) % 97) / 97;
+    const wall = i % 17 === 5 ? 0.5 : 0;
+    return (0.06 + h ** 2 * 0.36 + wall) * (0.55 + 0.45 * Math.min(1, d / 20)) * (1 + 0.1 * Math.sin(tick * 0.7 + i));
+  };
+  const bars = Array.from({ length: n }, (_, i) => v(i));
+  const X = 900 / n;
+  const cum = (dir: -1 | 1) => {
+    let s = 0, d = `M${mid * X} 296`;
+    for (let i = mid + dir; i >= 0 && i < n; i += dir) { s += bars[i]!; d += `H${((dir > 0 ? i : i + 1) * X).toFixed(1)}V${(296 - Math.min(1, s / 12) * 270).toFixed(1)}`; }
+    return d + `H${dir > 0 ? 900 : 0}`;
+  };
+  return (
+    <div ref={ref} className={cx('vd-ll', className)} aria-hidden="true">
+      <svg viewBox="0 0 900 300" preserveAspectRatio="none">
+        {bars.map((b, i) => <rect key={i} className={i < mid ? 'is-long' : 'is-short'} x={i * X + 1} width={X - 2} y="0" height="296" style={{ transform: `scaleY(${b.toFixed(3)})` }} />)}
+        <path className="is-long" d={cum(-1)} /><path className="is-short" d={cum(1)} />
+        <line x1={mid * X} x2={mid * X} y1="6" y2="296" />
+      </svg>
+      <span className="vd-ll__p">price now</span>
+      <span className="vd-ll__k is-l">Cumulative longs</span><span className="vd-ll__k is-r">Cumulative shorts</span>
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------------------------------------ console ----- */
@@ -167,12 +209,7 @@ const WIN: BoardWindow = '30d';
 /** The Copy hero: the best copy score now, and your copy following it - or countering it. */
 export function CopyConsole() {
   const [ref, on] = useOn<HTMLDivElement>('200px');
-  const boards = useAsync(
-    () => Promise.all(COPY_VENUES.map((venue) => vsApi.leaderboard({ venue, window: WIN, sort: 'pnl', limit: 100 }).then((b) => b.rows, () => [] as TraderRow[]))),
-    [],
-    { enabled: on, pollMs: 300_000 },
-  );
-  const top = useMemo(() => scoreRows((boards.data ?? []).flat(), WIN, 'copy').sort((a, b) => b.score.score - a.score.score)[0]?.row ?? null, [boards.data]);
+  const top = useTopTraders(on)[0]?.row ?? null;
   const [counter, setCounter] = useState(false);
   useEffect(() => {
     if (reducedMotion()) return;
@@ -214,9 +251,10 @@ export function CopyConsole() {
 const GATES: Array<{ t: string; s: string; x: [number, number] }> = [
   { t: 'Volatility gate', s: 'Pauses the moment the price moves fast, and comes back when it is calm.', x: [92, 168] },
   { t: 'Flow gate', s: 'Quotes only while enough volume trades.', x: [196, 282] },
-  { t: 'News gate', s: 'Pauses around US releases: CPI, jobs and the Fed.', x: [312, 374] },
-  { t: 'Spread limit', s: 'Pauses while the book is too wide.', x: [402, 470] },
-  { t: 'Trading hours', s: 'Pauses inside or outside the hours you set.', x: [504, 600] },
+  { t: 'News gate', s: 'Pauses around US releases: CPI, jobs and the Fed.', x: [328, 354] },
+  { t: 'Trading hours', s: 'Pauses inside or outside the hours you set.', x: [450, 566] },
+  // Over the hours' right half: the band moves right and gets slimmer.
+  { t: 'Spread limit', s: 'Pauses while the book is too wide.', x: [518, 560] },
 ];
 
 /** One day of a drawn market: the price, its bid and ask, the volume. Every gate has its reason in it. A drawing. */
@@ -229,9 +267,9 @@ const DAY = (() => {
     const spike = x > 92 && x < 168 ? Math.sin(((x - 92) / 76) * Math.PI * 3) * 34 : 0;
     const news = x >= 336 ? -22 * Math.min(1, (x - 336) / 14) : 0;
     const y = 92 + Math.sin(x / 70) * 10 + Math.sin(x / 23) * 4 + (rnd() - 0.5) * 5 + spike + news;
-    const w = 4 + (x > 402 && x < 470 ? 17 * Math.sin(((x - 402) / 68) * Math.PI) : 0) + (Math.abs(x - 342) < 12 ? 4 : 0);
-    const quiet = x > 196 && x < 282;
-    const v = quiet ? 2 + rnd() * 3 : 9 + rnd() * 13 + (Math.abs(spike) > 8 ? 12 : 0) + (Math.abs(x - 342) < 18 ? 14 : 0);
+    const w = 4 + (x > 518 && x < 560 ? 19 * Math.sin(((x - 518) / 42) * Math.PI) : 0) + (Math.abs(x - 342) < 12 ? 4 : 0);
+    const thin = (x > 196 && x < 282) || (x > 450 && x < 566);
+    const v = x > 196 && x < 282 ? 2 + rnd() * 3 : thin ? 5 + rnd() * 5 : 9 + rnd() * 13 + (Math.abs(spike) > 8 ? 12 : 0) + (Math.abs(x - 342) < 14 ? 14 : 0);
     pts.push({ x, y, w, v });
   }
   const line = (f: (p: (typeof pts)[number]) => number) => pts.map((p, i) => `${i ? 'L' : 'M'}${p.x} ${f(p).toFixed(1)}`).join('');
@@ -277,18 +315,18 @@ function GateStage() {
   );
 }
 
-/** What ends a run: three dials filling to the line the user set. Drawings, no figures. */
+/** What ends a run: the loss limit with its margin (the bot stops a little before the line, so closing fits in), volume, time. Drawings. */
 function StopStage() {
-  const rows: Array<[string, string, number, string]> = [['Loss limit', 'Stops at the loss you set', 0.36, 'is-neg'], ['Stop after volume', 'Stops once it has traded your amount', 0.72, 'is-pos'], ['Run for', 'An hour, a day, a week, or until you stop it', 0.54, '']];
+  const rows: Array<[string, string, string]> = [['Loss limit', 'Stops just before it, so closing still fits inside', 'is-neg'], ['Stop after volume', 'Stops once it has traded your amount', 'is-pos'], ['Run for', 'An hour, a day, a week, or until you stop it', '']];
   return (
     <div className="vd-st__card">
       <FeatureFx v={4} />
       <div className="vd-st__top"><h3>When it stops</h3></div>
       <div className="vd-sp">
-        {rows.map(([t, s, k, tone], i) => (
+        {rows.map(([t, sub, tone], i) => (
           <div key={t} className={tone}>
-            <p><b>{t}</b><small>{s}</small></p>
-            <div className="vd-sp__bar"><i style={{ '--k': k, '--d': `${i * -1.6}s` } as CSSProperties} /><em /></div>
+            <p><b>{t}</b><small>{sub}</small></p>
+            <div className="vd-sp__bar"><i style={{ '--d': `${i * -1.6}s` } as CSSProperties} />{tone === 'is-neg' && <u />}<em /></div>
           </div>
         ))}
       </div>
@@ -296,27 +334,44 @@ function StopStage() {
   );
 }
 
-/** How big: the app's own kinds of control, drawn. */
+/** How hard it works: the book around the price, the bot's own orders in it, and what it may hold - per preset. A drawing. */
+const EFFORT = [
+  { t: 'Steady', s: 'Further from the price, small position', n: 2, far: 2, hold: 0.28, beat: 2.6 },
+  { t: 'Balanced', s: 'Closer, a normal position', n: 3, far: 1, hold: 0.52, beat: 1.7 },
+  { t: 'Active', s: 'At the price, more volume, more risk', n: 4, far: 0, hold: 0.8, beat: 1 },
+] as const;
+const LEVELS = 6;
 function SizeStage() {
+  const [ref, on] = useOn<HTMLDivElement>();
   const [p, setP] = useState(1);
-  const PRE = ['Steady', 'Balanced', 'Active'];
+  const [held, setHeld] = useState(false);
   useEffect(() => {
-    if (reducedMotion()) return;
-    const id = window.setInterval(() => setP((x) => (x + 1) % 3), 2800);
+    if (!on || held || reducedMotion()) return;
+    const id = window.setInterval(() => setP((x) => (x + 1) % 3), 3000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [on, held]);
+  const e = EFFORT[p]!;
+  const level = (side: 'ask' | 'bid', i: number) => {
+    const mine = i >= e.far && i < e.far + e.n;
+    return <div key={side + i} className={cx('vd-ef__l', side, mine && 'is-mine')} style={{ '--w': 0.34 + ((i * 37 + (side === 'ask' ? 11 : 5)) % 60) / 100, '--i': i } as CSSProperties}><i /><b /></div>;
+  };
   return (
-    <div className="vd-st__card">
+    <div ref={ref} className="vd-st__card" data-off={on ? undefined : ''}>
       <FeatureFx v={5} />
       <div className="vd-st__top"><h3>How hard it works</h3></div>
-      <div className="vd-sz">
-        <div><p><b>Presets</b><small>A tested start; change anything after</small></p>
-          <div className="vd-sz__seg" style={{ '--at': p } as CSSProperties} aria-hidden="true"><i />{PRE.map((x, i) => <span key={x} className={cx(i === p && 'is-on')}>{x}</span>)}</div></div>
-        <div><p><b>Max holding</b><small>Caps the position it may build</small></p>
-          <div className="vd-sz__hold" aria-hidden="true">{Array.from({ length: 14 }, (_, i) => <i key={i} className={cx(i < [5, 8, 11][p]! && 'is-on')} />)}</div></div>
-        <div><p><b>Leverage</b><small>Yours, up to the market's maximum</small></p>
-          <div className="vd-sz__lev" style={{ '--k': [0.2, 0.46, 0.78][p] } as CSSProperties} aria-hidden="true"><i /></div></div>
+      <div className="vd-ef__tabs" role="group" aria-label="Presets" style={{ '--at': p } as CSSProperties}>
+        <i aria-hidden="true" />
+        {EFFORT.map((x, i) => <button key={x.t} type="button" aria-pressed={i === p} className={cx(i === p && 'is-on')} onClick={() => { setHeld(true); setP(i); }}>{x.t}</button>)}
       </div>
+      <div className="vd-ef" style={{ '--beat': `${e.beat}s`, '--hold': e.hold } as CSSProperties} aria-hidden="true">
+        <div className="vd-ef__book">
+          {Array.from({ length: LEVELS }, (_, i) => level('ask', LEVELS - 1 - i))}
+          <div className="vd-ef__px"><span>price</span></div>
+          {Array.from({ length: LEVELS }, (_, i) => level('bid', i))}
+        </div>
+        <div className="vd-ef__hold"><div><i /></div><small>Max<br />holding</small></div>
+      </div>
+      <p className="vd-ef__say"><b>{e.t}</b>{e.s}. Order size, holding and leverage stay yours to change.</p>
     </div>
   );
 }

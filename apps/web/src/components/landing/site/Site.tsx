@@ -13,7 +13,7 @@ import { Arrow, Reveal } from '../Home';
 import { HeatGlass } from '../v4/heat';
 import { FeatureFx } from '../v3/V3';
 import '../v3/v3.css';
-import { bp, FEES, startFromText, useLiveDesk } from '../shared';
+import { bp, FEES, liteDevice } from '../shared';
 import '../home.css';
 import './site.css';
 import './pages.css';
@@ -22,7 +22,11 @@ const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolea
 
 /* ---------------------------------------------------------------------------------------------- paths ----- */
 
-export const PAGE_PATHS = { bots: '/home/bots', copy: '/home/copy-trading', analytics: '/home/analytics', cross: '/home/cross-venue', pricing: '/home/fees' } as const;
+export const PAGE_PATHS = { bots: '/home/bots', copy: '/home/copy-trading', analytics: '/home/analytics', cross: '/home/cross-venue', pricing: '/home/fees', faq: '/home/faq' } as const;
+
+/** The page's own first step: a bot on Bots, a copy on Copy trading, the app everywhere else (owner 2026-11-24). */
+const CTA: Record<string, { href: string; label: string }> = { bots: { href: '/bots/new', label: 'Start a bot' }, copy: { href: '/copy', label: 'Copy a trader' } };
+const APP = { href: '/trade', label: 'Launch app' };
 const HOME_KEY = 'vd.home';
 /** The landing version this tab came from (/home/5 ...), for the logo and the FAQ link. */
 export function homePath(): string {
@@ -61,7 +65,6 @@ export function SiteNav({ current }: { current?: string }) {
   const [sheet, setSheet] = useState(false);
   const dd = useRef<HTMLDivElement>(null);
   const closeT = useRef(0);
-  const live = useLiveDesk();
   useEffect(() => {
     const s = () => setSolid(window.scrollY > 12);
     s();
@@ -80,7 +83,7 @@ export function SiteNav({ current }: { current?: string }) {
   const enter = () => { window.clearTimeout(closeT.current); setOpen(true); };
   const leave = () => { closeT.current = window.setTimeout(() => setOpen(false), 160); };
   const home = homePath();
-  const start = startFromText(live.startFrom);
+  const cta = CTA[current ?? ''] ?? APP;
 
   return (
     <header className={cx('vd-nav', solid && 'is-solid')}>
@@ -99,18 +102,18 @@ export function SiteNav({ current }: { current?: string }) {
               <a href="/bots/new" className="vd-dd__feat" role="menuitem">
                 <HeatGlass layout="card" rib={18} />
                 <small>Bots on SoDEX</small>
-                <b>Start with {start}</b>
+                <b>Start with your first bot</b>
                 <small>From {bp(FEES.botLowest)} per order (VIP)</small>
               </a>
             </div>
           </div>
           <a href={PAGE_PATHS.pricing} className={cx(current === 'fees' && 'is-on')}>Fees</a>
           <a href="/points">SoPoints</a>
-          <a href={`${home}#faq`}>FAQ</a>
+          <a href={PAGE_PATHS.faq} className={cx(current === 'faq' && 'is-on')}>FAQ</a>
         </nav>
         <div className="vd-nav__cta">
-          <a href="/trade" className="h-btn is-glass is-sm">Open app</a>
-          <a href="/bots/new" className="h-btn is-light is-sm">Start a bot<Arrow /></a>
+          {cta !== APP && <a href="/trade" className="h-btn is-glass is-sm">Open app</a>}
+          <a href={cta.href} className="h-btn is-light is-sm">{cta.label}<Arrow /></a>
           <button type="button" className="vd-burger" aria-label="Menu" onClick={() => setSheet(true)}>{IC.menu}</button>
         </div>
       </div>
@@ -125,11 +128,11 @@ export function SiteNav({ current }: { current?: string }) {
             <a key={p.key} href={p.href} className="vd-dd__item"><span className="vd-ic">{p.ic}</span><div><b>{p.t}</b><span>{p.s}</span></div></a>
           ))}
           <div className="vd-sheet__links">
-            <a href={PAGE_PATHS.pricing}>Fees</a><a href="/points">SoPoints</a><a href={`${home}#faq`} onClick={() => setSheet(false)}>FAQ</a>
+            <a href={PAGE_PATHS.pricing}>Fees</a><a href="/points">SoPoints</a><a href={PAGE_PATHS.faq}>FAQ</a>
           </div>
           <div className="vd-sheet__cta">
-            <a href="/bots/new" className="h-btn is-light is-block">Start a bot with {start}<Arrow /></a>
-            <a href="/trade" className="h-btn is-glass is-block">Open the app</a>
+            <a href={cta.href} className="h-btn is-light is-block">{cta.label}<Arrow /></a>
+            {cta !== APP && <a href="/trade" className="h-btn is-glass is-block">Open the app</a>}
           </div>
         </div>
       )}
@@ -140,7 +143,7 @@ export function SiteNav({ current }: { current?: string }) {
 /* --------------------------------------------------------------------------------------------- footer ----- */
 
 /** V1's footer: the closing call, the columns and the chrome wordmark. */
-export function SiteFooter({ title, sub, cta = { href: '/bots/new', label: 'Start a bot' } }: { title?: ReactNode; sub?: ReactNode; cta?: { href: string; label: string } }) {
+export function SiteFooter({ title, sub, cta = APP }: { title?: ReactNode; sub?: ReactNode; cta?: { href: string; label: string } }) {
   return (
     <footer className="h-foot">
       <div className="h-foot__cta">
@@ -155,7 +158,7 @@ export function SiteFooter({ title, sub, cta = { href: '/bots/new', label: 'Star
       </div>
       <div className="h-foot__cols">
         <div><a href={homePath()} className="h-logo"><BrandMark size={20} /><span>ValueDesk</span></a><p className="h-dim">Bots, copy trading and analytics for SoDEX.</p></div>
-        <div><p>Products</p>{PRODUCTS.map((p) => <a key={p.key} href={p.href}>{p.t}</a>)}<a href={PAGE_PATHS.pricing}>Fees</a></div>
+        <div><p>Products</p>{PRODUCTS.map((p) => <a key={p.key} href={p.href}>{p.t}</a>)}<a href={PAGE_PATHS.pricing}>Fees</a><a href={PAGE_PATHS.faq}>FAQ</a></div>
         <div><p>Legal</p><a href="/terms">Terms of use</a><a href="/risk">Risk disclosure</a><a href="/privacy">Privacy</a><a href="/copy-terms">Copy and bot terms</a></div>
         <div><p>More</p><a href="/trade">Open the app</a><a href="/leaderboard">Leaderboard</a><a href="/status">Status</a><a href="/licenses">Licences</a></div>
       </div>
@@ -177,7 +180,7 @@ export function SitePage({ title, children, whale, current, footer, home }: { ti
     if (home) rememberHome(home);
   }, [title, home]);
   return (
-    <div className="h vd" data-no-i18n="">
+    <div className={cx('h vd', liteDevice() && 'is-lite')} data-no-i18n="">
       <div className="h-bg" aria-hidden="true"><div className="h-bg__grid" /><div className="h-bg__beam" /></div>
       <SiteNav current={current} />
       <main className="vd-layer">{children}</main>
