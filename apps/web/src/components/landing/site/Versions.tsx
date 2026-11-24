@@ -4,7 +4,7 @@
  *   V3: the feature cards, "your funds stay yours", "up and running";  V4: the liquidation-heat header and the fee
  *   calculator, now with a SoPoints estimate beside it.
  * Each version leads differently:
- *   5 "Chrome on heat": V1's header with the chrome V standing in V4's heat; features, how, money, calculators, products.
+ *   5 "The app on heat": V3's app pages in 3D on a stage of liquidation heat (owner 2026-11-24); features, how, money, calculators, products.
  *   6 "Heat, then convert": V4's header and live ticker; setup and safety first, then features, calculators, money.
  *   7 "One desk, long": the V centred and large; the scene, a row per product, features, money, calculators, setup.
  * Every figure is live or a constant of the fee ladders (shared.tsx); drawings carry no figures.
@@ -17,7 +17,7 @@ import { Ticker } from '../v4/V4';
 import { HeatGlass } from '../v4/heat';
 import { bp, DESK_WINDOW_TEXT, FEES, startFromText, useLiveDesk } from '../shared';
 import { Calcs } from './Calcs';
-import { HeroDeck } from './HeroDeck';
+import { TerminalDesk } from '../v3/Terminal';
 import { SiteTape } from './Tape';
 import { qaFor } from './faq';
 import { Embed, ProductCards, Row, SitePage, Ticks, PAGE_PATHS } from './Site';
@@ -72,20 +72,20 @@ export function V5() {
   const start = startFromText(live.startFrom);
   return (
     <SitePage title="ValueDesk: bots, copy trading and analytics on SoDEX" home="/home/5">
-      <header className="h-hero vd-hh">
-        <div className="vd-hh__heat" aria-hidden="true"><HeatGlass layout="calm" rib={28} /></div>
-        <div className="h-hero__t">
-          <div className="h-up" style={{ '--d': '80ms' } as CSSProperties}><h1 className="h-h1">The market,<br /><span>on one desk.</span></h1></div>
-          <div className="h-up" style={{ '--d': '160ms' } as CSSProperties}>
+      <header className="vd-h5">
+        <div className="vd-h5__heat" aria-hidden="true"><HeatGlass layout="stage" rib={28} /></div>
+        <div className="vd-h5__t">
+          <div className="h-up" style={{ '--d': '60ms' } as CSSProperties}><h1 className="h-h1">The market, <span>on one desk.</span></h1></div>
+          <div className="h-up" style={{ '--d': '140ms' } as CSSProperties}>
             <p className="h-sub">Market makers that run around the clock, copies of any Hyperliquid or SoDEX wallet, and the liquidation map to read it all. Every order lands in your own SoDEX account.</p>
           </div>
-          <div className="h-up h-cta" style={{ '--d': '240ms' } as CSSProperties}>
+          <div className="h-up h-cta" style={{ '--d': '220ms' } as CSSProperties}>
             <a href="/bots/new" className="h-btn is-light vd-cta-main">Start with just {start}<Arrow /></a>
             <a href="/copy" className="h-btn is-glass">Copy a trader</a>
           </div>
-          <div className="h-up" style={{ '--d': '320ms' } as CSSProperties}><Trust /></div>
+          <div className="h-up" style={{ '--d': '300ms' } as CSSProperties}><Trust /></div>
         </div>
-        <Embed scope="v3" className="vd-hd"><HeroDeck live={live} /></Embed>
+        <Embed scope="v3" className="vd-h5__desk"><TerminalDesk /></Embed>
       </header>
       <SiteTape rows={live.rows} />
 

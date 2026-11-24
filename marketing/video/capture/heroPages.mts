@@ -16,14 +16,17 @@ const LOOK = { 'vd.site.terms.look': '"2026-11-23"' };
 const ACCOUNT = { balance: 25_000, stateful: true, positions: [{ symbol: 'BTC-USD', size: '0.12', entry: '61020', leverage: 10 }, { symbol: 'ETH-USD', size: '-1.8', entry: '1709', leverage: 5 }, { symbol: 'SOL-USD', size: '24', entry: '71.2', leverage: 5 }] };
 
 const OUT = process.env.OUT!;
-setView(1080);
+/** PHONE=1: the phone's own pages (names end in -p). */
+const PHONE = !!process.env.PHONE;
+setView(PHONE ? 844 : 1080, PHONE ? 390 : 1920);
+const SUF = PHONE ? '-p' : '';
 const boxes: Record<string, Array<[string, number, number, number, number]>> = {};
 const HIDE = '.toast, .toasts, .notices, [class*="idxprompt"], [class*="index-prompt"], [class*="navalert"], [class*="NavAlert"], .nav-alert { visibility: hidden !important } #__film_cursor { display: none }';
 async function take(p: Page, name: string, sels: Array<[string, string]>) {
   await p.addStyleTag({ content: HIDE });
   await p.mouse.move(2, 2);
   await p.waitForTimeout(700);
-  await p.screenshot({ path: join(OUT, `${name}.png`) });
+  await p.screenshot({ path: join(OUT, `${name}${SUF}.png`) });
   boxes[name] = [];
   for (const [k, s] of sels) for (const el of await p.locator(s).all()) {
     const b = await el.boundingBox();
@@ -35,9 +38,10 @@ const only = process.env.ONLY?.split(',');
 if (!only || only.includes('trade')) {
   const w = createTestWallet();
   const d = await openDemo('/trade', { trading: false, storage: LOOK, before: async (ctx) => { await w.install(ctx); await fakeSodexAccount(ctx, w.address, ACCOUNT as never); } });
-  await d.page.getByRole('complementary', { name: 'Tools' }).getByRole('button', { name: /^Connect/ }).first().waitFor({ state: 'visible', timeout: 60_000 });
-  await connectWallet(d.page);
+  if (!PHONE) await d.page.getByRole('complementary', { name: 'Tools' }).getByRole('button', { name: /^Connect/ }).first().waitFor({ state: 'visible', timeout: 60_000 });
+  if (!PHONE) await connectWallet(d.page);
   await d.page.waitForTimeout(14000);
+  if (PHONE) { await d.page.getByText('15m', { exact: true }).first().click().catch(() => {}); await d.page.waitForTimeout(6000); }
   await take(d.page, 'trade', [['cell', '.dash-cell, .panel, [class*="dash-panel"]'], ['tabs', '.mkt-tabs, [class*="markettabs"]'], ['nav', 'header, .navbar'], ['rail', '.sidebar, [class*="rail"]']]);
   console.log(await d.page.evaluate(() => [...document.querySelectorAll('main *, .app *')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 180 && r.height > 120 && parseFloat(getComputedStyle(e).borderTopLeftRadius) > 5; }).map((e) => { const r = e.getBoundingClientRect(); return `${(e as HTMLElement).className}`.slice(0, 50) + ' ' + [r.x, r.y, r.width, r.height].map(Math.round).join(','); }).join('\n')));
   await d.close();
@@ -47,8 +51,9 @@ for (const [n, path] of [['copy', '/copy'], ['new', '/bots/new'], ['explore', '/
   const d = await openDemo(path, { trading: false, storage: LOOK });
   await d.page.waitForTimeout(13000);
   if (n === 'new') for (let i = 0; i < 2; i++) { await d.page.getByRole('button', { name: /^Next/ }).first().click({ timeout: 8000 }).catch(() => console.log('no next')); await d.page.waitForTimeout(5000); }
+  if (PHONE && n === 'copy') { await d.page.locator('.cpy-card').first().evaluate((e) => { let p: HTMLElement | null = e.parentElement; while (p && p.scrollHeight <= p.clientHeight + 4) p = p.parentElement; (p ?? document.scrollingElement!).scrollBy(0, 330); window.scrollBy(0, window.scrollY ? 0 : 330); }); await d.page.waitForTimeout(1500); }
   await take(d.page, n, [['card', '.card, [class*="tcard"], [class*="copy-card"], [class*="shellcard"]']]);
   console.log(await d.page.evaluate(() => [...document.querySelectorAll('body *')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 180 && r.height > 90 && r.y < 1080 && parseFloat(getComputedStyle(e).borderTopLeftRadius) > 5; }).slice(0, 40).map((e) => { const r = e.getBoundingClientRect(); return `${(e as HTMLElement).className}`.slice(0, 50) + ' ' + [r.x, r.y, r.width, r.height].map(Math.round).join(','); }).join('\n')));
   await d.close();
 }
-writeFileSync(join(OUT, 'boxes.json'), JSON.stringify(boxes));
+writeFileSync(join(OUT, `boxes${SUF}.json`), JSON.stringify(boxes));

@@ -12,6 +12,18 @@
 .tm-hole { position: absolute; background: #0a0b0c; box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.7); }
 .tm-pane { position: absolute; background-size: 1240px 697.5px; background-color: #17181a; background-repeat: no-repeat; box-shadow: 0 30px 44px -20px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.12); transform: translateZ(0); transition: transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1); transition-delay: calc(var(--i) * 45ms); }
 .tm-page.is-on .tm-pane { transform: translate3d(calc(var(--mx) * var(--z) * 0.14px), calc(var(--my) * var(--z) * 0.1px), calc(var(--z) * 1px)); }
-.v3 .tm-note { position: relative; margin: -14px auto 0; text-align: center; font-size: 12.5px; color: #8d8f92; }
-@media (max-width: 760px) { .tm { margin-inline: -10px; } .tm-sw button { padding: 0 15px; font-size: 14px; } .v3 .tm-note { margin-top: 4px; } }
+.v3 .tm .tm-note { position: relative; margin: -14px auto 0; text-align: center; font-size: 12.5px; color: #8d8f92; }
+@media (max-width: 760px) { .tm { margin-inline: -10px; } .tm-sw button { padding: 0 15px; font-size: 14px; } .v3 .tm .tm-note { margin-top: 4px; } }
 @media (prefers-reduced-motion: reduce) { .tm-page, .tm-pane, .tm-tilt { transition: none !important; } }
+/* phones: three of the app's phone pages, the picked one in front */
+.tm-box.is-phone { height: 590px; perspective: 1100px; perspective-origin: 50% 40%; }
+.tm-ph { position: absolute; inset: 0; transform-style: preserve-3d; }
+.tm-phone { position: absolute; left: 50%; top: 14px; width: 258px; height: 558.3px; margin-left: -129px; border-radius: 30px; background: #0e0f10 0 0 / 258px 558.3px no-repeat; transform-style: preserve-3d; transition: transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1); box-shadow: 0 0 0 5px #17181b, 0 0 0 6px rgba(255, 255, 255, 0.2), 0 50px 60px -24px rgba(0, 0, 0, 0.9); }
+.tm-phone::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: rgba(6, 5, 10, 0.55); opacity: 0; transition: opacity 0.5s; pointer-events: none; }
+.tm-phone.is-on { transform: translateZ(0) rotateX(7deg) rotateY(-5deg); }
+.tm-phone.is-l { transform: translate3d(-112px, 10px, -190px) rotateY(26deg); }
+.tm-phone.is-r { transform: translate3d(112px, 10px, -190px) rotateY(-26deg); }
+.tm-phone.is-l::after, .tm-phone.is-r::after { opacity: 1; transform: translateZ(2px); }
+.tm-pane.is-ph { background-size: 258px 558.3px; box-shadow: 0 14px 22px -10px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.1); transition-delay: 0.15s; }
+.tm-phone.is-on .tm-pane.is-ph { transform: translateZ(calc(var(--z) * 1px)); }
+@media (prefers-reduced-motion: reduce) { .tm-phone { transition: none; } }

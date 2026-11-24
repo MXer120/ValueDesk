@@ -2,7 +2,8 @@
  * Version 3's hero (owner 2026-11-24: "the full pages trade, copytrading & bots"): the app's own Trade, Copy and Bots
  * pages in 3D. Each page is ONE picture of the real page (marketing/video/capture/heroPages.mts, a demo account), shown
  * as a slab with its panels cut out of the same picture and lifted above it - so the navbar, the rail, the order panel
- * and every row are exactly the app's. No reads of any kind; the other two pages' pictures load once the first is in.
+ * and every row are exactly the app's. On a phone: the app's phone pages as three phones,
+ * the picked one in front. No reads of any kind; the other two pages' pictures load once the first is in.
  */
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { liteDevice, reducedMotion } from '../shared';
@@ -12,6 +13,9 @@ import copyL from './hero/copy.webp';
 import copyS from './hero/copy-s.webp';
 import botsL from './hero/bots.webp';
 import botsS from './hero/bots-s.webp';
+import tradeP from './hero/trade-p.webp';
+import copyP from './hero/copy-p.webp';
+import botsP from './hero/bots-p.webp';
 import './terminal.css';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
@@ -36,7 +40,17 @@ const PAGES: Page[] = [
   ] },
 ];
 
+/** The phone's pages: 390 x 844, drawn PH_W wide. */
+const PH_W = 258;
+const PH_K = PH_W / 390;
+const PHONES: Array<{ img: string; panels: Panel[] }> = [
+  { img: tradeP, panels: [[8, 124, 374, 116, 16, 14], [8, 244, 374, 540, 26, 14]] },
+  { img: copyP, panels: [[20, 383, 350, 229, 34, 18], [20, 626, 350, 160, 22, 18]] },
+  { img: botsP, panels: [[43, 321, 304, 237, 32, 16], [43, 564, 304, 158, 20, 16]] },
+];
+
 const box = ([x, y, w, h, , r]: Panel): CSSProperties => ({ left: x * K, top: y * K, width: w * K, height: h * K, borderRadius: (r ?? 12) * K });
+const phBox = ([x, y, w, h, z, r]: Panel, img: string | undefined): CSSProperties => ({ left: x * PH_K, top: y * PH_K, width: w * PH_K, height: h * PH_K, borderRadius: (r ?? 12) * PH_K, '--z': z, backgroundImage: img, backgroundPosition: `${-x * PH_K}px ${-y * PH_K}px` } as CSSProperties);
 
 export function TerminalDesk() {
   const wrap = useRef<HTMLDivElement>(null);
@@ -45,14 +59,18 @@ export function TerminalDesk() {
   const [at, setAt] = useState(0);
   const [held, setHeld] = useState(false);
   const [small, setSmall] = useState(() => window.innerWidth * Math.min(2, devicePixelRatio || 1) <= 1300);
+  /** A phone's width: the phone pages. */
+  const [phone, setPhone] = useState(() => window.innerWidth <= 700);
   /** The pictures asked for: the first at once, the others when it is in (or when picked). */
   const [asked, setAsked] = useState<ReadonlySet<number>>(() => new Set([0]));
   useEffect(() => {
     const b = wrap.current;
     const r = rig.current;
-    if (!b || !r) return;
+    if (!b) return;
     const fit = () => {
-      const s = Math.min(1, b.clientWidth / r.offsetWidth);
+      setPhone(window.innerWidth <= 700);
+      if (!r) { b.style.height = ''; return; }
+      const s = Math.min(1, b.clientWidth / (r.offsetWidth + 60));
       b.style.setProperty('--s', s.toFixed(4));
       b.style.height = `${Math.round(r.offsetHeight * s)}px`;
       setSmall(b.clientWidth * Math.min(2, devicePixelRatio || 1) <= 1300);
@@ -63,7 +81,7 @@ export function TerminalDesk() {
     const io = new IntersectionObserver(([e]) => setOn(!!e?.isIntersecting), { rootMargin: '100px' });
     io.observe(b);
     return () => { ro.disconnect(); io.disconnect(); };
-  }, []);
+  }, [phone]);
   // The other two pictures, once the page has the first on screen and time to spare.
   useEffect(() => {
     if (!on || asked.size === PAGES.length) return;
@@ -95,8 +113,18 @@ export function TerminalDesk() {
       <div className="tm-sw" role="group" aria-label="Page shown">
         {PAGES.map((p, i) => <button key={p.id} type="button" aria-pressed={i === at} className={cx(i === at && 'is-on')} onClick={() => pick(i)}>{p.t}</button>)}
       </div>
-      <div ref={wrap} className="tm-box" aria-hidden="true">
-        <div ref={rig} className="tm-rig"><div className="tm-tilt">
+      <div ref={wrap} className={cx('tm-box', phone && 'is-phone')} aria-hidden="true">
+        {phone ? (
+          <div className="tm-ph">{PHONES.map((p, i) => {
+            const img = asked.has(i) ? `url(${p.img})` : undefined;
+            const side = (i - at + 3) % 3;
+            return (
+              <div key={p.img} className={cx('tm-phone', side === 0 && 'is-on', side === 1 && 'is-r', side === 2 && 'is-l')} style={{ backgroundImage: img }} onClick={() => pick(i)}>
+                {p.panels.map((b, n) => <span key={n} className="tm-pane is-ph" style={phBox(b, img)} />)}
+              </div>
+            );
+          })}</div>
+        ) : <div ref={rig} className="tm-rig"><div className="tm-tilt">
           {PAGES.map((p, i) => {
             const img = asked.has(i) ? `url(${small ? p.s : p.l})` : undefined;
             return (
@@ -108,9 +136,9 @@ export function TerminalDesk() {
               </div>
             );
           })}
-        </div></div>
+        </div></div>}
       </div>
-      <p className="tm-note">The app's own pages, with a demo account.</p>
+      <p className="tm-note">The app's own pages on 24 November 2026{phone ? '' : ', with a demo account'}.</p>
     </div>
   );
 }

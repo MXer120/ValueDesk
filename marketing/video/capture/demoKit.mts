@@ -22,7 +22,7 @@ export const WEB = process.env.VD_WEB || 'http://localhost:5181';
 const LIVE = 'https://www.valuedesk.so';
 export let VIEW = { width: 1920, height: 1080 };
 /** A laptop's 16:10 screen, for the takes shown on the 3D laptop. */
-export const setView = (height: number) => { VIEW = { width: 1920, height }; };
+export const setView = (height: number, width = 1920) => { VIEW = { width, height }; };
 const DSF = 2;
 const FPS = 60;
 
