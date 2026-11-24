@@ -158,11 +158,12 @@ const rawBotMarkets = (window: BotWindow, enabled: boolean): Read<BotMarketsResp
  * / 24; 7d: the sum of its last 168 hourly candles / 168 (fetched four at a time, kept 15 minutes). The other figures
  * (who takes, spread, moves, cost) stay the server's, refreshed every 5 minutes.
  */
-export function useBotMarkets(window: BotWindow = '24h', enabled = true): Read<BotMarketsResponse> {
+/** `weekMax`: SoDEX's own 7-day volume is read for the busiest this many only (one request each; the landing pages). */
+export function useBotMarkets(window: BotWindow = '24h', enabled = true, weekMax?: number): Read<BotMarketsResponse> {
   const r = rawBotMarkets(window, enabled);
   const tick = useTickers('perps', { enabled: enabled && window === '24h', pollMs: 30_000 });
   // The busiest first: the rows a page shows first get SoDEX's 7-day figure first.
-  const symbols = useMemo(() => [...(r.data?.markets ?? [])].sort((x, y) => y.volumeUsdH - x.volumeUsdH).map((m) => m.symbol), [r.data]);
+  const symbols = useMemo(() => [...(r.data?.markets ?? [])].sort((x, y) => y.volumeUsdH - x.volumeUsdH).slice(0, weekMax).map((m) => m.symbol), [r.data, weekMax]);
   const week = useVolume7d(enabled && window === '7d' ? symbols : []);
   return useMemo(() => {
     if (!r.data) return r;

@@ -638,7 +638,7 @@ export function V3() {
           </div>
           <p className="v3-hero__fine v3-up" style={{ '--d': '340ms' } as CSSProperties}>No deposit · three free signatures · stop any time</p>
         </div>
-        <TerminalDesk live={live} />
+        <TerminalDesk />
       </header>
 
       {/* ---------------------------------------------------------------------------------------- live strip */}

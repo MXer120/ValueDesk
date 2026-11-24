@@ -65,6 +65,8 @@ export interface FakeAccountOptions {
   builders?: Array<{ builderID: number; feeRate: number }>;
   /** A perps position the account holds (one-way: a positive size is long). */
   position?: { symbol: string; size: string; entry: string; leverage: number };
+  /** Stateful: more positions the account holds from the start (the launch film's demo desk). */
+  positions?: Array<{ symbol: string; size: string; entry: string; leverage: number }>;
   /** A resting perps limit order. */
   openOrder?: { symbol: string; side: 'BUY' | 'SELL'; price: string; quantity: string };
   /** The account moves with the writes (orders rest and fill, stops rest, leverage is kept): see the top. */
@@ -167,6 +169,10 @@ export async function fakeSodexAccount(ctx: BrowserContext, address: string, o: 
   const spotCoins = new Map<string, number>(Object.entries(o.spot ?? { vUSDC: Number(balance) }));
   const spotMarkets = new Map<number, { name: string; base: string; quote: string }>();
   if (stateful && o.position) pos.set(o.position.symbol, { size: Number(o.position.size), entry: Number(o.position.entry) });
+  for (const p of stateful ? o.positions ?? [] : []) {
+    pos.set(p.symbol, { size: Number(p.size), entry: Number(p.entry) });
+    lev.set(p.symbol, { leverage: p.leverage, marginMode: 'CROSS' });
+  }
 
   const perpsState = () => ({
     user: me, aid: accountId, uid: accountId,

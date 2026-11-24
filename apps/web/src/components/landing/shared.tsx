@@ -83,7 +83,7 @@ export const DESK_WINDOW_TEXT = 'the last 7 days';
 
 /** The live figures every version shows (one read of /api/vs/bots/markets and SoDEX's symbols). */
 export function useLiveDesk(): LiveDesk {
-  const bots = useBotMarkets(DESK_WINDOW);
+  const bots = useBotMarkets(DESK_WINDOW, true, 16);
   const { byName } = useSymbols('perps');
   const rows = useMemo<MarketRow[]>(() => {
     if (!bots.data) return [];
