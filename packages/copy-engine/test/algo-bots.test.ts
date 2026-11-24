@@ -39,6 +39,8 @@ import {
   checkSizes,
   botReserveUsd,
   newsAt,
+  pauseAhead,
+  lossMarginUsd,
   nyseHolidays,
   lseHolidays,
   type NewsEvent,
@@ -1174,16 +1176,70 @@ test('volume maker trading hours (quietOnly): quotes only inside its windows; th
   assert.equal(back.status, 'running');
 });
 
+test('a planned pause: reduce-only over the five minutes before it, only what it holds is quoted; then off the book (owner 2026-11-24)', async () => {
+  const r = await rig();
+  const a = await add(r, { ...MM, quiet: [{ from: '08:07', to: '08:30', zone: 'utc' }] });
+  await step(r, a.id);
+  assert.equal(r.ex.resting.size, 2, 'seven minutes before: both sides');
+  r.ex.fill(r.ex.side('buy')[0]!.clOrdID);
+  await settle();
+  await step(r, a.id, 3 * 60_000);
+  await step(r, a.id, 500);
+  assert.equal(r.ex.side('buy').length, 0, 'nothing that adds');
+  assert.equal(r.ex.side('sell').length, 1, 'what takes the holding off stays');
+  assert.match(r.rt.view(a.id)!.working ?? '', /Reduce only: it pauses at 08:07 UTC \(quiet window\)/);
+  r.ex.fill(r.ex.side('sell')[0]!.clOrdID);
+  await settle();
+  await step(r, a.id, 30_000);
+  assert.equal(r.ex.resting.size, 0, 'flat: nothing is quoted until it pauses');
+  const held = await step(r, a.id, 4 * 60_000);
+  assert.equal(held.statusReason, 'Paused: quiet window 08:07–08:30 UTC.');
+  // News, and the hours it trades in, the same way.
+  const ev = { time: T0 + 10 * 60_000, short: 'CPI', importance: 'high' } as const;
+  const news = { beforeMin: 2, afterMin: 10, level: 'high' } as const;
+  assert.deepEqual(pauseAhead({ news }, [ev], T0 + 3 * 60_000), { at: T0 + 8 * 60_000, why: 'CPI' });
+  assert.equal(pauseAhead({ news }, [ev], T0 + 2 * 60_000 + 30_000), null, 'never more than five minutes ahead');
+  assert.equal(pauseAhead({ quiet: [{ from: '07:00', to: '08:04', zone: 'utc', days: 'all' } as QuietWindow], quietOnly: true }, null, T0)?.why, 'trading hours end');
+});
+
+test('a pause nobody saw coming (spread, flow): reduce-only while it holds, at most five minutes, then off the book', async () => {
+  const r = await rig();
+  const a = await add(r, { ...MM, maxSpreadBps: 2 });
+  await step(r, a.id);
+  r.ex.fill(r.ex.side('buy')[0]!.clOrdID);
+  await settle();
+  r.market.set(60_000, 60_030);
+  await step(r, a.id, 500);
+  await step(r, a.id, 500);
+  assert.equal(r.ex.side('buy').length, 0);
+  assert.equal(r.ex.side('sell').length, 1, 'the holding is still offered');
+  const held = await step(r, a.id, 5 * 60_000);
+  assert.equal(r.ex.resting.size, 0, 'five minutes on: off the book');
+  assert.match(held.statusReason ?? '', /^Held: the spread/);
+  r.market.set(60_000, 60_002);
+  await step(r, a.id, 500);
+  await step(r, a.id, 3_000);
+  assert.ok(r.ex.resting.size > 0, 'quotes again once the spread is back');
+});
+
+test('loss limit margin: what closing the holding costs, never over 5%, nothing when flat or however long it ran', () => {
+  const fee = 0.0004;
+  const small = lossMarginUsd({ limitUsd: 10, heldUsd: 50, feeRate: fee, spreadBps: 1, minuteBps: 2 });
+  assert.ok(Math.abs(small - 50 * 0.00065) < 1e-12, `${small}: 3 cents of a $10 limit`);
+  assert.equal(lossMarginUsd({ limitUsd: 10, heldUsd: 5_000, feeRate: fee, spreadBps: 1, minuteBps: 200 }), 0.5, 'capped at 5%');
+  assert.equal(lossMarginUsd({ limitUsd: 10, heldUsd: 0, feeRate: fee, spreadBps: 50, minuteBps: 200 }), 0, 'flat: the limit itself');
+});
+
 test('volume maker quiet window: pulls its quotes and holds inside it; quotes again when it ends', async () => {
   const r = await rig();
-  // T0 is 08:00 UTC: the window starts five minutes on.
-  const a = await add(r, { ...MM, quiet: [{ from: '08:05', to: '08:30', zone: 'utc' }] });
+  // T0 is 08:00 UTC: the window starts six minutes on (five: reduce-only).
+  const a = await add(r, { ...MM, quiet: [{ from: '08:06', to: '08:30', zone: 'utc' }] });
   await step(r, a.id);
   assert.equal(r.ex.resting.size, 2);
-  const held = await step(r, a.id, 5 * 60_000);
+  const held = await step(r, a.id, 6 * 60_000);
   assert.equal(r.ex.resting.size, 0, 'nothing rests inside the window');
   assert.equal(held.status, 'waiting');
-  assert.equal(held.statusReason, 'Paused: quiet window 08:05–08:30 UTC.');
+  assert.equal(held.statusReason, 'Paused: quiet window 08:06–08:30 UTC.');
   const placed = r.ex.placed.length;
   await step(r, a.id, 10 * 60_000);
   assert.equal(r.ex.placed.length, placed, 'nothing new inside the window');

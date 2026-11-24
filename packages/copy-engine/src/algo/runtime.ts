@@ -65,7 +65,8 @@ import { ALGO_NAMES, algoClosesOnly, algoQuantity, algoSymbols, isSpotSpec, isSp
 import { countsAsFailure, refusalKind, refusalWords } from './refusals.ts';
 import type { AlgoStore } from './store.ts';
 import type { AlgoUpdatePatch } from '../api.ts';
-import { bookFill, bookGross, bookInventory, bookNet, bookVolume, botQuoteUsd, costPerMillion, emptyBook, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, INFORMED_TAKER_ACCOUNT, newsAt, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
+import { BOT_FEE_LADDER } from '../policy.ts';
+import { WIND_DOWN_MS, lossMarginUsd, pauseAhead, bookFill, bookGross, bookInventory, bookNet, bookVolume, botQuoteUsd, costPerMillion, emptyBook, gridPrices, gridQty, gridStart, mmQuotes, pastFair, PATIENT_TAKER_ACCOUNT, INFORMED_TAKER_ACCOUNT, newsAt, quietWindowAt, quietWords, sampleBook, usdWords, windowWords, type GridSide } from './bots.ts';
 import { FairBasis, REF_GRACE_MS, REF_MAX_AGE_MS, type ReferenceSource } from './reference.ts';
 import type { BotBook, BotHealth, BotHealthCheck, HedgeLegView, HedgeSpec, HedgeView } from './types.ts';
 import { firstMmr, hedgeClose, hedgePlan, liqDistance, spotHedgeMove, type HedgeLeg, type HedgeMove } from './hedge.ts';
@@ -2475,6 +2476,27 @@ export class AlgoRuntime {
     return true;
   }
 
+  /** What closing what `a` holds at the market costs, as a fraction of it: SoDEX's taker fee and ours (its own rate so far). */
+  private exitRate(a: AlgoRecord, b: BotBook): number {
+    const vol = bookVolume(b);
+    const own = vol > 0 ? b.builderFees / vol : BOT_FEE_LADDER[0]!.fee / 100_000;
+    return (this.markets.get(a.spec.symbol)?.takerFee ?? 0.0004) + own;
+  }
+
+  /** The loss limit's safety margin now (USD): 0 when nothing is held or its stop keeps the position. */
+  private lossMargin(a: AlgoRecord, b: BotBook, mk: number, now: number): number {
+    const s = a.spec;
+    if (!(s.kind === 'mm' || s.kind === 'grid' || s.kind === 'hedge') || s.maxLossUsd === null || s.onStop !== 'close') return 0;
+    // A hedge closes both legs: their sum, not their difference.
+    const legs = s.kind === 'hedge' ? Math.abs(a.book ? bookInventory(a.book) : 0) + Math.abs(this.hedgeOther(a)?.book ? bookInventory(this.hedgeOther(a)!.book!) : 0) : Math.abs(bookInventory(b));
+    if (!(legs > 0)) return 0;
+    const q = this.quoteOf(a, now);
+    const ago = this.market.priceAgo(s.symbol, 'mid', 60_000);
+    const minuteBps = q && ago && ago > 0 ? (Math.abs(mid(q) - ago) / ago) * 10_000 : 0;
+    // A hedge's legs move against each other: the minute's move costs it nothing.
+    return lossMarginUsd({ limitUsd: s.maxLossUsd, heldUsd: legs * mk, feeRate: this.exitRate(a, b), spreadBps: q ? spreadBps(q) : 0, minuteBps: s.kind === 'hedge' ? 0 : minuteBps });
+  }
+
   /** A bot's limits, checked every step: true when it stopped (or began closing). */
   private async botLimitsHit(a: AlgoRecord, mk: number | null, now: number): Promise<boolean> {
     const s = a.spec;
@@ -2484,7 +2506,8 @@ export class AlgoRuntime {
     let hit: { status: AlgoStatus; reason: string } | null = null;
     if (s.volumeTargetUsd !== null && bookVolume(b) >= s.volumeTargetUsd) hit = { status: 'done', reason: `Reached its volume target of ${money(s.volumeTargetUsd)}.` };
     // The loss limit needs a price: with none (no mark, no book) it is checked on the next step that has one.
-    else if (s.maxLossUsd !== null && mk !== null && bookNet(b, mk) <= -s.maxLossUsd) hit = { status: 'expired', reason: `Stopped at its loss limit: net PnL ${money(bookNet(b, mk))} (limit -${money(s.maxLossUsd)}).` };
+    // Before it by the margin of what closing costs (bots.ts lossMarginUsd), so the close itself does not take it past the limit.
+    else if (s.maxLossUsd !== null && mk !== null && bookNet(b, mk) <= -(s.maxLossUsd - this.lossMargin(a, b, mk, now))) hit = { status: 'expired', reason: `Stopped at its loss limit: net PnL ${money(bookNet(b, mk))} (limit -${money(s.maxLossUsd)}).` };
     else if (s.takeProfitUsd != null && mk !== null && bookNet(b, mk) >= s.takeProfitUsd) hit = { status: 'done', reason: `Took its profit: net PnL ${money(bookNet(b, mk))} (target ${money(s.takeProfitUsd)}).` };
     else if (s.endAt !== null && now >= s.endAt) hit = { status: 'expired', reason: 'Its end time came.' };
     if (!hit) return false;
@@ -2777,7 +2800,10 @@ export class AlgoRuntime {
     }
     if (live.length && !live.some((c) => c.tag.startsWith('close'))) return;
     const side: Side = inv > 0 ? 'sell' : 'buy';
-    const taking = now - closing.at >= BOT_CLOSE_REST_MS;
+    // At the touch first; at the market after a minute, or at once where the loss and what taking costs reach the loss limit.
+    const s = a.spec as { maxLossUsd?: number | null };
+    const taking = now - closing.at >= BOT_CLOSE_REST_MS
+      || (s.maxLossUsd != null && bookNet(b, mk) - Math.abs(inv) * mk * (this.exitRate(a, b) + spreadBps(q) / 20_000) <= -s.maxLossUsd);
     const mine = live.find((c) => c.tag.startsWith('close'));
     if (mine) {
       if (mine.state !== 'open' || mine.cancelling || mine.tif === 'ioc') return;
@@ -2894,7 +2920,12 @@ export class AlgoRuntime {
     const hadCalm = typeof a.k.calm === 'string';
     if (hadCalm) { delete a.k.calm; this.dirty.add(a.id); }
     // Its limits were checked before the holds (botGuard).
-    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
+    // `winding`: reduce-only, and why - before a planned pause, and over the first minutes of one nobody saw coming
+    // (bots.ts WIND_DOWN_MS): only the side that takes off what it holds is quoted, then the pause pulls everything.
+    let winding: string | null = null;
+    const wide = s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps;
+    if (this.unwinding(a, m, 'spread', wide, mk, now)) winding = `Reduce only: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp`;
+    else if (wide) {
       await this.pullResting(a);
       return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
     }
@@ -2919,6 +2950,8 @@ export class AlgoRuntime {
         }
       }
     }
+    const ahead = pauseAhead(s, this.host.events?.() ?? null, now);
+    if (ahead) winding ??= `Reduce only: it pauses at ${new Date(ahead.at).toISOString().slice(11, 16)} UTC (${ahead.why})`;
     // The patient-taker gate: closed while what PATIENT_TAKER_ACCOUNT took here over its window is under minUsd.
     let shrink = 1;
     let gateNote: string | undefined;
@@ -2931,15 +2964,19 @@ export class AlgoRuntime {
       } else if (took < g.minUsd) {
         const why = `the patient taker traded ${usdWords(took)} here in the last ${windowWords(g.windowMs)} (under your ${usdWords(g.minUsd)})`;
         if (g.action === 'pause') {
-          this.setGateNote(a, undefined);
-          await this.pullResting(a);
-          return this.hold(a, `Paused: ${why}.`, 'Paused: the patient taker traded');
+          if (!this.unwinding(a, m, 'flow', true, mk, now)) {
+            this.setGateNote(a, undefined);
+            await this.pullResting(a);
+            return this.hold(a, `Paused: ${why}.`, 'Paused: the patient taker traded');
+          }
+          winding ??= `Reduce only: ${why}`;
+        } else {
+          shrink = g.shrink;
+          gateNote = `Quoting smaller, ${usdWords(s.orderUsd * shrink)} a side: ${why}`;
         }
-        shrink = g.shrink;
-        gateNote = `Quoting smaller, ${usdWords(s.orderUsd * shrink)} a side: ${why}`;
-      }
+      } else this.unwinding(a, m, 'flow', false, mk, now);
     }
-    this.setGateNote(a, gateNote);
+    this.setGateNote(a, winding ?? gateNote);
     // Shrunk or back to full size: what rests goes, and is placed again at the new size.
     const shrunk = shrink < 1;
     if (Boolean(a.k.mshrunk) !== shrunk) {
@@ -2954,7 +2991,8 @@ export class AlgoRuntime {
     const tick = Number(m.tickSize);
     // Spot: the ask quotes only what it bought itself (never short): with nothing held there is no ask.
     const spotOnly = isSpotSpec(s);
-    const quotable = (x: { side: Side }) => !spotOnly || x.side === 'buy' || inv >= Number(m.stepSize) - 1e-12;
+    const quotable = (x: { side: Side }) => (!spotOnly || x.side === 'buy' || inv >= Number(m.stepSize) - 1e-12)
+      && (winding === null || (x.side === 'buy' ? inv < 0 : inv > 0));
     // The Binance-led maker: no fair price (no feed here, or it went quiet), no quotes.
     const fair = s.ref ? this.fairFor(s.symbol, q, now) : null;
     if (s.ref && fair === null) {
@@ -3126,6 +3164,27 @@ export class AlgoRuntime {
     let sum = 0;
     for (let i = f.b.length - 1; i >= 0 && f.b[i]![0] > now - windowMs; i--) sum += f.b[i]![1];
     return sum;
+  }
+
+  /**
+   * A gate that closes without warning: true while the bot is still reduce-only (what it holds can be quoted, and the
+   * gate closed under WIND_DOWN_MS ago), false once it is off the book - or the gate is open, which starts this over.
+   */
+  private unwinding(a: AlgoRecord, m: MarketInfo, gate: string, closed: boolean, mk: number, now: number): boolean {
+    const since = (a.k.gateAt as Record<string, number> | undefined) ?? {};
+    if (!closed) {
+      if (since[gate] === undefined) return false;
+      const { [gate]: _open, ...rest } = since;
+      a.k.gateAt = rest;
+      this.dirty.add(a.id);
+      return false;
+    }
+    if (since[gate] === undefined) {
+      a.k.gateAt = { ...since, [gate]: now };
+      this.dirty.add(a.id);
+    }
+    const held = floorStep(Math.abs(bookInventory(a.book!)), m);
+    return held >= minChildQty(m, mk) - 1e-12 && now - (since[gate] ?? now) < WIND_DOWN_MS;
   }
 
   /** A volume maker's gate line in its working text (view): set, changed or cleared. */

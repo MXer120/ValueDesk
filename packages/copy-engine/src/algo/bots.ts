@@ -466,6 +466,43 @@ export function newsAt(gate: NewsGate | undefined, events: readonly NewsEvent[],
   return null;
 }
 
+/**
+ * How long a gate's pause is reduce-only before the bot is off the book (owner 2026-11-24: "more than pause ... reduce
+ * only a few minutes earlier - max 5, no extra settings"): a planned pause (trading hours, quiet window, news) is wound
+ * down to over these minutes BEFORE it begins; one nobody can see coming (flow, spread) over the first of them.
+ */
+export const WIND_DOWN_MS = 5 * 60_000;
+
+/** When the planned pause (windows or a release) ahead of `now` begins, within WIND_DOWN_MS, to the minute; null: none. Not for a pause already on. */
+export function pauseAhead(s: Pick<MmSpec, 'quiet' | 'quietOnly' | 'news'>, events: readonly NewsEvent[] | null, now: number): { at: number; why: string } | null {
+  const shut = (t: number): string | null => {
+    const w = quietWindowAt(s.quiet, t);
+    if (s.quietOnly ? !w : w) return s.quietOnly ? 'trading hours end' : 'quiet window';
+    const ev = s.news && events ? newsAt(s.news, events, t) : null;
+    return ev ? ev.short : null;
+  };
+  // Windows and releases begin on whole minutes: every one of the next five is looked at, so a short one is not missed.
+  const first = Math.floor(now / 60_000) * 60_000 + 60_000;
+  for (let t = first; t <= now + WIND_DOWN_MS; t += 60_000) {
+    const why = shut(t);
+    if (why) return { at: t, why };
+  }
+  return null;
+}
+
+/** The most of a loss limit its safety margin may take. */
+export const LOSS_MARGIN_MAX = 0.05;
+
+/**
+ * How far before its loss limit a bot stops (USD): what closing what it holds NOW would cost - the taker fees and half
+ * the spread - and how far the price moved in the last minute, on that holding; never more than LOSS_MARGIN_MAX of the
+ * limit. Of the holding only, not of what it lost or how long it ran: flat, it stops at the limit itself.
+ */
+export function lossMarginUsd(o: { limitUsd: number; heldUsd: number; feeRate: number; spreadBps: number; minuteBps: number }): number {
+  const bps = Math.max(0, o.feeRate) * 10_000 + Math.max(0, o.spreadBps) / 2 + Math.max(0, o.minuteBps);
+  return Math.max(0, Math.min((Math.abs(o.heldUsd) * bps) / 10_000, o.limitUsd * LOSS_MARGIN_MAX));
+}
+
 /** '09:20–09:45 New York'. */
 export const quietWords = (w: QuietWindow): string => `${w.from}–${w.to} ${zoneWords(w.zone)}`;
 
