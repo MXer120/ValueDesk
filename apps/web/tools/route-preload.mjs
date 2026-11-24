@@ -28,7 +28,7 @@ import { createRequire } from 'node:module';
 export const ROUTE_PAGES = {
   '': /[\\/]dashboard[\\/]TradeDashboard\.tsx$/,
   trade: /[\\/]dashboard[\\/]TradeDashboard\.tsx$/,
-  // The home page (src/homeRoute.ts): also what / is on a first visit - theme-boot.js has said so in data-boot by now.
+  // The home page (src/homeRoute.ts): also what / is on a first visit - theme-boot.js has said so in data-home by now.
   home: /[\\/]landing[\\/]site[\\/]HomePage\.tsx$/,
   explore: /[\\/]explore[\\/]Explore\.tsx$/,
   copy: /[\\/]copy[\\/]CopyPage\.tsx$/,
@@ -73,7 +73,7 @@ export function preloadScript(map, base = '/', parts = {}, first = {}, { shell =
   const J = JSON.stringify;
   return `(function(){var m=${J(map)},p=${J(parts)},r=${J(first)},sh=${J(shell)},d=${J(reads)},ah=${J(ahead)},hs=${J(hints)},b=${J(base)},h=document.head,` +
     `s=(location.pathname.split('/')[1]||'').toLowerCase(),i,e,hm=0;` +
-    `try{hm=document.documentElement.getAttribute('data-boot')==='home';if(hm)s=location.pathname.split('/')[2]?'-':'home';}catch(z){}` +
+    `try{hm=document.documentElement.hasAttribute('data-home');if(hm)s=location.pathname.split('/')[2]?'-':'home';}catch(z){}` +
     `function ln(rel,href,co,as){e=document.createElement('link');e.rel=rel;if(as)e.as=as;if(co)e.crossOrigin='';e.href=href;h.appendChild(e);}` +
     // The page's chunks, and where its connections go.
     `try{var w={},k,j;for(k in m){w[k]=[];for(j=0;j<m[k].length;j++)if(p[m[k][j]])w[k].push(p[m[k][j]]);}window.__vsI18nPages=w;` +

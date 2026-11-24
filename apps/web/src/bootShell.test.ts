@@ -81,7 +81,10 @@ test('the first render waits for the stylesheet only while it is on its way', as
 
 /* ------------------------------------------------------------ theme-boot.js ----- */
 
-function boot(path: string, store: Record<string, string> = {}) {
+/** A browser that has used the app (its first popup answered) unless the store says otherwise. */
+const USED = { 'vd.site.terms.look': '"x"' };
+function boot(path: string, extra: Record<string, string> | null = {}, search = '', hostname = 'www.valuedesk.so') {
+  const store: Record<string, string> = extra === null ? {} : { ...USED, ...extra };
   const attrs = new Map<string, string>();
   const metas = new Map<string, string>([['color-scheme', 'dark'], ['theme-color', '#0e0e0e']]);
   const links: { rel: string; href: string; crossOrigin: string | null }[] = [];
@@ -95,8 +98,8 @@ function boot(path: string, store: Record<string, string> = {}) {
     createElement: () => ({ rel: '', href: '', crossOrigin: null }),
     head: { appendChild: (l: (typeof links)[number]) => links.push(l) },
   };
-  const localStorage = { getItem: (k: string) => store[k] ?? null };
-  runInNewContext(readFileSync(join(SRC, '..', 'public', 'theme-boot.js'), 'utf8'), { document, localStorage, location: { pathname: path } });
+  const localStorage = { getItem: (k: string) => store[k] ?? null, key: (i: number) => Object.keys(store)[i] ?? null, get length() { return Object.keys(store).length; } };
+  runInNewContext(readFileSync(join(SRC, '..', 'public', 'theme-boot.js'), 'utf8'), { document, localStorage, location: { pathname: path, search, hostname } });
   return { attrs, metas, links };
 }
 
@@ -113,6 +116,16 @@ test('theme-boot.js names the page the shell draws and its tab', () => {
   }
   assert.ok(boot('/', { 'ot.engine': '"spot"' }).attrs.has('data-boot-spot'));
   assert.ok(!boot('/', { 'ot.engine': '"perps"' }).attrs.has('data-boot-spot'));
+});
+
+test('theme-boot.js: / is the home page on a first visit only, as src/homeRoute.ts', () => {
+  assert.equal(boot('/', null).attrs.get('data-boot'), 'home');
+  assert.ok(boot('/', null).attrs.has('data-home'));
+  assert.equal(boot('/home/bots').attrs.get('data-boot'), 'home');
+  for (const b of [boot('/'), boot('/', null, '?ref=ABCDEFGH'), boot('/', null, '', 'beta.valuedesk.so'), boot('/trade', null)]) {
+    assert.equal(b.attrs.get('data-boot'), 'trade');
+    assert.ok(!b.attrs.has('data-home'));
+  }
 });
 
 test('theme-boot.js: the light theme before the first paint, the toolbar included', () => {
