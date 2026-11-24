@@ -1,0 +1,12 @@
+/* The home page's hero pictures (AppDesk.tsx): only opacity and transform ever change. */
+.ad { position: relative; max-width: 1440px; aspect-ratio: 1440 / 860; margin: 18px auto 0; }
+.ad::before { content: ''; position: absolute; left: 6%; right: 6%; top: 10%; height: 74%; background: radial-gradient(50% 50% at 50% 50%, rgba(91, 72, 190, 0.42), rgba(33, 145, 140, 0.12) 55%, transparent 72%); }
+.ad-pg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; transform: translateY(26px) scale(0.975); transition: opacity 0.5s ease, transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1); will-change: opacity, transform; }
+.ad-pg.is-on { opacity: 1; transform: none; transition-delay: 0.1s; }
+.ad.is-phone { height: 590px; aspect-ratio: auto; margin-top: 26px; perspective: 1100px; }
+.ad-ph { position: absolute; left: 50%; top: 14px; width: 258px; height: 558px; margin-left: -129px; border-radius: 30px; background: #0e0f10; box-shadow: 0 0 0 5px #17181b, 0 0 0 6px rgba(190, 180, 255, 0.3), 0 34px 44px -20px rgba(0, 0, 0, 0.85); transition: transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1), opacity 0.5s; will-change: transform, opacity; }
+.ad-ph.is-on { z-index: 3; transform: rotateX(5deg) rotateY(-4deg); }
+.ad-ph.is-l { z-index: 1; opacity: 0.5; transform: translate3d(-112px, 10px, -190px) rotateY(24deg); }
+.ad-ph.is-r { z-index: 1; opacity: 0.5; transform: translate3d(112px, 10px, -190px) rotateY(-24deg); }
+@media (max-width: 1420px) { .ad:not(.is-phone) { width: calc(100% + 32px + 9vw); margin-left: calc(-16px - 4.5vw); } }
+@media (prefers-reduced-motion: reduce) { .ad-pg, .ad-ph { transition: none; } }

@@ -66,7 +66,8 @@ const hexA = (hex: string, a: number) => {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 };
 
-export function HeatGlass({ layout = 'right', rib = 26, className }: { layout?: keyof typeof LAYOUTS; rib?: number; className?: string }) {
+/** `every`: at most one drawing per so many ms; `scale`: the canvas's pixels per CSS pixel at most (a large, soft field needs few). */
+export function HeatGlass({ layout = 'right', rib = 26, className, every = 0, scale = 1.5 }: { layout?: keyof typeof LAYOUTS; rib?: number; className?: string; every?: number; scale?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current;
@@ -96,7 +97,7 @@ export function HeatGlass({ layout = 'right', rib = 26, className }: { layout?: 
       const r = cv.getBoundingClientRect();
       W = Math.max(1, r.width);
       H = Math.max(1, r.height);
-      dpr = Math.min(liteDevice() ? 1 : 1.5, window.devicePixelRatio || 1);
+      dpr = Math.min(liteDevice() ? 1 : 1.5, scale, window.devicePixelRatio || 1);
       cv.width = Math.round(W * dpr);
       cv.height = Math.round(H * dpr);
       sw = W < 560 ? Math.max(14, rib * 0.66) : rib;
@@ -142,7 +143,7 @@ export function HeatGlass({ layout = 'right', rib = 26, className }: { layout?: 
     const draw = (t: number) => {
       if (!alive) return;
       if (!still && visible && document.visibilityState === 'visible') raf = requestAnimationFrame(draw);
-      if (!still && t - drawn < frameMs()) return;
+      if (!still && t - drawn < Math.max(every, frameMs())) return;
       drawn = t;
       paintField(still ? 8000 : t);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -178,6 +179,6 @@ export function HeatGlass({ layout = 'right', rib = 26, className }: { layout?: 
       io?.disconnect();
       document.removeEventListener('visibilitychange', onVis);
     };
-  }, [layout, rib]);
+  }, [layout, rib, every, scale]);
   return <canvas ref={ref} className={className} aria-hidden="true" />;
 }

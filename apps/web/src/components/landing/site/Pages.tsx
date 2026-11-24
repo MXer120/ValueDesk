@@ -15,7 +15,7 @@ import { CoinIcon } from '../../CoinIcon';
 import { VenueLogo } from '../../VenueLogo';
 import { GRID_VENUES, COPY_VENUES } from '../../copy/gridModel';
 import { VENUE_LABEL } from '../../../vsApi';
-import { Arrow, BookViz, Count, Eyebrow, FollowViz, HeatViz, Reveal, TopTraders } from '../Home';
+import { Arrow, BookViz, Count, Eyebrow, FollowViz, Reveal, TopTraders } from '../Home';
 import { Faq, Money } from '../v2/V2';
 import { FeatureFx, HubViz, SleepViz } from '../v3/V3';
 import { Calculator } from '../v4/V4';
@@ -24,14 +24,14 @@ import { coinOf, isBotSpot } from '../../../bots/engines';
 import { MarketConditions } from '../../bots/BotsRegime';
 import '../../bots/bots.css';
 import '../../bots/botsPages.css';
-import { HeatGlass } from '../v4/heat';
-import { botHref, bp, DESK_WINDOW_TEXT, FEES, startFromText, usdShort, usdStep, useLiveDesk, type MarketRow } from '../shared';
+
+import { botHref, bp, FEES, startFromText, usdShort, usdStep, useLiveDesk, type MarketRow } from '../shared';
 import { Calcs } from './Calcs';
 import { BotConsole, BotSettingsMap, CopyConsole, LiqMapViz, LiveLiqViz } from './viz';
 import './pages.css';
 import { FeeCards } from './FeeCards';
 import { qaFor } from './faq';
-import { Embed, IC, Row, SiteFooter, SitePage, Ticks, PAGE_PATHS } from './Site';
+import { Embed, IC, SiteFooter, SitePage, PAGE_PATHS } from './Site';
 import '../v2/v2.css';
 import '../v3/v3.css';
 import '../v4/v4.css';
@@ -624,6 +624,4 @@ export function PricingPage() {
     </SitePage>
   );
 }
-
-export const SITE_PAGES = { bots: BotsPage, 'copy-trading': CopyPage, analytics: AnalyticsPage, 'cross-venue': CrossVenuePage, fees: PricingPage } as const;
 export { IC };

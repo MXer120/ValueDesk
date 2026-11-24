@@ -28,6 +28,8 @@ import { createRequire } from 'node:module';
 export const ROUTE_PAGES = {
   '': /[\\/]dashboard[\\/]TradeDashboard\.tsx$/,
   trade: /[\\/]dashboard[\\/]TradeDashboard\.tsx$/,
+  // The home page (src/homeRoute.ts): also what / is on a first visit - theme-boot.js has said so in data-boot by now.
+  home: /[\\/]landing[\\/]site[\\/]HomePage\.tsx$/,
   explore: /[\\/]explore[\\/]Explore\.tsx$/,
   copy: /[\\/]copy[\\/]CopyPage\.tsx$/,
   leaderboard: /[\\/]leaderboard[\\/]LeaderboardPage\.tsx$/,
@@ -70,14 +72,15 @@ export const READS_BUDGET = 64 * 1024;
 export function preloadScript(map, base = '/', parts = {}, first = {}, { shell = null, reads = {}, ahead = {}, hints = {}, langs = [] } = {}) {
   const J = JSON.stringify;
   return `(function(){var m=${J(map)},p=${J(parts)},r=${J(first)},sh=${J(shell)},d=${J(reads)},ah=${J(ahead)},hs=${J(hints)},b=${J(base)},h=document.head,` +
-    `s=(location.pathname.split('/')[1]||'').toLowerCase(),i,e;` +
+    `s=(location.pathname.split('/')[1]||'').toLowerCase(),i,e,hm=0;` +
+    `try{hm=document.documentElement.getAttribute('data-boot')==='home';if(hm)s=location.pathname.split('/')[2]?'-':'home';}catch(z){}` +
     `function ln(rel,href,co,as){e=document.createElement('link');e.rel=rel;if(as)e.as=as;if(co)e.crossOrigin='';e.href=href;h.appendChild(e);}` +
     // The page's chunks, and where its connections go.
     `try{var w={},k,j;for(k in m){w[k]=[];for(j=0;j<m[k].length;j++)if(p[m[k][j]])w[k].push(p[m[k][j]]);}window.__vsI18nPages=w;` +
     `var l=m[s]||[];for(i=0;i<l.length;i++)ln('modulepreload',b+l[i],1);` +
     `var x=hs[s]||[];for(i=0;i<x.length;i++)ln(x[i][0],x[i][1],x[i][2]);}catch(z){}` +
     // Its first reads.
-    `try{window.__vsReads=d;window.__vsAhead=ah;if(!window.__vsPrimed&&document.visibilityState==='visible'){` +
+    `try{window.__vsReads=d;window.__vsAhead=ah;if(!hm&&!window.__vsPrimed&&document.visibilityState==='visible'){` +
     `var u=location.pathname+location.search,P=new RegExp(${J(PERSONAL_SRC)},'i');if(!P.test(u)){` +
     `var q=null,o=null,dd=d[u];if(Array.isArray(dd)&&!dd.length)q=dd;else{try{o=JSON.parse(localStorage.getItem('vs.firstReads')||'null')}catch(z){}` +
     `if(o&&typeof o==='object'&&!Array.isArray(o)&&Object.prototype.hasOwnProperty.call(o,u)&&Array.isArray(o[u]))q=o[u];}` +

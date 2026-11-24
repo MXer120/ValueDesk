@@ -1,5 +1,5 @@
 /**
- * The landing hero's pages (components/landing/v3/Terminal.tsx): Trade with the demo account, Copy and Bots, each one
+ * The home page hero pictures (components/landing/site/AppDesk.tsx; the tilted ones were baked from the 3D scene of commit 5c5d1d1e): Trade with the demo account, Copy and Bots, each one
  * picture plus the boxes of its panels. From apps/web:
  *   VD_WEB=http://localhost:5180 OUT=<dir> npx tsx ../../marketing/video/capture/heroPages.mts
  */

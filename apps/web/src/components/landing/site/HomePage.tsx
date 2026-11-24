@@ -1,38 +1,29 @@
 /**
- * Landing versions 5-7 (owner 2026-11-23, picking from 1-4): built from the parts the owner liked -
- *   V1: the chrome V and the footer;  V2: how it works (the pinned scene), where your money goes, the FAQ;
- *   V3: the feature cards, "your funds stay yours", "up and running";  V4: the liquidation-heat header and the fee
- *   calculator, now with a SoPoints estimate beside it.
- * Each version leads differently:
- *   5 "The app on heat": V3's app pages in 3D on a stage of liquidation heat (owner 2026-11-24); features, how, money, calculators, products.
- *   6 "Heat, then convert": V4's header and live ticker; setup and safety first, then features, calculators, money.
- *   7 "One desk, long": the V centred and large; the scene, a row per product, features, money, calculators, setup.
- * Every figure is live or a constant of the fee ladders (shared.tsx); drawings carry no figures.
+ * The home page (owner 2026-11-24: version 5): the app's pages in 3D on a stage of liquidation heat, the live tape, the
+ * feature cards, where the money goes, the calculators, the products, the questions. Every figure is live or a constant
+ * of the fee ladders (shared.tsx); drawings carry no figures.
  */
 import { type CSSProperties } from 'react';
-import { ChromeV, Eyebrow, Arrow, Tape, BookViz, FollowViz, HeatViz, Reveal } from '../Home';
-import { SetupScene, Money, Faq } from '../v2/V2';
-import { V3Features, V3Safety, V3SignTiles, HubViz } from '../v3/V3';
-import { Ticker } from '../v4/V4';
+import { Eyebrow, Arrow, BookViz, FollowViz, HeatViz, Reveal } from '../Home';
+import { Money, Faq } from '../v2/V2';
+import { V3Features, HubViz } from '../v3/V3';
 import { HeatGlass } from '../v4/heat';
-import { bp, DESK_WINDOW_TEXT, FEES, startFromText, useLiveDesk } from '../shared';
+import { startFromText, useLiveDesk } from '../shared';
+import { AppDesk } from './AppDesk';
 import { Calcs } from './Calcs';
-import { TerminalDesk } from '../v3/Terminal';
 import { SiteTape } from './Tape';
 import { qaFor } from './faq';
-import { Embed, ProductCards, Row, SitePage, Ticks, PAGE_PATHS } from './Site';
+import { Embed, IC, ProductCards, SitePage } from './Site';
 import '../v2/v2.css';
 import '../v3/v3.css';
 import '../v4/v4.css';
 import '../../vip.css';
 
-const VIP_RULE = FEES.vipCondition.replace(/^VIP:\s*/, '');
-
 function Trust() {
   return (
-    <ul className="h-trust">
-      <li><i />Your funds stay in your SoDEX account</li>
-      <li><i />Bot fee from {bp(FEES.botLowest)} (VIP)</li>
+    <ul className="h-trust is-checks">
+      <li>{IC.check}Your funds stay in your SoDEX account</li>
+      <li>{IC.check}Keys can't pay anyone else</li>
     </ul>
   );
 }
@@ -65,15 +56,13 @@ function Products() {
 
 const FAQ_HOME = qaFor('home');
 
-/* ------------------------------------------------------------------------------------------- version 5 ----- */
-
-export function V5() {
+export function HomePage() {
   const live = useLiveDesk();
   const start = startFromText(live.startFrom);
   return (
-    <SitePage title="ValueDesk: bots, copy trading and analytics on SoDEX" home="/home/5">
+    <SitePage title="ValueDesk: bots, copy trading and analytics on SoDEX" current="home">
       <header className="vd-h5">
-        <div className="vd-h5__heat" aria-hidden="true"><HeatGlass layout="stage" rib={28} /></div>
+        <div className="vd-h5__heat" aria-hidden="true"><HeatGlass layout="stage" rib={28} every={90} scale={0.75} /></div>
         <div className="vd-h5__t">
           <div className="h-up" style={{ '--d': '60ms' } as CSSProperties}><h1 className="h-h1">The market, <span>on one desk.</span></h1></div>
           <div className="h-up" style={{ '--d': '140ms' } as CSSProperties}>
@@ -81,11 +70,11 @@ export function V5() {
           </div>
           <div className="h-up h-cta" style={{ '--d': '220ms' } as CSSProperties}>
             <a href="/bots/new" className="h-btn is-light vd-cta-main">Start with just {start}<Arrow /></a>
-            <a href="/copy" className="h-btn is-glass">Copy a trader</a>
+            <a href="/copy" className="h-btn is-glass vd-blur">Copy a trader</a>
           </div>
           <div className="h-up" style={{ '--d': '300ms' } as CSSProperties}><Trust /></div>
         </div>
-        <Embed scope="v3" className="vd-h5__desk"><TerminalDesk /></Embed>
+        <AppDesk />
       </header>
       <SiteTape rows={live.rows} />
 
@@ -97,5 +86,3 @@ export function V5() {
     </SitePage>
   );
 }
-
-

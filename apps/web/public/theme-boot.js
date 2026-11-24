@@ -19,7 +19,16 @@
   try {
     // Which page index.html's static shell draws (src/bootShell.ts): its cards, its lit tab, the market type.
     var s = (location.pathname.split('/')[1] || '').toLowerCase();
-    var p = s === '' || s === 'trade' ? 'trade' : s === 'home' ? 'home' : /^(bots|points|portfolio|explore)$/.test(s) ? s : 'page';
+    // A first visit to / gets the home page (src/homeRoute.ts): nobody has answered the app's first popup here yet.
+    var h = location.pathname === '/' && !location.search && location.hostname.indexOf('beta.') !== 0;
+    if (h) {
+      try {
+        for (var i = 0; i < localStorage.length; i++) if ((localStorage.key(i) || '').indexOf('vd.site.terms') === 0) h = false;
+      } catch (y) {
+        h = false;
+      }
+    }
+    var p = h ? 'home' : s === '' || s === 'trade' ? 'trade' : s === 'home' ? 'home' : /^(bots|points|portfolio|explore)$/.test(s) ? s : 'page';
     document.documentElement.setAttribute('data-boot', p);
     document.documentElement.setAttribute('data-boot-tab', p === 'explore' || p === 'page' ? 'more' : p);
     var e = null;

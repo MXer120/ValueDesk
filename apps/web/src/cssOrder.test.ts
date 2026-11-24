@@ -24,7 +24,7 @@ const EXEMPT = new Set([
   'components/landing/site/pages.css',
   'components/landing/v2/v2.css',
   'components/landing/v3/v3.css',
-  'components/landing/v3/terminal.css',
+  'components/landing/site/appDesk.css',
   'components/landing/v4/v4.css',
   'legal/legal.css', // loads with the legal pages; only `.legal*` selectors (see below)
 ]);

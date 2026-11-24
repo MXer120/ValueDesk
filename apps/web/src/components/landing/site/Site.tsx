@@ -2,16 +2,14 @@
  * The marketing site's shell (owner 2026-11-23): one nav with a Products dropdown that leads to real pages (bots, copy
  * trading, analytics, cross-venue) plus Pricing and FAQ, V1's footer (the owner liked it), and the parts every page of
  * the site shares. Root class `h vd`: V1's vocabulary applies; borrowed sections of versions 2-4 go in <Embed>.
- *
- * Paths: the versions are /home/5..7, the pages /home/<page>. The logo and FAQ go back to the version the visitor came
- * from (kept for the tab in sessionStorage), so a review on localhost stays on the version under review.
+ * Paths: the home page is /home (and / on a first visit), the pages /home/<page>.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { BrandMark } from '../../BrandMark';
 import { dropBootShell } from '../../../bootShell';
 import { Arrow, Reveal } from '../Home';
 import { HeatGlass } from '../v4/heat';
-import { FeatureFx } from '../v3/V3';
+
 import '../v3/v3.css';
 import { bp, FEES, liteDevice } from '../shared';
 import '../home.css';
@@ -27,14 +25,8 @@ export const PAGE_PATHS = { bots: '/home/bots', copy: '/home/copy-trading', anal
 /** The page's own first step: a bot on Bots, a copy on Copy trading, the app everywhere else (owner 2026-11-24). */
 const CTA: Record<string, { href: string; label: string }> = { bots: { href: '/bots/new', label: 'Start a bot' }, copy: { href: '/copy', label: 'Copy a trader' } };
 const APP = { href: '/trade', label: 'Launch app' };
-const HOME_KEY = 'vd.home';
-/** The landing version this tab came from (/home/5 ...), for the logo and the FAQ link. */
-export function homePath(): string {
-  try { return sessionStorage.getItem(HOME_KEY) ?? '/home'; } catch { return '/home'; }
-}
-export function rememberHome(path: string): void {
-  try { sessionStorage.setItem(HOME_KEY, path); } catch { /* storage off: the logo goes to /home */ }
-}
+/** The home page: / shows it to a first visit only, so links name its own path. */
+export const homePath = (): string => '/home';
 
 /* ---------------------------------------------------------------------------------------------- icons ----- */
 
@@ -170,15 +162,12 @@ export function SiteFooter({ title, sub, cta = APP }: { title?: ReactNode; sub?:
 
 /* ----------------------------------------------------------------------------------------------- page ----- */
 
-type Whale = { from: [number, number, number, number]; to: [number, number, number, number]; opacity?: number; color?: string };
-
-/** A site page: ground, the swimming whale, nav, content, footer. */
-export function SitePage({ title, children, whale, current, footer, home }: { title: string; children: ReactNode; whale?: Whale | null; current?: string; footer?: ReactNode; home?: string }) {
+/** A site page: ground, nav, content, footer. */
+export function SitePage({ title, children, current, footer }: { title: string; children: ReactNode; current?: string; footer?: ReactNode }) {
   useEffect(() => {
     dropBootShell();
     document.title = title;
-    if (home) rememberHome(home);
-  }, [title, home]);
+  }, [title]);
   return (
     <div className={cx('h vd', liteDevice() && 'is-lite')} data-no-i18n="">
       <div className="h-bg" aria-hidden="true"><div className="h-bg__grid" /><div className="h-bg__beam" /></div>
@@ -192,26 +181,6 @@ export function SitePage({ title, children, whale, current, footer, home }: { ti
 /** A section borrowed from version 2, 3 or 4, in its own style scope. */
 export function Embed({ scope, children, className }: { scope: 'v2' | 'v3' | 'v4'; children: ReactNode; className?: string }) {
   return <div className={cx(scope, 'vd-embed', className)}>{children}</div>;
-}
-
-/* ------------------------------------------------------------------------------------------ small parts ----- */
-
-export function Ticks({ items }: { items: ReactNode[] }) {
-  return <ul className="vd-ticks">{items.map((t, i) => <li key={i}>{IC.check}<span>{t}</span></li>)}</ul>;
-}
-
-export function Row({ k, title, children, vis, flip, visClass }: { k: string; title: ReactNode; children: ReactNode; vis: ReactNode; flip?: boolean; visClass?: string }) {
-  return (
-    <Reveal className={cx('vd-row', flip && 'is-flip')}>
-      <FeatureFx v={1 + ([...k].reduce((n, ch) => n + ch.charCodeAt(0), 0) % 5)} />
-      <div className="vd-row__t">
-        <p className="vd-row__k">{k}</p>
-        <h3>{title}</h3>
-        {children}
-      </div>
-      <div className={cx('vd-vis', visClass)}>{vis}</div>
-    </Reveal>
-  );
 }
 
 /** The four products as cards, each with its own drawing, linking to its page. */

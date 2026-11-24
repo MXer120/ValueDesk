@@ -13,7 +13,7 @@
  *     the user's OWN SoDEX accounts and wallet - never to anyone else. Never say "the bot can only trade".
  *   - setup: connect + 3 signatures (terms, fee, key), one click asks for each; free, no transaction.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BOT_FEE_LADDER, BOT_FEE_VIP, BOT_VIP_MIN_USD, COPY_FEE_LADDER, COPY_FEE_WINDOW_DAYS } from '@copy-engine';
 import { useSymbols } from '../../hooks';
 import { useBotMarkets, type BotMarket } from '../../bots/data';
@@ -23,7 +23,7 @@ import { draftFor, minQuoteUsd, planMarkets } from '../../bots/presets';
 import { marketOf } from '../algo/draft';
 import { scoreRows, COPY_VENUES } from '../copy/gridModel';
 import { vsApi, type TraderRow } from '../../vsApi';
-import { loadTone, stipple, TH, TW, type Dot } from '../copy/DotWhale';
+
 
 /* -------------------------------------------------------------------------------------------------- fees ----- */
 
@@ -187,125 +187,4 @@ export function useTopTraders(on: boolean): TopTrader[] {
     return () => { alive = false; };
   }, [on, xs.length]);
   return xs;
-}
-
-/* ------------------------------------------------------------------------------------------ the whale ----- */
-
-/**
- * The owner's dotted humpback (copy/DotWhale.tsx's tone map, the same photo, never redrawn or warped) swimming through
- * the page as it scrolls: a fixed layer behind the content; the scroll position moves the WHOLE whale along a slow
- * path across the screen and turns it a little (the image is only moved, scaled and rotated as one piece). Its dots
- * shimmer. Behind everything, pointer-events none; under reduced motion it rests in one place.
- *
- * `path`: where it swims, as fractions of the screen per scroll progress 0..1 - [x, y, rotate deg, scale] at the start
- * and the end (eased between, with a gentle sway). `tone`: dot colour.
- */
-export function SwimmingWhale({
-  from = [1.05, 0.25, -64, 1],
-  to = [-0.25, 0.7, -76, 1.1],
-  height = 520,
-  opacity = 0.7,
-  color = '232, 238, 244',
-  className,
-}: {
-  from?: [number, number, number, number];
-  to?: [number, number, number, number];
-  height?: number;
-  opacity?: number;
-  color?: string;
-  className?: string;
-}) {
-  const cv = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const canvas = cv.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    let dots: Dot[] = [];
-    let raf = 0;
-    let alive = true;
-    const still = reducedMotion() || liteDevice();
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const size = () => {
-      canvas.width = Math.round(window.innerWidth * dpr);
-      canvas.height = Math.round(window.innerHeight * dpr);
-    };
-    size();
-    const draw = (t: number) => {
-      if (!alive) return;
-      const W = window.innerWidth;
-      const H = window.innerHeight;
-      const max = Math.max(1, document.documentElement.scrollHeight - H);
-      const p = still ? 0.35 : Math.min(1, Math.max(0, window.scrollY / max));
-      const e = p * p * (3 - 2 * p);
-      const lerp = (a: number, b: number) => a + (b - a) * e;
-      const sway = still ? 0 : Math.sin(t / 2400) * 0.012;
-      const x = lerp(from[0], to[0]) * W;
-      const y = (lerp(from[1], to[1]) + sway) * H;
-      const rot = (lerp(from[2], to[2]) + (still ? 0 : Math.sin(t / 3100) * 2)) * (Math.PI / 180);
-      const k = (height / TH) * lerp(from[3], to[3]) * Math.min(1, W / 900 + 0.35);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, W, H);
-      ctx.translate(x, y);
-      ctx.rotate(rot);
-      ctx.scale(k, k);
-      ctx.translate(-TW / 2, -TH / 2);
-      for (const d of dots) {
-        const tw = still ? 1 : 0.7 + 0.3 * Math.sin(t / 1000 * d.sp + d.ph);
-        ctx.fillStyle = `rgba(${color}, ${(d.a * tw * opacity).toFixed(3)})`;
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, d.r / Math.max(0.35, k) * 0.9, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      if (!still && document.visibilityState === 'visible') raf = requestAnimationFrame(draw);
-    };
-    const kick = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(draw); };
-    void loadTone().then((tone) => {
-      if (!alive) return;
-      dots = stipple(tone, 7000);
-      kick();
-    }).catch(() => {});
-    const onResize = () => { size(); kick(); };
-    window.addEventListener('resize', onResize);
-    window.addEventListener('scroll', kick, { passive: true });
-    document.addEventListener('visibilitychange', kick);
-    return () => {
-      alive = false;
-      cancelAnimationFrame(raf);
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('scroll', kick);
-      document.removeEventListener('visibilitychange', kick);
-    };
-  }, [from, to, height, opacity, color]);
-  return <canvas ref={cv} className={className} aria-hidden="true" style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: 0 }} />;
-}
-
-/* ------------------------------------------------------------------------------------ version switcher ----- */
-
-export const VERSIONS = [
-  { n: 1, name: 'Chrome' },
-  { n: 2, name: 'Version 2' },
-  { n: 3, name: 'Version 3' },
-  { n: 4, name: 'Version 4' },
-  { n: 5, name: 'Chosen: heat header, product cards, feature cards' },
-] as const;
-
-/** The version in the path: /home -> 1, /home/2 -> 2 ... */
-export function versionOfPath(pathname: string): number {
-  const v = Number(pathname.replace(/\/+$/, '').split('/').filter(Boolean)[1] ?? '1');
-  return VERSIONS.some((x) => x.n === v) ? v : 1;
-}
-
-/** Localhost only: a small pill to flip between the versions while the owner picks one. */
-export function VersionSwitcher({ current }: { current: number }): ReactNode {
-  if (!import.meta.env.DEV) return null;
-  return (
-    <nav aria-label="Landing versions" style={{ position: 'fixed', left: 16, bottom: 16, zIndex: 100, display: 'flex', gap: 4, padding: 4, borderRadius: 999, background: 'rgba(20,20,20,0.85)', border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(10px)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 12 }}>
-      {VERSIONS.map((v) => (
-        <a key={v.n} href={v.n === 1 ? '/home' : `/home/${v.n}`} title={v.name} style={{ padding: '6px 11px', borderRadius: 999, color: v.n === current ? '#0a0a0a' : v.n >= 5 ? '#4fe3b3' : '#ddd', background: v.n === current ? '#f4f4f2' : 'transparent', textDecoration: 'none' }}>
-          V{v.n}
-        </a>
-      ))}
-    </nav>
-  );
 }

@@ -37,7 +37,7 @@ import './theme';
 import './appearance';
 
 import { useNumStyle } from './numStyle';
-import { isHomePath } from './router';
+import { showsHome } from './homeRoute';
 
 /* Before React renders, so a chosen language is on the page as early as its catalogue allows. */
 bootLanguage();
@@ -45,9 +45,9 @@ bootLanguage();
 // beta.valuedesk.so (VITE_CHANNEL=beta, deploy/vercel/beta.settings): the beta list's door before the app
 // (beta/BetaGate.tsx). The site's own build folds this to null and never contains the door.
 const BetaGate = import.meta.env.VITE_CHANNEL === 'beta' ? lazy(() => import('./beta/BetaGate')) : null;
-// The landing page (/home, owner 2026-11-23): a page of its own, outside the app - no rail, navbar or terms popup.
-const Home = lazy(() => import('./components/landing/Versions').then((m) => ({ default: m.HomeVersions })));
-const onHome = isHomePath(window.location.pathname);
+// The home page (/home, and / on a first visit; owner 2026-11-24): a page of its own, outside the app - no rail, navbar or terms popup.
+const Home = lazy(() => import('./components/landing/HomeSite').then((m) => ({ default: m.HomeSite })));
+const onHome = showsHome(window.location);
 
 // Before the first render, so an error thrown while mounting is logged too.
 // See log.ts for levels, ?debug=<ns>, and the __vs console handle.

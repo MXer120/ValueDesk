@@ -15,7 +15,7 @@ import { CoinIcon } from '../../CoinIcon';
 import { VenueLogo } from '../../VenueLogo';
 import { BookViz } from '../Home';
 import { FeatureFx } from '../v3/V3';
-import { DESK_WINDOW_TEXT, frameMs, liteDevice, reducedMotion, usdShort, useTopTraders, type MarketRow } from '../shared';
+import { DESK_WINDOW_TEXT, liteDevice, reducedMotion, usdShort, useTopTraders, type MarketRow } from '../shared';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
 

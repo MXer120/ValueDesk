@@ -7,7 +7,8 @@ import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
 import { SideBar } from './components/SideBar';
 import './components/shell.css';
-import { DEFAULT_TAB, EXCLUDED_PATH, LIMITS_PATH, STATUS_PATH, SOON_TABS, TABS, isExcludedPath, isHomePath, isLimitsPath, isStatusPath, landingTab, legalForPath, litFromKey, pathForLegal, pathForSodexView, pathForTab, pushPath, routeKeyForPath, routeKeyOf, sodexViewForPath, tabForPath, useRoute, type LegalPage, type RouteReady, type SodexView, type Tab } from './router';
+import { DEFAULT_TAB, EXCLUDED_PATH, LIMITS_PATH, STATUS_PATH, SOON_TABS, TABS, isExcludedPath, isLimitsPath, isStatusPath, landingTab, legalForPath, litFromKey, pathForLegal, pathForSodexView, pathForTab, pushPath, routeKeyForPath, routeKeyOf, sodexViewForPath, tabForPath, useRoute, type LegalPage, type RouteReady, type SodexView, type Tab } from './router';
+import { showsHome } from './homeRoute';
 import { dropBootShell } from './bootShell';
 import { api, type Engine } from './api';
 import { askTrade } from './components/TradeConfirm';
@@ -101,8 +102,6 @@ const StatusDoc = lazyPage('status', () => import('./status/StatusPage').then((m
 const ExcludedDoc = lazyPage('excluded', () => import('./components/excluded/ExcludedPage').then((m) => m.ExcludedPage));
 /* Trading limits & conditions (More > Trading limits), the same way. */
 const LimitsDoc = lazyPage('limits', () => import('./components/limits/LimitsPage').then((m) => m.LimitsPage));
-/* The landing page (/home): bots, copy trading and analytics for a first visit, the same way. */
-const HomeDoc = lazyPage('home', () => import('./components/landing/Landing').then((m) => m.Landing));
 /* SoDEX's own products (More > SoDEX), the same way. */
 const SODEX_DOCS: Record<SodexView, LazyPage<SodexPageProps>> = {
   points: lazyPage('sopoints', () => import('./components/sodex/SoPointsPage').then((m) => m.SoPointsPage)),
@@ -131,18 +130,19 @@ const bootTabs = (): Tab[] => {
 /** The code the first render needs: a legal page's, the status page's, or the landing tab's (above). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const bootPages = (): LazyPage<any>[] =>
-  legalForPath(window.location.pathname) ? [LegalDoc] : isStatusPath(window.location.pathname) ? [StatusDoc] : isExcludedPath(window.location.pathname) ? [ExcludedDoc] : isLimitsPath(window.location.pathname) ? [LimitsDoc] : isHomePath(window.location.pathname) ? [HomeDoc] : sodexViewForPath(window.location.pathname) ? [SODEX_DOCS[sodexViewForPath(window.location.pathname) as SodexView]] : bootTabs().map((t) => PAGES[t]);
+  legalForPath(window.location.pathname) ? [LegalDoc] : isStatusPath(window.location.pathname) ? [StatusDoc] : isExcludedPath(window.location.pathname) ? [ExcludedDoc] : isLimitsPath(window.location.pathname) ? [LimitsDoc] : sodexViewForPath(window.location.pathname) ? [SODEX_DOCS[sodexViewForPath(window.location.pathname) as SodexView]] : bootTabs().map((t) => PAGES[t]);
 /* A touch phone has no Cmd+K to press the moment the page appears, so its first render does not wait for the
    palette's eight chunks (~28 KB brotli, ~83 KB of script to run first): the stand-in (lazyPalette.tsx) asks for
    them as soon as it is mounted, long before a tap on search, and keeps an open asked for before they are in.
    The same query decides whether tools/boot-shell.mjs announces the palette's chunks in the page's head. */
 const TOUCH_ONLY = typeof window.matchMedia === 'function' && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 /* Requested now, in parallel with React starting up. */
-const booting: Promise<unknown> = Promise.all([...bootPages().map((p) => p.preload()), ...(TOUCH_ONLY ? [] : [loadPalette()])]);
+const onHome = showsHome(window.location); // the home page mounts instead of the app (main.tsx): none of the app's code or reads
+const booting: Promise<unknown> = onHome ? Promise.resolve() : Promise.all([...bootPages().map((p) => p.preload()), ...(TOUCH_ONLY ? [] : [loadPalette()])]);
 /* The landing page's first index reads: started by the route script while the HTML was read (or now, without it); the
    page asks for them in an effect, after its code has arrived and rendered, and takes the answers that are already
    there (serverFetch.ts). What it reads in the seconds after its code is in (`booting`) is remembered for this URL. */
-primeFirstReads(window.location.pathname + window.location.search, booting);
+if (!onHome) primeFirstReads(window.location.pathname + window.location.search, booting);
 booting.catch(() => {
   /* logged in lazyPage; the page itself retries and recovers when it renders */
 });
@@ -154,7 +154,6 @@ function pageForPath(path: string): LazyPage<any> {
   if (isStatusPath(path)) return StatusDoc;
   if (isExcludedPath(path)) return ExcludedDoc;
   if (isLimitsPath(path)) return LimitsDoc;
-  if (isHomePath(path)) return HomeDoc;
   const view = sodexViewForPath(path);
   if (view) return SODEX_DOCS[view];
   return PAGES[tabForPath(path) ?? landingTab(path)];
@@ -230,7 +229,7 @@ export function App() {
   /* One element for the life of the page: App re-rendering for the popup's values never re-renders the shell. */
   const shell = useMemo(() => <AppShell onGate={setGate} />, []);
   const path = window.location.pathname;
-  const terms: GateProps = gate ?? { hidden: bootLegal || !!legalForPath(path) || isStatusPath(path) || isHomePath(path), onOpen: bootOpen, address: storedAddress(), provider: null };
+  const terms: GateProps = gate ?? { hidden: bootLegal || !!legalForPath(path) || isStatusPath(path), onOpen: bootOpen, address: storedAddress(), provider: null };
   return (
     <>
       {ready ? shell : null}
@@ -265,14 +264,14 @@ function AppShell({ onGate }: { onGate: (g: GateProps) => void }) {
   }, []);
   /* The page comes from the URL. `setTab` keeps its name because ~15 call
    * sites below pass it around as a callback; it pushes history now. */
-  const [tab, navigate, legal, navigateLegal, status, navigateStatus, excluded, navigateExcluded, limits, navigateLimits, sodex, navigateSodex, home] = useRoute(routeReady);
+  const [tab, navigate, legal, navigateLegal, status, navigateStatus, excluded, navigateExcluded, limits, navigateLimits, sodex, navigateSodex] = useRoute(routeReady);
   /*
    * EVERY IN-APP NAVIGATION GOES THROUGH `go` (nav.ts says why): the target's item lights in the frame after the
    * tap; the page changes after that frame has been painted, or once its code (and, in a language read in parts,
    * its text) is in - the current page stays up meanwhile, never a fallback; the latest request wins. A page
    * already on screen changes at once (a Scan of another address, the same tab tapped again).
    */
-  const committedKey = useRef(routeKeyOf({ tab, legal, status, excluded, limits, sodex, home }));
+  const committedKey = useRef(routeKeyOf({ tab, legal, status, excluded, limits, sodex }));
   const go = useCallback((path: string, apply: () => void) => {
     const t = navTicket();
     const key = routeKeyForPath(path) ?? `tab:${landingTab(path)}`;
@@ -364,7 +363,7 @@ function AppShell({ onGate }: { onGate: (g: GateProps) => void }) {
     return () => window.removeEventListener(OPEN_LEGAL_EVENT, on);
   }, [openLegal]);
   /* The tab whose page is on screen - none while a legal page or the status page is. */
-  const shown: Tab | null = legal || status || excluded || limits || sodex || home ? null : tab;
+  const shown: Tab | null = legal || status || excluded || limits || sodex ? null : tab;
   /*
    * A page landed (any route change): the navigation to it is over (its lit item is the committed one from this
    * same commit, no flicker), and the scroller follows the ONE rule (scrollMemory.ts) - a pushed page opens at its
@@ -373,7 +372,7 @@ function AppShell({ onGate }: { onGate: (g: GateProps) => void }) {
    * page at 7% (the chart's own first frame), not a hard cut. Not under reduced motion; not on the first render.
    */
   const contentRef = useRef<HTMLDivElement>(null);
-  const routeKey = routeKeyOf({ tab, legal, status, excluded, limits, sodex, home });
+  const routeKey = routeKeyOf({ tab, legal, status, excluded, limits, sodex });
   const firstRoute = useRef(true);
   useLayoutEffect(() => {
     committedKey.current = routeKey;
@@ -395,7 +394,7 @@ function AppShell({ onGate }: { onGate: (g: GateProps) => void }) {
     return el ? installScrollMemory(el) : undefined;
   }, []);
   /* A language in parts reads the text of a page when it opens (i18n/store.ts). */
-  useEffect(() => { i18nRouteChanged(); }, [tab, legal, status, excluded, limits, sodex, home]);
+  useEffect(() => { i18nRouteChanged(); }, [tab, legal, status, excluded, limits, sodex]);
   const SodexDoc = sodex ? SODEX_DOCS[sodex] : null;
   /* What the nav bars light for the page on screen (a legal page over the status page over the rest). */
   const committedLit = useMemo<Lit>(() => ({ ...litFromKey(routeKey), pending: null }), [routeKey]);
@@ -674,8 +673,8 @@ function AppShell({ onGate }: { onGate: (g: GateProps) => void }) {
 
   /* The terms popup lives in App (it opens before this shell is in): its values from here, in this frame. */
   useLayoutEffect(() => {
-    onGate({ hidden: !!legal || status || home, onOpen: openLegal, address, provider });
-  }, [onGate, legal, status, home, openLegal, address, provider]);
+    onGate({ hidden: !!legal || status, onOpen: openLegal, address, provider });
+  }, [onGate, legal, status, openLegal, address, provider]);
   /* This frame is the app's first: index.html's static shell goes (bootShell.ts). */
   useLayoutEffect(() => dropBootShell(), []);
 
@@ -877,10 +876,7 @@ function AppShell({ onGate }: { onGate: (g: GateProps) => void }) {
         {limits && !legal && !status && !excluded && (
           <Guarded name="Trading limits"><LimitsDoc /></Guarded>
         )}
-        {home && !legal && !status && !excluded && !limits && (
-          <Guarded name="Home" bare><HomeDoc /></Guarded>
-        )}
-        {SodexDoc && !legal && !status && !excluded && !limits && !home && (
+        {SodexDoc && !legal && !status && !excluded && !limits && (
           <Guarded name="SoDEX"><SodexDoc {...ctx} provider={provider} onOpenMarket={openMarket} /></Guarded>
         )}
 
