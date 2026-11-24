@@ -50,13 +50,18 @@ $dirty"
   fi
   node deploy/ci/deps-check.mjs >&2 || die "test gate: the installed packages are not the lockfile's - npm ci, then again"
   note "test gate: running deploy/ci/run-tests.mjs on $tag (logs: deploy/.out/ci/)"
-  # Without the GitHub token: no test needs one.
-  if ! env -u GITHUB_TOKEN -u GH_TOKEN node deploy/ci/run-tests.mjs --jobs=2 > "$run" 2>&1; then
+  # An environment of their own: not the release's settings, tokens and MSYS_NO_PATHCONV (lib.sh), with which 23 of the
+  # deploy suite's tests fail on Windows (they hand /c/... paths to Windows programs).
+  local clean=() v
+  for v in PATH HOME USER USERNAME USERPROFILE HOMEDRIVE HOMEPATH SYSTEMROOT SystemRoot SYSTEMDRIVE SystemDrive WINDIR COMSPEC PATHEXT TEMP TMP TMPDIR APPDATA LOCALAPPDATA PROGRAMDATA LANG LC_ALL MSYSTEM; do
+    [ -z "${!v:-}" ] || clean+=("$v=${!v}")
+  done
+  if ! env -i "${clean[@]}" node deploy/ci/run-tests.mjs --jobs=2 > "$run" 2>&1; then
     grep -E '^(FAIL|run-tests:|        x )' "$run" >&2 || true
     verdict="$(node deploy/release/ci-flake.mjs judge "$run")" \
       || die "test gate: tests FAILED for $tag - nothing was released (${verdict:-no verdict}; $run, deploy/.out/ci/<suite>.log)"
     note "test gate: only a known network flake failed - ${verdict#flake: }; once more"
-    env -u GITHUB_TOKEN -u GH_TOKEN node deploy/ci/run-tests.mjs --jobs=2 > "$run" 2>&1 \
+    env -i "${clean[@]}" node deploy/ci/run-tests.mjs --jobs=2 > "$run" 2>&1 \
       || { grep -E '^(FAIL|run-tests:|        x )' "$run" >&2 || true; die "test gate: tests FAILED for $tag again - nothing was released ($run)"; }
   fi
   # Still the tag: another session may have moved or changed this checkout while the suites ran.

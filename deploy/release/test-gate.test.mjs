@@ -37,7 +37,8 @@ function gate({ runs = [0], head = SHA, after = head, dirty = '', deps = 0, flak
       esac
       local n; n="$(cat "$T/n")"; echo $((n + 1)) > "$T/n"; echo "run-tests: run $n"; return "\${RUNS[$n]}"
     }
-    env() { [ "$1 $2 $3 $4" = "-u GITHUB_TOKEN -u GH_TOKEN" ] || { echo "DIED: env $*"; exit 1; }; shift 4; "$@"; }
+    export GITHUB_TOKEN=t MSYS_NO_PATHCONV=1
+    env() { [ "$1" = -i ] || { echo "DIED: env $*"; exit 1; }; shift; case " $* " in *TOKEN*|*MSYS_NO*) echo "DIED: leaked"; exit 1 ;; esac; while [[ "$1" == *=* ]]; do shift; done; "$@"; }
     . ${JSON.stringify(GATE)}
     for _ in $(seq ${times}); do test_gate v9.9.9; echo PASSED; done
   `;
