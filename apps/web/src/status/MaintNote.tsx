@@ -21,6 +21,8 @@ import {
   MAINT_KEY, PART_TEXT, maintDismiss, maintParts, maintShown, maintStep, maintView, parseMaint, withDismissals,
   type MaintSeen, type MaintState,
 } from './maintState';
+import { indexerOnly } from './incidentState';
+import { useIndexerViewOpen } from './indexerViews';
 import './maintNote.css';
 
 /** How long the green "Maintenance complete" stays: as long as any good news (toast.tsx TTL.ok). */
@@ -71,7 +73,8 @@ export function MaintNote({ health, onOpenStatus }: { health: unknown; onOpenSta
     window.addEventListener('storage', on);
     return () => window.removeEventListener('storage', on);
   }, []);
-  const shown = maintShown(state);
+  const reads = useIndexerViewOpen();
+  const shown = maintShown(state).filter((s) => reads || !indexerOnly(s));
   const live = shown.some((s) => s.end === null && s.endsAt !== null);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {

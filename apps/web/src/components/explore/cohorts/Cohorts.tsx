@@ -14,6 +14,7 @@
  * band's `.acct-table.acct-t`, the long / short bars the exposure card's
  * `.pf-split`. Cohorts.css only lays them out.
  */
+import { useIndexerView } from '../../../status/indexerViews';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   BIAS_LABEL, COHORT_BY_ID, LEAN_LABEL, PNL_COHORTS, SECTORS, SIZE_COHORTS, biasOf, isBullish, isCohortId, isSector, leanOf, longShare,
@@ -523,6 +524,7 @@ function useChartFor(): (coin: string) => string | null {
 
 /** `embedded`: a widget on another page (the terminal) - its view stays out of that page's URL and scroll. */
 export function Cohorts({ onScan, onOpenSymbol, embedded = false }: { onScan: (address: string) => void; onOpenSymbol?: (symbol: string) => void; embedded?: boolean }) {
+  useIndexerView();
   const write = (patch: Record<string, string | null>, push = true) => { if (!embedded) writeParams(patch, push); };
   const chartFor = useChartFor();
   const [stored, setStored] = useStored<Venue[]>('vs.cohorts.venues', [...SCAN_VENUES]);

@@ -25,6 +25,7 @@
  * right edge on the same price axis. Bars scale to barFit (cells to robustMax), so one giant level
  * is drawn at full (a tick marks it, the tooltip has its figure) and the rest stay readable.
  */
+import { useIndexerView } from '../../status/indexerViews';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import type { LiqAt, LiqHeatmap as HeatApi, LiqWallets } from '@sign/indexer/liqRead.js';
 import type { Engine } from '../../api';
@@ -226,6 +227,7 @@ export function regroup(h: Heat, k: number): Heat {
 }
 
 export function LiqHeatmap({ symbol, engine, instance, address = null }: { symbol: string; engine: Engine; instance?: string; address?: string | null }) {
+  useIndexerView();
   const [stored, setStored] = useStored<Prefs>(`vs.liqmap${instance ? `.${instance}` : ''}`, DEFAULTS);
   const prefs: Prefs = { ...DEFAULTS, ...(stored && typeof stored === 'object' ? stored : {}) };
   const venues = (Array.isArray(prefs.venues) ? prefs.venues : []).filter((v): v is Venue => (SCAN_VENUES as readonly string[]).includes(v));

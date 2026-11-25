@@ -16,6 +16,7 @@
  * One context hook (useCopy.ts) owns every fetch and the setup form. The setup
  * sheet still opens when a start needs a step that is not done (useCopy.ts).
  */
+import { useIndexerView } from '../../status/indexerViews';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CopySetupSheet } from '../../copy/CopySetupSheet';
 import { copyRows, startCopy } from '../../copy/live';
@@ -40,6 +41,7 @@ function setupFromUrl(): { address: string; venue: Venue; direction: 'copy' | 'c
 }
 
 export function CopyPage(props: CopyPageProps) {
+  useIndexerView();
   const c = useCopyContext(props);
   const [modal, setModal] = useState<{ open: boolean; row: TraderRow | null }>({ open: false, row: null });
   const settings = c.copySettings;

@@ -144,6 +144,9 @@ export const QUIET_KEY = 'vs.incident.quiet.indexer';
 export const QUIET_MS = 24 * 3_600_000;
 export const indexerMinor = (n: Pick<HealthNotice, 'impact' | 'components'>): boolean =>
   (n.impact ?? 'minor') === 'minor' && Array.isArray(n.components) && n.components.length > 0 && n.components.every((c) => c === 'indexer');
+/** An incident or maintenance of the indexer alone, whatever its impact. */
+export const indexerOnly = (n: { components?: readonly string[] | null }): boolean =>
+  Array.isArray(n.components) && n.components.length > 0 && n.components.every((c) => c === 'indexer');
 export function quietUntil(raw: string | null): number {
   const v = Number(raw);
   return Number.isFinite(v) && v > 0 ? v : 0;

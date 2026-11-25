@@ -112,3 +112,13 @@ test('one X on a minor indexer-only incident quiets the next ones for a day; maj
   assert.equal(quietUntil('abc'), 0);
   assert.equal(QUIET_MS, 86_400_000);
 });
+
+test('an incident of the indexer alone is shown only where a view reads the indexer (owner 2026-11-25)', async () => {
+  const { indexerOnly } = await import('./incidentState');
+  const { indexerViewOpen } = await import('./indexerViews');
+  assert.equal(indexerOnly({ components: ['indexer'] }), true);
+  assert.equal(indexerOnly({ components: ['indexer', 'api'] }), false);
+  assert.equal(indexerOnly({ components: [] }), false);
+  assert.equal(indexerOnly({}), false);
+  assert.equal(indexerViewOpen(), false, 'nothing open');
+});

@@ -17,6 +17,7 @@
  * venueCheck.ts) with its figures marked as floors. A candle not compared yet says nothing.
  * No wallet names: the owner's rule (server valuedesk/labels.ts) - an identicon and the address.
  */
+import { useIndexerView } from '../../status/indexerViews';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useLatched } from '../motion';
 import type { FlowWindow, FlowWindowRow, WalletFillsBody } from '@sign/flow/read.js';
@@ -153,6 +154,7 @@ export interface TradeFlowProps {
 }
 
 export function TradeFlowView({ symbol, spot, interval, at, end, onPick, onClose }: TradeFlowProps) {
+  useIndexerView();
   const coin = coinOfSymbol(symbol);
   // The chart's candle, picked there; the chart's interval changing re-cuts it.
   const win = useMemo(() => flowSpan(interval, at, end), [interval, at, end]);

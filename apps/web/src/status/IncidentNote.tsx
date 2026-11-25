@@ -14,7 +14,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { createPortal } from 'react-dom';
 import { STATUS_PATH } from '../router';
 import { useConnState } from '../hooks';
-import { INCIDENT_KEY, QUIET_KEY, QUIET_MS, connectionView, dismissIncident, incidentKey, incidentView, incidentsShown, indexerMinor, parseDismissed, pruneDismissed, quietUntil, type IncidentView } from './incidentState';
+import { INCIDENT_KEY, QUIET_KEY, QUIET_MS, connectionView, dismissIncident, incidentKey, incidentView, incidentsShown, indexerMinor, indexerOnly, parseDismissed, pruneDismissed, quietUntil, type IncidentView } from './incidentState';
+import { useIndexerViewOpen } from './indexerViews';
 import { WarnMark, usePin } from './MaintNote';
 import './maintNote.css';
 
@@ -83,9 +84,11 @@ export function IncidentNote({ health, down = false, onOpenStatus }: { health: u
   // Minor indexer-only incidents quieted for a day by one X (incidentState.ts QUIET_MS).
   const [quiet, setQuiet] = useState(() => { try { return quietUntil(localStorage.getItem(QUIET_KEY)); } catch { return 0; } });
   const quietOn = quiet > Date.now();
+  // The indexer alone: only where something on screen reads it (indexerViews.ts).
+  const reads = useIndexerViewOpen();
   const pin = usePin();
   const connShown = conn && conn !== connAway ? conn : null;
-  const shown = conn ? [] : incidentsShown(health, dismissed).filter((n) => !(quietOn && indexerMinor(n)));
+  const shown = conn ? [] : incidentsShown(health, dismissed).filter((n) => (reads || !indexerOnly(n)) && !(quietOn && indexerMinor(n)));
   if (!pin || (!shown.length && !connShown)) return null;
   return createPortal(
     <>

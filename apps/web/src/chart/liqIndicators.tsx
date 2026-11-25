@@ -13,6 +13,7 @@
  * a spot market has no liquidations). The chart mounts and stores them as it does any study;
  * LiqIndicatorFeed reads their data while one is on and hands it to the layer (extendData).
  */
+import { useIndexerView } from '../status/indexerViews';
 import { useEffect } from 'react';
 import type { Chart as KChart } from 'klinecharts';
 import type { LiqHeatmap as HeatApi } from '@sign/indexer/liqRead.js';
@@ -33,6 +34,7 @@ export function LiqIndicatorFeed({ chart, engine, symbol, names, ids }: { chart:
   const coin = engine === 'perps' ? coinOfSymbol(symbol) : null;
   const heatOn = !!chart && !!coin && names.includes(LIQ_HEAT);
   const mapOn = !!chart && !!coin && names.includes(LIQ_MAP);
+  useIndexerView(heatOn || mapOn);
   // The snapshots of the window on the chart, in tiles, and the scale over the 30 days (components/liqmap/histTiles.ts):
   // nothing read before the chart reports its window, by side with every band (slim rows), the snapshot each bar draws.
   const view = useChartWindow(chart, heatOn);
