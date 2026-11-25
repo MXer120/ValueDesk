@@ -28,7 +28,14 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(dir, `${name}-${PHONE ? 'phone' : 'desktop'}.png`) });
 }
 
+/** The local referral routes themselves (tools/invites-dev.ts): a dev web on production's data answers /check too, and a join there is a real one. */
+const LOCAL = process.env.VS_DEV_INVITES?.trim() || 'http://127.0.0.1:18797';
 async function routesUp(origin: string): Promise<boolean> {
+  try {
+    if (!(await fetch(`${LOCAL}/api/vs/invites/check?code=${CODE}`, { signal: AbortSignal.timeout(5_000) })).ok) return false;
+  } catch {
+    return false;
+  }
   try {
     const r = await fetch(`${origin}/api/vs/invites/check?code=${CODE}`, { signal: AbortSignal.timeout(15_000) });
     return r.ok && ((await r.json()) as { valid?: boolean }).valid === true;
