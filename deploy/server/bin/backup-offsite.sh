@@ -13,7 +13,8 @@
 #               builder-terms signing key, the fee tiers, the visitors' feedback chats and
 #               error reports (feedback.db with feedback-images/, client-errors.db), the status page's
 #               history and incidents (status-history.json), the admin suite's record and the
-#               app's own analytics (admin.db, analytics.db), the small caches of the
+#               app's own analytics (admin.db, analytics.db), the referrals and their credits
+#               (invites.db), the small caches of the
 #               state directory, /etc/valuescan (configuration and its secrets, without
 #               offsite/) and the Caddyfile.            When it changed; at least daily.
 #   folders     server 1: the knowledge folders (folders.db, their session key, the
@@ -232,6 +233,8 @@ tar_set() {   # set, force  (api-state, folders, executor)
       [ -f "$STATE_DIR/analytics.db" ] && add_db "$STATE_DIR/analytics.db"
       # Who has which username, and the signed changes (apps/server/src/profiles/store.ts).
       [ -f "$STATE_DIR/profiles.db" ] && add_db "$STATE_DIR/profiles.db"
+      # Referrals: the signed joins, the credit ledger and the signed claims (apps/server/src/invites/store.ts).
+      [ -f "$STATE_DIR/invites.db" ] && add_db "$STATE_DIR/invites.db"
       local f
       # status-history.json: the status page's finished days and incidents (apps/server/src/ops/status.ts writeHistory).
       for f in builder-terms.key builder-tiers.json etf-flows.json release-results.json device.key feedback.jsonl status-history.json; do
