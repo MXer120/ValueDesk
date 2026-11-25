@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LEGAL_LABELS, LEGAL_PAGES, SODEX_VIEWS, TABS, landingTab, legalForPath, pathForLegal, pathForSodexView, sodexViewForPath, soonTabs, tabForPath } from './router';
+import { landingUrl, LEGAL_LABELS, LEGAL_PAGES, SODEX_VIEWS, TABS, landingTab, legalForPath, pathForLegal, pathForSodexView, sodexViewForPath, soonTabs, tabForPath } from './router';
 
 test('the legal pages are routes of their own, outside the nav', () => {
   assert.deepEqual([...LEGAL_PAGES], ['impressum', 'privacy', 'cookies', 'terms', 'risk', 'copy-terms', 'licenses']);
@@ -44,4 +44,10 @@ test('the SoDEX views are routes of their own, outside the tabs; a fund is still
   assert.equal(sodexViewForPath('/blind-boxes'), 'blind-boxes');
   assert.equal(sodexViewForPath('/trade'), null);
   assert.equal(landingTab('/verify'), 'trade', 'removed pages still move');
+});
+
+test('an address that is no page keeps its query and hash: a referral link is /?ref=CODE', () => {
+  assert.equal(landingUrl({ pathname: '/', search: '?ref=EDDIE', hash: '' }), '/trade?ref=EDDIE');
+  assert.equal(landingUrl({ pathname: '/wallet', search: '?a=1', hash: '#x' }), '/trade?a=1#x');
+  assert.equal(landingUrl({ pathname: '/', search: '', hash: '' }), '/trade');
 });

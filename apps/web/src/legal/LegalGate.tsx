@@ -53,6 +53,7 @@ import { regionBannerText } from './notices';
 import { siteAccess } from './jurisdictions.mjs';
 import { screeningOf, useScreening } from './screening';
 import { lazyChunk } from '../lazyPage';
+import { pendingInvite } from '../invites/capture';
 import './gate.css';
 
 /* ------------------------------------------------------------ open a page ----- */
@@ -192,6 +193,8 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
   const country = geo.country ?? '';
   const problem = country ? countryProblem(country) : signer ? LOCATION_UNKNOWN : null;
   const ready = confirmed && !busy && (!signer || (!!country && !problem));
+  /** The referral code this browser came with: shown, because the signature joins with it (invites.ts joinByTerms). */
+  const invite = signer ? pendingInvite()?.code ?? null : null;
 
   const accept = async (all: boolean) => {
     setError(null);
@@ -248,6 +251,12 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
             <span>Your location</span>
             <b>{country ? `${countryName(country)}, from your connection` : 'unknown'}</b>
           </div>
+          {invite && (
+            <div className="lg-kv">
+              <span>Referral code</span>
+              <b>{invite}</b>
+            </div>
+          )}
           {problem && <p className="lg-err">{problem}</p>}
         </div>
       )}
@@ -270,7 +279,7 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
         ) : (
           <button type="button" className="lg-cta" disabled={!ready} aria-busy={!!busy || undefined} onClick={() => void accept(false)}>{label(false)}</button>
         )}
-        {signer && <p className="lg-hint">Your wallet signs once - free: not a transaction, no gas, no funds move.</p>}
+        {signer && <p className="lg-hint">Your wallet signs once - free: not a transaction, no gas, no funds move.{invite ? ` It also joins you with code ${invite}.` : ''}</p>}
       </div>
     </>
   );

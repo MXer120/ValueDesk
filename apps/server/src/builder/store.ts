@@ -403,6 +403,11 @@ export class BuilderStore {
     return r ? walletOf(r) : null;
   }
 
+  /** Wallets first counted at or after `t`. */
+  walletsSince(builder: number, t: number): Array<{ address: string; at: number }> {
+    return (this.q('SELECT address, created_at FROM wallets WHERE builder = ? AND created_at >= ?').all(builder, t) as Row[]).map((r) => ({ address: str(r.address), at: num(r.created_at) }));
+  }
+
   /** Counted volume of one wallet from UTC day `fromDay` on (counting.ts dayOf), per engine. */
   windowMicro(builder: number, address: string, fromDay: number): { perps: number; spot: number } {
     const rows = this.q('SELECT engine, sum(micro) AS m FROM days WHERE builder = ? AND address = ? AND day >= ? GROUP BY engine').all(builder, address, fromDay) as Row[];

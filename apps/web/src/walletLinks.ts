@@ -26,6 +26,9 @@
  * The page's address carries `vsConnect=1`, so the page that opens in the wallet connects without a second tap.
  */
 
+import { INVITE_PARAM } from '@sign/invites/claim';
+import { pendingInvite } from './invites/capture';
+
 export type PhoneWalletKey = 'metamask' | 'okx' | 'trust' | 'bitget' | 'rabby' | 'safepal';
 
 export interface PhoneWallet {
@@ -54,8 +57,10 @@ export const PHONE_WALLETS: readonly PhoneWallet[] = [
 export const CONNECT_PARAM = 'vsConnect';
 
 /** This page's address as the wallet should open it: the same page, asked to connect, without our own hash noise. */
-export function pageForWallet(href: string): string {
+export function pageForWallet(href: string, invite: string | null = pendingInvite()?.code ?? null): string {
   const u = new URL(href);
+  // The wallet's browser has a storage of its own: the referral this one keeps goes along in the address.
+  if (invite && !u.searchParams.has(INVITE_PARAM)) u.searchParams.set(INVITE_PARAM, invite);
   u.searchParams.set(CONNECT_PARAM, '1');
   return u.toString();
 }

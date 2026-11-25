@@ -38,6 +38,7 @@ import './appearance';
 
 import { useNumStyle } from './numStyle';
 import { showsHome } from './homeRoute';
+import { keepInvite } from './invites/capture';
 
 /* Before React renders, so a chosen language is on the page as early as its catalogue allows. */
 bootLanguage();
@@ -48,6 +49,8 @@ const BetaGate = import.meta.env.VITE_CHANNEL === 'beta' ? lazy(() => import('./
 // The home page (/home, and / on a first visit; owner 2026-11-24): a page of its own, outside the app - no rail, navbar or terms popup.
 const Home = lazy(() => import('./components/landing/HomeSite').then((m) => ({ default: m.HomeSite })));
 const onHome = showsHome(window.location);
+// A referral link's code (?ref=), kept now: the address changes as soon as the app renders.
+keepInvite(window.location.search);
 
 // Before the first render, so an error thrown while mounting is logged too.
 // See log.ts for levels, ?debug=<ns>, and the __vs console handle.

@@ -10,7 +10,7 @@ export function Gift() {
   const id = useId();
   const g = (k: string) => `url(#${id}${k})`;
   return (
-    <svg className="rf-gift" viewBox="0 -26 220 236" aria-hidden="true">
+    <svg className="rf-gift" viewBox="0 -36 220 246" aria-hidden="true">
       <defs>
         <linearGradient id={`${id}l`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fafaf8" /><stop offset="1" stopColor="#8d8d8a" /></linearGradient>
         <linearGradient id={`${id}r`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#a4a4a1" /><stop offset="1" stopColor="#3a3a39" /></linearGradient>
@@ -18,6 +18,7 @@ export function Gift() {
         <linearGradient id={`${id}g`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#5cf0c0" /><stop offset="1" stopColor="#00875f" /></linearGradient>
         <radialGradient id={`${id}i`}><stop offset="0" stopColor="#5cf0c0" stopOpacity="0.95" /><stop offset="0.6" stopColor="#00b481" stopOpacity="0.5" /><stop offset="1" stopColor="#00b481" stopOpacity="0" /></radialGradient>
         <linearGradient id={`${id}c`} x1="0" y1="0" x2="0" y2="1">{['#5cf0c0', '#2fd09c', '#00875f'].map((c, i) => <stop key={c} offset={i / 2} stopColor={c} />)}</linearGradient>
+        <linearGradient id={`${id}o`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ffc9a0" /><stop offset="0.5" stopColor="#f07a2e" /><stop offset="1" stopColor="#8a3a0c" /></linearGradient>
       </defs>
       <ellipse cx="110" cy="198" rx="74" ry="9" fill="#000" opacity="0.45" />
       <path d="M44 104 110 130v66L52 170q-6-3-6-9z" fill={g('l')} />
@@ -25,8 +26,10 @@ export function Gift() {
       <path d="M44 104 110 80l66 24-66 26z" fill="#0b1d17" />
       <ellipse cx="110" cy="104" rx="60" ry="22" fill={g('i')} />
       <path d="M68 113.500 86 120.500v65L68 177z" fill={g('g')} /><path d="M152 113.500 134 120.500v65L152 177z" fill={g('g')} opacity="0.75" />
-      <g transform="translate(0 6)"><g className="rf-gift__coin"><g transform="rotate(14 112 80)"><ellipse cx="117" cy="80" rx="29" ry="32" fill="#04513a" /><ellipse cx="110" cy="80" rx="29" ry="32" fill={g('c')} /><ellipse cx="110" cy="80" rx="24" ry="27" fill="#00a074" stroke="#8ff5d3" strokeOpacity="0.7" /><g transform="translate(93 67) scale(0.345)"><VBlocks fill="#fff" point="#04281d" /></g></g></g></g>
-      <g transform="translate(0 -20)"><g className="rf-gift__lid">
+      {/* SoDEX's coin beside ValueDesk's: both give a part of what is in the box. */}
+      <g transform="translate(-4 -1)"><g className="rf-gift__coin is-2"><g transform="rotate(-16 80 84)"><ellipse cx="85" cy="86" rx="22" ry="24" fill="#4a2208" /><ellipse cx="80" cy="86" rx="22" ry="24" fill={g('o')} /><ellipse cx="80" cy="86" rx="18" ry="20" fill="#16110d" stroke="#ffb27a" strokeOpacity="0.7" /><image href="/logos/brand/sodex.svg" x="64.500" y="70.500" width="31" height="31" /></g></g></g>
+      <g transform="translate(22 2)"><g className="rf-gift__coin"><g transform="rotate(14 112 80)"><ellipse cx="117" cy="80" rx="29" ry="32" fill="#04513a" /><ellipse cx="110" cy="80" rx="29" ry="32" fill={g('c')} /><ellipse cx="110" cy="80" rx="24" ry="27" fill="#00a074" stroke="#8ff5d3" strokeOpacity="0.7" /><g transform="translate(93 67) scale(0.345)"><VBlocks fill="#fff" point="#04281d" /></g></g></g></g>
+      <g transform="translate(0 -30)"><g className="rf-gift__lid">
         <path d="M36 66 118 34l70 32-74 30z" fill={g('t')} /><path d="M36 66v18l78 30V96z" fill={g('l')} /><path d="M188 66v18l-74 30V96z" fill={g('r')} />
         <path d="M70 52.700 89 45.300 160 78l-18 7z" fill={g('g')} /><path d="M151 50 134 42 62 75l19 8z" fill={g('g')} opacity="0.85" />
         <path d="M112 60C92 22 58 26 64 46c4 13 30 14 48 14z" fill={g('g')} /><path d="M112 60c14-40 52-40 50-18-2 14-32 18-50 18z" fill={g('g')} /><path d="M112 60C98 38 78 34 76 44c0 9 22 14 36 16zM112 60c10-22 34-28 38-18 1 10-24 16-38 18z" fill="#064d38" />

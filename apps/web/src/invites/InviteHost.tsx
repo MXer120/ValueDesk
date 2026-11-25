@@ -3,6 +3,8 @@
  * accepted: two steps with the same code (owner 2026-11-14: "they get their valuedesk code applied + the underlying
  * sodex code") -
  *
+ *   0  by the terms        a wallet that signs the terms with the code on screen has joined with that signature already
+ *                          (joinByTerms; sent until the server takes it) - step 1 shows as done
  *   1  join on ValueDesk   one free signature: the inviter's fee credits, the wallet's welcome
  *   2  the code on SoDEX   offered only when SoDEX says the wallet has no referrer yet; confirmed on sodex.com
  *
@@ -13,12 +15,12 @@ import { useEffect, useState } from 'react';
 import { TIER_SHARES, VIP_CODE_DAYS, VIP_TIER_SHARES, WELCOME_USD } from '@sign/invites/claim';
 import { Modal } from '../components/Modal';
 import { DlgFoot } from '../components/dialogParts';
-import { browseAccepted, useAcceptanceRevision } from '../legal/acceptance';
+import { browseAccepted, signedTerms, useAcceptanceRevision } from '../legal/acceptance';
 import { track } from '../analytics/usage';
 import { notify } from '../toast';
 import type { Eip1193Provider } from '../wallet';
-import { referralUrl, useReferral } from '../onboarding/referral';
-import { InviteError, dropInvite, joinInvite, loadMe, pendingInvite, useInviteRevision, type Pending } from './invites';
+import { loadReferral, referralUrl, useReferral } from '../onboarding/referral';
+import { InviteError, dropInvite, joinByTerms, joinInvite, loadMe, pendingInvite, useInviteRevision, type Pending } from './invites';
 import '../onboarding/onboarding.css';
 
 const SETTLE_MS = 2_500;
@@ -31,20 +33,45 @@ export function InviteHost({ address, provider, hold }: { address: string | null
   const [later, setLater] = useState(false);
   const terms = !!browseAccepted();
   const kept = pendingInvite();
+  // The terms were signed with this code on screen: that signature joins. Asked about before the popup opens.
+  const signed = address ? signedTerms(address)?.request ?? null : null;
+  const byTerms = kept && signed && Number(signed.nonce) >= kept.at ? signed : null;
+  const [termsFor, setTermsFor] = useState<string | null>(null);
   useEffect(() => {
+    if (!byTerms || !address || !kept) return;
+    let dead = false;
+    void joinByTerms(address, kept.code, byTerms).then(() => { if (!dead) setTermsFor(`${address}|${kept.code}`); });
+    // Not answered within a few seconds: the popup offers its own signature meanwhile.
+    const t = window.setTimeout(() => { if (!dead) setTermsFor(`${address}|${kept.code}`); }, 4_000);
+    return () => { dead = true; window.clearTimeout(t); };
+  }, [address, kept?.code, byTerms?.signature]);
+  const asking = !!byTerms && termsFor !== `${address}|${kept?.code}`;
+  useEffect(() => {
+    if (asking) return;
     if (!kept || !address || !provider || !terms || hold || later || open) return;
     let dead = false;
-    const t = window.setTimeout(() => {
-      void loadMe(address).then((me) => {
-        if (dead || !me) return;
+    let t = 0;
+    /** Another dialog's turn (the first-signup flow, the setup sheet): again until it is this one's. */
+    const show = (pending: Pending, joined: boolean) => {
+      if (dead) return;
+      if (document.querySelector('[role="dialog"]')) { t = window.setTimeout(() => show(pending, joined), SETTLE_MS); return; }
+      setOpen({ pending, joined });
+    };
+    const ask = () => {
+      void loadMe(address).then(async (me) => {
+        if (dead) return;
+        if (!me) { t = window.setTimeout(ask, 8 * SETTLE_MS); return; } // no answer: asked again
         const joinedThis = me.joined?.code === kept.code;
-        if (!me.canJoin && !joinedThis) { dropInvite(); return; }
-        if (document.querySelector('[role="dialog"]')) return; // another dialog's turn; asked again on the next change
-        setOpen({ pending: kept, joined: joinedThis });
+        // Traded here already: still its inviter's when SoDEX has it under this very code (the server asks SoDEX too).
+        const bound = me.blocked === 'has-volume' ? await loadReferral(address, kept.code) : null;
+        if (dead || bound === 'unknown') return;
+        if (!me.canJoin && !joinedThis && bound !== 'bound' && bound !== 'pending') { dropInvite(); return; }
+        show(kept, joinedThis);
       });
-    }, SETTLE_MS);
+    };
+    t = window.setTimeout(ask, SETTLE_MS);
     return () => { dead = true; window.clearTimeout(t); };
-  }, [address, provider, terms, hold, later, open, kept?.code]);
+  }, [address, provider, terms, hold, later, open, kept?.code, asking]);
 
   if (!open || !address || !provider) return null;
   const close = (done: boolean) => { if (done) dropInvite(); else setLater(true); setOpen(null); };

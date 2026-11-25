@@ -51,6 +51,11 @@ export const LIQ_LOG_INSERT = `INSERT OR REPLACE INTO liq_log (aid, coin, venue,
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 export const LIQ_CUR_INSERT = 'INSERT OR REPLACE INTO liq_cur (aid, coin, venue, side, liq, usd, t) VALUES (?, ?, ?, ?, ?, ?, ?)';
 export const LIQ_CUR_DELETE = 'DELETE FROM liq_cur WHERE aid = ? AND coin = ? AND venue = ?';
+export const MEMBER_PUT =
+  'INSERT OR REPLACE INTO cohort_member (venue, address, pnl, equity, label, at, pnl_1d, pnl_7d, pnl_30d, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+export const COHORT_REV_META = 'cohort_rev';
+/** A stream copy of a fill that the REST read now holds. */
+export const STREAM_DROP = 'DELETE FROM fills WHERE venue = ? AND address = ? AND id = ? AND src = 0';
 export const WRITER_DONE_META = 'writer_done';
 
 /** Slots of the shared control array. */
@@ -82,14 +87,21 @@ export type LiqChangedWire = [number | string, string, number, number, number, n
 /** [aid, coin, venue, mark]. */
 export type LiqClosedWire = [number, string, number, number | null];
 
+/** [address, pnl, equity, label, pnl1d, pnl7d, pnl30d]. */
+export type MemberWire = [string, number | null, number | null, string | null, number | null, number | null, number | null];
+
 export type WriterOp =
   /** `due[i]` = 1: row i's day takes a `fill_dirty` mark if the row changes. `spillId`: a spilled part, left in one transaction with its rows. */
   | { kind: 'fills'; rows: FillWire[]; due: Uint8Array; spillId?: number; prio?: boolean }
   | { kind: 'activity'; rows: ActivityWire[]; spillId?: number }
+  /** Cohort members (store.putCohortMembersAsync): each takes the next `cohort_rev` in the transaction that writes it. Ahead of the stream rows, as a wallet read's. */
+  | { kind: 'members'; venue: string; at: number; rows: MemberWire[]; prio: true }
+  /** A wallet's stream copies by id (store.dropStreamRowsAsync); `changed` says which were there. Ahead of the stream rows. */
+  | { kind: 'drop'; venue: string; address: string; rows: string[]; prio: true }
   | { kind: 'liqLog'; t: number; newAddrs: string[]; changed: LiqChangedWire[]; closed: LiqClosedWire[] };
 
 /** A wallet read's rows: written ahead of the stream rows, and named in meta.writer_done never (see the thread's queue). */
-export const isPrio = (op: WriterOp): boolean => op.kind === 'fills' && op.prio === true;
+export const isPrio = (op: WriterOp): boolean => (op.kind === 'fills' || op.kind === 'members' || op.kind === 'drop') && op.prio === true;
 
 export interface WriterAnswer {
   /** liqLog: the ids given to its new addresses. */
@@ -207,6 +219,9 @@ const main = (sql) => (w.liqOnly ? null : db.prepare(sql));
 const FILL = main(S.fill), DIRTY = main(S.dirty), HOUR = main(S.hour), DAYQ = main(S.day);
 const liq = (sql) => (w.noLiq ? null : ldb.prepare(sql));
 const ADDR = liq(S.addr), LOG = liq(S.log), CUR = liq(S.cur), UNCUR = liq(S.uncur);
+const DROP = main(S.drop), MEMBER = main(S.member), REVGET = main("SELECT value FROM meta WHERE key = '" + S.revKey + "'"), REVSET = main("INSERT INTO meta (key, value) VALUES ('" + S.revKey + "', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value");
+/** The last cohort_rev taken in the transaction under way (null: none). */
+let rev = null;
 const DONE = main("INSERT INTO meta (key, value) VALUES ('" + S.doneKey + "', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value");
 let UNSPILL = null;
 const queue = [];
@@ -273,6 +288,13 @@ function runRow(op, i, changed) {
     const r = op.rows[i];
     HOUR.run(r.venue, r.acct, r.hour, r.trades, r.volume);
     DAYQ.run(r.venue, r.acct, Math.floor(r.hour / 24), r.trades, r.volume);
+  } else if (op.kind === 'drop') {
+    if (Number(DROP.run(op.venue, op.address, op.rows[i]).changes) > 0) changed.push(i);
+  } else if (op.kind === 'members') {
+    const r = op.rows[i];
+    if (rev === null) { const g = REVGET.get(); rev = Number(g && g.value) || 0; }
+    rev++;
+    MEMBER.run(op.venue, r[0], r[1], r[2], r[3], op.at, r[4], r[5], r[6], rev);
   } else {
     const x = op.list[i];
     if (x.length === 4) {
@@ -376,6 +398,7 @@ function pump() {
   const t1 = Date.now();
   if (Atomics.load(ctl, STOP)) { db.exec('ROLLBACK'); return park(); }
   dirtySeen.clear();
+  rev = null;
   const out = [];
   let rows = 0, bad = 0, lastBad = null, qi = 0;
   const enough = () => rows >= w.maxRows || Atomics.load(ctl, WANT) > 0 || Atomics.load(ctl, STOP) || Date.now() - t1 >= w.targetMs;
@@ -409,7 +432,7 @@ function pump() {
         rows++;
         if (!atomic && ((rows & 15) === 0 ? enough() : (Atomics.load(ctl, WANT) > 0 || rows >= w.maxRows))) break;
       }
-      out.push({ op, seq: op.seq, from, to: i, changed: op.kind === 'fills' ? changed : undefined, final: i === op.n, ids: i === op.n && op.kind === 'liqLog' ? op.idList : undefined });
+      out.push({ op, seq: op.seq, from, to: i, changed: op.kind === 'fills' || op.kind === 'drop' ? changed : undefined, final: i === op.n, ids: i === op.n && op.kind === 'liqLog' ? op.idList : undefined });
       if (i < op.n) break;
       qi++;
       if (enough()) break;
@@ -419,6 +442,7 @@ function pump() {
     let last = null;
     for (let k = out.length - 1; k >= 0 && !last; k--) if (out[k].op.kind !== 'liqLog' && !out[k].op.prio) last = out[k];
     if (last) DONE.run(last.seq + ':' + last.to);
+    if (rev !== null) REVSET.run(String(rev));
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch (x) {}
     for (const o of out) if (o.op.kind === 'liqLog' && o.from === 0) { o.op.list = null; o.op.idList = null; }
@@ -527,7 +551,7 @@ export class WriterThread<X = unknown> {
         cacheKb: this.o.cacheKb, busyMs: this.o.busyMs, walLimit: this.o.walLimit, autoCkpt: this.o.autoCkpt,
         liqOnly: this.o.liqOnly === true, noLiq: this.o.noLiq === true, liqPath: this.o.liqPath ?? null, liqCacheKb: this.o.liqCacheKb ?? this.o.cacheKb, liqAutoCkpt: this.o.liqAutoCkpt ?? 16_000,
         targetMs: this.o.targetMs ?? TARGET_MS, maxRows: this.o.maxRows ?? MAX_ROWS, maxYieldMs: MAX_YIELD_MS,
-        sql: { fill: FILL_UPSERT, dirty: DIRTY_INSERT, hour: ACTIVITY_HOUR, day: ACTIVITY_DAY, addr: LIQ_ADDR_INSERT, log: LIQ_LOG_INSERT, cur: LIQ_CUR_INSERT, uncur: LIQ_CUR_DELETE, doneKey: WRITER_DONE_META },
+        sql: { fill: FILL_UPSERT, dirty: DIRTY_INSERT, hour: ACTIVITY_HOUR, day: ACTIVITY_DAY, addr: LIQ_ADDR_INSERT, log: LIQ_LOG_INSERT, cur: LIQ_CUR_INSERT, uncur: LIQ_CUR_DELETE, drop: STREAM_DROP, member: MEMBER_PUT, revKey: COHORT_REV_META, doneKey: WRITER_DONE_META },
       },
       transferList: [port2],
     });

@@ -1,0 +1,11 @@
+[Unit]
+Description=The index (ext4 image)
+Requires=valuescan-index-loop.service
+After=valuescan-index-loop.service
+[Mount]
+What=/dev/loop0
+Where=/var/lib/valuescan/index
+Type=ext4
+Options=noatime
+[Install]
+WantedBy=multi-user.target

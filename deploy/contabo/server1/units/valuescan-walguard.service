@@ -1,0 +1,9 @@
+[Unit]
+Description=Keeps the index's WAL from growing without end (stop-gap 2026-11-25)
+RequiresMountsFor=/var/lib/valuescan/index
+[Service]
+Type=oneshot
+User=valuescan
+TimeoutStartSec=10min
+ExecCondition=/usr/bin/systemctl is-active -q valuescan-indexer
+ExecStart=/opt/node/current/bin/node --disable-warning=ExperimentalWarning /opt/valuescan/bin/walguard.mjs

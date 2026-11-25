@@ -79,7 +79,32 @@ h.test('a referral link: kept and taken off the address; the wallet joins with o
   await page.getByText('Your link appears with your SoDEX account').waitFor({ timeout: 20_000 });
   assert.equal(await page.getByText('Could not read your referrals').count(), 0);
   await shot(page, 'page-joined');
-}, { path: `/trade?ref=${CODE.toLowerCase()}`, timeout: 150_000 });
+  // The link as the Referrals page gives it: on / (the test came by /trade until 2026-11-25, and / lost the code).
+}, { path: `/?ref=${CODE.toLowerCase()}`, timeout: 150_000 });
+
+h.test('signing the terms with the code on screen joins by that signature: no popup signature needed', async ({ page, wallet, origin, skip }) => {
+  if (!(await routesUp(origin))) return skip('no referral routes behind this dev web (start "invites-dev")');
+  const mark = wallet.mark();
+  await connectWallet(page, { settle: false });
+  // An action that needs the terms (any order): the app's own gate, through the page's own module.
+  await page.evaluate(async (owner) => {
+    const m = (await import(/* @vite-ignore */ '/src/legal/acceptance.ts' as string)) as { requireTerms(r: { owner: string; reason: string }): Promise<boolean> };
+    void m.requireTerms({ owner, reason: 'place this order' });
+  }, wallet.address);
+  const terms = page.getByRole('dialog', { name: 'Sign the terms to continue' });
+  await terms.waitFor({ state: 'visible', timeout: 20_000 });
+  assert.ok(await terms.getByText('Referral code', { exact: true }).isVisible(), 'the code is on screen');
+  assert.ok(await terms.getByText(`It also joins you with code ${CODE}.`).isVisible(), 'and what the signature does');
+  await terms.getByRole('checkbox', { name: /^I confirm that/ }).check();
+  await shot(page, 'terms');
+  await terms.getByRole('button', { name: /Only necessary|Sign and continue/ }).first().click();
+  await terms.waitFor({ state: 'hidden', timeout: 30_000 });
+  await until(page, async () => {
+    const r = await fetch(`${origin}/api/vs/invites/me?address=${wallet.address}`);
+    return ((await r.json()) as { joined?: { code?: string } | null }).joined?.code === CODE;
+  }, 'the wallet joined', 30_000);
+  assert.ok(!wallet.since(mark).some((r) => r.primaryType === 'InviteJoin'), 'by the terms signature alone');
+}, { path: `/?ref=${CODE}`, timeout: 150_000 });
 
 h.test('the Referrals page: under More, and without a wallet a connect state', async ({ page }) => {
   if (!PHONE) {

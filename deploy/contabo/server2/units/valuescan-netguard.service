@@ -1,0 +1,5 @@
+[Unit]
+Description=No network at all for minutes: bring it up again, then reboot (2026-11-25)
+[Service]
+Type=oneshot
+ExecStart=/opt/valuescan/bin/netguard.sh

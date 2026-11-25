@@ -7,7 +7,7 @@
  * code gives is greyed with a lock until this wallet's code gives it.
  */
 import { useEffect, useId, useMemo, useState, type CSSProperties } from 'react';
-import { CREDIT_FEE, REFERRED_START_USD, VIP_CODE_DAYS, VIP_TIER_SHARES, WELCOME_CAP, WELCOME_CAP_DAYS, sharesFor, type InviteMe } from '@sign/invites/claim';
+import { CREDIT_FEE, REFERRED_START_USD, VIP_CODE_DAYS, VIP_TIER_SHARES, sharesFor, type InviteMe } from '@sign/invites/claim';
 import { DASH, fmtUsd } from '../../format';
 import { isVipMe } from '../../invites/invites';
 import { WE_GET, YOU_GET } from '../../onboarding/referralRules';
@@ -27,15 +27,13 @@ const Lock = () => (
 /* ------------------------------------------------------------------------------------- how it works ----- */
 
 /** The programme's values, all of them, from the shared rules: the terms name this page for them. */
-function Steps({ me, vip, onClose }: { me: InviteMe | null; vip: boolean; onClose: () => void }) {
+function Steps({ me, vip }: { me: InviteMe | null; vip: boolean }) {
   const c = me?.credits;
   const rates = sharesFor(vip);
   const gold = vip ? 'vip-text' : undefined;
   const open = me?.vipCode === true;
-  const sources = [...new Map([...YOU_GET.slice(0, 1), ...WE_GET].map((b) => [b.source.url, b.source])).values()];
   return (
     <section className="rf-steps" aria-label="How referrals work">
-      <button type="button" className="rf-steps__x" aria-label="Close" onClick={onClose}><Icon name="x" size={18} /></button>
       <article>
         <h2><i>1</i>Share your link</h2>
         <p>Your SoDEX code, one link for both.</p>
@@ -77,12 +75,6 @@ function Steps({ me, vip, onClose }: { me: InviteMe | null; vip: boolean; onClos
           </div>
         </div>
       </article>
-      <p className="rf-steps__fine">
-        <span>{WELCOME_CAP} welcomes per link in {WELCOME_CAP_DAYS} days</span>
-        <span>Credits are never cash, for as long as they trade</span>
-        <span>On SoDEX: they get {YOU_GET[0]!.title}, you get a {WE_GET.map((b) => b.title).join(' and a ')}</span>
-        {sources.map((s) => <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer">{s.label.replace(/^SoDEX (docs, )?/, '')}</a>)}
-      </p>
     </section>
   );
 }
@@ -158,6 +150,16 @@ function Traders({ v }: { v: RefView }) {
   );
 }
 
+/** One benefit in the bar under the present; SoDEX's own carry its mark and link to where SoDEX says so. */
+function Pay({ v, t, sodex, gold }: { v: string; t: string; sodex?: string; gold?: boolean }) {
+  return (
+    <li>
+      <b className={gold ? 'vip-text' : undefined}>{v}</b>
+      {sodex ? <a href={sodex} target="_blank" rel="noopener noreferrer" title="From SoDEX: see where it says so"><img src="/logos/brand/sodex.svg" width="15" height="15" alt="SoDEX" />{t}</a> : <span>{t}</span>}
+    </li>
+  );
+}
+
 /* ----------------------------------------------------------------------------------------- the page ----- */
 
 export function GiftPage({ v }: { v: RefView }) {
@@ -170,28 +172,45 @@ export function GiftPage({ v }: { v: RefView }) {
   const gold = vip ? 'vip-text' : undefined;
   return (
     <>
-      <div className={how ? 'rf-how is-open' : 'rf-how'} id={id}><div><Steps me={me} vip={vip} onClose={() => setHow(false)} /></div></div>
-      <section className="rf-dark rf-g">
+      <section className={how ? 'rf-dark rf-g is-how' : 'rf-dark rf-g'}>
         <span className="rf-g__ribs" aria-hidden="true" /><span className="rf-g__light" aria-hidden="true" />
-        <div className="rf-g__t">
-          <div className="rf-g__k">
-            <h1>Referrals</h1>
-            <button type="button" className="rf-howbtn" aria-expanded={how} aria-controls={id} onClick={(e) => { setHow(!how); if (!how) e.currentTarget.closest('.rf-page')?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }}>
-              How it works<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
-            </button>
+        <div className="rf-g__k">
+          <h1>Referrals</h1>
+          <button type="button" className="rf-howbtn" aria-expanded={how} aria-controls={id} onClick={() => setHow(!how)}>
+            {how ? 'Close' : 'How it works'}<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={how ? 'm4.500 4.500 7 7m0-7-7 7' : 'm4 6 4 4 4-4'} /></svg>
+          </button>
+        </div>
+        {/* Both stay in the one cell, so the card keeps its height when the steps take the present's place. */}
+        <div className="rf-g__body">
+          <div className="rf-g__front" aria-hidden={how} {...(how ? { inert: '' } : {})}>
+            <div className="rf-g__t">
+              <h2>They start with 0 fees.<br />You earn <span className={gold}>{pct(rates[0])}</span> after.</h2>
+              <div className="rf-bar is-big">
+                <div className="rf-bar__in"><LinkText l={l} /><LinkButton l={l} label="Copy" /></div>
+                <LinkIcons l={l} />
+              </div>
+            </div>
+            <div className="rf-g__art"><Gift /></div>
           </div>
-          <h2>They start with 0 fees.<br />You earn <span className={gold}>{pct(rates[0])}</span> after.</h2>
-          <div className="rf-bar is-big">
-            <div className="rf-bar__in"><LinkText l={l} /><LinkButton l={l} label="Copy" /></div>
-            <LinkIcons l={l} />
+          <div className="rf-g__steps" id={id} aria-hidden={!how} {...(how ? {} : { inert: '' })}><Steps me={me} vip={vip} /></div>
+        </div>
+        <div className="rf-pays">
+          <div className="rf-pays__g">
+            <h3>They get</h3>
+            <ul>
+              <Pay v="$0" t={`Fees, first ${welcomeText()}`} />
+              <Pay v="+5%" t="SoPoints" sodex={YOU_GET[0]!.source.url} />
+            </ul>
+          </div>
+          <div className="rf-pays__g is-you">
+            <h3>You get</h3>
+            <ul>
+              {rates.map((r, i) => <Pay key={i} v={pct(r)} t={`Tier ${i + 1} fee rebate`} gold={vip} />)}
+              <Pay v="25%" t="SoPoints rebate" sodex={WE_GET[0]!.source.url} />
+              <Pay v="10%" t="SoDEX fee rebate" sodex={WE_GET[1]!.source.url} />
+            </ul>
           </div>
         </div>
-        <div className="rf-g__art"><Gift /></div>
-        <ol className="rf-g__steps">
-          <li><b>$0</b><span>their ValueDesk fee on the first {welcomeText()}</span></li>
-          <li><b className={gold}>{pct(rates[0])}</b><span>of the fees they pay after, yours as credits</span></li>
-          <li><b className={gold}>{pct(rates[1])} + {pct(rates[2])}</b><span>from the two tiers behind them</span></li>
-        </ol>
       </section>
       <div className="rf-g__desk">
         <div className="rf-g__cr">

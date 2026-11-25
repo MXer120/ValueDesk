@@ -21,6 +21,17 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   2. is offered the same code on SoDEX (sodex.com/join/CODE), only when SoDEX says it has no referrer.
   Wherever VALUEDESK would be offered (popup, first-signup step, Profile), a wallet that came on a link is offered
   its inviter's code instead.
+- **A referral is never lost on one step** (2026-11-25: until then `/?ref=CODE` lost its code in the router, and not one
+  join was recorded in ten days). Independent ways, whichever comes first:
+  1. the code is kept before anything renders (`web/src/invites/capture.ts`: memory, tab, browser) and goes along into a
+     phone wallet's browser; an unanswered check keeps it;
+  2. the terms signature joins: the terms window shows the code (`joinByTerms`, server `checkTermsJoin`), sent until the
+     server answers;
+  3. the popup's own signature, on every visit until it is answered, with retries;
+  4. the SoDEX check (`InviteService.autoTick`): a new wallet whose SoDEX inviter used ValueDesk before it joins by
+     SoDEX's word, whatever its browser lost.
+  Volume blocks a join only after 24 h, and not when SoDEX names the same inviter. `counts` in invites.db and the health
+  check `referrals` alert when links are opened and nobody joins. Lost ones: `apps/server/tools/invites-restore.ts`.
 - **Welcome.** A joined wallet pays no ValueDesk builder fee on its first **$100,000**. All its SoDEX fills since the
   join day count, wherever it traded, so trading elsewhere cannot stretch the welcome. The builder verifier's sweep now
   also adds every fill's notional to a `traded` table.
@@ -37,8 +48,7 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   the rest of what it would have paid comes off the balance. Bots > Savings has a card for them and the link. They are never paid out and never moved.
 - **VIP codes** (owner 2026-11-25): a wallet that joins with the code of a VIP wallet (volume, kept, a VIP program, the
   beta's 30 days) pays the VIP fee, the lowest tier of every product, for 7 days from its join. The dev page (Fees) can
-  upgrade any code to do the same. The days are a fee, not VIP: the wallet's own code is no VIP code for it. The inviter's
-  cap of 50 in 30 days applies.
+  upgrade any code to do the same. The days are a fee, not VIP: the wallet's own code is no VIP code for it.
 - **VIP credit**: removed 2026-11-25 (owner). Nobody is given any, and what was left of one is gone; what it had paid
   stays paid.
 - **Referrals page** (`/referrals`, under More), laid out like the reference screenshot:
@@ -68,15 +78,13 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   - Credits switch on only when they cover 15 minutes of the wallet's own recent pace. A trickle of credit therefore
     never opens 0.1 bp to a fast trader's burst.
   - Anything that still runs over goes to a negative balance, which the next credits repay first.
-- **Welcome farming is bounded:**
-  - at most 50 welcomes per inviter per 30 days;
-  - each welcome needs a fresh wallet with its own SoDEX deposit (SoDEX has no transfers between wallets);
-  - a join past the cap still counts for credits, without the welcome.
+- **Invites have no limit** (owner 2026-11-25; was 50 welcomes per inviter in 30 days). Welcome farming is bounded only by:
+  - each welcome needs a fresh wallet with its own SoDEX deposit (SoDEX has no transfers between wallets).
 - **Where it can't be enforced:** a page can always be bypassed, just as anyone can trade on sodex.com and pay no
   ValueDesk fee. The fee is enforced exactly where ValueDesk places the orders (copy trading, bots).
 
 What remains possible: one person can invite their own fresh wallets. That earns them at most 20/7.5/2% of fees they
-pay themselves, plus one capped welcome per wallet. The terms line below lets ValueDesk withhold credits for that.
+pay themselves, plus one welcome per wallet, without a limit on wallets. The terms line below lets ValueDesk withhold credits for that.
 
 ## Cost (builder ledger on server 1, read-only, 2026-11-14)
 

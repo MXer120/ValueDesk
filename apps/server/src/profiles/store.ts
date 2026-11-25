@@ -92,6 +92,17 @@ export class ProfileStore {
     return r ? { address: r.address, username: r.username, updatedAt: r.updated_at } : null;
   }
 
+  /** When a wallet took its first name (null: none). */
+  createdAt(address: string): number | null {
+    const r = this.db.prepare('SELECT created_at FROM wallet_names WHERE address = ?').get(address.toLowerCase()) as { created_at: number } | undefined;
+    return r ? Number(r.created_at) : null;
+  }
+
+  /** Wallets that took their first name at or after `t`. */
+  since(t: number): Array<{ address: string; at: number }> {
+    return (this.db.prepare('SELECT address, created_at FROM wallet_names WHERE created_at >= ?').all(t) as Array<{ address: string; created_at: number }>).map((r) => ({ address: r.address, at: Number(r.created_at) }));
+  }
+
   /** Whether a wallet other than `except` holds this name, in any spelling. */
   isTaken(username: string, except?: string): boolean {
     const r = this.db.prepare('SELECT address FROM wallet_names WHERE username_key = ?').get(usernameKey(username)) as { address: string } | undefined;

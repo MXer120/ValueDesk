@@ -1,0 +1,7 @@
+[Unit]
+Description=Network guard every minute
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=1min
+[Install]
+WantedBy=timers.target

@@ -130,6 +130,11 @@ function onExit(kid: Kid, code: number | null, signal: NodeJS.Signals | null): v
     if (took) process.exit(1);
     return;
   }
+  if (kid !== active) {
+    // The standby took over before this end was seen (a busy machine): said all the same.
+    if (kid.tookRequest) log(`the indexer (pid ${kid.proc.pid}) handed over and ended (${how})`);
+    return;
+  }
   if (kid === active) {
     active = null;
     if (kid.tookRequest && incoming) {

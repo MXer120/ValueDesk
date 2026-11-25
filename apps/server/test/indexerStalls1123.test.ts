@@ -48,10 +48,11 @@ test('checkpoint thread: a run longer than hungMs is not ended', async () => {
   const path = join(dir, 'i.db');
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; CREATE TABLE t (x)');
-  // Each run holds 400 ms (a slow disk), the silence limit is 60 ms: before, the watchdog ended it at once.
-  const c = new Checkpointer(path, (on) => seen.push(on), { everyMs: 20, hungMs: 60, runHungMs: 60_000, testRunHoldMs: 400 });
+  // Each run holds 2.2 s (a slow disk), the silence limit is 1.5 s: before, the watchdog ended it at once. Not shorter: the
+  // thread's own start counts as silence, and on a busy machine it took longer than the 60 ms this test once allowed.
+  const c = new Checkpointer(path, (on) => seen.push(on), { everyMs: 20, hungMs: 1_500, runHungMs: 60_000, testRunHoldMs: 2_200 });
   try {
-    await until('runs done', () => c.state.runs >= 3);
+    await until('runs done', () => c.state.runs >= 2);
     assert.equal(c.state.restarts, 0, `never ended: ${JSON.stringify(c.state)}`);
     assert.deepEqual(seen, [false]);
   } finally {

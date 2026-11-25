@@ -65,10 +65,10 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync, writevSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Checkpointer, type CheckpointStatus } from './checkpointer.js';
-import { WarmPool, warmThreads, type WarmActivity, type WarmFill, type WarmLiq } from './warmPool.js';
+import { WarmPool, warmThreads, type ScanAnswer, type WarmActivity, type WarmBook, type WarmFill, type WarmLiq } from './warmPool.js';
 import { DayScanPool, dayScanThreads, type DayScanResult } from './dayScanPool.js';
 import {
-  ACTIVITY_DAY, ACTIVITY_HOUR, CTL_WANT, FILL_UPSERT, LIQ_ADDR_INSERT, LIQ_CUR_DELETE, LIQ_CUR_INSERT, LIQ_LOG_INSERT, WRITER_DONE_META, WriterStopped, WriterThread, writerThreadOn,
+  ACTIVITY_DAY, ACTIVITY_HOUR, CTL_WANT, FILL_UPSERT, LIQ_ADDR_INSERT, LIQ_CUR_DELETE, LIQ_CUR_INSERT, LIQ_LOG_INSERT, WRITER_DONE_META, COHORT_REV_META, MEMBER_PUT, STREAM_DROP, type MemberWire, WriterStopped, WriterThread, writerThreadOn,
   type ActivityWire, type LiqChangedWire, type LiqClosedWire, type WriterAnswer, type WriterPending, type WriterStatus,
 } from './writerThread.js';
 import { deviceKeyPath } from '../deviceKey.js';
@@ -86,6 +86,8 @@ const COHORT_MIX_SLICE_ROWS = 50;
 const MIX_LAST_T_META = 'cohort_mix_last_t';
 const LIQ_HIST_LAST_T_META = 'liq_hist_last_t';
 /** Rows of a wallet's range read at a time when its stream copies are dropped (dropStreamRowsAsync): at most, at least, first. */
+/** Stream copies deleted per op of the writer thread (dropStreamOffThread). */
+const DROP_IDS = 2_000;
 const DROP_SCAN = 2_000;
 const DROP_SCAN_MIN = 50;
 const DROP_SCAN_FIRST = 250;
@@ -589,7 +591,6 @@ const SCHEMA_TABLES: readonly string[] = [...SCHEMA.matchAll(/CREATE TABLE IF NO
  * ALTER TABLE ... ADD COLUMN with a constant default rewrites nothing (SQLite keeps the default in
  * the schema); the two indexes are one pass over each table at the first start.
  */
-const COHORT_REV_META = 'cohort_rev';
 /** The version of one venue's trader_win rows for a window (writeTraderWin moves it; traderWinVersion reads it). */
 const TRADER_WIN_META = (venue: Venue, window: BoardWindow): string => `tw|${venue}|${window}`;
 /** A new number whenever the sequence starts over (a fresh file, a restored one): a reader then loads in full. */
@@ -935,6 +936,8 @@ export const liqTurnMs = (elapsedMs: number): number => Math.min(600, 100 + (500
 const WRITE_SQL = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i;
 /** What the store keeps about an op it gave the writer thread. */
 interface WriterExtra {
+  /** drop: how many of its rows went. */
+  dropped?: { n: number };
   /** Fills: for each row, the row it was copied from (-1: none; takeFills). */
   derived?: number[];
   /** Days of the op's rows (inflightDays), released when it settles. */
@@ -972,6 +975,7 @@ export class IndexStore {
   private writer: WriterThread<WriterExtra> | null = null;
   private liqWriter: WriterThread<WriterExtra> | null = null;
   private warmer: WarmPool | null = null;
+  private hadWriter = false;
   /** The writer thread's control array, while one runs: this thread's writes are counted in it (writing()). */
   private ctl: Int32Array | null = null;
   /** How long a stop waits for the writer thread to park before it ends it (writerThread.ts stopSync). */
@@ -1299,6 +1303,7 @@ export class IndexStore {
       targetMs: o.targetMs, maxRows: o.maxRows, hungMs: o.hungMs, restartAfterMs: o.restartAfterMs,
     });
     this.ctl = this.writer.ctl;
+    this.hadWriter = true;
     const warm = warmThreads();
     if (warm > 0 && !this.warmer) this.warmer = new WarmPool(this.path, this.liqFile, warm);
     // The level change log's file has a thread of its own (2026-11-23): one thread wrote both files and took the log's steps
@@ -1364,6 +1369,12 @@ export class IndexStore {
     await p.warm('activity', rows.map((r): WarmActivity => [r.venue, r.acct, r.hour]));
   }
 
+  /** The pages of these cohort rows, read by the warm-up threads first (the write itself then waits for no disk). */
+  async warmCohort(kind: 'members' | 'books', keys: ReadonlyArray<WarmBook>): Promise<void> {
+    if (!this.warmer?.on || keys.length < 8) return;
+    await this.warmer.warm(kind, keys);
+  }
+
   get warmStatus(): WarmPool['state'] | null {
     return this.warmer?.state ?? null;
   }
@@ -1404,6 +1415,7 @@ export class IndexStore {
 
   /** Rows [from, to) of an op are in the file: what putFills did in its transaction for the ones that changed, done now. */
   private writerRows(p: WriterPending<WriterExtra>, from: number, to: number, changed: readonly number[] | null): void {
+    if (p.op.kind === 'drop' && p.extra.dropped) p.extra.dropped.n += changed ? changed.length : to - from;
     if (p.op.kind !== 'fills') return;
     const rows = p.op.rows as FillRow[];
     const due = p.op.due;
@@ -1435,6 +1447,16 @@ export class IndexStore {
     if (op.kind === 'liqLog') {
       const l = p.extra.liq!;
       return { ids: [...this.putLiqLog(l.t, l.newAddrs, l.changed, l.closed)] };
+    }
+    if (op.kind === 'drop') {
+      let n = 0;
+      this.tx(() => { for (const id of op.rows.slice(from)) n += Number(this.q(STREAM_DROP).run(op.venue, op.address, id).changes); });
+      if (p.extra.dropped) p.extra.dropped.n += n;
+      return {};
+    }
+    if (op.kind === 'members') {
+      this.putCohortMembers(op.venue as Venue, op.rows.slice(from).map(([address, pnl, equity, label, pnl1d, pnl7d, pnl30d]): CohortMemberRow => ({ address, pnl, equity, label, pnl1d, pnl7d, pnl30d })), op.at);
+      return {};
     }
     const spillId = op.spillId;
     this.tx(() => {
@@ -3198,6 +3220,11 @@ export class IndexStore {
       this.noteRestSpan(v, address, fromT, toT);
       const first = this.oldestRaw(v, address);
       let gone = 0;
+      if (this.warmer?.on && this.writer?.on) {
+        gone = await this.dropStreamOffThread(v, address, fromT, toT, first);
+        if (gone >= 0) continue;
+        gone = 0; // not answered: read here, as without the threads
+      }
       let atT = fromT;
       let atId = '';
       for (;;) {
@@ -3226,6 +3253,29 @@ export class IndexStore {
       }
     }
     this.bump(venue, address);
+  }
+
+  /**
+   * A wallet's stream copies found by a read-ahead thread and deleted by the writer thread (2026-11-25: here they were 47% of
+   * the indexer's thread, a small transaction a slice with the lock waited for each time, and one wallet's read took over
+   * 15 min). Returns how many went; -1: the threads did not answer.
+   */
+  private async dropStreamOffThread(venue: Venue, address: string, fromT: number, toT: number, first: ReturnType<IndexStore['oldestRaw']>): Promise<number> {
+    const dropped = { n: 0 };
+    let at: [number, string] | null = [fromT, ''];
+    try {
+      while (at) {
+        const a: ScanAnswer | null = (await this.warmer?.scan([venue, address, at[0], at[1], toT, DROP_IDS])) ?? null;
+        // Not answered, also midway: read here, so no copy stays to count beside its REST row.
+        if (!a || (a.ids.length && !this.writer?.on)) return -1;
+        if (a.ids.length) await this.writer!.send({ kind: 'drop', venue, address, rows: a.ids, prio: true }, a.ids.length, { dropped });
+        at = a.next;
+      }
+    } finally {
+      // Also when a stop came in between: what was deleted has its days summed again.
+      if (dropped.n) this.markRange(venue, address, fromT, toT, first);
+    }
+    return dropped.n;
   }
 
   /**
@@ -4031,12 +4081,28 @@ export class IndexStore {
   putCohortMembers(venue: Venue, rows: ReadonlyArray<CohortMemberRow>, at: number): void {
     if (!rows.length) return;
     this.tx(() => {
-      const ins = this.q(
-        'INSERT OR REPLACE INTO cohort_member (venue, address, pnl, equity, label, at, pnl_1d, pnl_7d, pnl_30d, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      );
+      const ins = this.q(MEMBER_PUT);
       let rev = this.takeRevs(rows.length);
       for (const r of rows) ins.run(venue, r.address, r.pnl, r.equity, r.label, at, r.pnl1d ?? null, r.pnl7d ?? null, r.pnl30d ?? null, rev++);
     });
+  }
+
+  /**
+   * putCohortMembers on the writer thread (2026-11-25: 18-22% of the indexer's thread was these small transactions, each
+   * waiting for the lock and the disk). Each row takes its rev in the transaction that writes it; written twice after a
+   * death, it is the same row under a newer rev. Not written by a stop: WriterStopped (the next start's pass writes it).
+   */
+  async putCohortMembersAsync(venue: Venue, rows: ReadonlyArray<CohortMemberRow>, at: number): Promise<void> {
+    if (!rows.length) return;
+    await this.warmCohort('members', rows.map((r): [string, string] => [venue, r.address]));
+    if (!this.writer?.on) {
+      if (this.hadWriter && !this.writer) throw new WriterStopped();
+      return this.putCohortMembers(venue, rows, at);
+    }
+    await this.writer.send({
+      kind: 'members', venue, at, prio: true,
+      rows: rows.map((r): MemberWire => [r.address, r.pnl, r.equity, r.label, r.pnl1d ?? null, r.pnl7d ?? null, r.pnl30d ?? null]),
+    }, rows.length, {});
   }
 
   /** Every Hyperliquid account's PnL flow since its perp PnL read, as saved (cohortTracker). */
