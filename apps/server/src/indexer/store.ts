@@ -65,9 +65,10 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync, writevSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Checkpointer, type CheckpointStatus } from './checkpointer.js';
+import { WarmPool, warmThreads, type WarmActivity, type WarmFill, type WarmLiq } from './warmPool.js';
 import { DayScanPool, dayScanThreads, type DayScanResult } from './dayScanPool.js';
 import {
-  ACTIVITY_DAY, ACTIVITY_HOUR, CTL_WANT, FILL_UPSERT, LIQ_ADDR_INSERT, LIQ_CUR_DELETE, LIQ_CUR_INSERT, LIQ_LOG_INSERT, WRITER_DONE_META, WriterThread, writerThreadOn,
+  ACTIVITY_DAY, ACTIVITY_HOUR, CTL_WANT, FILL_UPSERT, LIQ_ADDR_INSERT, LIQ_CUR_DELETE, LIQ_CUR_INSERT, LIQ_LOG_INSERT, WRITER_DONE_META, WriterStopped, WriterThread, writerThreadOn,
   type ActivityWire, type LiqChangedWire, type LiqClosedWire, type WriterAnswer, type WriterPending, type WriterStatus,
 } from './writerThread.js';
 import { deviceKeyPath } from '../deviceKey.js';
@@ -110,7 +111,7 @@ const HELD_SLICE_MS = 20;
  * The writer connection's page cache at most, in KiB (PRAGMA cache_size). Its own memory: nothing else on the machine can
  * push it out, as a backup's reads did to the OS's cache (a 413 s stall, 2026-11-05). Taken as used; the server has 46 GB.
  */
-export const WRITER_CACHE_KB = 6 * 1024 * 1024;
+export const WRITER_CACHE_KB = 1024 * 1024; // 6 GB until 2026-11-25: two connections write, so each one's cache is emptied by the other's commits, and 12 GB were the OS's cache to lose
 // With the writer thread (writerThread.ts) two connections write, and SQLite empties a connection's page cache whenever the
 // other commits. PRAGMA mmap_size was tried against that on 2026-11-09 (writeBench.ts -mmap modes) and is NOT set: node's
 // SQLite is built with SQLITE_MAX_MMAP_SIZE 0x7fff0000, so only the first 2 GiB of the 50 GB file could be mapped, and on
@@ -970,6 +971,7 @@ export class IndexStore {
   private inflightDays = new Map<string, number>();
   private writer: WriterThread<WriterExtra> | null = null;
   private liqWriter: WriterThread<WriterExtra> | null = null;
+  private warmer: WarmPool | null = null;
   /** The writer thread's control array, while one runs: this thread's writes are counted in it (writing()). */
   private ctl: Int32Array | null = null;
   /** How long a stop waits for the writer thread to park before it ends it (writerThread.ts stopSync). */
@@ -1297,6 +1299,8 @@ export class IndexStore {
       targetMs: o.targetMs, maxRows: o.maxRows, hungMs: o.hungMs, restartAfterMs: o.restartAfterMs,
     });
     this.ctl = this.writer.ctl;
+    const warm = warmThreads();
+    if (warm > 0 && !this.warmer) this.warmer = new WarmPool(this.path, this.liqFile, warm);
     // The level change log's file has a thread of its own (2026-11-23): one thread wrote both files and took the log's steps
     // first, and they were 59% of its time that day (66 steps, 35,216 s) - the stream rows waited behind them, 14.5M deep.
     if (this.liqFile) {
@@ -1335,6 +1339,33 @@ export class IndexStore {
       ...s, liqFile: true, liqRows: l.liqRows, liqTxs: l.liqTxs, liqLastTxMs: l.liqLastTxMs, liqMaxTxMs: l.liqMaxTxMs, liqMaxLockMs: l.liqMaxLockMs,
       liqPendingRows: l.pendingRows, liqRestarts: l.restarts, liqLastError: l.lastError,
     };
+  }
+
+  /** The pages these rows will be written to, read side by side first (warmPool.ts); never throws. */
+  async warmFills(rows: readonly FillRow[]): Promise<void> {
+    const p = this.warmer;
+    if (!p?.on || rows.length < 8) return;
+    const keys: WarmFill[] = [];
+    const wallets = new Map<string, [string, string]>();
+    const add = (venue: string, f: FillRow): void => {
+      keys.push([venue, f.address, f.id, f.t]);
+      wallets.set(`${venue}|${f.address}`, [venue, f.address]);
+    };
+    for (const f of rows) {
+      add(f.venue, f);
+      if (f.venue === 'hyperliquid' && f.symbol.startsWith(XYZ)) add('tradexyz', f);
+    }
+    await Promise.all([p.warm('wallets', [...wallets.values()]), p.warm('fills', keys)]);
+  }
+
+  async warmActivity(rows: ReadonlyArray<{ venue: Venue; acct: string; hour: number }>): Promise<void> {
+    const p = this.warmer;
+    if (!p?.on || rows.length < 8) return;
+    await p.warm('activity', rows.map((r): WarmActivity => [r.venue, r.acct, r.hour]));
+  }
+
+  get warmStatus(): WarmPool['state'] | null {
+    return this.warmer?.state ?? null;
   }
 
   /** Rows sent to the writer thread and not in the file yet. */
@@ -1434,6 +1465,8 @@ export class IndexStore {
     this.writer = null;
     const lw = this.liqWriter;
     this.liqWriter = null;
+    this.warmer?.stop();
+    this.warmer = null;
     // A step not written is refused (the tracker writes it again from the same state).
     lw?.stopSync(() => {}, this.writerStopWaitMs);
     try {
@@ -1978,6 +2011,8 @@ export class IndexStore {
    * putFills itself, within the call.
    */
   async putFillsAsync(input: readonly FillRow[], o: { stream?: boolean } = {}): Promise<void> {
+    // A wallet read's pages are warmed here; the streams' flush did it before it took its rows (engine.ts handOver).
+    if (!o.stream && this.writer?.on && this.warmer?.on) await this.warmFills(input);
     if (!this.writer?.on) return this.putFills(input);
     const derived: number[] = [];
     const rows = this.takeFills(input, derived);
@@ -4610,6 +4645,17 @@ export class IndexStore {
       const wire: LiqChangedWire[] = changed.map((c) => [c.aid, c.coin, c.venue, c.side, c.liq, c.usd, c.sym ?? null, finiteOrNull(c.sz), finiteOrNull(c.entry), finiteOrNull(c.mark),
         c.iso === undefined || c.iso === null ? null : c.iso ? 1 : 0, finiteOrNull(c.lev), finiteOrNull(c.eq), finiteOrNull(c.cash), finiteOrNull(c.readAt)]);
       const gone: LiqClosedWire[] = closed.map((c) => [c.aid, c.coin, c.venue, finiteOrNull(c.mark)]);
+      // The step's pages first, read side by side (a step of 92k rows was 14 min of one read after another on 2026-11-25).
+      if (this.warmer?.on && this.liqFile) {
+        const keys: WarmLiq[] = [];
+        for (const c of changed) if (typeof c.aid === 'number') keys.push([c.aid, c.coin, c.venue, t, c.liq]);
+        for (const c of closed) keys.push([c.aid, c.coin, c.venue, t, 0]);
+        for (let i = 0; i < keys.length; i += 8_000) {
+          await this.warmer?.warm('liq', keys.slice(i, i + 8_000));
+          await pause();
+        }
+        if (!this.writer) throw new WriterStopped();
+      }
       const a = await (this.liqWriter ?? this.writer).send({ kind: 'liqLog', t, newAddrs: [...newAddrs], changed: wire, closed: gone }, wire.length + gone.length, { liq: { t, newAddrs, changed, closed } });
       return new Map(a.ids ?? []);
     }
@@ -5002,6 +5048,27 @@ export class IndexStore {
       for (const p of parts) if (p.rows.length) ids.push(Number(ins.run(p.kind, JSON.stringify(p.rows)).lastInsertRowid));
     });
     return ids;
+  }
+
+  /** The next spilled parts after `afterId`, oldest first: read a few at a time (the ids of a 200,000-part spill alone took 72 s). */
+  spillBatch(afterId: number, limit: number): Array<{ id: number; kind: string; rows: unknown[] }> {
+    this.spillTable();
+    return (this.q('SELECT id, kind, rows FROM write_spill WHERE id > ? ORDER BY id LIMIT ?').all(afterId, limit) as Array<{ id: number; kind: string; rows: string }>)
+      .map((r) => ({ id: Number(r.id), kind: r.kind, rows: JSON.parse(r.rows) as unknown[] }));
+  }
+
+  /** Parts read by spillBatch through the writer thread, their pages warmed first; each part goes with its rows. */
+  async replayBatch(parts: ReadonlyArray<{ id: number; kind: string; rows: unknown[] }>): Promise<void> {
+    await this.warmFills(parts.flatMap((p) => (p.kind === 'fills' ? (p.rows as FillRow[]) : [])));
+    await this.warmActivity(parts.flatMap((p) => (p.kind === 'activity' ? (p.rows as Array<{ venue: Venue; acct: string; hour: number }>) : [])));
+    await Promise.all(parts.map((p): Promise<unknown> => {
+      if (!this.hasWriter) return Promise.reject(new WriterStopped());
+      if (!this.writer?.on) { this.replaySpill(p.id); return Promise.resolve(); }
+      if (p.kind === 'activity') return this.writer.send({ kind: 'activity', rows: p.rows as ActivityWire[], spillId: p.id }, p.rows.length, { replay: true });
+      if (p.kind !== 'fills') return Promise.reject(new Error(`write_spill ${p.id}: unknown kind ${p.kind}`));
+      const derived: number[] = [];
+      return this.sendFills(this.takeFills(p.rows as FillRow[], derived), derived, p.id);
+    }));
   }
 
   /** The spilled parts' ids, oldest first. Their rows are not read: counting them parses the whole backlog's JSON. */

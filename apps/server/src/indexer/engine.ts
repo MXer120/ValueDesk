@@ -257,6 +257,9 @@ const OVERFLOW_PART = 200;
 const OVERFLOW_TURN = 4_000;
 /** Spilled parts with the writer thread at once (all at once read the whole spill into memory: 22,003 parts on 2026-11-23). */
 const REPLAY_WINDOW = 64;
+/** A start's replay: parts a batch, sent once fewer than this many rows wait at the thread. */
+const REPLAY_BATCH = 60;
+const REPLAY_IDLE_ROWS = 4_000;
 /** A held range this fresh answers for "now" even without the stream. */
 const STALE_MS = 10 * 60_000;
 /** Candidates waiting for a trade check per board before the walk stops. */
@@ -756,7 +759,8 @@ export class Indexer {
       });
       this.gcWatch.observe({ entryTypes: ['gc'] });
     } catch { /* the stall lines then say 0 s of it */ }
-    if (process.env.VALUESCAN_STALL_PROFILE !== '0' && this.store.path !== ':memory:') {
+    // Off unless asked for (2026-11-25): each profile's end and start held the thread ~3 s (61 s over the last 20), a stall of its own after each stall.
+    if (process.env.VALUESCAN_STALL_PROFILE === '1' && this.store.path !== ':memory:') {
       this.stallProfiler = new StallProfiler(join(dirname(this.store.path), 'profiles'), 'indexer-stall');
       this.stallProfiler.start();
     }
@@ -1088,6 +1092,7 @@ export class Indexer {
       // With the writer thread on, also its flushes and the rows held for it: until 2026-11-23 they were not counted, and the
       // status said "0 ms" with 14.5M rows waiting.
       flushOldestMs: this.oldestUnwrittenMs(),
+      warm: this.store.warmStatus,
       flushHeld: { fills: this.pendingFills.length + this.unsentFills.length, activity: this.act.size, overflowed: this.overflowed, replaying: this.replaying },
       streamUnderRest: this.store.streamUnderRest,
       retention: this.store.retention(this.now()),
@@ -1216,6 +1221,30 @@ export class Indexer {
     }
     await this.replayParts(ids);
     this.replaying--;
+  }
+
+  /** Every spilled part, read a batch at a time, behind the live rows: the next batch only once the thread has little left. */
+  private async replayAll(): Promise<void> {
+    let after = 0;
+    let n = 0;
+    const t0 = Date.now();
+    while (!this.stopped) {
+      if (this.store.writerPendingRows > REPLAY_IDLE_ROWS) { await new Promise<void>((ok) => { setTimeout(ok, 50).unref?.(); }); continue; }
+      try {
+        const parts = this.store.spillBatch(after, REPLAY_BATCH);
+        if (!parts.length) break;
+        if (!n) console.log('[indexer] start: rows spilled by the last stop, written back as the writer has room');
+        await this.store.replayBatch(parts);
+        after = parts[parts.length - 1]!.id;
+        n += parts.length;
+      } catch (e) {
+        if (this.stopped) return;
+        this.lastError = `spill replay: ${String(e)}`;
+        await new Promise<void>((ok) => { setTimeout(ok, 1_000).unref?.(); });
+      }
+      await new Promise<void>((ok) => setImmediate(ok));
+    }
+    if (n) console.log(`[indexer] spill written back: ${n} parts in ${Math.round((Date.now() - t0) / 1000)} s`);
   }
 
   /** Spilled parts written back through the writer thread, REPLAY_WINDOW at a time and behind the live rows. */
@@ -1348,10 +1377,14 @@ export class Indexer {
         if (this.stopped) throw new Error('stopped before these rows were sent');
         // Taken and sent in one turn: a stop finds a row in one place or the other.
         if (this.unsentActivity.length) {
+          await this.store.warmActivity(this.unsentActivity.slice(0, WRITER_SEND_ROWS));
+          if (this.stopped) throw new Error('stopped before these rows were sent');
           const part = this.unsentActivity.slice(0, WRITER_SEND_ROWS);
           this.unsentActivity = this.unsentActivity.slice(part.length);
           guard(this.store.addActivityAsync(part));
         } else {
+          await this.store.warmFills(this.unsentFills.slice(0, WRITER_SEND_ROWS));
+          if (this.stopped) throw new Error('stopped before these rows were sent');
           const part = this.unsentFills.slice(0, WRITER_SEND_ROWS);
           this.unsentFills = this.unsentFills.slice(part.length);
           guard(this.store.putFillsAsync(part, { stream: true }));
@@ -1423,6 +1456,13 @@ export class Indexer {
    * written twice. Not tracked as unwritten: a stop meanwhile leaves them where they are.
    */
   private replaySpill(): number {
+    if (this.store.writerOn) {
+      // Beside the new rows: a fill is an upsert, and activity adds up in any order. A stop before a part is written leaves
+      // it there; the coverage does not move until all are in.
+      this.replaying++;
+      void this.replayAll().finally(() => { this.replaying--; });
+      return 0;
+    }
     let parts: number[];
     try {
       parts = this.store.spilledIds();
@@ -1431,14 +1471,7 @@ export class Indexer {
       return 0;
     }
     if (!parts.length) return 0;
-    if (this.store.writerOn) {
-      // A window at a time beside the new rows: a fill is an upsert, and activity adds up in any order. A stop before one is
-      // written leaves it there; the coverage does not move until all are in.
-      this.replaying++;
-      void this.replayParts(parts).finally(() => { this.replaying--; });
-    } else {
-      this.writes.add(parts.map((id) => () => { if (!this.stopped) this.store.replaySpill(id); }));
-    }
+    this.writes.add(parts.map((id) => () => { if (!this.stopped) this.store.replaySpill(id); }));
     console.log(`[indexer] start: ${parts.length} parts of rows spilled by the last stop, written back as the writer has room`);
     return parts.length;
   }
