@@ -9,7 +9,7 @@
  *   me          a wallet's join, welcome, credits, referrals and history (the Referrals page).
  */
 import { useEffect, useSyncExternalStore } from 'react';
-import { CLAIM_STATEMENT, CODE_RE, INVITE_PARAM, INVITE_STATEMENT, INVITE_TTL_MS, OURS_CODE, claimTypedData, inviteTypedData, normCode, type CreditClaim, type InviteJoin, type InviteMe, INVITES_PER_WEEK } from '@sign/invites/claim';
+import { CODE_RE, INVITE_PARAM, INVITE_STATEMENT, INVITE_TTL_MS, OURS_CODE, inviteTypedData, normCode, type InviteJoin, type InviteMe, INVITES_PER_WEEK } from '@sign/invites/claim';
 import { OWN_KEY, dropKept, inviteParam, keepInvite, pendingInvite, readOwn, writeInvite, type Pending } from './capture';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
@@ -214,35 +214,6 @@ export async function checkCode(code: string): Promise<{ state: 'ok' } & CodeChe
   }
 }
 
-/** Claim the fee credits that are claimable: the wallet's one free signature. Returns the USD claimed. */
-export async function claimCredits(provider: Eip1193Provider, address: string, week: number): Promise<number> {
-  const chainId = await getChainId(provider).catch(() => 1);
-  const t = Date.now();
-  const fields: Omit<CreditClaim, 'signature'> = {
-    wallet: address.toLowerCase(), week, statement: CLAIM_STATEMENT, nonce: nonce(), issuedAt: String(t), expiresAt: String(t + INVITE_TTL_MS - 30_000), chainId,
-  };
-  const signature = await signTypedData(provider, address, claimTypedData(fields));
-  const body = JSON.stringify({ claim: { ...fields, signature } });
-  for (let i = 0; ; i++) {
-    let r: { status: number; body: { ok?: boolean; code?: string; error?: string; usd?: number } } | null = null;
-    try {
-      r = await json('/api/vs/invites/claim', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
-    } catch { /* no answer */ }
-    if (r?.status === 200 && r.body.ok) {
-      await loadMe(address);
-      return r.body.usd ?? 0;
-    }
-    // The same signed claim was taken by a try whose answer was lost: the server says what it holds.
-    if (i > 0 && r?.status === 409 && r.body.code === 'claimed') return (await loadMe(address))?.claims?.usd ?? 0;
-    if (r && r.status < 500 && r.status !== 429) {
-      void loadMe(address);
-      throw new InviteError(r.body.error || `The claim was not taken (${r.status}).`, r.body.code);
-    }
-    const wait = [2_000, 5_000, 12_000][i];
-    if (wait === undefined) throw new InviteError('The server did not answer. Nothing was claimed; try again.');
-    await pause(wait);
-  }
-}
 
 const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 type JoinAnswer = { ok?: boolean; code?: string; error?: string; welcome?: boolean; vipUntil?: number | null };

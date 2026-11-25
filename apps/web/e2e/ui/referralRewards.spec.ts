@@ -3,7 +3,9 @@
  *
  *   use a code     offered only to a wallet SoDEX says has no referrer; ValueDesk's code first; another code joins and applies
  *   rewards        the SoDEX sign-in, USDC and fee credits over time, SoPoints by week, traders and history of both kinds
- *   the claim      both at once; one failing never holds back the other; under $1 it waits; signed out it asks for the sign-in
+ *   the claim      SoDEX's USDC, each claim's amount from its own transaction (never SoDEX's `fees`); under $1 it waits;
+ *                  signed out it asks for the sign-in; a live countdown; fee credits need no claim
+ *   the switch     How it works and back: the present comes back with the steps, not after them
  *   the quota      a code that took its 3 joins of the week (SoDEX's) says so and asks for no signature
  *
  * NOTHING LEAVES THIS MACHINE that could change anything: the referral routes are the server's own code on a store in memory
@@ -27,6 +29,8 @@ const D = 86_400_000;
 const SIGN_IN = /^Confirm wallet to reveal your SoDEX referral code\. No blockchain transaction or gas fee will occur\.\n\nURI: https:\/\/sodex\.com\nNonce: [A-Za-z0-9]{8,64}\n?$/;
 const INVITER = '0x1111111111111111111111111111111111111111';
 const CONTRACT = '0x4e0ced3cb2775a82718f9a29c5f86a34169958ec';
+const CLAIMED = '0x0be0cb7a90a777a82578b63bfbffd13e1ed78edd777c27b5a7779fbdba198a54';
+const USDC = '0xcb7f80dff2727c791fa491722c428e6657f7e2c6';
 
 async function shot(page: Page, name: string): Promise<void> {
   const dir = process.env.VS_E2E_REF_SHOTS?.trim();
@@ -48,6 +52,10 @@ class World {
   unlocked = true;
   claim: 'paid' | 'busy' | 'claimed' = 'paid';
   claimCalls = 0;
+  /** SoDEX's claim history, its `fees` as SoDEX sends it: the running total in raw units, not the claim's amount. */
+  readonly history = [{ fees: '8620000', txHash: `0x${'a'.repeat(64)}`, time: Date.now() - 5 * D }, { fees: '3180000', txHash: `0x${'b'.repeat(64)}`, time: Date.now() - 12 * D }];
+  /** What each claim transaction paid, micro-USDC: the chain's word. */
+  readonly paid = new Map<string, bigint>([[`0x${'a'.repeat(64)}`, 5_440_000n], [`0x${'b'.repeat(64)}`, 3_180_000n]]);
   /** Invitees SoDEX lists beyond the two named ones. */
   extraTraders = 0;
   /** Requests answered, and anything asked that this world does not know. */
@@ -107,7 +115,7 @@ class World {
     // Everything else needs the token, as SoDEX's.
     if (q.headers().authorization !== `Bearer ${this.token}`) return route.fulfill({ status: 401, headers: cors, contentType: 'application/json', body: JSON.stringify({ code: 401, msg: 'Unauthorized: missing bearer token' }) });
     if (p === '/biz/referral/myStats') return ok({ eligible: true, referrerState: { stage: 'ready', data: { code: 'MYCODE99', canModify: false, totalReferrals: 2 } }, earnedRewardsOnChain: String(this.settled), totalFeesEarned: this.settled + this.pending, pendingRewards: this.pending, cumVlm: this.unlocked ? 48_000 : 800, vlmThreshold: 2000, vaultNetStake: 0, vaultNetStakeThreshold: 500, weeklyInviteCount: 2, maxInvitesPerWeek: 100, nextAvailableTime: null, referredBy: null, bonusDistributions: [] });
-    if (p === '/biz/referral/myClaimHistory') return ok({ total: 2, list: [{ fees: '5.44', txHash: `0x${'a'.repeat(64)}`, time: Date.now() - 5 * D }, { fees: '3.18', txHash: `0x${'b'.repeat(64)}`, time: Date.now() - 12 * D }] });
+    if (p === '/biz/referral/myClaimHistory') return ok({ total: this.history.length, list: this.history });
     if (p === '/biz/referral/myList') return ok({ total: 2 + this.extraTraders, list: [...Array.from({ length: this.extraTraders }, (_, i) => ({ inviteeWallet: `0x77${String(i).padStart(38, '0')}`, referralCode: 'MYCODE99', volume: 5_000 + i, paidFees: 1, yourRewardedFees: 0.1, yourRewardedPoints: 1, referralTime: Date.now() - 40 * D })),{ inviteeWallet: '0xc04f0000000000000000000000000000000071aa', referralCode: 'MYCODE99', volume: 210_000, paidFees: 80, yourRewardedFees: 8, yourRewardedPoints: 640, referralTime: Date.now() - 20 * D }, { inviteeWallet: '0x66aa0000000000000000000000000000000010f3', referralCode: 'MYCODE99', volume: 88_000, paidFees: 23, yourRewardedFees: '2.3', yourRewardedPoints: 96, referralTime: Date.now() - 30 * D }] });
     if (p === '/biz/sopoints/v2/summary') return ok({ totalPoints: 666, currentTier: 'Silver', nextTier: 'Gold', nextTierPoints: 1000, referralPoints: 100 });
     if (p === '/biz/sopoints/v2/week/list') return ok([this.week(1, 120, 20), this.week(2, 240, 60), this.week(3, 0, 0, 'TBD')]);
@@ -120,7 +128,10 @@ class World {
       if (this.claim === 'claimed') return err(-3001111, 'already claimed');
       const usd = Math.floor((this.settled - this.claimed) * 100 + 1e-6) / 100;
       this.claimed += usd;
-      return ok({ results: [{ amount: String(usd), status: 1, txHash: `0x${'c'.repeat(64)}` }] });
+      this.paid.set(`0x${'c'.repeat(64)}`, BigInt(Math.round(usd * 1e6)));
+      this.history.unshift({ fees: String(Math.round(this.claimed * 1e6)), txHash: `0x${'c'.repeat(64)}`, time: Date.now() });
+      // SoDEX's `amount` is not what the page shows: the chain's is.
+      return ok({ results: [{ amount: '610228924', status: 1, txHash: `0x${'c'.repeat(64)}` }] });
     }
     this.unknown.push(`${q.method()} ${p}`);
     return route.fulfill({ status: 404, headers: cors, body: '' });
@@ -137,7 +148,14 @@ class World {
       assert.equal(body.params[0].data!.slice(74, 138), this.wallet.slice(2).toLowerCase().padStart(64, '0'));
       return ok(`0x${Math.round(this.claimed * 1e6).toString(16).padStart(64, '0')}`);
     }
-    if (body.method === 'eth_getTransactionReceipt') return ok({ status: '0x1', logs: [] });
+    if (body.method === 'eth_getTransactionReceipt') {
+      // Each claim transaction's Claimed event, as the contract writes it.
+      const tx = String((body.params as unknown as string[])[0]).toLowerCase();
+      const micro = this.paid.get(tx);
+      const word = (h: string) => h.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+      const log = { address: CONTRACT, topics: [CLAIMED, `0x${word('2')}`, `0x${word(this.wallet)}`, `0x${word(USDC)}`], data: `0x${word((micro ?? 0n).toString(16))}${word('1')}` };
+      return ok({ status: '0x1', logs: micro === undefined ? [] : [log] });
+    }
     return route.continue();
   }
 
@@ -277,8 +295,13 @@ h.test('rewards: signed out nothing is made up; signed in every figure is SoDEX\
   // The card and the field: claimable is 12.82 - 8.62.
   await page.getByRole('region', { name: 'Your rewards' }).getByText('$4,20', { exact: true }).waitFor();
   await field.getByText('$4,20', { exact: true }).waitFor();
-  await field.getByText('$3,25', { exact: true }).waitFor(); // 2.50 + 0.75: the week that ended
-  await field.getByText('$0,40 pending', { exact: true }).waitFor(); // two decimals
+  await field.getByText('$3,65', { exact: true }).waitFor(); // 2.50 + 0.75 + 0.40: credits need no claim
+  await field.getByText('Pay your fees by themselves', { exact: true }).waitFor();
+  // A live countdown to the next Tuesday 12:00 UTC, by the second.
+  const count = field.locator('time.rf-count');
+  const c1 = await count.innerText();
+  assert.match(c1, /^\d+d \d{2}h \d{2}m \d{2}s$|^\d+h \d{2}m \d{2}s$|^\d+m \d{2}s$/);
+  await until(page, async () => (await count.innerText()) !== c1, 'the countdown ticks', 3_000);
   // Traders: SoDEX's invitee and its rebate; the history: both kinds.
   const list = page.getByRole('region', { name: 'Your traders' });
   await list.getByText('0xc04f…71aa', { exact: true }).waitFor();
@@ -286,6 +309,9 @@ h.test('rewards: signed out nothing is made up; signed in every figure is SoDEX\
   await list.getByRole('radio', { name: 'History', exact: true }).click();
   await list.getByText('USDC claimed', { exact: true }).first().waitFor();
   await list.getByText('+$2,50', { exact: false }).first().waitFor();
+  // A USDC claim at its transaction's amount; SoDEX's `fees` said 8620000.
+  await list.getByText('+$5,44', { exact: false }).first().waitFor();
+  assert.equal(await list.getByText(/8\.620\.000|8,620,000/).count(), 0);
   assert.equal(await list.getByRole('link', { name: 'USDC claimed' }).first().getAttribute('href'), `https://main-scan.valuechain.xyz/tx/0x${'a'.repeat(64)}`);
   await shot(page, 'history');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 0, 'nothing runs off the side');
@@ -297,7 +323,7 @@ h.test('rewards: signed out nothing is made up; signed in every figure is SoDEX\
   assert.deepEqual(w.unknown, []);
 }, { setup, timeout: 180_000 });
 
-h.test('the claim: both at once, one signature; claimed once; the figures follow', async ({ page, wallet }) => {
+h.test("the claim: SoDEX's USDC, no signature; the amount from its transaction; once; fee credits need none", async ({ page, wallet }) => {
   const w = await arrive(page, wallet);
   w.referrer = INVITER;
   const cw = claimWindow(Date.now());
@@ -305,28 +331,29 @@ h.test('the claim: both at once, one signature; claimed once; the figures follow
   wallet.messages = SIGN_IN;
   await page.reload({ waitUntil: 'domcontentloaded' });
   const field = claimField(page);
-  await field.getByRole('button', { name: 'Claim', exact: true }).click();
+  await field.getByRole('button', { name: 'See my rewards', exact: true }).click();
   const dlg = page.getByRole('dialog', { name: 'Weekly claim' });
-  await dlg.getByRole('button', { name: 'Sign in', exact: true }).click();
-  const both = dlg.getByRole('button', { name: 'Claim both', exact: true });
-  await both.waitFor({ timeout: 20_000 });
+  await dlg.getByText('They pay your ValueDesk fees by themselves, no claim', { exact: true }).waitFor();
+  await dlg.getByRole('button', { name: 'Sign in to SoDEX', exact: true }).click();
+  const go = dlg.getByRole('button', { name: /^Claim \$4,20 USDC$/ });
+  await go.waitFor({ timeout: 20_000 });
   await shot(page, 'claim-open');
   const mark = wallet.mark();
-  await both.click();
+  await go.click();
   const done = page.getByRole('dialog', { name: 'Claimed' });
   await done.waitFor({ timeout: 30_000 });
-  await done.getByText('+$4,20', { exact: true }).waitFor();
-  await done.getByText('+$2,00', { exact: true }).waitFor();
+  await done.getByText('+$4,20', { exact: true }).waitFor(); // the chain's amount; SoDEX's answer said 610228924
   assert.equal(await done.getByRole('link', { name: 'See the transaction' }).getAttribute('href'), `https://main-scan.valuechain.xyz/tx/0x${'c'.repeat(64)}`);
   await shot(page, 'claim-done');
-  assert.deepEqual(wallet.since(mark).map((r) => `${r.primaryType} ${r.outcome}`), ['CreditClaim signed'], 'one signature, for the credits only');
+  assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed'), [], 'no signature: SoDEX pays the signed-in wallet');
   assert.equal(w.claimCalls, 1);
-  assert.equal(w.store.claimOf(w.wallet, cw.week)?.micro, 2e6);
-  assert.equal(w.store.totals(w.wallet).balance, 2e6);
+  assert.equal(w.store.totals(w.wallet).balance, 2e6, 'credits count without a claim');
   await done.getByRole('button', { name: 'Close', exact: true }).last().click();
-  await field.getByText('Claimed', { exact: false }).first().waitFor();
-  await page.getByRole('region', { name: 'Your rewards' }).getByText('$2,00', { exact: true }).waitFor();
   await until(page, async () => /\$0,00/.test(await page.getByRole('region', { name: 'Your rewards' }).innerText()), 'USDC to claim back to 0', 15_000);
+  // The history has the new claim, at its transaction's amount.
+  const list = page.getByRole('region', { name: 'Your traders' });
+  await list.getByRole('radio', { name: 'History', exact: true }).click();
+  await list.getByText('+$4,20', { exact: false }).first().waitFor({ timeout: 15_000 });
   // Again: nothing to claim, nothing sent.
   await field.getByRole('button', { name: 'Claim', exact: true }).click();
   const again = page.getByRole('dialog', { name: 'Weekly claim' });
@@ -334,7 +361,20 @@ h.test('the claim: both at once, one signature; claimed once; the figures follow
   assert.equal(w.claimCalls, 1);
 }, { setup, timeout: 120_000 });
 
-h.test('signed out, the popup asks for the SoDEX sign-in, never "Nothing to claim"; credits under $1 wait; traders and history by page', async ({ page, wallet }) => {
+h.test('How it works: the present and the link come back with the steps, not after them', async ({ page, wallet }) => {
+  await arrive(page, wallet);
+  const toggle = page.locator('.rf-howbtn:not(.is-code)');
+  await toggle.dispatchEvent('click');
+  await page.locator('.rf-g__steps').getByText('Share your link').waitFor();
+  await page.waitForTimeout(700);
+  await toggle.dispatchEvent('click');
+  await page.waitForTimeout(160);
+  const front = await page.locator('.rf-g__front').evaluate((e) => { const c = getComputedStyle(e); return { v: c.visibility, d: c.display }; });
+  assert.deepEqual(front, { v: 'visible', d: front.d === 'none' ? 'shown' : front.d }, 'visible at once, coming in');
+  await until(page, async () => Number(await page.locator('.rf-g__front').evaluate((e) => getComputedStyle(e).opacity)) > 0.99, 'all in', 2_000);
+}, { setup, timeout: 90_000 });
+
+h.test('signed out, the popup asks for the SoDEX sign-in, never "Nothing to claim"; traders and history by page', async ({ page, wallet }) => {
   const w = await arrive(page, wallet);
   w.referrer = INVITER;
   w.extraTraders = 9;
@@ -343,13 +383,13 @@ h.test('signed out, the popup asks for the SoDEX sign-in, never "Nothing to clai
   for (let i = 0; i < 12; i++) w.earn(0.01, cw.opensAt - (i + 2) * 3_600_000, 1, `h${i}`);
   await page.reload({ waitUntil: 'domcontentloaded' });
   const field = claimField(page);
-  await field.getByText('Claimable from $1,00', { exact: true }).waitFor({ timeout: 20_000 });
+  await field.getByText('$0,72', { exact: true }).waitFor({ timeout: 20_000 });
   await field.getByRole('button', { name: 'See my rewards', exact: true }).click();
   const dlg = page.getByRole('dialog', { name: 'Weekly claim' });
   await dlg.getByRole('button', { name: 'Sign in to SoDEX', exact: true }).waitFor();
   assert.equal(await dlg.getByRole('button', { name: 'Nothing to claim' }).count(), 0);
   assert.equal(await dlg.getByRole('button', { name: 'Sign in', exact: true }).count(), 0, 'one sign-in button');
-  await dlg.getByText('Claimable from $1,00. They stay yours until then', { exact: true }).waitFor();
+  await dlg.getByText('They pay your ValueDesk fees by themselves, no claim', { exact: true }).waitFor();
   await shot(page, 'claim-signedout');
   wallet.messages = SIGN_IN;
   await dlg.getByRole('button', { name: 'Sign in to SoDEX', exact: true }).click();
@@ -384,30 +424,26 @@ h.test("SoDEX's quota: a code that took its 3 joins this week says so, and no si
   assert.equal(w.store.joinOf(w.wallet), null);
 }, { setup, timeout: 120_000 });
 
-h.test('the claim: SoDEX busy never holds back the credits; a rejected signature leaves them; under a dollar SoDEX is not asked', async ({ page, wallet }) => {
+h.test('the claim: SoDEX busy says so and nothing is lost; under a dollar SoDEX is not asked', async ({ page, wallet }) => {
   const w = await arrive(page, wallet);
   w.referrer = INVITER;
   w.claim = 'busy';
-  const cw = claimWindow(Date.now());
-  w.earn(2, cw.opensAt - D, 1, 'a');
   wallet.messages = SIGN_IN;
   await page.reload({ waitUntil: 'domcontentloaded' });
   const field = claimField(page);
-  await field.getByRole('button', { name: 'Claim', exact: true }).click();
+  await field.getByRole('button', { name: 'See my rewards', exact: true }).click();
   const dlg = page.getByRole('dialog', { name: 'Weekly claim' });
-  await dlg.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await dlg.getByRole('button', { name: 'Claim both', exact: true }).waitFor({ timeout: 20_000 });
-  wallet.reject.add('credit-claim');
-  await dlg.getByRole('button', { name: 'Claim both', exact: true }).click();
+  await dlg.getByRole('button', { name: 'Sign in to SoDEX', exact: true }).click();
+  const go = dlg.getByRole('button', { name: /^Claim \$4,20 USDC$/ });
+  await go.click({ timeout: 20_000 });
   await dlg.getByText('SoDEX is busy. Try again in a minute.', { exact: true }).waitFor({ timeout: 20_000 });
-  assert.equal(w.store.claimOf(w.wallet, cw.week), null, 'rejected: nothing claimed, still open');
-  wallet.reject.clear();
-  await dlg.getByRole('button', { name: 'Claim both', exact: true }).click();
-  await until(page, () => w.store.claimOf(w.wallet, cw.week) !== null, 'the credits claimed', 20_000);
-  await dlg.getByText('SoDEX is busy. Try again in a minute.', { exact: true }).waitFor();
-  await dlg.getByRole('button', { name: /^Claim \$4,20 USDC$/ }).waitFor();
+  await go.waitFor();
   await shot(page, 'claim-busy');
-  await dlg.getByRole('button', { name: 'Not now', exact: true }).click();
+  w.claim = 'paid';
+  await go.click();
+  const done = page.getByRole('dialog', { name: 'Claimed' });
+  await done.getByText('+$4,20', { exact: true }).waitFor({ timeout: 20_000 });
+  await done.getByRole('button', { name: 'Close', exact: true }).last().click();
   // Under a dollar: said, and not asked for.
   w.settled = w.claimed + 0.6;
   const calls = w.claimCalls;

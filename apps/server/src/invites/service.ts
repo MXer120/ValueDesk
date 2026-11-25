@@ -26,7 +26,7 @@ import { dayOf } from '../builder/counting.js';
 import { MICRO } from '../builder/tiers.js';
 import {
   CREDIT_COVER_MIN, CREDIT_FEE, REFERRED_START_USD, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIERS, VIP_CODE_DAYS, VIP_CODE_LABEL,
-  WELCOME_FEE, WELCOME_USD, CLAIM_MIN_USD, INVITES_PER_WEEK, claimWindow, inviteWeekStart, sharesFor, weekOf, type ClaimRefusal, type CreditClaim, type InviteClaims, type InviteMe, type InviteReferral,
+  WELCOME_FEE, WELCOME_USD, INVITES_PER_WEEK, inviteWeekStart, sharesFor, type InviteMe, type InviteReferral,
 } from './claim.js';
 import { sodexCodeOf, sodexInviterOf, sodexOwnerOf } from './sodex.js';
 import type { InviteStore } from './store.js';
@@ -408,34 +408,6 @@ export class InviteService {
     this.store.setState(w, next, now);
   }
 
-  /* ------------------------------------------------------------------- the weekly claim ----- */
-
-  claimsOf(address: string, now = this.now()): InviteClaims {
-    const w = claimWindow(now);
-    return {
-      week: w.week, opensAt: w.opensAt, closesAt: w.closesAt,
-      usd: this.store.claimableMicro(address, now) / MICRO,
-      claimed: !!this.store.claimOf(address, w.week),
-      pendingUsd: this.store.earnedInWeek(address, weekOf(now)) / MICRO,
-      claimedUsd: this.store.totals(address).claimed / MICRO,
-      minUsd: CLAIM_MIN_USD,
-    };
-  }
-
-  /** A signed claim: this week's, once a week, of all that is claimable, from CLAIM_MIN_USD on. */
-  claim(c: CreditClaim): { ok: true; usd: number } | { ok: false; code: ClaimRefusal } {
-    const now = this.now();
-    if (c.week !== claimWindow(now).week) return { ok: false, code: 'closed' };
-    if (this.store.claimOf(c.wallet, c.week)) return { ok: false, code: 'claimed' };
-    const micro = this.store.claimableMicro(c.wallet, now);
-    if (micro <= 0) return { ok: false, code: 'nothing' };
-    if (micro < CLAIM_MIN_USD * MICRO) return { ok: false, code: 'small' };
-    if (!this.store.claim(c, micro, now)) return { ok: false, code: 'claimed' };
-    // The balance grew: credits may switch on before the next tick.
-    this.switch(c.wallet.toLowerCase(), now);
-    return { ok: true, usd: micro / MICRO };
-  }
-
   /* -------------------------------------------------------------------------- me ----- */
 
   /** A wallet's referrals and credits, for the Referrals page. Referrals shortened: the page never names them whole. */
@@ -485,7 +457,6 @@ export class InviteService {
       credits: { balanceUsd: t.balance / MICRO, earnedUsd: t.earned / MICRO, grantedUsd: t.granted / MICRO, spentUsd: t.spent / MICRO, paying: this.paying.has(a), rates },
       stats: { referred, perpsUsd: perps / MICRO, spotUsd: spot / MICRO, earnedUsd: t.earned / MICRO },
       referrals,
-      claims: this.claimsOf(a),
       invites: { week: this.store.joinsThisWeek(a, this.now()), max: INVITES_PER_WEEK, resetsAt: inviteWeekStart(this.now()) + 7 * 86_400_000 },
       days: this.store.days(a),
       // The removed VIP credit: shown only for what it paid.

@@ -114,7 +114,7 @@ export function mergeTraders(ours: readonly InviteReferral[], theirs: readonly S
   return rows.sort((a, b) => (b.creditUsd ?? 0) + (b.usdcUsd ?? 0) - ((a.creditUsd ?? 0) + (a.usdcUsd ?? 0)) || b.volumeUsd - a.volumeUsd);
 }
 
-export interface HistoryRow { key: string; at: number; unit: 'usdc' | 'credit'; kind: InviteEntry['kind']; usd: number; tier: number | null; from: string | null; tx: string | null }
+export interface HistoryRow { key: string; at: number; unit: 'usdc' | 'credit'; kind: InviteEntry['kind'] | 'claim'; usd: number | null; tier: number | null; from: string | null; tx: string | null }
 /** Both kinds in one list, newest first. */
 export function mergeHistory(v: RefView, s: SodexRewards): HistoryRow[] {
   return [
@@ -186,8 +186,8 @@ function History({ rows, loading, partial }: { rows: HistoryRow[]; loading: bool
                 <tr key={h.key}>
                   <td className="dim">{day(h.at)}</td>
                   <td><span className="rf-type">{h.unit === 'usdc' ? <><img src="/logos/brand/sodex.svg" width="14" height="14" alt="" />{h.tx ? <a href={`${TX}${h.tx}`} target="_blank" rel="noopener noreferrer">USDC claimed</a> : 'USDC claimed'}</>
-                    : h.kind === 'earn' ? <><span className={`rf-tier is-${h.tier ?? 1}`}>T{h.tier ?? 1}</span>{h.from}</> : h.kind === 'claim' ? 'Credits claimed' : h.kind === 'grant' ? <b className="vip-text">VIP credit</b> : 'Fees paid'}</span></td>
-                  <td className={`right num ${h.unit === 'usdc' ? 'is-usdc' : h.kind === 'spend' || h.kind === 'claim' ? 'dim' : 'pos'}`}>{h.kind === 'spend' ? '−' : h.unit === 'credit' && h.kind === 'claim' ? '' : '+'}{h.unit === 'usdc' ? usd2(h.usd) : credit(h.usd)}<small>{h.unit === 'usdc' ? ' USDC' : ' credits'}</small></td>
+                    : h.kind === 'earn' ? <><span className={`rf-tier is-${h.tier ?? 1}`}>T{h.tier ?? 1}</span>{h.from}</> : h.kind === 'grant' ? <b className="vip-text">VIP credit</b> : 'Fees paid'}</span></td>
+                  <td className={`right num ${h.unit === 'usdc' ? 'is-usdc' : h.kind === 'spend' ? 'dim' : 'pos'}`}>{h.usd === null ? DASH : <>{h.kind === 'spend' ? '−' : '+'}{h.unit === 'usdc' ? usd2(h.usd) : credit(h.usd)}</>}<small>{h.unit === 'usdc' ? ' USDC' : ' credits'}</small></td>
                 </tr>
               ))}
             </tbody>

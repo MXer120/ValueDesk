@@ -122,7 +122,7 @@ test('VIP credit removed: nobody is given any, and what is left of one already g
   const vip = wallet().address;
   const used = wallet().address;
   const dbFile = join(tempDir('vs-invvip-'), 'invites.db');
-  const before = new InviteStore(dbFile, T0, Number.MAX_SAFE_INTEGER);
+  const before = new InviteStore(dbFile, T0);
   before.grant(vip, 'vip', 5e6, T0 - 2000);
   before.grant(used, 'vip', 5e6, T0 - 2000);
   before.take(`s:${used}`, 'o1', 1, [{ address: used, kind: 'spend', micro: 2e6, source: null, tier: null }], T0 - 1000);

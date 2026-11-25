@@ -1,5 +1,5 @@
 /** Localhost only (ReferralsPage's switch, "Sample"): made-up referrals to judge a filled page. Never in a build. */
-import { claimWindow, sharesFor, type CreditDay, type InviteMe, type InviteReferral } from '@sign/invites/claim';
+import { sharesFor, type CreditDay, type InviteMe, type InviteReferral } from '@sign/invites/claim';
 import { allWeeks, type S2Week } from '../sodex/soPointsV2';
 import { usdcLine, type SodexClaim } from '../../invites/sodexRewards';
 import type { SodexRewards } from '../../invites/useSodexRewards';
@@ -15,7 +15,6 @@ export function sampleMe(vip: boolean, now = Date.now()): InviteMe {
     r('0x41c6…f29e', 3, 5, 1_020_000, 0, 0.4),
   ];
   const earned = referrals.reduce((x, y) => x + y.earnedUsd, 0);
-  const w = claimWindow(now);
   const me: InviteMe = {
     ok: true,
     joined: { inviter: '0x77d0…1c9b', code: 'SAMPLE', at: now - 20 * D },
@@ -36,8 +35,6 @@ export function sampleMe(vip: boolean, now = Date.now()): InviteMe {
     ].sort((a, b) => b.at - a.at),
   };
   me.days = me.history.map((h): CreditDay => ({ day: Math.floor(h.at / D), kind: h.kind as CreditDay['kind'], tier: h.tier, usd: h.usd }));
-  const open = me.history.filter((h) => h.kind === 'earn' && h.at >= w.opensAt - 7 * D && h.at < w.opensAt).reduce((x, h) => x + h.usd, 0);
-  me.claims = { week: w.week, opensAt: w.opensAt, closesAt: w.closesAt, usd: open, claimed: false, pendingUsd: me.history.filter((h) => h.kind === 'earn' && h.at >= w.opensAt).reduce((x, h) => x + h.usd, 0), claimedUsd: 6.2, minUsd: 1 };
   me.invites = { week: 2, max: 3, resetsAt: now + 3 * D };
   return me;
 }

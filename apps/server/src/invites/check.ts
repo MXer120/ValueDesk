@@ -4,14 +4,13 @@
  */
 import { keccak_256 } from '@noble/hashes/sha3';
 import { concat, domainSeparator, hexToBytes, recoverAddress, utf8, word } from '../signing/eip712.js';
-import { CLAIM_DOMAIN, CLAIM_STATEMENT, CLAIM_TYPE, CODE_RE, INVITE_DOMAIN, INVITE_STATEMENT, INVITE_TTL_MS, INVITE_TYPE, INVITE_ZERO_ADDRESS, type CreditClaim, type InviteJoin } from './claim.js';
+import { CODE_RE, INVITE_DOMAIN, INVITE_STATEMENT, INVITE_TTL_MS, INVITE_TYPE, INVITE_ZERO_ADDRESS, type InviteJoin } from './claim.js';
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const NONCE = /^[0-9a-f]{32}$/;
 const STAMP = /^\d{13}$/;
 const SIGNATURE = /^0x[0-9a-fA-F]{130}$/;
 const TYPEHASH = keccak_256(utf8(INVITE_TYPE));
-const CLAIM_TYPEHASH = keccak_256(utf8(CLAIM_TYPE));
 
 function addressWord(a: string): Uint8Array {
   const out = new Uint8Array(32);
@@ -119,52 +118,4 @@ export function checkInviteJoin(raw: unknown, now = Date.now()): JoinCheck {
   }
   if (signer !== wallet) return { ok: false, error: 'the signature is not from this wallet' };
   return { ok: true, join: { ...fields, signature: q.signature } };
-}
-
-/** The EIP-712 digest of a weekly claim. */
-export function creditClaimDigest(c: Omit<CreditClaim, 'signature'>): Uint8Array {
-  const struct = keccak_256(concat(
-    CLAIM_TYPEHASH,
-    addressWord(c.wallet.toLowerCase()),
-    word(BigInt(c.week)),
-    keccak_256(utf8(c.statement)),
-    keccak_256(utf8(c.nonce)),
-    word(BigInt(c.issuedAt)),
-    word(BigInt(c.expiresAt)),
-  ));
-  const domain = domainSeparator({ name: CLAIM_DOMAIN.name, version: CLAIM_DOMAIN.version, chainId: c.chainId, verifyingContract: INVITE_ZERO_ADDRESS });
-  return keccak_256(concat(new Uint8Array([0x19, 0x01]), domain, struct));
-}
-
-export type ClaimCheck = { ok: true; claim: CreditClaim } | { ok: false; error: string };
-
-/** A signed claim: its shape, wording, time window, and that the wallet it names signed it. Which week is open is the service's. */
-export function checkCreditClaim(raw: unknown, now = Date.now()): ClaimCheck {
-  if (!raw || typeof raw !== 'object') return { ok: false, error: 'missing claim' };
-  const q = raw as Record<string, unknown>;
-  const wallet = typeof q.wallet === 'string' ? q.wallet.toLowerCase() : '';
-  if (!ADDRESS.test(wallet)) return { ok: false, error: 'wallet must be a 0x address' };
-  const week = Number(q.week);
-  if (!Number.isSafeInteger(week) || week < 0) return { ok: false, error: 'week must be a number' };
-  if (q.statement !== CLAIM_STATEMENT) return { ok: false, error: 'this is not the credit claim; reload the page and sign again' };
-  if (typeof q.nonce !== 'string' || !NONCE.test(q.nonce)) return { ok: false, error: 'nonce must be 32 hex characters' };
-  if (typeof q.issuedAt !== 'string' || !STAMP.test(q.issuedAt)) return { ok: false, error: 'issuedAt must be a time in ms' };
-  if (typeof q.expiresAt !== 'string' || !STAMP.test(q.expiresAt)) return { ok: false, error: 'expiresAt must be a time in ms' };
-  const chainId = Number(q.chainId);
-  if (!Number.isSafeInteger(chainId) || chainId <= 0) return { ok: false, error: 'chainId must be a positive integer' };
-  if (typeof q.signature !== 'string' || !SIGNATURE.test(q.signature)) return { ok: false, error: 'signature must be 65 bytes of hex' };
-  const issuedAt = Number(q.issuedAt);
-  const expiresAt = Number(q.expiresAt);
-  if (expiresAt <= now) return { ok: false, error: 'this signature has expired; sign again' };
-  if (expiresAt - issuedAt > INVITE_TTL_MS || expiresAt <= issuedAt) return { ok: false, error: 'this signature is valid for longer than allowed' };
-  if (issuedAt - now > 5 * 60_000) return { ok: false, error: 'the signature time is too far ahead; check your clock' };
-  const fields = { wallet, week, statement: CLAIM_STATEMENT, nonce: q.nonce, issuedAt: q.issuedAt, expiresAt: q.expiresAt, chainId };
-  let signer: string;
-  try {
-    signer = recoverAddress(creditClaimDigest(fields), hexToBytes(q.signature)).toLowerCase();
-  } catch {
-    return { ok: false, error: 'the signature cannot be read' };
-  }
-  if (signer !== wallet) return { ok: false, error: 'the signature is not from this wallet' };
-  return { ok: true, claim: { ...fields, signature: q.signature } };
 }

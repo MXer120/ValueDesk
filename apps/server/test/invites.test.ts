@@ -89,9 +89,9 @@ function fakeLedger() {
   return L;
 }
 
-function setup(owners: Record<string, string> = {}, inviters: Record<string, string> = {}, vips: ReadonlySet<string> = new Set(), claimsFrom = Number.MAX_SAFE_INTEGER) {
+function setup(owners: Record<string, string> = {}, inviters: Record<string, string> = {}, vips: ReadonlySet<string> = new Set()) {
   const L = fakeLedger();
-  const s = new InviteStore(':memory:', Date.now(), claimsFrom);
+  const s = new InviteStore(':memory:', Date.now());
   const clock = { now: T0 };
   const asked: string[] = [];
   const svc = new InviteService(s, L.builder, {

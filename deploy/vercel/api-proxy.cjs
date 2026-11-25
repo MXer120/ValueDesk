@@ -202,7 +202,7 @@ const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/a
  * Referrals (apps/server/src/routes/invites.ts): a code's check, one wallet's credits, a signed join (POST). Like the
  * username: POST passes, never cached (a wallet's own credits), the small body limit.
  */
-const isInvitesPath = (p) => p === '/api/vs/invites/check' || p === '/api/vs/invites/me' || p === '/api/vs/invites/join' || p === '/api/vs/invites/claim'
+const isInvitesPath = (p) => p === '/api/vs/invites/check' || p === '/api/vs/invites/me' || p === '/api/vs/invites/join'
   // The SoPoints sign-in relay (apps/server/src/routes/pointsAuth.ts): POST, never cached, the small body limit.
   || p === '/api/vs/sodex-auth/nonce' || p === '/api/vs/sodex-auth/verify'
   // The SoPoints week log (apps/server/src/routes/sopointsLog.ts): one wallet's weeks, up to 64 KiB.

@@ -69,7 +69,7 @@ function Steps({ me, vip }: { me: InviteMe | null; vip: boolean }) {
       </article>
       <article>
         <h2><i>3</i>You pay less</h2>
-        <p>Claim every Tuesday. Credits cover your own fee.</p>
+        <p>Credits cover your own fee as they come. SoDEX pays its USDC every Tuesday.</p>
         <div className="rf-steps__art">
           <div className="rf-meter">
             <div className="rf-meter__ring" style={{ '--p': c && c.earnedUsd > 0 ? Math.min(1, Math.max(0, c.balanceUsd / c.earnedUsd)) : 0 } as CSSProperties}>
@@ -100,17 +100,19 @@ export function GiftPage({ v, s, provider }: { v: RefView; s: SodexRewards; prov
   const l = useLink(v);
   const id = useId();
   const [how, setHow] = useState(false);
+  // Once switched, the side that comes in slides in (on narrow screens the two do not share a cell).
+  const [toggled, setToggled] = useState(false);
   const me = v.me;
   const vip = isVipMe(me);
   const rates = sharesFor(vip);
   const gold = vip ? 'vip-text' : undefined;
   return (
     <>
-      <section className={how ? 'rf-dark rf-g is-how' : 'rf-dark rf-g'}>
+      <section className={`rf-dark rf-g${how ? ' is-how' : ''}${toggled ? ' is-toggled' : ''}`}>
         <span className="rf-g__ribs" aria-hidden="true" /><span className="rf-g__light" aria-hidden="true" />
         <div className="rf-g__k">
           <h1>Referrals</h1>
-          <button type="button" className="rf-howbtn" aria-expanded={how} aria-controls={id} onClick={() => setHow(!how)}>
+          <button type="button" className="rf-howbtn" aria-expanded={how} aria-controls={id} onClick={() => { setHow(!how); setToggled(true); }}>
             {how ? 'Close' : 'How it works'}<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={how ? 'm4.500 4.500 7 7m0-7-7 7' : 'm4 6 4 4 4-4'} /></svg>
           </button>
           {!v.sample && <UseCodeButton address={v.address} provider={provider} me={me} />}

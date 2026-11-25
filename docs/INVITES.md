@@ -57,16 +57,15 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
 
   Since 2026-11-25 (owner) the page is the Gift page: the link, what each side gets, the weekly claim, the rewards over
   time (USDC and credits, or SoPoints), traders and history.
-- **Weekly claim** (owner 2026-11-25, "make it just like sodex"): what was earned until a Tuesday 12:00 UTC is claimable
-  from then on by one free signature (`CreditClaim`, EIP-712, no chain), and only then pays fees. As SoDEX's rebates: one
-  claim a week takes all that is claimable, from $1 (CLAIM_MIN_USD); less, or anything not claimed, stays claimable - nothing
-  lapses. Credits from before the first start of this code (`claims-from`) need no claim. The rules: `claim.ts`
-  (claimWindow), `store.ts` (totals, claimableMicro, claim).
+- **No claim for credits** (owner 2026-11-26, "make all pay like now"): credits pay the wallet's fees as they are earned,
+  as before. The page's weekly claim is SoDEX's USDC only (Tuesday 12:00 UTC, from $1, what is not claimed stays at SoDEX).
 - **SoDEX's rewards** on the same page: USDC rebates (10%) and SoPoints (25%) of the wallet's SoDEX invitees, read from SoDEX
   in the browser with the wallet's SoDEX sign-in (the SoPoints page's, about 15 days) and, for what was claimed, from SoDEX's
   contract on ValueChain. SoDEX settles on Saturday 00:00 UTC and pays from Tuesday on (its contract's weekly root: 09:38 to
   10:51 UTC on 2026-11-03, -10, -17, -24), from $1, to wallets with $2,000 of volume; what is not claimed stays there. The
-  claim is SoDEX's own call and pays the signed-in wallet. No server of ours is in it. Code: `apps/web/src/invites/sodexRewards.ts`.
+  claim is SoDEX's own call and pays the signed-in wallet. No server of ours is in it. Each claim's amount is read from
+  its transaction (the contract's Claimed event): SoDEX's history field `fees` carried the wallet's running total in raw
+  units (610228924 for a claim of 1.97242 on 2026-11-25). Code: `apps/web/src/invites/sodexRewards.ts`.
 
 ## Why it cannot be gamed
 
@@ -140,7 +139,7 @@ pay themselves, plus one welcome per wallet, 3 wallets a week. The terms line be
   - `sodex.ts`: the code's owner from SoDEX;
   - `store.ts`: `invites.db`;
   - `service.ts`: tiers, welcome, switch, perkBudget.
-- `routes/invites.ts`: `/api/vs/invites/{check,me,join,claim}`.
+- `routes/invites.ts`: `/api/vs/invites/{check,me,join}`.
 - BuilderService: `setExtraPrograms`, `setPerkBudget`, `standardFee`. `/api/vs/builder/volume` sends the budget with
   invite perks.
 - BuilderStore: `traded`, `tradedMicro`, `readThrough`, `oldestOpen`; the verifier fills `traded`.

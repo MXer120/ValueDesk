@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak_256 } from '@noble/hashes/sha3';
-import { CLAIMED_SELECTOR, SodexClaimError, claimRebates, claimableOf, claimedCall, fetchClaimed, floorCents, parseClaims, parseStats, parseTraders, settledPoint, timeMs, usdcLine } from './sodexRewards';
+import { CLAIMED_SELECTOR, CLAIMED_TOPIC, SodexClaimError, claimAmount, claimRebates, claimedIn, claimableOf, claimedCall, fetchClaimed, floorCents, parseClaims, parseStats, parseTraders, settledPoint, timeMs, usdcLine } from './sodexRewards';
 import { SodexError, type authedPost } from '../points';
 import type { rpcCall } from '../trading/rpc';
 
@@ -30,8 +30,9 @@ test('claims and traders: every field SoDEX lists, times in ms, seconds or text;
   assert.equal(timeMs(1_795_000_000_000), 1_795_000_000_000);
   assert.equal(timeMs('2026-11-25T12:00:00Z'), Date.UTC(2026, 10, 25, 12));
   assert.equal(timeMs('x'), null);
-  const c = parseClaims({ total: 2, list: [{ fees: '1.2150', txHash: '0xab', time: 1_795_000_000_000 }, { fees: 3, txHash: '', time: 1_795_000_100 }, { fees: 9 }] });
-  assert.deepEqual(c, { total: 2, list: [{ usd: 1.215, at: 1_795_000_000_000, tx: '0xab' }, { usd: 3, at: 1_795_000_100_000, tx: null }] });
+  // `fees` is not the claim's amount (it carried the running total, raw): the amount comes from the transaction.
+  const c = parseClaims({ total: 2, list: [{ fees: '610228924', txHash: `0x${'AB'.repeat(32)}`, time: 1_795_000_000_000 }, { fees: 3, txHash: '', time: 1_795_000_100 }, { fees: 9 }] });
+  assert.deepEqual(c, { total: 2, list: [{ usd: null, at: 1_795_000_000_000, tx: `0x${'ab'.repeat(32)}` }, { usd: null, at: 1_795_000_100_000, tx: null }] });
   assert.deepEqual(parseClaims(null), { total: 0, list: [] });
   const t = parseTraders({ total: 1, list: [{ inviteeWallet: '0xABC', volume: 1000, paidFees: 1, yourRewardedFees: '0.1', yourRewardedPoints: 7, referralTime: 1_795_000_000_000 }] });
   assert.deepEqual(t.list, [{ wallet: '0xabc', volumeUsd: 1000, rebateUsd: 0.1, points: 7, at: 1_795_000_000_000 }]);
@@ -59,14 +60,38 @@ test('the claimed amount is read from the rewards contract: its selector, its th
   assert.equal(await fetchClaimed(A, (async () => { throw new Error('offline'); }) as unknown as typeof rpcCall), null);
 });
 
-test('the claim: paid, sent and confirmed, sent and failed, claimed already, busy, and no result', async () => {
+/** A Claimed event as the contract writes it (tx 0x18f257d8…, 2026-11-25 23:18 UTC: 1.97242 USDC to 0xc5f7…b347). */
+const U = '0xc5f733dbd2ec75c7720902ba4c5a1e0490dcb347';
+const pad = (h: string) => `0x${h.replace(/^0x/, '').toLowerCase().padStart(64, '0')}`;
+const claimedLog = (user: string, micro: bigint) => ({
+  address: '0x4e0ced3cb2775a82718f9a29c5f86a34169958ec',
+  topics: [CLAIMED_TOPIC, pad('2'), pad(user), pad('0xcb7f80dff2727c791fa491722c428e6657f7e2c6')],
+  data: `0x${micro.toString(16).padStart(64, '0')}${'1'.padStart(64, '0')}`,
+});
+const transfer = { address: '0xcb7f80dff2727c791fa491722c428e6657f7e2c6', topics: ['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', pad('0x4e0ced3cb2775a82718f9a29c5f86a34169958ec'), pad('0x0101010101010101010101010101010101010101')], data: pad('1e18c4') };
+
+test("a claim's amount: the contract's Claimed event for this wallet and USDC, 6 decimals; nothing else counts", async () => {
+  assert.equal(CLAIMED_TOPIC, `0x${hex(keccak_256(new TextEncoder().encode('Claimed(uint256,address,address,uint256,bool)')))}`);
+  assert.equal(claimedIn([transfer, claimedLog(U, 1_972_420n)], U), 1.97242);
+  assert.equal(claimedIn([claimedLog(U, 1_972_420n)], A), null, "another wallet's claim");
+  assert.equal(claimedIn([transfer], U), null);
+  const receipt = (logs: unknown[], status = '0x1') => (async () => ({ result: { status, logs } })) as unknown as typeof rpcCall;
+  assert.equal(await claimAmount(`0x${'18'.repeat(32)}`, U, receipt([transfer, claimedLog(U, 1_972_420n)])), 1.97242);
+  assert.equal(await claimAmount(`0x${'19'.repeat(32)}`, U, receipt([claimedLog(U, 5n)], '0x0')), null, 'a failed transaction paid nothing');
+  assert.equal(await claimAmount(`0x${'1a'.repeat(32)}`, U, (async () => { throw new Error('offline'); }) as unknown as typeof rpcCall), null);
+});
+
+test('the claim: paid, sent and confirmed, sent and failed, claimed already, busy, and no result; the amount from the chain', async () => {
   const post = (d: unknown) => (async () => d) as unknown as typeof authedPost;
   const fail = (code: number) => (async () => { throw new SodexError('x', code); }) as unknown as typeof authedPost;
   const none = (async () => ({ result: null })) as unknown as typeof rpcCall;
   const wait = async () => {};
-  assert.deepEqual(await claimRebates(A, { post: post({ results: [{ amount: '4.2', status: 2, txHash: '0x1' }] }), call: none, wait }), { usd: 4.2, tx: '0x1' });
+  const paid = (async () => ({ result: { status: '0x1', logs: [claimedLog(A, 4_200_000n)] } })) as unknown as typeof rpcCall;
+  // SoDEX's `amount` is not taken: the chain's is (here 4.2 where SoDEX said 610228924).
+  assert.deepEqual(await claimRebates(A, { post: post({ results: [{ amount: '610228924', status: 2, txHash: '0x1' }] }), call: paid, wait }), { usd: 4.2, tx: '0x1' });
+  assert.deepEqual(await claimRebates(A, { post: post({ results: [{ amount: '4.2', status: 2, txHash: '0x5' }] }), call: none, wait }), { usd: null, tx: '0x5' }, 'unread: no amount rather than a wrong one');
   let asked = 0;
-  const later = (async () => ({ result: ++asked < 3 ? null : { status: '0x1' } })) as unknown as typeof rpcCall;
+  const later = (async () => ({ result: ++asked < 3 ? null : { status: '0x1', logs: [claimedLog(A, 1_500_000n)] } })) as unknown as typeof rpcCall;
   assert.deepEqual(await claimRebates(A, { post: post({ results: [{ amount: 1.5, status: 1, txHash: '0x2' }] }), call: later, wait }), { usd: 1.5, tx: '0x2' });
   assert.equal(asked, 3);
   const kind = async (p: Promise<unknown>) => p.then(() => 'ok', (e: unknown) => (e instanceof SodexClaimError ? e.kind : 'other'));

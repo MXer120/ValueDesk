@@ -272,6 +272,8 @@ html[data-theme='light'] .rf-pass > svg { stroke: #fafafa; }
 .rf-g__steps { display: flex; opacity: 0; visibility: hidden; transform: translateY(14px); }
 .rf-g.is-how .rf-g__steps { opacity: 1; visibility: visible; transform: none; transition-delay: 0s, 0.08s, 0s; }
 .rf-g.is-how .rf-g__front { opacity: 0; visibility: hidden; transform: scale(0.98); }
+/* Closing: the present, the line and the link come back as the steps go, not after them. */
+.rf-g:not(.is-how) .rf-g__front { transition-delay: 0.08s, 0.08s, 0s; }
 .rf-g__light, .rf-g__ribs { transition: opacity 0.4s; }
 .rf-g.is-how .rf-g__light { opacity: 0.35; }
 .rf-g.is-how .rf-g__ribs { opacity: 0.4; }
@@ -300,6 +302,17 @@ html[data-theme='light'] .rf-pass > svg { stroke: #fafafa; }
   .rf-g__body { display: block; }
   .rf-g__front, .rf-g__steps { transition: none; }
   .rf-g.is-how .rf-g__front, .rf-g:not(.is-how) .rf-g__steps { display: none; }
+  /* The two take turns here: the one that comes in slides in. */
+  .rf-g.is-toggled .rf-g__front, .rf-g.is-toggled .rf-g__steps { animation: rf-swap 0.42s var(--tf-spring) both; }
+}
+@keyframes rf-swap { from { opacity: 0; transform: translateY(12px); } }
+/* Tablet width: steps 1 and 2 side by side, 3 under them. */
+@media (min-width: 721px) and (max-width: 1000px) {
+  .rf-g .rf-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rf-g .rf-steps article, .rf-g .rf-steps article + article { padding: 18px 24px 20px; }
+  .rf-g .rf-steps article:nth-of-type(2) { border-top: 0; border-left: 1px solid var(--rf-hair); }
+  .rf-g .rf-steps article:nth-of-type(3) { grid-column: 1 / -1; }
+  .rf-g .rf-steps article:nth-of-type(3) .rf-steps__art { align-items: flex-start; }
 }
 @media (max-width: 720px) {
   .rf-page .rf-g { border-radius: 24px; }
@@ -477,3 +490,5 @@ html[data-theme='light'] .rf-signin img { padding: 5px; border-radius: 10px; }
   .rf-claimdlg .dlg-foot .dlg-actions { flex: 1 1 auto; }
   .rf-claimdlg .dlg-foot .dlg-actions > .rf-claimdlg__ok { margin-left: auto; }
 }
+/* The claim's countdown: by the second, figures that do not jump. */
+.rf-count { font-variant-numeric: tabular-nums; white-space: nowrap; }

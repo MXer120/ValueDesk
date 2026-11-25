@@ -51,7 +51,7 @@ export function RewardsChart({ usdc, credits, now }: { usdc: LinePoint[] | null;
   const cv = at === null ? null : valueAt(credits, at);
   const left = at === null ? 0 : (g.X(at) / W) * 100;
   return (
-    <div className="rfc" role="img" aria-label="Rewards over time" onPointerDown={read} onPointerMove={read} onPointerLeave={() => setAt(null)}>
+    <div className="rfc" role="img" aria-label="Rewards over time" onPointerDown={read} onPointerMove={read} onPointerLeave={(e) => { if (e.pointerType !== 'touch') setAt(null); }}>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
         <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--pos)" stopOpacity="0.24" /><stop offset="1" stopColor="var(--pos)" stopOpacity="0" /></linearGradient></defs>
         {[0.25, 0.5, 0.75].map((k) => <path key={k} className="rfc__g" d={`M0 ${H * k}H${W}`} />)}
@@ -86,7 +86,7 @@ export function PointsChart({ weeks }: { weeks: readonly AnyWeek[] }) {
   const every = Math.ceil(ws.length / 8);
   const read = (e: React.PointerEvent<HTMLDivElement>) => setAt(Math.min(ws.length - 1, Math.floor(shareOf(e) * ws.length)));
   return (
-    <div className="rfc is-bars" role="img" aria-label="SoPoints by week" onPointerDown={read} onPointerMove={read} onPointerLeave={() => setAt(null)}>
+    <div className="rfc is-bars" role="img" aria-label="SoPoints by week" onPointerDown={read} onPointerMove={read} onPointerLeave={(e) => { if (e.pointerType !== 'touch') setAt(null); }}>
       <div className="rfc__bars" aria-hidden="true">
         {ws.map((x, i) => (
           <span key={x.key} className={at === i ? 'is-on' : undefined}>

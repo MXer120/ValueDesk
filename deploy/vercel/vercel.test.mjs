@@ -741,7 +741,6 @@ test('feedback and error reports: POST and the thread token pass, a screenshot u
       assert.equal(proxy.isReportsPath('/api/vs/username/check'), false);
       // Referrals: the signed join is a POST, a wallet's credits are its own - both pass, neither is cached.
       assert.equal(proxy.isReportsPath('/api/vs/invites/join'), true);
-      assert.equal(proxy.isReportsPath('/api/vs/invites/claim'), true);
       assert.equal(proxy.isReportsPath('/api/vs/invites/me'), true);
       assert.equal(proxy.isReportsPath('/api/vs/invites/check'), true);
       assert.equal(proxy.isReportsPath('/api/vs/invites/other'), false);

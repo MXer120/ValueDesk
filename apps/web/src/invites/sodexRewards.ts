@@ -5,7 +5,9 @@
  * WHERE EACH FIGURE COMES FROM, as SoDEX's own referral page reads them (its bundle, 2026-11-25):
  *   biz/referral/myStats         earnedRewardsOnChain (all rebates made claimable so far), pendingRewards (not yet),
  *                                totalFeesEarned, the $2,000 volume that unlocks the programme, the weekly invite limit
- *   biz/referral/myClaimHistory  every claim: USDC, transaction, time
+ *   biz/referral/myClaimHistory  every claim: its transaction and time. Its `fees` is NOT the claim's amount (2026-11-26: it
+ *                                carried the wallet's running total in raw units, 610228924 for a claim of 1.97242); the
+ *                                amount is read from the claim's own transaction (the contract's Claimed event)
  *   biz/referral/myList          every invitee: volume, fees, the rebate and the SoPoints it earned this wallet
  *   the rewards contract         getClaimedAmount, public on ValueChain: what this wallet claimed (no sign-in needed)
  *   claimable                  = max(0, earnedRewardsOnChain - getClaimedAmount), as SoDEX's page works it out
@@ -83,8 +85,8 @@ export function parseStats(d: Record<string, unknown>): SodexStats {
   };
 }
 
-/** One USDC claim. */
-export interface SodexClaim { usd: number; at: number; tx: string | null }
+/** One USDC claim. `usd`: from its transaction on chain; null until read, or when it cannot be. */
+export interface SodexClaim { usd: number | null; at: number; tx: string | null }
 export function parseClaims(d: unknown): { total: number; list: SodexClaim[] } {
   const o = (d ?? {}) as { total?: unknown; list?: unknown };
   const list = (Array.isArray(o.list) ? o.list : []) as Array<Record<string, unknown>>;
@@ -92,9 +94,45 @@ export function parseClaims(d: unknown): { total: number; list: SodexClaim[] } {
     total: num(o.total),
     list: list.flatMap((r) => {
       const at = timeMs(r.time);
-      return at === null ? [] : [{ usd: num(r.fees), at, tx: typeof r.txHash === 'string' && r.txHash ? r.txHash : null }];
+      return at === null ? [] : [{ usd: null, at, tx: typeof r.txHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(r.txHash) ? r.txHash.toLowerCase() : null }];
     }),
   };
+}
+
+/** keccak256('Claimed(uint256,address,address,uint256,bool)'): epoch, user and token indexed; amount and a flag in the data. */
+export const CLAIMED_TOPIC = '0x0be0cb7a90a777a82578b63bfbffd13e1ed78edd777c27b5a7779fbdba198a54';
+interface Log { address?: string; topics?: string[]; data?: string }
+/** The USDC a transaction's Claimed event paid this wallet, or null when it holds none. */
+export function claimedIn(logs: readonly Log[], wallet: string): number | null {
+  const user = word(wallet);
+  let micro = 0n;
+  let found = false;
+  for (const l of logs) {
+    if (l.address?.toLowerCase() !== REWARDS_CONTRACT.toLowerCase() || l.topics?.[0]?.toLowerCase() !== CLAIMED_TOPIC) continue;
+    if (l.topics[2]?.replace(/^0x/, '').toLowerCase() !== user || l.topics[3]?.replace(/^0x/, '').toLowerCase() !== word(REWARDS_USDC)) continue;
+    const amount = (l.data ?? '').replace(/^0x/, '').slice(0, 64);
+    if (!/^[0-9a-fA-F]{64}$/.test(amount)) continue;
+    micro += BigInt(`0x${amount}`);
+    found = true;
+  }
+  return found ? Number(micro) / 1e6 : null;
+}
+const TX_KEY = (tx: string) => `vd.sodex.claimtx.${tx.toLowerCase()}`;
+/** A claim transaction's amount, from the chain (kept: a mined transaction does not change). */
+export async function claimAmount(tx: string, wallet: string, call: typeof rpcCall = rpcCall): Promise<number | null> {
+  try {
+    const kept = localStorage.getItem(TX_KEY(tx));
+    if (kept !== null && Number.isFinite(Number(kept))) return Number(kept);
+  } catch { /* private mode */ }
+  try {
+    const r = await call<{ status?: string; logs?: Log[] } | null>(VALUECHAIN_RPC, 'eth_getTransactionReceipt', [tx]);
+    if (!r.result || r.result.status !== '0x1') return null;
+    const usd = claimedIn(r.result.logs ?? [], wallet);
+    if (usd !== null) try { localStorage.setItem(TX_KEY(tx), String(usd)); } catch { /* private mode */ }
+    return usd;
+  } catch {
+    return null;
+  }
 }
 
 /** One invitee on SoDEX. */
@@ -130,7 +168,16 @@ async function allPages<T>(read: (page: number) => Promise<{ total: number; list
 }
 
 export const fetchStats = (a: string): Promise<SodexStats> => authedPost<Record<string, unknown>>(`${BIZ}/biz/referral/myStats?wallet_address=${a}`, a).then((d) => parseStats(d ?? {}));
-export const fetchClaims = (a: string): Promise<SodexClaim[]> => allPages((page) => authedPost<unknown>(`${BIZ}/biz/referral/myClaimHistory?wallet_address=${a}`, a, { page, pageSize: POST_PAGE }).then(parseClaims));
+/** Every claim, each with its amount from its transaction. */
+export async function fetchClaims(a: string, call: typeof rpcCall = rpcCall): Promise<SodexClaim[]> {
+  const list = await allPages((page) => authedPost<unknown>(`${BIZ}/biz/referral/myClaimHistory?wallet_address=${a}`, a, { page, pageSize: POST_PAGE }).then(parseClaims));
+  const out: SodexClaim[] = [];
+  for (let i = 0; i < list.length; i += 4) {
+    const part = list.slice(i, i + 4);
+    out.push(...await Promise.all(part.map(async (c) => ({ ...c, usd: c.tx ? await claimAmount(c.tx, a, call) : null }))));
+  }
+  return out;
+}
 export const fetchTraders = (a: string): Promise<SodexTrader[]> => allPages((page) => authedPost<unknown>(`${BIZ}/biz/referral/myList?wallet_address=${a}`, a, { page, pageSize: POST_PAGE, hideZeroReward: false }).then(parseTraders));
 
 const word = (hex: string): string => hex.replace(/^0x/, '').toLowerCase().padStart(64, '0');
@@ -155,8 +202,11 @@ export class SodexClaimError extends Error {
 }
 
 const RECEIPT_TRIES = 60;
-/** Claim the USDC rebates: SoDEX sends them to the signed-in wallet. Only ever called from the Claim button. */
-export async function claimRebates(a: string, deps: { post?: typeof authedPost; call?: typeof rpcCall; wait?: (ms: number) => Promise<void> } = {}): Promise<{ usd: number; tx: string | null }> {
+/**
+ * Claim the USDC rebates: SoDEX sends them to the signed-in wallet. Only ever called from the Claim button. `usd`: what the
+ * transaction paid, from the chain (null when it cannot be read; SoDEX's own `amount` is not trusted for it).
+ */
+export async function claimRebates(a: string, deps: { post?: typeof authedPost; call?: typeof rpcCall; wait?: (ms: number) => Promise<void> } = {}): Promise<{ usd: number | null; tx: string | null }> {
   const post = deps.post ?? authedPost;
   const call = deps.call ?? rpcCall;
   const wait = deps.wait ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -171,15 +221,15 @@ export async function claimRebates(a: string, deps: { post?: typeof authedPost; 
   }
   const r = d?.results?.[0];
   if (!r) throw new SodexClaimError('SoDEX returned no claim.', 'failed');
-  const usd = num(r.amount);
   const tx = typeof r.txHash === 'string' && r.txHash ? r.txHash : null;
+  const paid = async (): Promise<number | null> => (tx ? claimAmount(tx, a, call) : null);
   // SoDEX's statuses: 2 paid, 1 sent.
-  if (Number(r.status) === 2) return { usd, tx };
+  if (Number(r.status) === 2) return { usd: await paid(), tx };
   if (Number(r.status) === 1 && tx) {
     for (let i = 0; i < RECEIPT_TRIES; i++) {
-      const rc = await call<{ status?: string } | null>(VALUECHAIN_RPC, 'eth_getTransactionReceipt', [tx]).catch(() => ({ result: null }));
+      const rc = await call<{ status?: string; logs?: Log[] } | null>(VALUECHAIN_RPC, 'eth_getTransactionReceipt', [tx]).catch(() => ({ result: null }));
       if (rc.result) {
-        if (rc.result.status === '0x1') return { usd, tx };
+        if (rc.result.status === '0x1') return { usd: claimedIn(rc.result.logs ?? [], a), tx };
         throw new SodexClaimError('The payment failed on chain. Nothing was claimed; try again.', 'failed');
       }
       await wait(2_000);
@@ -232,7 +282,8 @@ export interface LinePoint { t: number; v: number }
 export function usdcLine(claims: readonly SodexClaim[], seen: readonly SeenTotal[], nowUsd: number, now: number, settled: LinePoint | null = null): LinePoint[] {
   const xs: LinePoint[] = [];
   let cum = 0;
-  for (const c of [...claims].sort((a, b) => a.at - b.at)) { cum += c.usd; xs.push({ t: c.at, v: cum }); }
+  // A claim whose amount is not known adds nothing: the line stays at what is certain.
+  for (const c of [...claims].sort((a, b) => a.at - b.at)) { if (c.usd === null) continue; cum += c.usd; xs.push({ t: c.at, v: cum }); }
   for (const s of seen) if (s.t <= now) xs.push({ t: s.t, v: s.usd });
   if (settled && settled.t <= now) xs.push(settled);
   xs.sort((a, b) => a.t - b.t);

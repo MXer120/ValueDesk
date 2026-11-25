@@ -200,11 +200,10 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/username/check', cls: 'read' },
   { method: 'POST', url: '/api/vs/username', cls: 'write' },
   { method: 'POST', url: '/api/vs/username/change', cls: 'write' },
-  // Referrals and fee credits (routes/invites.ts): a SoDEX code's check, a wallet's credits, a signed join, a signed claim of a week's credits.
+  // Referrals and fee credits (routes/invites.ts): a SoDEX code's check, a wallet's credits, a signed join.
   { method: 'GET', url: '/api/vs/invites/check', cls: 'read' },
   { method: 'GET', url: '/api/vs/invites/me', cls: 'read' },
   { method: 'POST', url: '/api/vs/invites/join', cls: 'write' },
-  { method: 'POST', url: '/api/vs/invites/claim', cls: 'write' },
   // SoPoints sign-in relay (routes/pointsAuth.ts): SoDEX's nonce and the signed sign-in text, nothing else.
   { method: 'POST', url: '/api/vs/sodex-auth/nonce', cls: 'auth' },
   { method: 'POST', url: '/api/vs/sodex-auth/verify', cls: 'auth' },

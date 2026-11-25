@@ -31,7 +31,7 @@ export function HeatGrid({ grid, caption, step }: { grid: (cols: number, offset:
   const cell = on ? row?.cells[on.c] : undefined;
   const text = (v: number) => (g.unit === 'points' ? whole(v) : credit(v));
   return (
-    <div className="rf-cal" ref={ref} onPointerLeave={() => setOn(null)}>
+    <div className="rf-cal" ref={ref} onPointerLeave={(e) => { if (e.pointerType !== 'touch') setOn(null); }}>
       <div className="rf-cal__top">
         <ul aria-hidden="true">{LEGEND.map((l, i) => <li key={l}><i className={`rf-cell is-${i + 1}`} />{l}</li>)}</ul>
         <div>

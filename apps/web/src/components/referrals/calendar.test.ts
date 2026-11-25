@@ -13,7 +13,7 @@ const me = (over: Partial<InviteMe>): InviteMe => ({
 
 test('the credits line: each UTC day once, never falling, ending at what was earned', () => {
   const m = me({ credits: { balanceUsd: 0, earnedUsd: 6, grantedUsd: 0, spentUsd: 1, paying: false, rates: [] }, days: [
-    { day: D - 2, kind: 'earn', tier: 1, usd: 1 }, { day: D - 2, kind: 'earn', tier: 2, usd: 2 }, { day: D - 1, kind: 'spend', tier: null, usd: 1 }, { day: D, kind: 'earn', tier: 1, usd: 3 }, { day: D, kind: 'claim', tier: null, usd: 3 },
+    { day: D - 2, kind: 'earn', tier: 1, usd: 1 }, { day: D - 2, kind: 'earn', tier: 2, usd: 2 }, { day: D - 1, kind: 'spend', tier: null, usd: 1 }, { day: D, kind: 'earn', tier: 1, usd: 3 },
   ] });
   const l = creditsLine(m, now);
   assert.deepEqual(l.map((p) => p.v), [3, 6]);

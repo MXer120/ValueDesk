@@ -63,7 +63,7 @@ export function rewardsGrid(me: InviteMe | null, claims: readonly SodexClaim[] |
     if (d.kind === 'earn') add(`${d.tier === 3 ? 'T3' : d.tier === 2 ? 'T2' : 'T1'}|${d.day}`, d.usd);
     else if (d.kind === 'spend') add(`Spent|${d.day}`, d.usd);
   }
-  for (const c of claims ?? []) { oldest = Math.min(oldest, dayOf(c.at)); add(`USDC|${dayOf(c.at)}`, c.usd); }
+  for (const c of claims ?? []) { if (c.usd === null) continue; oldest = Math.min(oldest, dayOf(c.at)); add(`USDC|${dayOf(c.at)}`, c.usd); }
   const row = (key: string, name: string, tone: GridRow['tone']): GridRow => ({ key, label: key, name, tone, cells: levels(days.map((d) => sums.get(`${key}|${d}`) ?? 0)) });
   return {
     unit: 'usd',
