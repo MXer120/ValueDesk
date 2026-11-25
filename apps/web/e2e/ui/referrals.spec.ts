@@ -90,5 +90,5 @@ h.test('the Referrals page: under More, and without a wallet a connect state', a
   }
   await page.getByRole('heading', { name: 'Referrals', exact: true }).waitFor();
   assert.ok(new URL(page.url()).pathname === '/referrals');
-  await page.getByText('Connect a wallet to get your link', { exact: true }).waitFor();
+  await page.locator('.rf-bar').getByRole('button', { name: 'Connect wallet' }).waitFor();
 }, { path: '/trade' });

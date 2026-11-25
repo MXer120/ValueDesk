@@ -78,7 +78,7 @@ export function useLink(v: RefView): LinkState {
 export function LinkText({ l }: { l: LinkState }) {
   if (l.code) return <span className="rf-linktext" title={`valuedesk.so/?ref=${l.code}`}><span>valuedesk.so/?ref=</span><b>{l.code}</b></span>;
   if (l.state === 'loading') return <Skeleton className="rf-linkskel" />;
-  return <span className="rf-linktext is-empty">{l.state === 'connect' ? 'Connect a wallet to get your link' : l.state === 'none' ? 'Your link appears with your SoDEX account' : 'SoDEX did not answer'}</span>;
+  return <span className={`rf-linktext is-empty is-${l.state}`}>{l.state === 'connect' ? 'Connect a wallet to get your link' : l.state === 'none' ? 'Your link appears with your SoDEX account' : 'SoDEX did not answer'}</span>;
 }
 
 /** The main action: copy (`share`, or a phone: the share sheet), or the step before it. */

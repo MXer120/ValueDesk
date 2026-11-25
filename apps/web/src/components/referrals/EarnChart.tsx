@@ -33,19 +33,21 @@ export function EarnChart({ me }: { me: InviteMe | null }) {
       </div>
     );
   }
+  const read = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * W;
+    let best = 0;
+    pts.xs.forEach((q, i) => { if (Math.abs(q.x - x) < Math.abs(pts.xs[best]!.x - x)) best = i; });
+    setAt(best);
+  };
   const p = at === null ? null : pts.xs[at]!;
   return (
     <div
       className="rfc"
       role="img"
       aria-label={`Credits earned: ${signedUsd(pts.xs[pts.xs.length - 1]!.v)}`}
-      onPointerMove={(e) => {
-        const r = e.currentTarget.getBoundingClientRect();
-        const x = ((e.clientX - r.left) / r.width) * W;
-        let best = 0;
-        pts.xs.forEach((q, i) => { if (Math.abs(q.x - x) < Math.abs(pts.xs[best]!.x - x)) best = i; });
-        setAt(best);
-      }}
+      onPointerDown={read}
+      onPointerMove={read}
       onPointerLeave={() => setAt(null)}
     >
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">

@@ -3,16 +3,17 @@
  * opens the three steps above it; under it the credit card, the earnings and the traders on one ground. Drawings carry
  * no figures but the programme's constants; every other figure is the wallet's own.
  *
- * A VIP (isVipMe) earns the VIP shares and sees them, the present's coin and the V's point in gold. What only a VIP's
+ * A VIP (isVipMe) earns the VIP shares and sees them, the credit card and the V's point in gold. What only a VIP's
  * code gives is greyed with a lock until this wallet's code gives it.
  */
-import { useId, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useMemo, useState, type CSSProperties } from 'react';
 import { CREDIT_FEE, REFERRED_START_USD, VIP_CODE_DAYS, VIP_TIER_SHARES, WELCOME_CAP, WELCOME_CAP_DAYS, sharesFor, type InviteMe } from '@sign/invites/claim';
 import { DASH, fmtUsd } from '../../format';
 import { isVipMe } from '../../invites/invites';
 import { WE_GET, YOU_GET } from '../../onboarding/referralRules';
 import { BrandMark } from '../BrandMark';
 import { Icon, RollingNumber, Segmented, Skeleton } from '../bots/kit/kit';
+import { CreditCalendar } from './CreditCalendar';
 import { EarnChart } from './EarnChart';
 import { Gift } from './Gift';
 import { Face, History, LinkButton, LinkIcons, LinkText, Missing, ReferralTable, compact, credit, day, pct, referredOf, signedUsd, usd2, useLink, welcomeText, type RefView } from './parts';
@@ -26,7 +27,7 @@ const Lock = () => (
 /* ------------------------------------------------------------------------------------- how it works ----- */
 
 /** The programme's values, all of them, from the shared rules: the terms name this page for them. */
-function Steps({ me, vip }: { me: InviteMe | null; vip: boolean }) {
+function Steps({ me, vip, onClose }: { me: InviteMe | null; vip: boolean; onClose: () => void }) {
   const c = me?.credits;
   const rates = sharesFor(vip);
   const gold = vip ? 'vip-text' : undefined;
@@ -34,6 +35,7 @@ function Steps({ me, vip }: { me: InviteMe | null; vip: boolean }) {
   const sources = [...new Map([...YOU_GET.slice(0, 1), ...WE_GET].map((b) => [b.source.url, b.source])).values()];
   return (
     <section className="rf-steps" aria-label="How referrals work">
+      <button type="button" className="rf-steps__x" aria-label="Close" onClick={onClose}><Icon name="x" size={18} /></button>
       <article>
         <h2><i>1</i>Share your link</h2>
         <p>Your SoDEX code, one link for both.</p>
@@ -87,17 +89,37 @@ function Steps({ me, vip }: { me: InviteMe | null; vip: boolean }) {
 
 /* ------------------------------------------------------------------------------ earnings and traders ----- */
 
+/** Chart or calendar: kept per browser. */
+const VIEW_KEY = 'vs.referrals.credits';
+function readView(): 'chart' | 'calendar' {
+  try { return localStorage.getItem(VIEW_KEY) === 'calendar' ? 'calendar' : 'chart'; } catch { return 'chart'; }
+}
+
 function Earnings({ v }: { v: RefView }) {
   const c = v.me?.credits;
+  const [view, setView] = useState<'chart' | 'calendar'>(readView);
+  const pick = (x: 'chart' | 'calendar') => { setView(x); try { localStorage.setItem(VIEW_KEY, x); } catch { /* this tab only */ } };
   return (
     <section className="rf-earn" aria-label="Credits earned">
       <div className="rf-earn__h">
         <div><span className="rf-k">Credits earned</span>{v.loading && v.address ? <Skeleton className="rf-skel-big" /> : <b className={c && c.earnedUsd > 0 ? 'pos' : undefined}>{c ? <RollingNumber value={signedUsd(c.earnedUsd)} /> : DASH}</b>}</div>
-        <dl><div className="rf-fig"><dt>Volume referred</dt><dd>{v.me ? compact(v.me.stats.perpsUsd + v.me.stats.spotUsd) : DASH}</dd></div></dl>
+        <Segmented<'chart' | 'calendar'> label="Credits as" value={view} onChange={pick} options={[{ value: 'chart', label: 'Chart' }, { value: 'calendar', label: 'Calendar' }]} />
       </div>
-      <EarnChart me={v.me} />
+      {view === 'chart' ? <EarnChart me={v.me} /> : <CreditCalendar me={v.me} />}
     </section>
   );
+}
+
+/** A phone's width: the list stays a list there, never a wide table. */
+function usePhone(): boolean {
+  const [on, setOn] = useState(() => window.matchMedia('(max-width: 720px)').matches);
+  useEffect(() => {
+    const m = window.matchMedia('(max-width: 720px)');
+    const f = () => setOn(m.matches);
+    m.addEventListener('change', f);
+    return () => m.removeEventListener('change', f);
+  }, []);
+  return on;
 }
 
 /** The traders as a short list: who, on which tier, what they earned you. */
@@ -106,18 +128,19 @@ function Traders({ v }: { v: RefView }) {
   const [all, setAll] = useState(false);
   const rows = useMemo(() => [...(v.me?.referrals ?? [])].sort((a, b) => b.earnedUsd - a.earnedUsd), [v.me]);
   const n = referredOf(v.me);
+  const phone = usePhone();
   return (
     <section className="rf-tr" aria-label="Your traders">
       <div className="rf-tr__h">
         <Segmented<'traders' | 'history'> label="List" value={tab} onChange={setTab} options={[{ value: 'traders', label: `Your traders${n === null ? '' : ` (${n})`}` }, { value: 'history', label: 'Credit history' }]} />
-        {tab === 'traders' && rows.length > 0 && <button type="button" className="rf-text" onClick={() => setAll(!all)}>{all ? 'Show less' : 'Details'}</button>}
+        {tab === 'traders' && rows.length > (phone ? 6 : 0) && <button type="button" className="rf-text" onClick={() => setAll(!all)}>{all ? 'Show less' : phone ? 'Show all' : 'Details'}</button>}
       </div>
       {v.absent || (v.error && !v.me) ? <Missing v={v} />
         : tab === 'history' ? <History me={v.me} loading={v.loading && !!v.address} />
-        : all ? <ReferralTable rows={v.me?.referrals ?? null} />
+        : all && !phone ? <ReferralTable rows={v.me?.referrals ?? null} />
         : rows.length ? (
           <ul className="rf-list">
-            {rows.slice(0, 6).map((r) => (
+            {(all ? rows : rows.slice(0, 6)).map((r) => (
               <li key={`${r.wallet}${r.at}`}>
                 <Face seed={r.wallet} size={36} />
                 <span><b>{r.wallet}</b><small>Tier {r.tier} · {compact(r.perpsUsd + r.spotUsd)}{r.welcome ? ' · in the welcome' : ''}</small></span>
@@ -147,7 +170,7 @@ export function GiftPage({ v }: { v: RefView }) {
   const gold = vip ? 'vip-text' : undefined;
   return (
     <>
-      <div className={how ? 'rf-how is-open' : 'rf-how'} id={id}><div><Steps me={me} vip={vip} /></div></div>
+      <div className={how ? 'rf-how is-open' : 'rf-how'} id={id}><div><Steps me={me} vip={vip} onClose={() => setHow(false)} /></div></div>
       <section className="rf-dark rf-g">
         <span className="rf-g__ribs" aria-hidden="true" /><span className="rf-g__light" aria-hidden="true" />
         <div className="rf-g__t">
@@ -157,13 +180,13 @@ export function GiftPage({ v }: { v: RefView }) {
               How it works<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
             </button>
           </div>
-          <h2>They start at zero.<br />You pay less.</h2>
+          <h2>They start with 0 fees.<br />You earn <span className={gold}>{pct(rates[0])}</span> after.</h2>
           <div className="rf-bar is-big">
             <div className="rf-bar__in"><LinkText l={l} /><LinkButton l={l} label="Copy" /></div>
             <LinkIcons l={l} />
           </div>
         </div>
-        <div className="rf-g__art"><Gift vip={vip} /></div>
+        <div className="rf-g__art"><Gift /></div>
         <ol className="rf-g__steps">
           <li><b>$0</b><span>their ValueDesk fee on the first {welcomeText()}</span></li>
           <li><b className={gold}>{pct(rates[0])}</b><span>of the fees they pay after, yours as credits</span></li>
@@ -181,6 +204,7 @@ export function GiftPage({ v }: { v: RefView }) {
           <dl className="rf-kv">
             <div><dt>Your fee while they last</dt><dd>{(CREDIT_FEE / 10).toFixed(1)} bp</dd></div>
             <div><dt>Spent on fees</dt><dd>{me ? usd2(me.credits.spentUsd) : DASH}</dd></div>
+            <div><dt>Volume referred</dt><dd>{me ? compact(me.stats.perpsUsd + me.stats.spotUsd) : DASH}</dd></div>
             {me?.welcome?.active && <div><dt>Left at $0 ValueDesk fee</dt><dd>{fmtUsd(me.welcome.leftUsd, 0)}</dd></div>}
             {me?.vipUntil && <div><dt className="vip-text">VIP fee until</dt><dd className="vip-text">{day(me.vipUntil)}</dd></div>}
             {me?.vipCode && <div><dt className="vip-text">Your link gives</dt><dd className="vip-text">{VIP_CODE_DAYS} days of VIP fee</dd></div>}
