@@ -207,7 +207,14 @@ function devInvites(): Plugin {
       server.middlewares.use((req, res, next) => {
         if (!req.url || !req.url.startsWith('/api/vs/invites/')) return next();
         void first.then(() => {
-          if (!up) return next();
+          if (!up) {
+            // Never a join on production's data from a laptop (2026-11-25: the UI specs' throwaway wallets became real referrals).
+            if (!DEV_PROD || req.method === 'GET') return next();
+            res.statusCode = 503;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ ok: false, code: 'sodex-silent', error: 'localhost joins only with the local referral routes (start "invites-dev")' }));
+            return;
+          }
           const headers = { ...req.headers, host: target.host };
           delete headers[TOKEN_HEADER];
           const out = httpRequest({ host: target.hostname, port: target.port, path: req.url, method: req.method, headers }, (pres) => {

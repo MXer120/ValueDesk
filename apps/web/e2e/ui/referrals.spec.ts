@@ -31,7 +31,8 @@ async function shot(page: Page, name: string): Promise<void> {
 async function routesUp(origin: string): Promise<boolean> {
   try {
     const r = await fetch(`${origin}/api/vs/invites/check?code=${CODE}`, { signal: AbortSignal.timeout(15_000) });
-    return r.ok && ((await r.json()) as { valid?: boolean }).valid === true;
+    // The local routes only: through them alone does a throwaway wallet's join stay on this machine.
+    return r.ok && r.headers.get('x-vs-dev-invites') === 'local' && ((await r.json()) as { valid?: boolean }).valid === true;
   } catch {
     return false;
   }
