@@ -265,6 +265,9 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/admin/fees/add', cls: 'admin' },
   { method: 'POST', url: '/api/admin/fees/end', cls: 'admin' },
   { method: 'POST', url: '/api/admin/fees/lookup', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/codes', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/codes/add', cls: 'admin' },
+  { method: 'POST', url: '/api/admin/codes/remove', cls: 'admin' },
   // The beta channel's sign-in (routes/beta.ts): registered by the beta API only (VALUESCAN_CHANNEL=beta),
   // a 404 on the main one. A listed wallet's BetaSignIn for a 7-day token (beta/gate.ts).
   { method: 'POST', url: '/api/beta/session', cls: 'auth' },

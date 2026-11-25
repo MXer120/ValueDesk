@@ -42,6 +42,8 @@
  * and every sign-in is told to the owner by Telegram. Everything is in the audit
  * log (admin/store.ts).
  */
+import { inviteService } from './invites.js';
+import { CODE_RE, OURS_CODE, VIP_CODE_DAYS, normCode } from '../invites/claim.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import { clientKey } from '../hosted.js';
@@ -722,6 +724,47 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const ended = store().endFeeProgram(id, now());
     store().audit({ kind: 'fees.end', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { id, ended } }, now());
     return { ok: true, ended, programs: store().feePrograms() };
+  });
+
+  // --- VIP referral codes (owner 2026-11-25) -----------------------------------------------------
+  // A code upgraded here gives whoever joins with it the VIP fee for VIP_CODE_DAYS. A VIP wallet's code does so by itself.
+  const codeRows = () => {
+    const st = inviteService().store;
+    const t = now();
+    return st.vipCodes().map((c) => ({ ...c, owner: st.ownerOfCode(c.code), ...st.joinsOfCode(c.code, t) }));
+  };
+  app.post('/api/admin/codes', { bodyLimit: 4 * 1024 }, async (req, reply) => {
+    const raw = bodyOf(req).code;
+    if (raw === undefined) return { ok: true, days: VIP_CODE_DAYS, codes: codeRows() };
+    const code = normCode(String(raw));
+    if (!CODE_RE.test(code) || code === OURS_CODE) return reply.code(400).send({ ok: false, error: 'not a trader\'s referral code' });
+    if (!paced(req, reply)) return reply;
+    const svc = inviteService();
+    const owner = await svc.ownerOf(code);
+    if (owner === undefined) return reply.code(503).send({ ok: false, error: 'SoDEX did not answer' });
+    return { ok: true, code, owner, vip: owner ? svc.isVip(owner) : false, upgraded: svc.store.isVipCode(code), ...svc.store.joinsOfCode(code, now()) };
+  });
+  app.post('/api/admin/codes/add', { bodyLimit: 4 * 1024 }, async (req, reply) => {
+    const code = normCode(String(bodyOf(req).code ?? ''));
+    if (!CODE_RE.test(code) || code === OURS_CODE) return reply.code(400).send({ ok: false, error: 'not a trader\'s referral code' });
+    if (!signed(req, reply, 'codes.add', code, { code })) return reply;
+    const svc = inviteService();
+    const owner = await svc.ownerOf(code);
+    if (owner === undefined) return reply.code(503).send({ ok: false, error: 'SoDEX did not answer' });
+    if (owner === null) return reply.code(409).send({ ok: false, error: 'SoDEX has no such referral code' });
+    const s = session(req);
+    const added = svc.store.addVipCode(code, s.wallet, now());
+    store().audit({ kind: 'codes.add', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { code, owner, added } }, now());
+    return { ok: true, added, codes: codeRows() };
+  });
+  app.post('/api/admin/codes/remove', { bodyLimit: 4 * 1024 }, async (req, reply) => {
+    const code = normCode(String(bodyOf(req).code ?? ''));
+    if (!CODE_RE.test(code)) return reply.code(400).send({ ok: false, error: 'not a referral code' });
+    if (!signed(req, reply, 'codes.remove', code, { code })) return reply;
+    const s = session(req);
+    const removed = inviteService().store.removeVipCode(code);
+    store().audit({ kind: 'codes.remove', ok: true, wallet: s.wallet, client: clientKey(req.ip), country: countryOf(req), detail: { code, removed } }, now());
+    return { ok: true, removed, codes: codeRows() };
   });
 
   // --- the kanban board (sessions write through tools/board.ts) ---------------------------------

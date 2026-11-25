@@ -46,7 +46,7 @@ export const inviteLinkShown = (code: string): string => `valuedesk.so/?${INVITE
 
 /* ------------------------------------------------------------- the code it came with ----- */
 
-export interface Pending { code: string; at: number; welcome: boolean }
+export interface Pending { code: string; at: number; welcome: boolean; vipDays?: number }
 
 function readOwn(): string[] {
   try {
@@ -99,10 +99,10 @@ export async function captureInvite(): Promise<void> {
   history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
   if (!code || pendingInvite() || readOwn().includes(code)) return;
   try {
-    const { status, body } = await json<{ valid?: boolean; welcome?: boolean; unknown?: boolean }>(`/api/vs/invites/check?code=${code}`);
+    const { status, body } = await json<{ valid?: boolean; welcome?: boolean; vipDays?: number; unknown?: boolean }>(`/api/vs/invites/check?code=${code}`);
     // SoDEX did not answer the server: kept, and the join asks again.
     if (status === 200 && (body.valid || body.unknown)) {
-      localStorage.setItem(KEY, JSON.stringify({ code, at: Date.now(), welcome: body.welcome !== false }));
+      localStorage.setItem(KEY, JSON.stringify({ code, at: Date.now(), welcome: body.welcome !== false, vipDays: body.vipDays ?? 0 }));
       changed();
     }
   } catch {
@@ -208,21 +208,21 @@ const nonce = (): string => {
 };
 
 /** Join with a code: the wallet's one free signature. */
-export async function joinInvite(provider: Eip1193Provider, address: string, code: string): Promise<{ welcome: boolean }> {
+export async function joinInvite(provider: Eip1193Provider, address: string, code: string): Promise<{ welcome: boolean; vipUntil: number | null }> {
   const chainId = await getChainId(provider).catch(() => 1);
   const t = Date.now();
   const fields: Omit<InviteJoin, 'signature'> = {
     wallet: address.toLowerCase(), code: normCode(code), statement: INVITE_STATEMENT, nonce: nonce(), issuedAt: String(t), expiresAt: String(t + INVITE_TTL_MS - 30_000), chainId,
   };
   const signature = await signTypedData(provider, address, inviteTypedData(fields));
-  const { status, body } = await json<{ ok?: boolean; code?: string; error?: string; welcome?: boolean }>('/api/vs/invites/join', {
+  const { status, body } = await json<{ ok?: boolean; code?: string; error?: string; welcome?: boolean; vipUntil?: number | null }>('/api/vs/invites/join', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ join: { ...fields, signature } }),
   });
   if (status === 200 && body.ok) {
     void loadMe(address);
-    return { welcome: body.welcome !== false };
+    return { welcome: body.welcome !== false, vipUntil: body.vipUntil ?? null };
   }
   throw new InviteError(body.error || `The link was not taken (${status}).`, body.code);
 }

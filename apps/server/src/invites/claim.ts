@@ -46,10 +46,12 @@ export const WELCOME_CAP_DAYS = 30;
 export const PERK_HORIZON_MS = 3 * 60_000;
 
 /**
- * Every VIP wallet gets this much fee credit once (owner 2026-11-14: "give vips a $10 Fee credit balance just bc
- * their vips"): VIP as the app shows it - by volume, kept, or by a VIP program (the beta's 30 days too).
+ * A VIP code (owner 2026-11-25): a wallet that joins with the code of a VIP wallet, or with one upgraded on the dev page,
+ * pays the VIP fee (the lowest tier of each product) for this many days from its join. Not VIP itself: its own code is
+ * no VIP code for it. Under the same cap as the welcome. (The one-time VIP credit ended the same day, store.ts totals.)
  */
-export const VIP_CREDIT_USD = 5; // $5 since owner 2026-11-15 (was $10)
+export const VIP_CODE_DAYS = 7;
+export const VIP_CODE_LABEL = 'VIP invite';
 
 /**
  * A wallet that joined through a referral starts at the fee tier of this much volume (owner 2026-11-15: "referred
@@ -118,6 +120,8 @@ export interface InviteCheck {
   valid: boolean;
   /** Whether a wallet joining now gets the welcome (the inviter's cap). */
   welcome: boolean;
+  /** Days of the VIP fee a wallet joining now gets (0: not a VIP code). */
+  vipDays?: number;
 }
 
 export interface InviteReferral {
@@ -150,6 +154,10 @@ export interface InviteMe {
   /** May this wallet still join: never joined, no ValueDesk volume, no referrals of its own. */
   canJoin: boolean;
   welcome: { active: boolean; usedUsd: number; leftUsd: number; limitUsd: number } | null;
+  /** The VIP fee from a VIP code: until when (null: none, or over). */
+  vipUntil?: number | null;
+  /** This wallet's own code gives the VIP days now. */
+  vipCode?: boolean;
   credits: { balanceUsd: number; earnedUsd: number; grantedUsd: number; spentUsd: number; paying: boolean; rates: readonly number[] };
   stats: { referred: [number, number, number]; perpsUsd: number; spotUsd: number; earnedUsd: number };
   referrals: InviteReferral[];

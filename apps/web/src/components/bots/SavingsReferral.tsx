@@ -62,7 +62,7 @@ export function SavingsReferral({ address, me, onOpen }: { address: string; me: 
           <div className="bots-rc__tile"><span>Referred</span><b>{me ? me.stats.referred.reduce((x, y) => x + y, 0) : DASH}</b></div>
           <div className="bots-rc__tile"><span>Your ValueDesk fee now</span><b>{now ? now.fee : 'Your tier'}</b></div>
         </div>
-        {c && c.grantedUsd > 0 && <StatusPill size="sm" icon="star" className="vip-pill">Includes your {fmtUsd(c.grantedUsd, 0)} VIP credit</StatusPill>}
+        {me?.vipUntil && <StatusPill size="sm" icon="star" className="vip-pill">VIP fee until {new Date(me.vipUntil).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</StatusPill>}
         {w && (
           <div className="sv-ref__welcome">
             <span>Welcome: no ValueDesk fee until {fmtUsd(w.limitUsd, 0)} of volume · {fmtUsd(w.leftUsd, 0)} left</span>

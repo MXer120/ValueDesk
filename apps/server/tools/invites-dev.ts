@@ -3,8 +3,8 @@
  * (VALUETRADE_DEV_API=prod) where referrals are not released yet. The Vite dev server sends /api/vs/invites here while
  * this answers (apps/web/vite.config.ts devInvites); everything else still goes to production.
  *
- * The real code: SoDEX's own answers for codes, a signed join checked as on the server, the welcome, credits and the VIP
- * credit. What a laptop has not got is the builder ledger, so volume and paid fees are empty here; whether a wallet is
+ * The real code: SoDEX's own answers for codes, a signed join checked as on the server, the welcome and credits, VIP codes
+ * included. What a laptop has not got is the builder ledger, so volume and paid fees are empty here; whether a wallet is
  * VIP is asked of production's /api/vs/bots/vip. State lives in the OS temp folder (VS_INVITES_DEV_DB to move it).
  *
  *   npm --prefix apps/server run invites-dev        (or the launch config "invites-dev")
@@ -46,12 +46,11 @@ async function askVip(address: string): Promise<void> {
 
 const service = new InviteService(new InviteStore(process.env.VS_INVITES_DEV_DB?.trim() || join(dir, 'invites.db')), builder, {
   isVip: (a) => vip.get(a.toLowerCase())?.yes === true,
-  vipWallets: () => [...vip.entries()].filter(([, v]) => v.yes).map(([a]) => a),
   log,
 });
 
 const app = Fastify({ logger: false });
-// The page's read of a wallet: production says first whether it is VIP (its one-time credit).
+// The page's read of a wallet: production says first whether it is VIP.
 app.addHook('onRequest', async (req) => {
   const m = /^\/api\/vs\/invites\/me\?address=(0x[0-9a-fA-F]{40})/.exec(req.url);
   if (m) await askVip(m[1]!);

@@ -33,18 +33,12 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
 - **Credits** pay only the wallet's own ValueDesk builder fee. While they last, its fee is 0.1 bp on every product
   (futures and spot on the site, copy trading, bots: owner 2026-11-15 "apply for all builder fees not only bots"), and
   the rest of what it would have paid comes off the balance. Bots > Savings has a card for them and the link. They are never paid out and never moved.
-- **VIP credit** (owner: "give vips a $10 Fee credit balance just bc their vips"; $5 since 2026-11-15): every wallet that
-  is VIP as the app shows it gets $5 of credit, once:
-  - who counts: VIP by volume, the kept list (`VALUEDESK_VIP_KEEP`), or a running VIP program (the dev page's, and the
-    beta's 30 days from listing);
-  - when: the job sweeps every 10 minutes, and a VIP opening the Referrals page gets it at once;
-  - once: a `grants` row and its entry are written together, so a sweep, the page or a restart never give it twice;
-  - it shows like any credit (balance, Savings "Fee credits"), marked "Includes your $5 VIP credit", and as "VIP credit"
-    in the history.
-
-  Production today (read-only, 2026-11-14): 11 beta wallets inside their 30 days, none by volume, none kept, so at most
-  $110. Server 2's executor has 1 assigned VIP (`EXECUTOR_VIP_WALLETS`) that server 1 cannot see. Add it to
-  `VALUEDESK_VIP_KEEP` or a dev-page VIP program for it to get the credit too.
+- **VIP codes** (owner 2026-11-25): a wallet that joins with the code of a VIP wallet (volume, kept, a VIP program, the
+  beta's 30 days) pays the VIP fee, the lowest tier of every product, for 7 days from its join. The dev page (Fees) can
+  upgrade any code to do the same. The days are a fee, not VIP: the wallet's own code is no VIP code for it. The inviter's
+  cap of 50 in 30 days applies.
+- **VIP credit**: removed 2026-11-25 (owner). Nobody is given any, and what was left of one is gone; what it had paid
+  stays paid.
 - **Referrals page** (`/referrals`, under More), laid out like the reference screenshot:
   - left: the link, a "how it pays" banner, stats and a referrals table;
   - right: credit balance, credits earned, the welcome, and credit history.

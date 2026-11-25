@@ -10,7 +10,7 @@
  * the wallet gets and what its inviter gets is said in a line each.
  */
 import { useEffect, useState } from 'react';
-import { TIER_SHARES, WELCOME_USD } from '@sign/invites/claim';
+import { TIER_SHARES, VIP_CODE_DAYS, WELCOME_USD } from '@sign/invites/claim';
 import { Modal } from '../components/Modal';
 import { DlgFoot } from '../components/dialogParts';
 import { browseAccepted, useAcceptanceRevision } from '../legal/acceptance';
@@ -71,7 +71,7 @@ function InviteDialog({ pending, joined: joinedAt, address, provider, onClose }:
       const r = await joinInvite(provider, address, code);
       track('invite.bind', {});
       setJoined(true);
-      notify('ok', r.welcome ? `Joined. No ValueDesk fee on your first ${usd(WELCOME_USD)} of volume.` : 'Joined.');
+      notify('ok', r.vipUntil ? `Joined. You pay the VIP fee for ${VIP_CODE_DAYS} days${r.welcome ? `, and nothing on your first ${usd(WELCOME_USD)}` : ''}.` : r.welcome ? `Joined. No ValueDesk fee on your first ${usd(WELCOME_USD)} of volume.` : 'Joined.');
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       if (e instanceof InviteError && e.code && e.code !== 'sodex-silent') { notify('warn', m); onClose(true); }
@@ -89,6 +89,7 @@ function InviteDialog({ pending, joined: joinedAt, address, provider, onClose }:
       </div>
       <ul className="inv-perks">
         {pending.welcome && <li><b>$0</b><span>ValueDesk fee on your first {usd(WELCOME_USD)}</span></li>}
+        {(pending.vipDays ?? 0) > 0 && <li><b className="vip-text">VIP</b><span>fee for {pending.vipDays} days on everything</span></li>}
         <li><b>+5%</b><span>SoPoints with this code on SoDEX <a href="https://docs.sodex.com/sopoints/layer-1-season" target="_blank" rel="noopener noreferrer">source</a></span></li>
       </ul>
       <p className="inv-they">Your inviter gets {Math.round(TIER_SHARES[0] * 100)}% of the ValueDesk fees you pay, as fee credits, and SoDEX's referral rebate. Nothing comes out of your trades.</p>

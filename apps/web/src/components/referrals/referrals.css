@@ -112,7 +112,6 @@
 .rf-stats.tf-shell { gap: 6px; }
 .rf-stats .rf-table { margin-top: 0; }
 .rf-state { padding: 10px 6px; }
-.rf-vipcredit { align-self: flex-start; }
 /* The VIP credit's line in "How it works": gold like every VIP mark (vip.css). */
 .rf-how li.is-vip { background: var(--vip-ground-soft); }
 .rf-how li.is-vip i { background: var(--vip-ground); color: var(--vip-ink); }

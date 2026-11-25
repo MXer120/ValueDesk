@@ -120,9 +120,9 @@ test("a code's owner comes from SoDEX once and is kept; nobody's is asked again 
   await svc.ownerOf('NOBODY12');
   assert.equal(asked.length, 3);
   assert.equal(await svc.ownerOf('SILENT'), undefined);
-  assert.deepEqual(await svc.check(OURS_CODE), { valid: false, welcome: false, silent: false });
-  assert.deepEqual(await svc.check('AAAA1111'), { valid: true, welcome: true, silent: false });
-  assert.deepEqual(await svc.check('SILENT'), { valid: false, welcome: false, silent: true });
+  assert.deepEqual(await svc.check(OURS_CODE), { valid: false, welcome: false, vipDays: 0, silent: false });
+  assert.deepEqual(await svc.check('AAAA1111'), { valid: true, welcome: true, vipDays: 0, silent: false });
+  assert.deepEqual(await svc.check('SILENT'), { valid: false, welcome: false, vipDays: 0, silent: true });
 });
 
 test('joining: the wallet signs; never itself, never a wallet with volume or with referrals of its own; the first join stands', async () => {

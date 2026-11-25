@@ -8,7 +8,7 @@
  * Segmented, the bots table and pager) like the rest of the app's pages.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { CREDIT_FEE, REFERRED_START_USD, TIER_SHARES, VIP_CREDIT_USD, WELCOME_CAP, WELCOME_CAP_DAYS, WELCOME_USD, type InviteMe, type InviteReferral } from '@sign/invites/claim';
+import { CREDIT_FEE, REFERRED_START_USD, TIER_SHARES, VIP_CODE_DAYS, WELCOME_CAP, WELCOME_CAP_DAYS, WELCOME_USD, type InviteMe, type InviteReferral } from '@sign/invites/claim';
 import { DASH, fmtUsd } from '../../format';
 import { track } from '../../analytics/usage';
 import { canShareNative, prefersNativeShare, shareNative } from '../../share/nativeShare';
@@ -145,6 +145,7 @@ function LinkCard({ address, me }: { address: string; me: InviteMe | null }) {
     <section className="rf-link" aria-label="Your link">
       <div className="rf-link__head">
         <span className="rf-k">Your link</span>
+        {me?.vipCode && <StatusPill size="sm" icon="star" className="vip-pill">Gives {VIP_CODE_DAYS} days of VIP fee</StatusPill>}
         {me?.joined && (
           <StatusPill size="sm" tone="positive" icon="check" className="rf-by">Referred by <b>{me.joined.inviter}</b></StatusPill>
         )}
@@ -261,7 +262,6 @@ function CreditCards({ me, loading }: { me: InviteMe | null; loading: boolean })
           {c && <StatusPill size="sm" tone={c.paying ? 'positive' : 'neutral'} dot>{c.paying ? 'Paying your fees' : c.balanceUsd > 0 ? 'Collecting' : 'Empty'}</StatusPill>}
         </div>
         {loading ? <Skeleton className="rf-skel-big" /> : <b className={`rf-big${c && c.balanceUsd < 0 ? ' neg' : ''}`}>{c ? usd2(c.balanceUsd) : DASH}</b>}
-        {c && c.grantedUsd > 0 && <StatusPill size="sm" icon="star" className="vip-pill rf-vipcredit">Includes your {usd2(c.grantedUsd)} VIP credit</StatusPill>}
         <p className="rf-fine">Pays your ValueDesk fees by itself. Never cash.</p>
       </Panel>
       <Panel className="rf-card">
@@ -272,6 +272,15 @@ function CreditCards({ me, loading }: { me: InviteMe | null; loading: boolean })
           <div><dt>Your fee while it pays</dt><dd className="num">0.1 bp</dd></div>
         </dl>
       </Panel>
+      {me?.vipUntil && (
+        <Panel className="rf-card">
+          <div className="rf-card__head">
+            <span className="rf-k">Your VIP fee</span>
+            <StatusPill size="sm" icon="star" className="vip-pill">VIP invite</StatusPill>
+          </div>
+          <p className="rf-fine">The lowest ValueDesk fee on futures, spot, copy trading and bots until {day(me.vipUntil)}.</p>
+        </Panel>
+      )}
       {w && (
         <Panel className="rf-card">
           <div className="rf-card__head">
@@ -338,7 +347,7 @@ function HowItWorks({ onClose }: { onClose: () => void }) {
     { t: 'They join', l: `One free signature. No ValueDesk fee on their first ${usd(WELCOME_USD)} (${WELCOME_CAP} welcomes per link in ${WELCOME_CAP_DAYS} days), and they start at the ${usd(REFERRED_START_USD)} fee tier.` },
     { t: 'You earn, three tiers deep', l: `${TIER_SHARES.map(pct).join(' / ')} of the ValueDesk fees paid by your referrals, theirs, and the next. For as long as they trade.` },
     { t: 'Credits pay your fees', l: `While you have credits your ValueDesk fee is ${(CREDIT_FEE / 10).toFixed(1)} bp and credits pay the rest. Never cash, never moved.` },
-    { t: 'VIP credit', l: `Every VIP wallet gets ${usd(VIP_CREDIT_USD)} of fee credit, once.`, vip: true },
+    { t: 'VIP codes', l: `Join with a VIP's code and you pay the VIP fee for ${VIP_CODE_DAYS} days.`, vip: true },
   ];
   return (
     <Modal open size="sm" title="How referrals work" className="dlg" onClose={onClose}>

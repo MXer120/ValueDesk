@@ -12,6 +12,7 @@ import { signAction } from '../wallet';
 import { useWallet } from '../WalletPicker';
 import { isUserRejection } from '../../wallet';
 import { ago, int, short, when } from '../format';
+import { VipCodes } from './VipCodes';
 import { Empty, Figure, Figures, Note, Page, Section, useAdmin } from '../ui';
 
 type Product = 'perps' | 'spot' | 'copy' | 'bots';
@@ -203,6 +204,7 @@ export function Fees() {
           </div>
         )}
       </Section>
+      <VipCodes />
     </Page>
   );
 }

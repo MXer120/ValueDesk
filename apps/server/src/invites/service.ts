@@ -21,10 +21,11 @@
  */
 import type { FeeProduct, FeeProgram } from '../admin/store.js';
 import type { BuilderService } from '../builder/service.js';
+import { VIP_PROGRAM_FEE } from '../builder/programs.js';
 import { dayOf } from '../builder/counting.js';
 import { MICRO } from '../builder/tiers.js';
 import {
-  CREDIT_COVER_MIN, CREDIT_FEE, REFERRED_START_USD, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIER_SHARES, TIERS, VIP_CREDIT_USD, WELCOME_CAP,
+  CREDIT_COVER_MIN, CREDIT_FEE, REFERRED_START_USD, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIER_SHARES, TIERS, VIP_CODE_DAYS, VIP_CODE_LABEL, WELCOME_CAP,
   WELCOME_CAP_DAYS, WELCOME_FEE, WELCOME_USD, type InviteMe, type InviteReferral,
 } from './claim.js';
 import { sodexOwnerOf } from './sodex.js';
@@ -37,8 +38,6 @@ const HOUR = 3_600_000;
 const ALL: FeeProduct[] = ['perps', 'spot', 'copy', 'bots'];
 /** A code SoDEX said nobody owns is asked about again after this long. */
 const NO_OWNER_MS = 10 * 60_000;
-/** How often the job looks for VIP wallets that have not had their credit yet. */
-const VIP_SWEEP_MS = 10 * 60_000;
 
 /** What an order is, by the client order id the engines give theirs (builder/tiers.ts ENGINE_ORDER_ID). */
 export function productOf(engine: 'perps' | 'spot', cl: string | null): FeeProduct {
@@ -78,7 +77,6 @@ export class InviteService {
   /** When the last tick finished: the balance reflects the ledger's counted orders up to then. */
   private tickedAt = 0;
   private readonly noOwner = new Map<string, number>();
-  private vipSweptAt = 0;
 
   constructor(
     readonly store: InviteStore,
@@ -90,12 +88,11 @@ export class InviteService {
       ownerOf?: (code: string) => Promise<string | null | undefined>;
       /** Whether a wallet is VIP now (default: as the app shows it - builder vipNow or a VIP program). */
       isVip?: (address: string) => boolean;
-      /** The wallets that are VIP now (default: the builder's vipWallets). */
-      vipWallets?: (now: number) => string[];
     } = {},
   ) {
     for (const w of store.creditWallets()) if (store.stateOf(w)?.paying) this.paying.add(w);
     builder.setExtraPrograms((address, at) => this.programsFor(address, at));
+    builder.setGiftPrograms?.((address, at) => this.giftsFor(address, at));
     builder.setPerkBudget((address, at) => this.perkBudget(address, at));
     // A wallet that joined through a referral starts at the fee tier of REFERRED_START_USD (owner 2026-11-15).
     builder.setVolumeFloor?.((address) => (this.store.joinOf(address) ? REFERRED_START_USD : 0));
@@ -117,7 +114,7 @@ export class InviteService {
     this.timer = null;
   }
 
-  /* ------------------------------------------------------------------- VIP credit ----- */
+  /* ------------------------------------------------------------------- VIP codes ----- */
 
   isVip(address: string): boolean {
     const a = address.toLowerCase();
@@ -126,29 +123,6 @@ export class InviteService {
     } catch {
       return false;
     }
-  }
-
-  /** A VIP wallet's one-time credit: given the first time it is seen VIP, never again. True when given now. */
-  grantVip(address: string, now = this.now()): boolean {
-    const a = address.toLowerCase();
-    if (this.store.hasGrant(a, 'vip') || !this.isVip(a)) return false;
-    const fresh = this.store.grant(a, 'vip', VIP_CREDIT_USD * MICRO, now);
-    if (fresh) this.switch(a, now);
-    return fresh;
-  }
-
-  /** Every VIP wallet without its credit yet gets it (the job, every VIP_SWEEP_MS). */
-  sweepVip(now = this.now()): number {
-    let n = 0;
-    let list: string[] = [];
-    try {
-      list = this.o.vipWallets ? this.o.vipWallets(now) : this.builder.vipWallets(now);
-    } catch (e) {
-      this.o.log?.warn({ err: String(e) }, 'invites: the VIP wallets could not be listed');
-    }
-    for (const w of list) if (this.grantVip(w, now)) n += 1;
-    this.vipSweptAt = now;
-    return n;
   }
 
   /* ----------------------------------------------------------------------- codes ----- */
@@ -174,14 +148,30 @@ export class InviteService {
   }
 
   /** A code as the page checks it: valid (someone's, not ValueDesk's own), and whether it brings the welcome. */
-  async check(code: string): Promise<{ valid: boolean; welcome: boolean; silent: boolean }> {
-    if (code === OURS_CODE) return { valid: false, welcome: false, silent: false };
+  async check(code: string): Promise<{ valid: boolean; welcome: boolean; vipDays: number; silent: boolean }> {
+    if (code === OURS_CODE) return { valid: false, welcome: false, vipDays: 0, silent: false };
     const owner = await this.ownerOf(code);
-    if (owner === undefined) return { valid: false, welcome: false, silent: true };
-    return owner ? { valid: true, welcome: this.welcomeOpen(owner), silent: false } : { valid: false, welcome: false, silent: false };
+    if (owner === undefined) return { valid: false, welcome: false, vipDays: 0, silent: true };
+    return owner ? { valid: true, welcome: this.welcomeOpen(owner), vipDays: this.vipDaysOf(code, owner), silent: false } : { valid: false, welcome: false, vipDays: 0, silent: false };
   }
 
   /* -------------------------------------------------------------- ledger readings ----- */
+
+  /**
+   * Days of the VIP fee a wallet joining with this code now gets: its owner is VIP (as the app shows it; not through a VIP
+   * code it joined with itself), or the code was upgraded on the dev page. 0 past the inviter's welcome cap too.
+   */
+  vipDaysOf(code: string, owner: string): number {
+    return (this.store.isVipCode(code) || this.isVip(owner)) && this.welcomeOpen(owner) ? VIP_CODE_DAYS : 0;
+  }
+
+  /** A joined wallet's VIP fee while it lasts (builder programs; never VIP standing, service.ts vipProgramOf). */
+  giftsFor(address: string, now: number): FeeProgram[] {
+    const a = address.toLowerCase();
+    const j = this.store.joinOf(a);
+    if (!j?.vipUntil || j.vipUntil <= now) return [];
+    return [{ id: 0, address: a, products: ALL, fee: VIP_PROGRAM_FEE, from: j.at, until: j.vipUntil, label: VIP_CODE_LABEL, addedAt: j.at, addedBy: 'invites' }];
+  }
 
   private cfgStore() {
     const cfg = this.builder.tiers.current();
@@ -299,7 +289,6 @@ export class InviteService {
       this.switch(w, now);
     }
     this.store.pruneSeen(now - SEEN_KEEP_MS);
-    if (now - this.vipSweptAt >= VIP_SWEEP_MS) this.sweepVip(now);
     this.tickedAt = now;
   }
 
@@ -316,8 +305,6 @@ export class InviteService {
   /** A wallet's referrals and credits, for the Referrals page. Referrals shortened: the page never names them whole. */
   me(address: string): InviteMe {
     const a = address.toLowerCase();
-    // A VIP opening the page gets its credit now, not at the next sweep.
-    try { this.grantVip(a); } catch (e) { this.o.log?.warn({ err: String(e) }, 'invites: the VIP credit could not be given'); }
     const t = this.store.totals(a);
     const join = this.store.joinOf(a);
     const life = this.lifetimeMicro(a);
@@ -352,10 +339,13 @@ export class InviteService {
       joined: join ? { inviter: short(join.inviter), code: join.code, at: join.at } : null,
       canJoin: !join && life === 0 && !this.store.hasReferrals(a),
       welcome: used === null ? null : { active: used < WELCOME_USD * MICRO, usedUsd: Math.min(WELCOME_USD, used / MICRO), leftUsd: Math.max(0, WELCOME_USD - used / MICRO), limitUsd: WELCOME_USD },
+      vipUntil: join?.vipUntil && join.vipUntil > this.now() ? join.vipUntil : null,
+      vipCode: this.isVip(a) || this.store.ownsVipCode(a),
       credits: { balanceUsd: t.balance / MICRO, earnedUsd: t.earned / MICRO, grantedUsd: t.granted / MICRO, spentUsd: t.spent / MICRO, paying: this.paying.has(a), rates: TIER_SHARES },
       stats: { referred, perpsUsd: perps / MICRO, spotUsd: spot / MICRO, earnedUsd: t.earned / MICRO },
       referrals,
-      history: this.store.history(a).map((e) => ({ at: e.at, kind: e.kind, usd: e.micro / MICRO, tier: e.tier, from: e.source ? short(e.source) : null })),
+      // The removed VIP credit: shown only for what it paid.
+      history: this.store.history(a).filter((e) => e.kind !== 'grant' || t.granted > 0).map((e) => (e.kind === 'grant' ? { ...e, micro: t.granted } : e)).map((e) => ({ at: e.at, kind: e.kind, usd: e.micro / MICRO, tier: e.tier, from: e.source ? short(e.source) : null })),
     };
   }
 }

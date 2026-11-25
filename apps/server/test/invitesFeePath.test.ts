@@ -23,7 +23,7 @@ import { copyLadderFee } from '../src/builder/tiers.js';
 import type { FeeProgram } from '../src/admin/store.js';
 import { builderRoutes } from '../src/routes/builder.js';
 import { inviteRoutes } from '../src/routes/invites.js';
-import { CREDIT_FEE, INVITE_STATEMENT, REFERRED_START_USD, PERK_HORIZON_MS, VIP_CREDIT_USD, WELCOME_FEE, WELCOME_USD } from '../src/invites/claim.js';
+import { CREDIT_FEE, INVITE_STATEMENT, REFERRED_START_USD, PERK_HORIZON_MS, WELCOME_FEE, WELCOME_USD } from '../src/invites/claim.js';
 import { inviteJoinDigest } from '../src/invites/check.js';
 import { InviteService } from '../src/invites/service.js';
 import { InviteStore } from '../src/invites/store.js';
@@ -82,7 +82,7 @@ test('the welcome: a joined wallet signs 0 on site trading in short slices, the 
   assert.ok(before.fee.perps > 0 && before.fee.spot > 0, 'a wallet that has not joined pays its tier');
   // The page checks the code, the wallet signs, the server takes the join.
   const check = await app.inject({ method: 'GET', url: '/api/vs/invites/check?code=inviter1' });
-  assert.deepEqual(check.json(), { ok: true, valid: true, welcome: true });
+  assert.deepEqual(check.json(), { ok: true, valid: true, welcome: true, vipDays: 0 });
   const joined = await app.inject({ method: 'POST', url: '/api/vs/invites/join', payload: { join: signJoin(fresh, 'INVITER1', clock.now()) } });
   assert.equal(joined.statusCode, 200, joined.body);
   assert.equal(joined.json().welcome, true);
@@ -118,45 +118,65 @@ test('the welcome: a joined wallet signs 0 on site trading in short slices, the 
   assert.equal(me.joined.code, 'INVITER1');
 });
 
-test('VIP: every VIP wallet gets $5 of credit once - sweep, page, restart - and the credit lowers its ValueDesk fee', async () => {
+test('VIP credit removed: nobody is given any, and what is left of one already given is gone without a debt', async () => {
   const vip = wallet().address;
-  const plain = wallet().address;
+  const used = wallet().address;
   const dbFile = join(tempDir('vs-invvip-'), 'invites.db');
+  const before = new InviteStore(dbFile, T0);
+  before.grant(vip, 'vip', 5e6, T0 - 2000);
+  before.grant(used, 'vip', 5e6, T0 - 2000);
+  before.take(`s:${used}`, 'o1', 1, [{ address: used, kind: 'spend', micro: 2e6, source: null, tier: null }], T0 - 1000);
+  // Later credits and spends of its own stay its own.
+  before.take(`e:x`, 'o2', 1, [{ address: used, kind: 'earn', micro: 9e6, source: 'x', tier: 1 }], T0 + 3_600_000);
+  before.take(`s:${used}`, 'o3', 1, [{ address: used, kind: 'spend', micro: 4e6, source: null, tier: null }], T0 + 3_700_000);
+  before.close();
   const program: FeeProgram = { id: 0, address: vip, products: ['perps', 'spot', 'copy', 'bots'], fee: VIP_PROGRAM_FEE, from: T0 - 1, until: T0 + 30 * 86_400_000, label: 'Beta VIP', addedAt: T0, addedBy: 'beta' };
   const w = await world({ programs: [program], dbFile });
-  assert.equal(w.inv.isVip(vip), true);
-  assert.equal(w.inv.isVip(plain), false);
-  assert.deepEqual(w.svc.vipWallets(), [vip]);
-  const tierBefore = w.terms(vip).fee.perps;
-
-  assert.equal(w.inv.sweepVip(), 1, 'given');
-  assert.equal(w.inv.sweepVip(), 0, 'never twice');
   w.inv.tick();
-  const me = (await w.app.inject({ method: 'GET', url: `/api/vs/invites/me?address=${vip}` })).json();
-  assert.equal(me.credits.balanceUsd, VIP_CREDIT_USD);
-  assert.equal(me.credits.grantedUsd, VIP_CREDIT_USD);
-  assert.equal(me.credits.earnedUsd, 0, 'not earned from referrals');
-  assert.equal(me.credits.paying, true);
-  assert.deepEqual(me.history.map((h: { kind: string; usd: number }) => [h.kind, h.usd]), [['grant', VIP_CREDIT_USD]]);
-  // The credit pays the VIP's site fee: 0.1 bp signed instead of its tier, and the executor's copy fee with a budget.
-  const t = w.terms(vip);
-  assert.ok(tierBefore > CREDIT_FEE);
-  assert.equal(t.fee.perps, CREDIT_FEE);
-  const v = await w.volume(vip);
-  assert.equal(v.fees.copy.fee, CREDIT_FEE);
-  assert.equal(v.fees.copy.budget.kind, 'credits');
-  assert.equal(v.fees.copy.budget.capUsd, VIP_CREDIT_USD);
-  // A plain wallet opening the page gets nothing.
-  const p = (await w.app.inject({ method: 'GET', url: `/api/vs/invites/me?address=${plain}` })).json();
-  assert.equal(p.credits.balanceUsd, 0);
-  assert.equal(p.history.length, 0);
+  const me = (a: string) => w.inv.me(a);
+  assert.equal(me(vip).credits.balanceUsd, 0);
+  assert.equal(me(vip).credits.grantedUsd, 0);
+  assert.equal(me(vip).credits.paying, false);
+  assert.equal(me(vip).history.length, 0);
+  assert.equal(me(used).credits.balanceUsd, 5, '9 earned - 4 of its own spent; the 2 spent of the credit stay paid');
+  assert.equal(me(used).credits.grantedUsd, 2);
+});
 
-  // A restart on the same file: the VIP is not given it again, by the sweep or by the page.
-  const again = new InviteService(new InviteStore(dbFile), w.svc, { now: w.clock.now });
-  assert.equal(again.sweepVip(), 0);
-  assert.equal(again.me(vip).credits.grantedUsd, VIP_CREDIT_USD);
-  assert.equal(again.store.history(vip).filter((h) => h.kind === 'grant').length, 1);
-  again.store.close();
+test('VIP codes: who joins a VIP\'s code, or one upgraded on the dev page, pays the VIP fee for 7 days - and is no VIP', async () => {
+  const vip = wallet();
+  const plain = wallet();
+  const [a, b, c, d] = [wallet(), wallet(), wallet(), wallet()];
+  const program: FeeProgram = { id: 0, address: vip.address, products: ['perps', 'spot', 'copy', 'bots'], fee: VIP_PROGRAM_FEE, from: T0 - 1, until: T0 + 30 * 86_400_000, label: 'Beta VIP', addedAt: T0, addedBy: 'beta' };
+  const w = await world({ programs: [program], owners: { VIPVIP11: vip.address, PLAIN111: plain.address, JOINED11: a.address } });
+  const check = async (code: string) => (await w.app.inject({ method: 'GET', url: `/api/vs/invites/check?code=${code}` })).json().vipDays;
+  const post = async (x: ReturnType<typeof wallet>, code: string) => (await w.app.inject({ method: 'POST', url: '/api/vs/invites/join', payload: { join: signJoin(x, code, w.clock.now()) } })).json();
+  const progs = (x: string) => w.svc.loweredFor(x, w.clock.now()).fees;
+  assert.equal(await check('VIPVIP11'), 7);
+  assert.equal(await check('PLAIN111'), 0);
+  const r = await post(a, 'VIPVIP11');
+  assert.equal(r.vipUntil, w.clock.now() + 7 * 86_400_000);
+  assert.equal((await post(b, 'PLAIN111')).vipUntil, null);
+  assert.equal(w.inv.giftsFor(a.address, w.clock.now())[0]!.fee, VIP_PROGRAM_FEE);
+  assert.deepEqual(w.inv.giftsFor(b.address, w.clock.now()), []);
+  // Its own code gives no VIP days on: the days are a fee, not VIP.
+  assert.equal(w.inv.isVip(a.address), false);
+  assert.equal(w.svc.vipProgramOf(a.address), null);
+  assert.equal(await check('JOINED11'), 0);
+  // The welcome is lower while it lasts; after it the VIP fee holds (standardFee: without welcome and credits).
+  assert.equal(progs(a.address).bots!.fee, 0);
+  assert.equal(w.svc.standardFee(a.address, 'bots'), 1);
+  assert.equal(w.svc.standardFee(b.address, 'bots'), 2);
+  // Upgraded on the dev page.
+  assert.equal(w.inv.store.addVipCode('PLAIN111', vip.address, w.clock.now()), true);
+  assert.equal(await check('PLAIN111'), 7);
+  assert.ok((await post(c, 'PLAIN111')).vipUntil);
+  assert.deepEqual(w.inv.store.joinsOfCode('PLAIN111', w.clock.now()), { joins: 2, vipNow: 1 });
+  assert.equal(w.inv.me(plain.address).vipCode, true);
+  // Downgraded: new joins get none, those made keep theirs.
+  w.inv.store.removeVipCode('PLAIN111');
+  assert.equal((await post(d, 'PLAIN111')).vipUntil, null);
+  assert.equal(w.inv.giftsFor(c.address, w.clock.now()).length, 1);
+  assert.deepEqual(w.inv.giftsFor(c.address, w.clock.now() + 7 * 86_400_000), []);
 });
 
 test('the routes refuse what they must: a bad signature, the own code, ValueDesk\'s code, an unknown code, a second join', async () => {
@@ -174,7 +194,7 @@ test('the routes refuse what they must: a bad signature, the own code, ValueDesk
   assert.equal((await post(signJoin(c, 'BBBB1111', clock.now()))).json().code, 'joined');
   // The code's owner now has a referral: it joins nobody.
   assert.equal((await post(signJoin(a, 'BBBB1111', clock.now()))).json().code, 'has-referrals');
-  assert.deepEqual((await app.inject({ method: 'GET', url: '/api/vs/invites/check?code=VALUEDESK' })).json(), { ok: true, valid: false, welcome: false });
-  assert.deepEqual((await app.inject({ method: 'GET', url: '/api/vs/invites/check?code=no' })).json(), { ok: true, valid: false, welcome: false });
+  assert.deepEqual((await app.inject({ method: 'GET', url: '/api/vs/invites/check?code=VALUEDESK' })).json(), { ok: true, valid: false, welcome: false, vipDays: 0 });
+  assert.deepEqual((await app.inject({ method: 'GET', url: '/api/vs/invites/check?code=no' })).json(), { ok: true, valid: false, welcome: false, vipDays: 0 });
   assert.equal((await app.inject({ method: 'GET', url: '/api/vs/invites/me?address=nope' })).statusCode, 400);
 });

@@ -154,6 +154,13 @@ export class BuilderService {
     this.extra = f;
   }
 
+  private gifts: ((address: string, now: number) => FeeProgram[]) | null = null;
+
+  /** VIP fees a wallet was given without being VIP (invites: the days of a VIP code). They lower its fee; vipProgramOf does not see them. */
+  setGiftPrograms(f: ((address: string, now: number) => FeeProgram[]) | null): void {
+    this.gifts = f;
+  }
+
   /**
    * The least volume a wallet's fee is read at (USD; invites/service.ts: a wallet that joined through a referral starts
    * at REFERRED_START_USD). Its site tier and its copy and bot ladder steps use the higher of this and its own volume.
@@ -377,12 +384,19 @@ export class BuilderService {
   }
 
   /** The wallet's running programs (never throws: an unreadable store means none; no source given, none). */
-  private programsOf(address: string, now: number, withExtra = true): FeeProgram[] {
+  private programsOf(address: string, now: number, withExtra = true, withGifts = true): FeeProgram[] {
     let out: FeeProgram[] = [];
     try {
       out = this.o.programs ? this.o.programs(address, now) : [];
     } catch (e) {
       this.o.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'builder tiers: fee programs could not be read');
+    }
+    if (withGifts && this.gifts) {
+      try {
+        out = [...out, ...this.gifts(address, now)];
+      } catch (e) {
+        this.o.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'builder tiers: gift programs could not be read');
+      }
     }
     if (withExtra && this.extra) {
       try {
@@ -434,7 +448,7 @@ export class BuilderService {
    */
   vipProgramOf(address: string, now = this.now()): FeeProgram | null {
     let best: FeeProgram | null = null;
-    for (const g of this.programsOf(address.toLowerCase(), now)) {
+    for (const g of this.programsOf(address.toLowerCase(), now, true, false)) {
       if (g.fee !== VIP_PROGRAM_FEE || g.from > now || (g.until !== null && g.until <= now)) continue;
       if (!best || (best.until !== null && (g.until === null || g.until > best.until))) best = g;
     }

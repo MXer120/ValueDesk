@@ -75,10 +75,10 @@ export async function inviteRoutes(app: FastifyInstance, opts: InviteRouteOption
     const wait = limited(req.ip, 'ir', INVITE_LIMITS.read);
     if (wait !== null) return slow(reply, wait);
     const code = normCode(String((req.query as { code?: unknown }).code ?? ''));
-    if (!CODE_RE.test(code)) return { ok: true, valid: false, welcome: false };
+    if (!CODE_RE.test(code)) return { ok: true, valid: false, welcome: false, vipDays: 0 };
     const c = await service().check(code);
     // SoDEX did not answer: the page keeps the code and the join asks again.
-    return { ok: true, valid: c.valid, welcome: c.welcome, ...(c.silent ? { unknown: true } : {}) };
+    return { ok: true, valid: c.valid, welcome: c.welcome, vipDays: c.vipDays, ...(c.silent ? { unknown: true } : {}) };
   });
 
   app.get('/api/vs/invites/me', async (req, reply) => {
@@ -102,10 +102,12 @@ export async function inviteRoutes(app: FastifyInstance, opts: InviteRouteOption
     const owner = await s.ownerOf(code);
     if (owner === undefined) return reply.code(503).send({ ok: false, code: 'sodex-silent', error: words['sodex-silent'] });
     if (owner === null) return reply.code(409).send({ ok: false, code: 'unknown-code', error: words['unknown-code'] });
-    const r = s.store.join(c.join, owner, { hasVolume: s.hasVolume(c.join.wallet), welcome: s.welcomeOpen(owner) }, now());
+    const at = now();
+    const days = s.vipDaysOf(code, owner);
+    const r = s.store.join(c.join, owner, { hasVolume: s.hasVolume(c.join.wallet), welcome: s.welcomeOpen(owner), vipUntil: days ? at + days * 86_400_000 : null }, at);
     if (r.ok) {
       if (r.fresh) app.log.info({ wallet: r.join.wallet, code: r.join.code }, 'invites: joined');
-      return { ok: true, at: r.join.at, welcome: r.join.welcome };
+      return { ok: true, at: r.join.at, welcome: r.join.welcome, vipUntil: r.join.vipUntil };
     }
     return reply.code(409).send({ ok: false, code: r.code, error: words[r.code] });
   });

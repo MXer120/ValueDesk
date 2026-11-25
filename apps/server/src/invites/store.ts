@@ -10,8 +10,9 @@
  *   seen       per builder-ledger order, how much of it was taken in already (an order that fills further later adds
  *              only the new part). Old rows go once the builder ledger let go of the order.
  *   state      per wallet: whether credits are paying now, and since when
- *   grants     credits given rather than earned, once per wallet and reason (the VIP credit): the row and its entry
- *              are written together, so a grant can never be given twice
+ *   grants     credits given rather than earned (the VIP credit, until 2026-11-25). Nothing is deleted: from the row
+ *              ('*', 'vip-removed') on, only what had been spent of them by then still counts (totals)
+ *   vip_codes  codes upgraded on the dev page: whoever joins with one gets the VIP fee for claim.ts VIP_CODE_DAYS
  */
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
@@ -67,6 +68,11 @@ CREATE TABLE IF NOT EXISTS grants (
   at INTEGER NOT NULL,
   PRIMARY KEY (address, reason)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS vip_codes (
+  code TEXT PRIMARY KEY,
+  added_at INTEGER NOT NULL,
+  added_by TEXT NOT NULL
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS state (
   address TEXT PRIMARY KEY,
   paying INTEGER NOT NULL,
@@ -75,18 +81,22 @@ CREATE TABLE IF NOT EXISTS state (
 ) WITHOUT ROWID;
 `;
 
-export interface Join { wallet: string; inviter: string; code: string; at: number; welcome: boolean }
+/** Spends of a removed grant may still reach the ledger this long after (signed fees' life, the explorer's delay). */
+const REMOVED_LATE_MS = 15 * 60_000;
+
+export interface Join { wallet: string; inviter: string; code: string; at: number; welcome: boolean; vipUntil: number | null }
+export interface VipCode { code: string; addedAt: number; addedBy: string }
 export type JoinResult = { ok: true; join: Join; fresh: boolean } | { ok: false; code: JoinRefusal };
 export interface Entry { address: string; kind: 'earn' | 'spend' | 'grant'; micro: number; source: string | null; tier: number | null }
 
 const isUnique = (e: unknown): boolean => /UNIQUE|constraint/i.test(String((e as Error).message));
-const joinOfRow = (r: { wallet: string; inviter: string; code: string; at: number | bigint; welcome?: number | bigint }): Join =>
-  ({ wallet: r.wallet, inviter: r.inviter, code: r.code, at: Number(r.at), welcome: Number(r.welcome ?? 1) === 1 });
+const joinOfRow = (r: { wallet: string; inviter: string; code: string; at: number | bigint; welcome?: number | bigint; vip_until?: number | bigint | null }): Join =>
+  ({ wallet: r.wallet, inviter: r.inviter, code: r.code, at: Number(r.at), welcome: Number(r.welcome ?? 1) === 1, vipUntil: r.vip_until === null || r.vip_until === undefined ? null : Number(r.vip_until) });
 
 export class InviteStore {
   readonly db: DatabaseSync;
 
-  constructor(path = invitesDbPath()) {
+  constructor(path = invitesDbPath(), now = Date.now()) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
@@ -94,6 +104,9 @@ export class InviteStore {
     // A file from before the tiers: the columns they added.
     const has = (t: string, c: string) => (this.db.prepare(`PRAGMA table_info(${t})`).all() as Array<{ name: string }>).some((x) => x.name === c);
     if (!has('joins', 'welcome')) this.db.exec('ALTER TABLE joins ADD COLUMN welcome INTEGER NOT NULL DEFAULT 1');
+    if (!has('joins', 'vip_until')) this.db.exec('ALTER TABLE joins ADD COLUMN vip_until INTEGER');
+    // The VIP credit ended (owner 2026-11-25), from the first start of this code on.
+    this.db.prepare("INSERT OR IGNORE INTO grants (address, reason, micro, at) VALUES ('*', 'vip-removed', 0, ?)").run(now);
     if (!has('entries', 'tier')) this.db.exec('ALTER TABLE entries ADD COLUMN tier INTEGER');
   }
 
@@ -112,16 +125,47 @@ export class InviteStore {
     this.db.prepare('INSERT INTO sodex_codes (code, owner, at) VALUES (?, ?, ?) ON CONFLICT (code) DO NOTHING').run(code, owner.toLowerCase(), now);
   }
 
+  /* ------------------------------------------------------------------- VIP codes ----- */
+
+  isVipCode(code: string): boolean {
+    return !!this.db.prepare('SELECT 1 AS x FROM vip_codes WHERE code = ?').get(code);
+  }
+
+  vipCodes(): VipCode[] {
+    return (this.db.prepare('SELECT code, added_at, added_by FROM vip_codes ORDER BY added_at DESC').all() as Array<{ code: string; added_at: number; added_by: string }>)
+      .map((r) => ({ code: r.code, addedAt: Number(r.added_at), addedBy: r.added_by }));
+  }
+
+  /** True when it was not a VIP code before. */
+  addVipCode(code: string, by: string, now: number): boolean {
+    return Number(this.db.prepare('INSERT OR IGNORE INTO vip_codes (code, added_at, added_by) VALUES (?, ?, ?)').run(code, now, by.toLowerCase()).changes) === 1;
+  }
+
+  removeVipCode(code: string): boolean {
+    return Number(this.db.prepare('DELETE FROM vip_codes WHERE code = ?').run(code).changes) === 1;
+  }
+
+  /** Wallets joined with a code, and how many of them have its VIP fee at `now`. */
+  joinsOfCode(code: string, now: number): { joins: number; vipNow: number } {
+    const r = this.db.prepare('SELECT count(*) AS n, coalesce(sum(CASE WHEN vip_until > ? THEN 1 ELSE 0 END), 0) AS v FROM joins WHERE code = ?').get(now, code) as { n: number; v: number };
+    return { joins: Number(r.n), vipNow: Number(r.v) };
+  }
+
+  /** A code of this wallet that was upgraded. */
+  ownsVipCode(owner: string): boolean {
+    return !!this.db.prepare('SELECT 1 AS x FROM vip_codes v JOIN sodex_codes c ON c.code = v.code WHERE c.owner = ? LIMIT 1').get(owner.toLowerCase());
+  }
+
   /* ------------------------------------------------------------------- joins ----- */
 
   joinOf(wallet: string): Join | null {
-    const r = this.db.prepare('SELECT wallet, inviter, code, at, welcome FROM joins WHERE wallet = ?').get(wallet.toLowerCase()) as Parameters<typeof joinOfRow>[0] | undefined;
+    const r = this.db.prepare('SELECT wallet, inviter, code, at, welcome, vip_until FROM joins WHERE wallet = ?').get(wallet.toLowerCase()) as Parameters<typeof joinOfRow>[0] | undefined;
     return r ? joinOfRow(r) : null;
   }
 
   /** The wallet's direct referrals, newest first. */
   referralsOf(inviter: string, limit = 2000): Join[] {
-    return (this.db.prepare('SELECT wallet, inviter, code, at, welcome FROM joins WHERE inviter = ? ORDER BY at DESC LIMIT ?').all(inviter.toLowerCase(), limit) as Array<Parameters<typeof joinOfRow>[0]>).map(joinOfRow);
+    return (this.db.prepare('SELECT wallet, inviter, code, at, welcome, vip_until FROM joins WHERE inviter = ? ORDER BY at DESC LIMIT ?').all(inviter.toLowerCase(), limit) as Array<Parameters<typeof joinOfRow>[0]>).map(joinOfRow);
   }
 
   hasReferrals(wallet: string): boolean {
@@ -130,7 +174,7 @@ export class InviteStore {
 
   /** Every join (the credit job walks them). */
   allJoins(): Join[] {
-    return (this.db.prepare('SELECT wallet, inviter, code, at, welcome FROM joins').all() as Array<Parameters<typeof joinOfRow>[0]>).map(joinOfRow);
+    return (this.db.prepare('SELECT wallet, inviter, code, at, welcome, vip_until FROM joins').all() as Array<Parameters<typeof joinOfRow>[0]>).map(joinOfRow);
   }
 
   /**
@@ -159,7 +203,7 @@ export class InviteStore {
    * A signed join under `inviter` (the code's owner, from SoDEX). The first join of a wallet stands; a repeat of it is
    * answered as done. `hasVolume`: the builder ledger counts volume for the wallet already.
    */
-  join(j: InviteJoin, inviter: string, o: { hasVolume: boolean; welcome: boolean }, now = Date.now()): JoinResult {
+  join(j: InviteJoin, inviter: string, o: { hasVolume: boolean; welcome: boolean; vipUntil?: number | null }, now = Date.now()): JoinResult {
     const wallet = j.wallet.toLowerCase();
     const by = inviter.toLowerCase();
     if (by === wallet) return { ok: false, code: 'self' };
@@ -169,14 +213,14 @@ export class InviteStore {
     // No loops: a wallet others joined already joins nobody (and so a chain only ever grows downwards).
     if (this.hasReferrals(wallet)) return { ok: false, code: 'has-referrals' };
     try {
-      this.db.prepare('INSERT INTO joins (wallet, inviter, code, at, nonce, issued_at, expires_at, chain_id, signature, welcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(wallet, by, j.code, now, j.nonce, Number(j.issuedAt), Number(j.expiresAt), j.chainId, j.signature, o.welcome ? 1 : 0);
+      this.db.prepare('INSERT INTO joins (wallet, inviter, code, at, nonce, issued_at, expires_at, chain_id, signature, welcome, vip_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(wallet, by, j.code, now, j.nonce, Number(j.issuedAt), Number(j.expiresAt), j.chainId, j.signature, o.welcome ? 1 : 0, o.vipUntil ?? null);
     } catch (e) {
       if (!isUnique(e)) throw e;
       const again = this.joinOf(wallet);
       return again && again.inviter === by ? { ok: true, join: again, fresh: false } : { ok: false, code: 'joined' };
     }
-    return { ok: true, join: { wallet, inviter: by, code: j.code, at: now, welcome: o.welcome }, fresh: true };
+    return { ok: true, join: { wallet, inviter: by, code: j.code, at: now, welcome: o.welcome, vipUntil: o.vipUntil ?? null }, fresh: true };
   }
 
   /* -------------------------------------------------------------- the credit ledger ----- */
@@ -225,7 +269,16 @@ export class InviteStore {
     return !!this.db.prepare('SELECT 1 AS x FROM grants WHERE address = ? AND reason = ?').get(address.toLowerCase(), reason);
   }
 
-  /** Earned (from referrals), granted, spent and the balance of a wallet, micro-USD. */
+  /** When the VIP credit was removed. */
+  private removedAt(): number {
+    const r = this.db.prepare("SELECT at FROM grants WHERE address = '*' AND reason = 'vip-removed'").get() as { at: number } | undefined;
+    return Number(r?.at ?? 0);
+  }
+
+  /**
+   * Earned (from referrals), granted, spent and the balance of a wallet, micro-USD. Granted: the removed VIP credit counts
+   * only for what it had paid by its removal, so no balance is left of it and nobody owes what it paid.
+   */
   totals(address: string): { earned: number; granted: number; spent: number; balance: number } {
     const rows = this.db.prepare('SELECT kind, sum(micro) AS m FROM entries WHERE address = ? GROUP BY kind').all(address.toLowerCase()) as Array<{ kind: string; m: number }>;
     let earned = 0;
@@ -235,6 +288,10 @@ export class InviteStore {
       if (r.kind === 'earn') earned = Number(r.m);
       else if (r.kind === 'grant') granted = Number(r.m);
       else if (r.kind === 'spend') spent = Number(r.m);
+    }
+    if (granted > 0) {
+      const r = this.db.prepare("SELECT coalesce(sum(micro), 0) AS m FROM entries WHERE address = ? AND kind = 'spend' AND at <= ?").get(address.toLowerCase(), this.removedAt() + REMOVED_LATE_MS) as { m: number };
+      granted = Math.min(granted, Number(r.m));
     }
     return { earned, granted, spent, balance: earned + granted - spent };
   }
