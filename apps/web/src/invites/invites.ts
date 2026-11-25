@@ -70,7 +70,7 @@ export function pendingInvite(now = Date.now()): Pending | null {
     const v = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<Pending> | null;
     if (!v?.code || !CODE_RE.test(v.code) || now - Number(v.at ?? 0) >= KEEP_MS) return null;
     if (readOwn().includes(v.code)) return null;
-    return { code: v.code, at: Number(v.at), welcome: v.welcome !== false };
+    return { code: v.code, at: Number(v.at), welcome: v.welcome !== false, vipDays: Number(v.vipDays) || 0 };
   } catch {
     return null;
   }

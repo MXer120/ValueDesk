@@ -61,7 +61,7 @@ export function VipCodes() {
           <div className="dv-beta__check" aria-live="polite">
             {!found.owner ? <><Pill tone="dim">Unknown</Pill><span className="dv-dim">SoDEX has no code {found.code}.</span></> : (
               <>
-                <Pill tone={found.vip || found.upgraded ? 'pos' : 'dim'}>{found.upgraded ? 'Upgraded' : found.vip ? 'Owner is VIP' : 'Normal code'}</Pill>
+                {found.vip || found.upgraded ? <span className="st-pill vip-pill">{found.upgraded ? 'Upgraded' : 'Owner is VIP'}</span> : <Pill tone="dim">Normal code</Pill>}
                 <span className="dv-dim">{found.code} of <span className="dv-mono" title={found.owner}>{short(found.owner)}</span> · {int(found.joins)} joined, {int(found.vipNow)} on the VIP fee now.</span>
                 {!found.upgraded && <button type="button" className="dv-btn dv-btn--primary" disabled={!!busy} onClick={() => void change('add', found.code)}>{busy === `add-${found.code}` ? 'Signing…' : 'Upgrade to VIP code'}</button>}
               </>

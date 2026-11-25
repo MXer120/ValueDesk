@@ -310,6 +310,7 @@ html[data-theme='light'] .onb-go:hover { filter: brightness(1.6); }
 .inv-code b { font-family: var(--font-num); font-size: 20px; font-weight: 500; letter-spacing: 0.08em; }
 .inv-perks { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 0 0 10px; padding: 0; list-style: none; }
 .inv-perks li { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: rgb(var(--ink) / 0.04); }
+.inv-perks li:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .inv-perks b { font-family: var(--font-num); font-size: 18px; font-weight: 500; color: var(--pos); }
 .inv-perks span { color: var(--muted); font-size: var(--fs-xs); line-height: 1.4; }
 .inv-perks a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
