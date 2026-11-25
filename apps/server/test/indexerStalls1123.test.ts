@@ -68,7 +68,7 @@ test('checkpoint thread: a run past runHungMs is ended and the writer told', asy
   const path = join(dir, 'i.db');
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; CREATE TABLE t (x)');
-  const c = new Checkpointer(path, (on) => seen.push(on), { everyMs: 20, hungMs: 60, runHungMs: 100, testRunHoldMs: 5_000, restartAfterMs: 60_000 });
+  const c = new Checkpointer(path, (on) => seen.push(on), { everyMs: 20, hungMs: 4_000, runHungMs: 600, testRunHoldMs: 5_000, restartAfterMs: 60_000 });
   try {
     await until('writer told', () => seen.includes(true));
     assert.match(c.state.lastError ?? '', /one run for/);
