@@ -25,9 +25,11 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   join day count, wherever it traded, so trading elsewhere cannot stretch the welcome. The builder verifier's sweep now
   also adds every fill's notional to a `traded` table.
 - **Three tiers, forever.** Of the ValueDesk builder fees a wallet really pays (the builder ledger's counted orders):
-  - **20%** go to its inviter;
-  - **7.5%** go to the inviter's inviter;
-  - **2%** go to the next one up (owner 2026-11-15; was 25 / 10 / 5%).
+  - **15%** go to its inviter;
+  - **5%** go to the inviter's inviter;
+  - **1%** go to the next one up (owner 2026-11-25; was 20 / 7.5 / 2%).
+  - An earner that is VIP when the credit is given gets **20 / 7.5 / 2%** instead (owner 2026-11-25). An upgraded code is
+    no VIP standing: its owner earns the normal shares.
 
   This lasts as long as the wallet trades.
 - **Credits** pay only the wallet's own ValueDesk builder fee. While they last, its fee is 0.1 bp on every product
@@ -56,7 +58,7 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   - a second join (the first one stands).
 - **Same browser:** codes of wallets this browser has connected are never kept or offered, which blocks casual
   self-invites.
-- **Credits come only out of fees really received:** together at most 29.5% (20 + 7.5 + 2) of a referral's fees. So
+- **Credits come only out of fees really received:** together at most 29.5% (all three VIP: 20 + 7.5 + 2; else 21%) of a referral's fees. So
   ValueDesk always keeps at least 70%, and no wallet can earn more than it brings in.
 - **No runaway lowered fee:**
   - The 0 bp welcome and the 0.1 bp credit fee are handed out 3 minutes at a time: the signed terms end with them,

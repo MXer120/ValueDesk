@@ -196,6 +196,9 @@ export function useInviteMeState(address: string | null): { me: InviteMe | null;
   return { me: v?.me ?? null, error: v?.error ?? false, loading: !!a && !v, absent: v?.absent ?? false };
 }
 
+/** VIP as the referral rates count it (a server from before `vip`: whether its code gives the VIP days). */
+export const isVipMe = (me: InviteMe | null): boolean => (me ? me.vip ?? me.vipCode === true : false);
+
 export const useInviteMe = (address: string | null): InviteMe | null => useInviteMeState(address).me;
 
 /** What is known of a wallet's join, asking nothing. */

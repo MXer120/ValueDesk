@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { keccak_256 } from '@noble/hashes/sha3';
 import type { BuilderService } from '../src/builder/service.js';
-import { CODE_RE, CREDIT_FEE, INVITE_STATEMENT, OURS_CODE, TIER_SHARES, WELCOME_CAP, WELCOME_FEE, WELCOME_USD, normCode } from '../src/invites/claim.js';
+import { CODE_RE, CREDIT_FEE, INVITE_STATEMENT, OURS_CODE, TIER_SHARES, VIP_TIER_SHARES, WELCOME_CAP, WELCOME_FEE, WELCOME_USD, normCode } from '../src/invites/claim.js';
 import { checkInviteJoin, inviteJoinDigest } from '../src/invites/check.js';
 import { InviteService, payingNext, productOf } from '../src/invites/service.js';
 import { InviteStore } from '../src/invites/store.js';
@@ -88,13 +88,14 @@ function fakeLedger() {
   return L;
 }
 
-function setup(owners: Record<string, string> = {}) {
+function setup(owners: Record<string, string> = {}, vips: ReadonlySet<string> = new Set()) {
   const L = fakeLedger();
   const s = new InviteStore(':memory:');
   const clock = { now: T0 };
   const asked: string[] = [];
   const svc = new InviteService(s, L.builder, {
     now: () => clock.now,
+    isVip: (a) => vips.has(a),
     ownerOf: async (code) => { asked.push(code); return code === 'SILENT' ? undefined : owners[code] ?? null; },
   });
   /** A wallet joins under `code` the way the route does it. */
@@ -197,7 +198,7 @@ test('the welcome: fee 0 until the wallet traded $100k on SoDEX since its join -
   assert.equal(me.joined?.code, 'INVITER1');
 });
 
-test("three tiers: 20% / 7.5% / 2% of the fees each referral pays, for as long as it trades; credits then pay the inviter's own fee", async () => {
+test("three tiers: 15% / 5% / 1% of the fees each referral pays, for as long as it trades; credits then pay the inviter's own fee", async () => {
   const [a, b, c, d] = [wallet(), wallet(), wallet(), wallet()];
   const { L, s, svc, join, clock } = setup({ AAAA1111: a.address, BBBB1111: b.address, CCCC1111: c.address });
   assert.ok((await join(b, 'AAAA1111')).ok);
@@ -221,7 +222,7 @@ test("three tiers: 20% / 7.5% / 2% of the fees each referral pays, for as long a
   // a's page: three referrals, one per tier, shortened; history with the tier.
   const me = svc.me(a.address);
   assert.deepEqual(me.stats.referred, [1, 1, 1]);
-  assert.deepEqual(me.referrals.map((r) => [r.tier, r.rate]), [[1, 0.2], [2, 0.075], [3, 0.02]]);
+  assert.deepEqual(me.referrals.map((r) => [r.tier, r.rate]), [[1, 0.15], [2, 0.05], [3, 0.01]]);
   assert.match(me.referrals[0]!.wallet, /^0x[0-9a-f]{4}…[0-9a-f]{4}$/);
   assert.ok(me.history.length > 0 && me.history.every((h) => h.kind === 'earn' && h.tier === 3));
   // c joined b, so c has its own welcome first: fee 0, nothing spent. Once it is used up, c's credits pay.
@@ -240,6 +241,25 @@ test("three tiers: 20% / 7.5% / 2% of the fees each referral pays, for as long a
   assert.ok(bud && bud.kind === 'credits' && near(bud.capUsd, after.balanceUsd) && near(bud.perUsd.bots, 3 / 100_000) && near(bud.perUsd.copy, 24 / 100_000));
 });
 
+test('a VIP earns 20% / 7.5% / 2%, each earner of a chain at its own standing; losing VIP changes only what comes after', async () => {
+  const [a, b, c, d] = [wallet(), wallet(), wallet(), wallet()];
+  const vips = new Set([b.address]);
+  const { L, svc, join } = setup({ AAAA1111: a.address, BBBB1111: b.address, CCCC1111: c.address }, vips);
+  for (const [w, code] of [[b, 'AAAA1111'], [c, 'BBBB1111'], [d, 'CCCC1111']] as const) assert.ok((await join(w, code)).ok);
+  L.traded(d.address, T0 + 1, WELCOME_USD);
+  L.trade(d.address, 'd1', T0 + 2, 15, 100_000); // $15 of fees
+  svc.tick();
+  assert.ok(near(svc.me(c.address).credits.earnedUsd, 15 * TIER_SHARES[0]), 'c is no VIP');
+  assert.ok(near(svc.me(b.address).credits.earnedUsd, 15 * VIP_TIER_SHARES[1]), 'b is');
+  assert.ok(near(svc.me(a.address).credits.earnedUsd, 15 * TIER_SHARES[2]), 'a is no VIP');
+  assert.deepEqual([svc.me(b.address).vip, svc.me(b.address).credits.rates], [true, VIP_TIER_SHARES]);
+  assert.deepEqual([svc.me(c.address).vip, svc.me(c.address).credits.rates], [false, TIER_SHARES]);
+  vips.delete(b.address);
+  L.trade(d.address, 'd2', T0 + 3, 15, 100_000);
+  svc.tick();
+  assert.ok(near(svc.me(b.address).credits.earnedUsd, 15 * VIP_TIER_SHARES[1] + 15 * TIER_SHARES[1]));
+});
+
 test('credits: a trickle does not switch them on for a fast trader; what runs past 0 is spent too (the balance goes below 0)', async () => {
   const inviter = wallet();
   const fresh = wallet();
@@ -248,10 +268,10 @@ test('credits: a trickle does not switch them on for a fast trader; what runs pa
   L.traded(fresh.address, T0 + 1, WELCOME_USD);
   // The inviter trades $1M an hour itself (at its own fee, before credits).
   L.trade(inviter.address, 'own', T0 + 10, 15, 1_000_000);
-  L.trade(fresh.address, 'p', T0 + 2, 15, 2_000); // $0.30 fee -> $0.075 credit
+  L.trade(fresh.address, 'p', T0 + 2, 15, 2_000); // $0.30 fee -> $0.045 credit
   clock.now = T0 + 60_000;
   svc.tick();
-  assert.equal(svc.me(inviter.address).credits.paying, false, '$0.075 does not cover 15 minutes of $1M an hour');
+  assert.equal(svc.me(inviter.address).credits.paying, false, '$0.045 does not cover 15 minutes of $1M an hour');
 
   // A slow trader with the same credit: on, and what it trades past 0 is spent too.
   const slow = wallet();
@@ -259,7 +279,7 @@ test('credits: a trickle does not switch them on for a fast trader; what runs pa
   const two = setup({ SLOW1111: slow.address });
   assert.ok((await two.join(f2, 'SLOW1111')).ok);
   two.L.traded(f2.address, T0 + 1, WELCOME_USD);
-  two.L.trade(f2.address, 'p', T0 + 2, 15, 2_000);
+  two.L.trade(f2.address, 'p', T0 + 2, 15, 3_000); // $0.0675 of credit
   two.clock.now = T0 + 60_000;
   two.svc.tick();
   assert.equal(two.svc.me(slow.address).credits.paying, true);

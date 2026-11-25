@@ -2,18 +2,16 @@
  * What every version of the Referrals page shares: the wallet's link and its actions, the figures, the tables, the
  * benefits and "How it works". Numbers carry the page; words stay to a line.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CREDIT_FEE, REFERRED_START_USD, TIER_SHARES, VIP_CODE_DAYS, WELCOME_CAP, WELCOME_CAP_DAYS, WELCOME_USD, type InviteMe, type InviteReferral } from '@sign/invites/claim';
+import { useEffect, useMemo, useState } from 'react';
+import { WELCOME_USD, type InviteMe, type InviteReferral } from '@sign/invites/claim';
 import { DASH, fmtUsd } from '../../format';
 import { track } from '../../analytics/usage';
 import { canShareNative, prefersNativeShare, shareNative } from '../../share/nativeShare';
 import { notify } from '../../toast';
 import { Identicon } from '../Identicon';
-import { Modal } from '../Modal';
 import { openConnectDialog } from '../account/connect';
 import { Button, EmptyState, Icon, IconButton, Panel, Segmented, Skeleton, StatusPill, type IconName } from '../bots/kit/kit';
 import { inviteLink, loadMe, loadOwnCode, useOwnCode } from '../../invites/invites';
-import { WE_GET, YOU_GET } from '../../onboarding/referralRules';
 
 const PAGE = 10;
 export const pct = (x: number) => `${Number((x * 100).toFixed(1))}%`;
@@ -28,7 +26,7 @@ export const day = (t: number) => new Date(t).toLocaleDateString('en-US', { mont
 export const welcomeText = () => fmtUsd(WELCOME_USD, 0);
 
 /** What every version draws from. `me` null: no wallet, not read yet, or this server has no referrals. */
-export interface RefView { address: string | null; me: InviteMe | null; loading: boolean; error: boolean; absent: boolean; sample: boolean; how: () => void }
+export interface RefView { address: string | null; me: InviteMe | null; loading: boolean; error: boolean; absent: boolean; sample: boolean }
 export const referredOf = (me: InviteMe | null): number | null => (me ? me.stats.referred.reduce((x, y) => x + y, 0) : null);
 
 /* --------------------------------------------------------------------- the link ----- */
@@ -109,17 +107,6 @@ export function LinkIcons({ l }: { l: LinkState }) {
         : l.canShare && <button type="button" className="rf-icon" aria-label="Share" title="Share" onClick={() => void l.share()}><Icon name="share" size={16} /></button>}
     </>
   );
-}
-
-/** One quiet line: whose code this wallet joined with, its VIP fee days, what its own link gives. */
-export function Standing({ me }: { me: InviteMe | null }) {
-  if (!me) return null;
-  const xs: ReactNode[] = [];
-  if (me.vipCode) xs.push(<b className="vip-text">Your link gives {VIP_CODE_DAYS} days of VIP fee</b>);
-  if (me.vipUntil) xs.push(<b className="vip-text">VIP fee until {day(me.vipUntil)}</b>);
-  if (me.joined) xs.push(<>Referred by {me.joined.inviter}</>);
-  if (me.welcome?.active) xs.push(<>{fmtUsd(me.welcome.leftUsd, 0)} left at $0 ValueDesk fee</>);
-  return xs.length ? <p className="rf-standing">{xs.map((x, i) => <span key={i}>{x}</span>)}</p> : null;
 }
 
 /** Why the figures are missing, if they are. */
@@ -238,30 +225,3 @@ export function Face({ seed, size }: { seed: string; size: number }) {
   return <span className="rf-face" style={{ width: size, height: size }}><Identicon seed={seed} size={Math.round(size * 0.58)} /></span>;
 }
 
-/* ---------------------------------------------------------------- how it works ----- */
-
-/**
- * The programme's current values, all of them, from the shared rules (claim.ts): the terms name this page for them
- * (owner 2026-11-14: changing a value must never need the terms signed again).
- */
-export function HowItWorks({ onClose }: { onClose: () => void }) {
-  const usd = (n: number) => `$${n.toLocaleString('en-US')}`;
-  const steps: Array<{ t: string; l: string; vip?: boolean }> = [
-    { t: 'Share your link', l: 'It is your SoDEX referral code: one link for ValueDesk and SoDEX.' },
-    { t: 'They join', l: `One free signature. No ValueDesk fee on their first ${usd(WELCOME_USD)} (${WELCOME_CAP} welcomes per link in ${WELCOME_CAP_DAYS} days), and they start at the ${usd(REFERRED_START_USD)} fee tier.` },
-    { t: 'You earn, three tiers deep', l: `${TIER_SHARES.map(pct).join(' / ')} of the ValueDesk fees paid by your referrals, theirs, and the next. For as long as they trade.` },
-    { t: 'Credits pay your fees', l: `While you have credits your ValueDesk fee is ${(CREDIT_FEE / 10).toFixed(1)} bp and credits pay the rest. Never cash, never moved.` },
-    { t: 'On SoDEX', l: `They get ${YOU_GET[0]!.title}. You get a ${WE_GET.map((b) => b.title).join(' and a ')}.` },
-    { t: 'VIP codes', l: `Join with a VIP's code and you pay the VIP fee for ${VIP_CODE_DAYS} days.`, vip: true },
-  ];
-  return (
-    <Modal open size="sm" title="How referrals work" className="dlg" onClose={onClose}>
-      <ol className="rf-how">
-        {steps.map((s, i) => (
-          <li key={s.t} className={s.vip ? 'is-vip' : undefined}><i aria-hidden="true">{i + 1}</i><div><b className={s.vip ? 'vip-text' : undefined}>{s.t}</b><small>{s.l}</small></div></li>
-        ))}
-      </ol>
-      <p className="rf-srcs">SoDEX sources: {[...new Map([...YOU_GET, ...WE_GET].map((b) => [b.source.url, b.source])).values()].map((s) => <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer">{s.label}</a>)}</p>
-    </Modal>
-  );
-}

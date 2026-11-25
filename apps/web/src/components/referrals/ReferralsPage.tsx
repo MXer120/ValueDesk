@@ -1,48 +1,42 @@
 /**
  * Referrals: the wallet's link (its own SoDEX referral code, so every wallet with a SoDEX account has one at once), what
  * it earns three tiers deep, its referrals, and its fee credits with their history. Credits pay the wallet's own
- * ValueDesk fees by themselves: there is nothing to claim.
+ * ValueDesk fees by themselves: there is nothing to claim. The page itself: GiftPage.tsx.
  *
- * Redesigned 2026-11-25 on the home page's look, in three versions (versions.tsx) while the owner picks one: on
- * localhost a pill switches between them (and fills the page with sample data); a build shows the first.
+ * On localhost a pill fills the page with made-up data, as a VIP too (devSample.ts); a build has neither.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { track } from '../../analytics/usage';
-import { useInviteMeState } from '../../invites/invites';
-import { HowItWorks, type RefView } from './parts';
+import { isVipMe, useInviteMeState } from '../../invites/invites';
+import type { RefView } from './parts';
 import { sampleMe } from './devSample';
-import { V1Steps, V2Gift, V3Network } from './versions';
+import { GiftPage } from './GiftPage';
 import '../bots/kit/kit.css';
 import '../bots/botsPages.css';
 import '../vip.css';
 import './referrals.css';
 
-const VERSIONS = [
-  { name: 'Steps', C: V1Steps },
-  { name: 'Gift', C: V2Gift },
-  { name: 'Network', C: V3Network },
-] as const;
 const DEV = import.meta.env.DEV;
-const KEY = 'vs.dev.referrals';
+const KEY = 'vs.dev.referrals.sample';
 const SEEN = (a: string) => `vd.credits.seen.${a.toLowerCase()}`;
+type Sample = 'off' | 'on' | 'vip';
+const SAMPLES: ReadonlyArray<[Sample, string]> = [['off', 'My wallet'], ['on', 'Sample'], ['vip', 'Sample VIP']];
 
-interface Pick { v: number; sample: boolean }
-function stored(): Pick {
-  if (DEV) {
-    try {
-      const p = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<Pick> | null;
-      if (p) return { v: VERSIONS[Number(p.v)] ? Number(p.v) : 0, sample: p.sample === true };
-    } catch { /* private mode */ }
+function stored(): Sample {
+  if (!DEV) return 'off';
+  try {
+    const s = localStorage.getItem(KEY);
+    return s === 'on' || s === 'vip' ? s : 'off';
+  } catch {
+    return 'off';
   }
-  return { v: 0, sample: false };
 }
 
 export function ReferralsPage({ address }: { address: string | null }) {
   const [pick, setPick] = useState(stored);
-  const [how, setHow] = useState(false);
   const real = useInviteMeState(address);
-  const sample = DEV && pick.sample;
-  const demo = useMemo(() => (sample ? sampleMe() : null), [sample]);
+  const sample = DEV && pick !== 'off';
+  const demo = useMemo(() => (sample ? sampleMe(pick === 'vip') : null), [sample, pick]);
   const { me, error, loading, absent } = demo ? { me: demo, error: false, loading: false, absent: false } : real;
   // New credit since this wallet last looked: counted once (analytics, after consent only).
   const earned = real.me?.credits.earnedUsd ?? null;
@@ -56,20 +50,13 @@ export function ReferralsPage({ address }: { address: string | null }) {
       }
     } catch { /* private mode */ }
   }, [address, earned]);
-  const choose = (p: Pick) => {
-    setPick(p);
-    try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* for this tab only */ }
-  };
-  const view: RefView = { address, me, loading, error, absent, sample, how: () => setHow(true) };
-  const V = VERSIONS[pick.v]!.C;
+  const view: RefView = { address, me, loading, error, absent, sample };
   return (
-    <div className="tf bots-page rf-page">
-      <div className="bots-col" key={pick.v}><V v={view} /></div>
-      {how && <HowItWorks onClose={() => setHow(false)} />}
+    <div className={isVipMe(me) ? 'tf bots-page rf-page is-vip' : 'tf bots-page rf-page'}>
+      <div className="bots-col"><GiftPage v={view} /></div>
       {DEV && (
-        <nav className="rf-switch" aria-label="Referral page versions" data-no-i18n="">
-          {VERSIONS.map((x, i) => <button key={x.name} type="button" aria-pressed={pick.v === i} className={pick.v === i ? 'is-on' : ''} onClick={() => choose({ ...pick, v: i })}><b>{i + 1}</b><span>{x.name}</span></button>)}
-          <button type="button" aria-pressed={sample} className={sample ? 'is-sample is-on' : 'is-sample'} onClick={() => choose({ ...pick, sample: !sample })}>{sample ? 'Sample data' : 'Sample'}</button>
+        <nav className="rf-switch" aria-label="Sample data" data-no-i18n="">
+          {SAMPLES.map(([k, t]) => <button key={k} type="button" aria-pressed={pick === k} className={pick === k ? 'is-on' : ''} onClick={() => { setPick(k); try { localStorage.setItem(KEY, k); } catch { /* this tab only */ } }}>{t}</button>)}
         </nav>
       )}
     </div>

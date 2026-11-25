@@ -10,7 +10,8 @@
  *                  site's terms. Refused: its own code, ValueDesk's own code, a wallet that traded on ValueDesk already,
  *                  a wallet that has referrals of its own (no loops), a second join (the first stands).
  *   Credits        of the ValueDesk builder fees a wallet really pays (the builder ledger's counted orders), its inviter
- *                  gets TIER_SHARES[0], the inviter's inviter TIER_SHARES[1], the next TIER_SHARES[2] - for as long as
+ *                  gets TIER_SHARES[0], the inviter's inviter TIER_SHARES[1], the next TIER_SHARES[2] (each at
+ *                  VIP_TIER_SHARES while it is VIP itself) - for as long as
  *                  it trades. Credits pay only the wallet's own ValueDesk builder fee: while they last its fee is
  *                  CREDIT_FEE and the rest is taken from them. Never paid out, never moved.
  *   Welcome        a wallet that joined pays no ValueDesk builder fee on its first WELCOME_USD of volume (all of its
@@ -19,7 +20,10 @@
  */
 
 /** Of the ValueDesk fees a wallet pays: its inviter's credit, the inviter's inviter's, the next one's. */
-export const TIER_SHARES = [0.2, 0.075, 0.02] as const; // owner 2026-11-15: 20 / 7.5 / 2% (was 25 / 10 / 5%, then 2.5% on tier 3)
+export const TIER_SHARES = [0.15, 0.05, 0.01] as const; // owner 2026-11-25: 15 / 5 / 1% (was 20 / 7.5 / 2% for everyone)
+/** The same for an earner that is VIP when the credit is given (owner 2026-11-25: "for vip its the current tiers"). */
+export const VIP_TIER_SHARES = [0.2, 0.075, 0.02] as const;
+export const sharesFor = (vip: boolean): readonly [number, number, number] => (vip ? VIP_TIER_SHARES : TIER_SHARES);
 export const TIERS = TIER_SHARES.length;
 /**
  * The builder fee while credits pay: 1 tenth of a bp. Not 0: the builder ledger sees an order only when it paid a
@@ -156,6 +160,8 @@ export interface InviteMe {
   welcome: { active: boolean; usedUsd: number; leftUsd: number; limitUsd: number } | null;
   /** The VIP fee from a VIP code: until when (null: none, or over). */
   vipUntil?: number | null;
+  /** This wallet is VIP now: it earns VIP_TIER_SHARES (absent: a server from before 2026-11-25). */
+  vip?: boolean;
   /** This wallet's own code gives the VIP days now. */
   vipCode?: boolean;
   credits: { balanceUsd: number; earnedUsd: number; grantedUsd: number; spentUsd: number; paying: boolean; rates: readonly number[] };

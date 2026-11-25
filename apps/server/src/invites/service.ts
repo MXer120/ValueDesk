@@ -3,7 +3,7 @@
  *
  * Every TICK_MS (main API only: the beta API reads the same file):
  *   earn   each referral's counted orders (builder ledger) since its join: the builder fee it paid (counted volume x
- *          the fee its order named) x TIER_SHARES[tier], onto each of up to three inviters above it;
+ *          the fee its order named) x the earner's share of that tier (sharesFor: more while it is VIP), onto each of up to three inviters above it;
  *   spend  each wallet with credits: its counted orders since credits first paid that paid less than it would have
  *          without credits (standardFee, valued now) - the difference comes off its balance;
  *   switch credits pay (the wallet's fee is CREDIT_FEE everywhere) from a balance that covers CREDIT_COVER_MIN of the
@@ -25,8 +25,8 @@ import { VIP_PROGRAM_FEE } from '../builder/programs.js';
 import { dayOf } from '../builder/counting.js';
 import { MICRO } from '../builder/tiers.js';
 import {
-  CREDIT_COVER_MIN, CREDIT_FEE, REFERRED_START_USD, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIER_SHARES, TIERS, VIP_CODE_DAYS, VIP_CODE_LABEL, WELCOME_CAP,
-  WELCOME_CAP_DAYS, WELCOME_FEE, WELCOME_USD, type InviteMe, type InviteReferral,
+  CREDIT_COVER_MIN, CREDIT_FEE, REFERRED_START_USD, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIERS, VIP_CODE_DAYS, VIP_CODE_LABEL, WELCOME_CAP,
+  WELCOME_CAP_DAYS, WELCOME_FEE, WELCOME_USD, sharesFor, type InviteMe, type InviteReferral,
 } from './claim.js';
 import { sodexOwnerOf } from './sodex.js';
 import type { InviteStore } from './store.js';
@@ -256,7 +256,13 @@ export class InviteService {
     const c = this.cfgStore();
     if (!c) return;
     const now = this.now();
-    // Earn: each referral's paid fees, a share to each inviter above it.
+    // Earn: each referral's paid fees, a share to each inviter above it, at that inviter's own standing now.
+    const vip = new Map<string, boolean>();
+    const share = (address: string, i: number) => {
+      let v = vip.get(address);
+      if (v === undefined) { v = this.isVip(address); vip.set(address, v); }
+      return sharesFor(v)[i]!;
+    };
     for (const j of this.store.allJoins()) {
       const chain = this.store.chainOf(j.wallet);
       if (!chain.length) continue;
@@ -267,7 +273,7 @@ export class InviteService {
         const delta = o.countedMicro - seen;
         if (delta <= 0) continue;
         const fee = feeMicro(delta, o.rate);
-        this.store.take(key, o.key, o.countedMicro, chain.map((address, i) => ({ address, kind: 'earn' as const, micro: fee * TIER_SHARES[i]!, source: j.wallet, tier: i + 1 })), now);
+        this.store.take(key, o.key, o.countedMicro, chain.map((address, i) => ({ address, kind: 'earn' as const, micro: fee * share(address, i), source: j.wallet, tier: i + 1 })), now);
       }
     }
     // Spend: what credits paid, valued at the fee the wallet would have paid.
@@ -309,6 +315,8 @@ export class InviteService {
     const join = this.store.joinOf(a);
     const life = this.lifetimeMicro(a);
     const earned = this.store.earnedBySource(a);
+    const vip = this.isVip(a);
+    const rates = sharesFor(vip);
     const referrals: InviteReferral[] = [];
     const referred: [number, number, number] = [0, 0, 0];
     let perps = 0;
@@ -325,7 +333,7 @@ export class InviteService {
           perps += v.perps;
           spot += v.spot;
           referrals.push({
-            wallet: short(j.wallet), tier: tier as 1 | 2 | 3, rate: TIER_SHARES[tier - 1]!, at: j.at,
+            wallet: short(j.wallet), tier: tier as 1 | 2 | 3, rate: rates[tier - 1]!, at: j.at,
             perpsUsd: v.perps / MICRO, spotUsd: v.spot / MICRO, earnedUsd: (earned.get(j.wallet) ?? 0) / MICRO, welcome: j.welcome,
           });
           next.push(j.wallet);
@@ -340,8 +348,9 @@ export class InviteService {
       canJoin: !join && life === 0 && !this.store.hasReferrals(a),
       welcome: used === null ? null : { active: used < WELCOME_USD * MICRO, usedUsd: Math.min(WELCOME_USD, used / MICRO), leftUsd: Math.max(0, WELCOME_USD - used / MICRO), limitUsd: WELCOME_USD },
       vipUntil: join?.vipUntil && join.vipUntil > this.now() ? join.vipUntil : null,
-      vipCode: this.isVip(a) || this.store.ownsVipCode(a),
-      credits: { balanceUsd: t.balance / MICRO, earnedUsd: t.earned / MICRO, grantedUsd: t.granted / MICRO, spentUsd: t.spent / MICRO, paying: this.paying.has(a), rates: TIER_SHARES },
+      vip,
+      vipCode: vip || this.store.ownsVipCode(a),
+      credits: { balanceUsd: t.balance / MICRO, earnedUsd: t.earned / MICRO, grantedUsd: t.granted / MICRO, spentUsd: t.spent / MICRO, paying: this.paying.has(a), rates },
       stats: { referred, perpsUsd: perps / MICRO, spotUsd: spot / MICRO, earnedUsd: t.earned / MICRO },
       referrals,
       // The removed VIP credit: shown only for what it paid.

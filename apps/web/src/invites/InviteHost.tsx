@@ -10,7 +10,7 @@
  * the wallet gets and what its inviter gets is said in a line each.
  */
 import { useEffect, useState } from 'react';
-import { TIER_SHARES, VIP_CODE_DAYS, WELCOME_USD } from '@sign/invites/claim';
+import { TIER_SHARES, VIP_CODE_DAYS, VIP_TIER_SHARES, WELCOME_USD } from '@sign/invites/claim';
 import { Modal } from '../components/Modal';
 import { DlgFoot } from '../components/dialogParts';
 import { browseAccepted, useAcceptanceRevision } from '../legal/acceptance';
@@ -92,7 +92,7 @@ function InviteDialog({ pending, joined: joinedAt, address, provider, onClose }:
         {(pending.vipDays ?? 0) > 0 && <li><b className="vip-text">VIP</b><span>fee for {pending.vipDays} days on everything</span></li>}
         <li><b>+5%</b><span>SoPoints with this code on SoDEX <a href="https://docs.sodex.com/sopoints/layer-1-season" target="_blank" rel="noopener noreferrer">source</a></span></li>
       </ul>
-      <p className="inv-they">Your inviter gets {Math.round(TIER_SHARES[0] * 100)}% of the ValueDesk fees you pay, as fee credits, and SoDEX's referral rebate. Nothing comes out of your trades.</p>
+      <p className="inv-they">Your inviter gets {Math.round(TIER_SHARES[0] * 100)}% ({Math.round(VIP_TIER_SHARES[0] * 100)}% as a VIP) of the ValueDesk fees you pay, as fee credits, and SoDEX's referral rebate. Nothing comes out of your trades.</p>
       <ol className="inv-steps">
         <li className={joined ? 'is-done' : ''}>
           <i aria-hidden="true">{joined ? <Check /> : 1}</i>

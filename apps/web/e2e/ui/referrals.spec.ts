@@ -74,7 +74,7 @@ h.test('a referral link: kept and taken off the address; the wallet joins with o
   await page.goto(`${origin}/referrals`, { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: 'Referrals', exact: true }).waitFor();
   await page.getByText(/Referred by/).first().waitFor({ timeout: 20_000 });
-  await page.getByText(/left at [$]0 ValueDesk fee/).first().waitFor();
+  await page.getByText(/left at [$]0 ValueDesk fee/i).first().waitFor();
   // A throwaway wallet has no SoDEX account: no code of its own yet, said so - never an endless "making your link".
   await page.getByText('Your link appears with your SoDEX account').waitFor({ timeout: 20_000 });
   assert.equal(await page.getByText('Could not read your referrals').count(), 0);

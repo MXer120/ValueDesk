@@ -2,14 +2,14 @@
  * Bots > Savings: referrals and fee credits in one card (owner 2026-11-15: "add a referral/fee credit element on the
  * savings page"). Credits pay the wallet's own ValueDesk builder fee on every product - futures, spot, copy trading and
  * bots (the server's fee programs, invites/service.ts programsFor) - so the card says so, with the link that earns them.
- * Every figure is the wallet's own from GET /api/vs/invites/me; the rates are the server's (TIER_SHARES).
+ * Every figure is the wallet's own from GET /api/vs/invites/me; the rates are the server's (sharesFor).
  */
-import { CREDIT_FEE, TIER_SHARES, type InviteMe } from '@sign/invites/claim';
+import { CREDIT_FEE, sharesFor, type InviteMe } from '@sign/invites/claim';
 import { DASH, fmtUsd } from '../../format';
 import { notify } from '../../toast';
 import { track } from '../../analytics/usage';
 import { prefersNativeShare, shareNative } from '../../share/nativeShare';
-import { inviteLink, inviteLinkShown, useOwnCode } from '../../invites/invites';
+import { inviteLink, inviteLinkShown, isVipMe, useOwnCode } from '../../invites/invites';
 import { Button, Panel, ProgressBar, Shell, ShellHeader, StatusPill } from './kit/kit';
 
 const pct = (x: number) => `${Math.round(x * 1000) / 10}%`;
@@ -52,7 +52,7 @@ export function SavingsReferral({ address, me, onOpen }: { address: string; me: 
           </span>
         </div>
         <div className="sv-ref__rates" aria-label="What you earn">
-          {TIER_SHARES.map((r, i) => (
+          {sharesFor(isVipMe(me)).map((r, i) => (
             <span key={i} className="sv-ref__rate"><span className={`sv-ref__tier is-${i + 1}`}>T{i + 1}</span><b>{pct(r)}</b><small>{i === 0 ? 'of what your referrals pay' : i === 1 ? 'of what theirs pay' : 'one level further'}</small></span>
           ))}
         </div>
