@@ -65,10 +65,10 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync, writevSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Checkpointer, type CheckpointStatus } from './checkpointer.js';
-import { WarmPool, warmThreads, type WarmActivity, type WarmFill, type WarmLiq } from './warmPool.js';
+import { WarmPool, warmThreads, type WarmActivity, type WarmBook, type WarmFill, type WarmLiq, type WarmRange } from './warmPool.js';
 import { DayScanPool, dayScanThreads, type DayScanResult } from './dayScanPool.js';
 import {
-  ACTIVITY_DAY, ACTIVITY_HOUR, CTL_WANT, FILL_UPSERT, LIQ_ADDR_INSERT, LIQ_CUR_DELETE, LIQ_CUR_INSERT, LIQ_LOG_INSERT, WRITER_DONE_META, WriterStopped, WriterThread, writerThreadOn,
+  ACTIVITY_DAY, ACTIVITY_HOUR, CTL_WANT, FILL_UPSERT, LIQ_ADDR_INSERT, LIQ_CUR_DELETE, LIQ_CUR_INSERT, LIQ_LOG_INSERT, WRITER_DONE_META, COHORT_REV_META, MEMBER_PUT, type MemberWire, WriterStopped, WriterThread, writerThreadOn,
   type ActivityWire, type LiqChangedWire, type LiqClosedWire, type WriterAnswer, type WriterPending, type WriterStatus,
 } from './writerThread.js';
 import { deviceKeyPath } from '../deviceKey.js';
@@ -589,7 +589,6 @@ const SCHEMA_TABLES: readonly string[] = [...SCHEMA.matchAll(/CREATE TABLE IF NO
  * ALTER TABLE ... ADD COLUMN with a constant default rewrites nothing (SQLite keeps the default in
  * the schema); the two indexes are one pass over each table at the first start.
  */
-const COHORT_REV_META = 'cohort_rev';
 /** The version of one venue's trader_win rows for a window (writeTraderWin moves it; traderWinVersion reads it). */
 const TRADER_WIN_META = (venue: Venue, window: BoardWindow): string => `tw|${venue}|${window}`;
 /** A new number whenever the sequence starts over (a fresh file, a restored one): a reader then loads in full. */
@@ -972,6 +971,7 @@ export class IndexStore {
   private writer: WriterThread<WriterExtra> | null = null;
   private liqWriter: WriterThread<WriterExtra> | null = null;
   private warmer: WarmPool | null = null;
+  private hadWriter = false;
   /** The writer thread's control array, while one runs: this thread's writes are counted in it (writing()). */
   private ctl: Int32Array | null = null;
   /** How long a stop waits for the writer thread to park before it ends it (writerThread.ts stopSync). */
@@ -1299,6 +1299,7 @@ export class IndexStore {
       targetMs: o.targetMs, maxRows: o.maxRows, hungMs: o.hungMs, restartAfterMs: o.restartAfterMs,
     });
     this.ctl = this.writer.ctl;
+    this.hadWriter = true;
     const warm = warmThreads();
     if (warm > 0 && !this.warmer) this.warmer = new WarmPool(this.path, this.liqFile, warm);
     // The level change log's file has a thread of its own (2026-11-23): one thread wrote both files and took the log's steps
@@ -1362,6 +1363,12 @@ export class IndexStore {
     const p = this.warmer;
     if (!p?.on || rows.length < 8) return;
     await p.warm('activity', rows.map((r): WarmActivity => [r.venue, r.acct, r.hour]));
+  }
+
+  /** The pages of these cohort rows, read by the warm-up threads first (the write itself then waits for no disk). */
+  async warmCohort(kind: 'members' | 'books', keys: ReadonlyArray<WarmBook>): Promise<void> {
+    if (!this.warmer?.on || keys.length < 8) return;
+    await this.warmer.warm(kind, keys);
   }
 
   get warmStatus(): WarmPool['state'] | null {
@@ -1435,6 +1442,10 @@ export class IndexStore {
     if (op.kind === 'liqLog') {
       const l = p.extra.liq!;
       return { ids: [...this.putLiqLog(l.t, l.newAddrs, l.changed, l.closed)] };
+    }
+    if (op.kind === 'members') {
+      this.putCohortMembers(op.venue as Venue, op.rows.slice(from).map(([address, pnl, equity, label, pnl1d, pnl7d, pnl30d]): CohortMemberRow => ({ address, pnl, equity, label, pnl1d, pnl7d, pnl30d })), op.at);
+      return {};
     }
     const spillId = op.spillId;
     this.tx(() => {
@@ -3196,6 +3207,11 @@ export class IndexStore {
     let page = DROP_SCAN_FIRST;
     for (const v of venue === 'hyperliquid' ? [venue, 'tradexyz' as Venue] : [venue]) {
       this.noteRestSpan(v, address, fromT, toT);
+      // The range's pages first (2026-11-25: this read, a page of a file larger than memory after another, was 25% of the indexer's thread).
+      if (this.warmer?.on) {
+        const range: WarmRange = [v, address, fromT, toT];
+        await this.warmer.warm('range', [range]);
+      }
       const first = this.oldestRaw(v, address);
       let gone = 0;
       let atT = fromT;
@@ -4031,12 +4047,28 @@ export class IndexStore {
   putCohortMembers(venue: Venue, rows: ReadonlyArray<CohortMemberRow>, at: number): void {
     if (!rows.length) return;
     this.tx(() => {
-      const ins = this.q(
-        'INSERT OR REPLACE INTO cohort_member (venue, address, pnl, equity, label, at, pnl_1d, pnl_7d, pnl_30d, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      );
+      const ins = this.q(MEMBER_PUT);
       let rev = this.takeRevs(rows.length);
       for (const r of rows) ins.run(venue, r.address, r.pnl, r.equity, r.label, at, r.pnl1d ?? null, r.pnl7d ?? null, r.pnl30d ?? null, rev++);
     });
+  }
+
+  /**
+   * putCohortMembers on the writer thread (2026-11-25: 18-22% of the indexer's thread was these small transactions, each
+   * waiting for the lock and the disk). Each row takes its rev in the transaction that writes it; written twice after a
+   * death, it is the same row under a newer rev. Not written by a stop: WriterStopped (the next start's pass writes it).
+   */
+  async putCohortMembersAsync(venue: Venue, rows: ReadonlyArray<CohortMemberRow>, at: number): Promise<void> {
+    if (!rows.length) return;
+    await this.warmCohort('members', rows.map((r): [string, string] => [venue, r.address]));
+    if (!this.writer?.on) {
+      if (this.hadWriter && !this.writer) throw new WriterStopped();
+      return this.putCohortMembers(venue, rows, at);
+    }
+    await this.writer.send({
+      kind: 'members', venue, at, prio: true,
+      rows: rows.map((r): MemberWire => [r.address, r.pnl, r.equity, r.label, r.pnl1d ?? null, r.pnl7d ?? null, r.pnl30d ?? null]),
+    }, rows.length, {});
   }
 
   /** Every Hyperliquid account's PnL flow since its perp PnL read, as saved (cohortTracker). */

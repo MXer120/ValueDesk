@@ -1456,7 +1456,7 @@ export class CohortTracker {
     }
     for (const a of members.keys()) saved.add(a);
     for (let i = 0; i < changed.length; i += MEMBER_SAVE_BATCH) {
-      this.d.store.putCohortMembers(venue, changed.slice(i, i + MEMBER_SAVE_BATCH), this.d.now());
+      await this.d.store.putCohortMembersAsync(venue, changed.slice(i, i + MEMBER_SAVE_BATCH), this.d.now());
       await this.breathePlan();
     }
     this.savedFrom.set(venue, members);
@@ -1971,6 +1971,10 @@ export class CohortTracker {
       const n = sync ? f.rows.length - f.i : this.flushBatch;
       const batch = f.rows.slice(f.i, f.i + n);
       const last = f.i + batch.length >= f.rows.length;
+      if (!sync) {
+        await s.warmCohort('books', batch.map((r): [string, string] => [r.venue, r.address]));
+        if (this.flushing !== f) return; // stop() finished it meanwhile
+      }
       const t0 = Date.now();
       s.putCohortBooks(batch, last ? [PRINTS_THROUGH_META, f.through] : undefined);
       f.i += batch.length;
