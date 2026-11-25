@@ -128,8 +128,11 @@ html[data-theme='light'] .rf-pass > svg { stroke: #fafafa; }
 .rf-vipnote { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 20px; font-size: 13px; color: var(--tf-faint); }
 /* a VIP: the V's point, the percentages and the credit card in gold */
 .rf-page.is-vip { --brand-point: #e0a93b; }
-.rf-page.is-vip .rf-cc { --brand-ink: #241903; --brand-point: #fff; --tf-fg: #1d1504; --tf-muted: rgba(29, 21, 4, 0.74); color: #1d1504; background: linear-gradient(130deg, #fff1c4, #f0c766 34%, #d09a36 64%, #f3d384); box-shadow: inset 0 0 0 1px rgb(255 246 216 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.7), 0 24px 50px -18px rgba(224, 169, 59, 0.45); }
-.rf-page.is-vip .rf-cc__sheen { background: linear-gradient(115deg, transparent 44%, rgb(255 255 255 / 0.45) 50%, transparent 56%); }
+/* black metal with a gold edge and gold light, not a gold block */
+.rf-page.is-vip .rf-cc { --brand-point: #e8bd62; --tf-muted: rgba(240, 222, 180, 0.66); background: radial-gradient(90% 120% at 100% 0%, rgba(224, 169, 59, 0.26), transparent 60%), linear-gradient(130deg, #2e2719, #16130d 45%, #0c0b09 72%, #211b10); box-shadow: inset 0 0 0 1px rgba(232, 189, 98, 0.42), inset 0 1px 0 rgba(255, 241, 196, 0.35), 0 24px 50px -18px rgba(0, 0, 0, 0.7); }
+.rf-page.is-vip .rf-cc > b { color: #f1d491; }
+.rf-page.is-vip .rf-cc em { color: #e8bd62; }
+.rf-page.is-vip .rf-cc__sheen { background: linear-gradient(115deg, transparent 44%, rgba(255, 225, 150, 0.13) 50%, transparent 56%); }
 /* the credit calendar */
 .rf-cal { display: flex; flex: 1; flex-direction: column; min-height: 230px; margin-top: 18px; }
 .rf-cal__top { display: flex; align-items: center; justify-content: space-between; min-height: 32px; margin-bottom: 10px; }
