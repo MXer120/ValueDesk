@@ -8,6 +8,8 @@
  *   POST /api/vs/invites/join {join}         a signed join (the invited wallet's own signature)
  *                             {terms}        the same by its terms signature: the terms window showed the code
  *
+ *   POST /api/vs/invites/claim {claim}       a signed claim of the open week's credits
+ *
  * The credit job runs on the main API only (the beta API reads the same file).
  */
 import type { FastifyInstance } from 'fastify';
@@ -15,8 +17,8 @@ import { clientKey } from '../hosted.js';
 import { KeyedLimiter, type Limit } from '../rateLimit.js';
 import { builderService, type BuilderService } from '../builder/service.js';
 import { channelFrom } from '../beta/gate.js';
-import { CODE_RE, OURS_CODE, normCode, type JoinRefusal } from '../invites/claim.js';
-import { checkInviteJoin, checkTermsJoin } from '../invites/check.js';
+import { CODE_RE, OURS_CODE, normCode, type ClaimRefusal, type JoinRefusal } from '../invites/claim.js';
+import { checkCreditClaim, checkInviteJoin, checkTermsJoin } from '../invites/check.js';
 import { InviteService, type People } from '../invites/service.js';
 import { ProfileStore } from '../profiles/store.js';
 import { InviteStore } from '../invites/store.js';
@@ -35,6 +37,12 @@ const words: Record<JoinRefusal, string> = {
   'has-volume': 'This wallet has traded on ValueDesk already: links are for new wallets.',
   'has-referrals': 'Others joined with this wallet already, so it cannot join anyone.',
   'sodex-silent': 'SoDEX did not answer. Try again in a minute.',
+};
+
+const claimWords: Record<ClaimRefusal, string> = {
+  closed: 'This week\'s claim is closed. Reload the page for the open one.',
+  nothing: 'There are no credits to claim for this week.',
+  claimed: 'This week\'s credits were claimed already.',
 };
 
 export interface InviteRouteOptions {
@@ -148,5 +156,20 @@ export async function inviteRoutes(app: FastifyInstance, opts: InviteRouteOption
     }
     s.store.count(`refused:${r.code}`, at);
     return reply.code(409).send({ ok: false, code: r.code, error: words[r.code] });
+  });
+
+  app.post('/api/vs/invites/claim', { bodyLimit: 8 * 1024 }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const wait = limited(req.ip, 'iw', INVITE_LIMITS.write);
+    if (wait !== null) return slow(reply, wait);
+    const c = checkCreditClaim((req.body as { claim?: unknown } | null)?.claim, now());
+    if (!c.ok) return reply.code(400).send({ ok: false, error: c.error });
+    const r = service().claim(c.claim);
+    if (r.ok) {
+      service().store.count('claim', now());
+      app.log.info({ wallet: c.claim.wallet, week: c.claim.week, usd: r.usd }, 'invites: credits claimed');
+      return { ok: true, usd: r.usd, week: c.claim.week };
+    }
+    return reply.code(409).send({ ok: false, code: r.code, error: claimWords[r.code] });
   });
 }

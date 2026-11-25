@@ -62,6 +62,87 @@ export const VIP_CODE_LABEL = 'VIP invite';
  */
 export const REFERRED_START_USD = 100_000;
 
+/* ------------------------------------------------------------------- the weekly claim ----- */
+
+/**
+ * Credits are claimed by the week (owner 2026-11-25: "only be claimabile every tuesday from 12utc, then the whole 7days,
+ * but only for that week"). A week runs from a Tuesday 12:00 UTC to the next, as SoDEX's own. What a wallet earned in one
+ * week it can claim from that week's end, for the 7 days until the next week ends; then the next week's claim takes its
+ * place. A claimed credit pays fees until it is used up, however long that takes. Credits from before the claims began
+ * (the store's 'claims-from') needed none and keep paying.
+ */
+export const WEEK_MS = 7 * 86_400_000;
+/** A Tuesday, 12:00 UTC (SoDEX's Layer 1 Season began on it). */
+export const WEEK_ANCHOR = Date.UTC(2026, 8, 1, 12);
+export const weekOf = (t: number): number => Math.floor((t - WEEK_ANCHOR) / WEEK_MS);
+export const weekStart = (week: number): number => WEEK_ANCHOR + week * WEEK_MS;
+/** The week whose claim is open at `t`: the one that ended last. Open until `closesAt`. */
+export const claimWindow = (t: number): { week: number; opensAt: number; closesAt: number } => {
+  const now = weekOf(t);
+  return { week: now - 1, opensAt: weekStart(now), closesAt: weekStart(now + 1) };
+};
+
+export const CLAIM_DOMAIN = { name: 'ValueDesk Credits', version: '1' } as const;
+export const CLAIM_STATEMENT = 'Claim my ValueDesk fee credits of this week. Free: a signature, never a transaction.';
+export const CLAIM_TYPE = 'CreditClaim(address wallet,uint64 week,string statement,string nonce,uint64 issuedAt,uint64 expiresAt)';
+
+export interface CreditClaim {
+  wallet: string;
+  week: number;
+  statement: string;
+  nonce: string;
+  issuedAt: string;
+  expiresAt: string;
+  chainId: number;
+  signature: string;
+}
+
+/** The typed data the wallet signs to claim (eth_signTypedData_v4). */
+export function claimTypedData(c: Omit<CreditClaim, 'signature'>) {
+  return {
+    domain: { name: CLAIM_DOMAIN.name, version: CLAIM_DOMAIN.version, chainId: c.chainId, verifyingContract: INVITE_ZERO_ADDRESS },
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      CreditClaim: [
+        { name: 'wallet', type: 'address' },
+        { name: 'week', type: 'uint64' },
+        { name: 'statement', type: 'string' },
+        { name: 'nonce', type: 'string' },
+        { name: 'issuedAt', type: 'uint64' },
+        { name: 'expiresAt', type: 'uint64' },
+      ],
+    },
+    primaryType: 'CreditClaim' as const,
+    message: { wallet: c.wallet.toLowerCase(), week: String(c.week), statement: c.statement, nonce: c.nonce, issuedAt: c.issuedAt, expiresAt: c.expiresAt },
+  };
+}
+
+/** Why a claim is refused. */
+export type ClaimRefusal = 'closed' | 'nothing' | 'claimed';
+
+/** A wallet's claim as /api/vs/invites/me answers it. */
+export interface InviteClaims {
+  /** The week whose claim is open now, what it holds, and whether it was claimed. */
+  week: number;
+  opensAt: number;
+  closesAt: number;
+  usd: number;
+  claimed: boolean;
+  /** Earned in the week that runs now: claimable from `closesAt` on. */
+  pendingUsd: number;
+  /** Claimed so far, and what lapsed unclaimed. */
+  claimedUsd: number;
+  lapsedUsd: number;
+}
+
+/** One UTC day of a wallet's credit ledger: every day there is, summed (the history lists only the newest entries). */
+export interface CreditDay { day: number; kind: 'earn' | 'spend' | 'claim'; tier: number | null; usd: number }
+
 /** ValueDesk's own SoDEX code: it refers nobody on ValueDesk (its fees are ValueDesk's). */
 export const OURS_CODE = 'VALUEDESK';
 /** A SoDEX referral code, upper case. */
@@ -140,8 +221,8 @@ export interface InviteReferral {
 
 export interface InviteEntry {
   at: number;
-  /** earn: a share of a referral's fee; spend: a fee credits paid; grant: credit given (the VIP credit). */
-  kind: 'earn' | 'spend' | 'grant';
+  /** earn: a share of a referral's fee; spend: a fee credits paid; grant: credit given (the VIP credit); claim: a week's credits claimed. */
+  kind: 'earn' | 'spend' | 'grant' | 'claim';
   usd: number;
   tier: number | null;
   /** The referral it came from, shortened (earn only). */
@@ -168,4 +249,8 @@ export interface InviteMe {
   stats: { referred: [number, number, number]; perpsUsd: number; spotUsd: number; earnedUsd: number };
   referrals: InviteReferral[];
   history: InviteEntry[];
+  /** The weekly claim (absent: a server from before it - credits apply by themselves there). */
+  claims?: InviteClaims;
+  /** The whole ledger by UTC day (absent: as above). */
+  days?: CreditDay[];
 }

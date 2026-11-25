@@ -15,9 +15,9 @@
  * - The wallet signs a plain text message, SoDEX's own: "Confirm wallet to reveal your SoDEX referral code. No
  *   blockchain transaction or gas fee will occur." The relay refuses any other text (SIGN_IN_TEXT), so it can never
  *   carry a signature over an order, a transfer or anything else.
- * - The token SoDEX returns reads points, referral lists and notifications. Every order, transfer and withdrawal on
- *   SoDEX needs an EIP-712 signature by the wallet or one of its API keys, which the token is not and which this
- *   process never sees.
+ * - The token SoDEX returns reads points, referral lists and notifications, and can make SoDEX pay a wallet's own
+ *   referral rebates out to that same wallet (it takes no address). Every order, transfer and withdrawal on SoDEX needs
+ *   an EIP-712 signature by the wallet or one of its API keys, which the token is not and which this process never sees.
  * - `type` is fixed to 'sign_in' and `autoSign` to false: a caller cannot turn this into a terms acceptance or a
  *   session that signs by itself.
  * - Nothing is kept: no token, address, message or signature is stored or logged. The answer carries only the token.

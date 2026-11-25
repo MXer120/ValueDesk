@@ -1,69 +1,110 @@
-/** Credits earned over time, from the wallet's credit history: a step line, the value under the pointer. */
-import { useId, useMemo, useState } from 'react';
-import type { InviteMe } from '@sign/invites/claim';
-import { credit, day, signedUsd } from './parts';
+/**
+ * Rewards over time - USDC rebates from SoDEX and ValueDesk fee credits as two step lines on one scale, both values under
+ * the pointer - and SoPoints by week as bars.
+ */
+import { useId, useMemo, useState, type ReactNode } from 'react';
+import type { LinePoint } from '../../invites/sodexRewards';
+import type { AnyWeek } from '../sodex/soPointsV2';
+import { DAY_MS, scoredWeeks, valueAt } from './calendar';
+import { credit, day, whole } from './parts';
 
 const W = 600;
 const H = 200;
 
-export function EarnChart({ me }: { me: InviteMe | null }) {
+/** Where the pointer is, as a share of the width. */
+const shareOf = (e: React.PointerEvent<HTMLElement>): number => {
+  const r = e.currentTarget.getBoundingClientRect();
+  return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+};
+const path = (line: readonly LinePoint[], X: (t: number) => number, Y: (v: number) => number, t1: number): string =>
+  line.length ? `M0 ${Y(0)}` + line.map((p) => `H${X(p.t)}V${Y(p.v)}`).join('') + `H${X(t1)}` : '';
+
+export function Empty({ children, steps }: { children: ReactNode; steps?: boolean }) {
+  return (
+    <div className="rfc is-empty">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true"><path d={steps ? 'M0 190V150H70V190M100 190V120H170V190M200 190V140H270V190M300 190V90H370V190M400 190V60H470V190M500 190V30H570V190' : 'M0 178H110V160H210V142H330V104H430V72H520V38H600'} /></svg>
+      <p>{children}</p>
+    </div>
+  );
+}
+
+/** `usdc` null: not signed in to SoDEX - only the credits are drawn, and nothing is said of USDC. */
+export function RewardsChart({ usdc, credits, now }: { usdc: LinePoint[] | null; credits: LinePoint[]; now: number }) {
   const id = useId();
   const [at, setAt] = useState<number | null>(null);
-  const pts = useMemo(() => {
-    const earns = (me?.history ?? []).filter((h) => h.kind === 'earn').sort((a, b) => a.at - b.at);
-    if (!me || !earns.length) return null;
-    // The history may not reach back to the first credit: the line starts at what was earned before it.
-    let sum = Math.max(0, me.credits.earnedUsd - earns.reduce((x, e) => x + e.usd, 0));
-    const t0 = earns[0]!.at;
-    const t1 = Math.max(Date.now(), t0 + 86_400_000);
-    const top = Math.max(me.credits.earnedUsd, sum + 1e-9);
-    const X = (t: number) => ((t - t0) / (t1 - t0)) * W;
-    const Y = (v: number) => H - 6 - (v / top) * (H - 24);
-    const xs: Array<{ x: number; y: number; t: number; v: number; from: string | null; usd: number }> = [];
-    for (const e of earns) { sum += e.usd; xs.push({ x: X(e.at), y: Y(sum), t: e.at, v: sum, from: e.from, usd: e.usd }); }
-    const start = Y(xs[0]!.v - earns[0]!.usd);
-    const line = `M0 ${start}` + xs.map((p) => `H${p.x}V${p.y}`).join('') + `H${W}`;
-    return { xs, line, t0 };
-  }, [me]);
-  if (!pts) {
-    return (
-      <div className="rfc is-empty">
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true"><path d="M0 178H110V160H210V142H330V104H430V72H520V38H600" /></svg>
-        <p>Your credits draw here from your first referral.</p>
-      </div>
-    );
-  }
+  const g = useMemo(() => {
+    const times = [...new Set([...(usdc ?? []).map((p) => p.t), ...credits.map((p) => p.t)])].sort((a, b) => a - b);
+    const top = Math.max(0, ...(usdc ?? []).map((p) => p.v), ...credits.map((p) => p.v));
+    if (!times.length || top <= 0) return null;
+    // A little before the first one, so the line starts at 0.
+    const first = Math.min(times[0]!, now - DAY_MS);
+    const t0 = first - (now - first) * 0.04;
+    const X = (t: number) => ((t - t0) / Math.max(1, now - t0)) * W;
+    const Y = (v: number) => H - 4 - (v / top) * (H - 22);
+    return { times: [t0, ...times, ...(times[times.length - 1] === now ? [] : [now])], t0, X, Y, c: path(credits, X, Y, now), u: usdc ? path(usdc, X, Y, now) : '' };
+  }, [usdc, credits, now]);
+  if (!g) return <Empty>Your rewards draw here from your first referral.</Empty>;
   const read = (e: React.PointerEvent<HTMLDivElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - r.left) / r.width) * W;
-    let best = 0;
-    pts.xs.forEach((q, i) => { if (Math.abs(q.x - x) < Math.abs(pts.xs[best]!.x - x)) best = i; });
-    setAt(best);
+    const t = g.t0 + shareOf(e) * (now - g.t0);
+    setAt(g.times.reduce((b, x) => (Math.abs(x - t) < Math.abs(b - t) ? x : b), g.times[0]!));
   };
-  const p = at === null ? null : pts.xs[at]!;
+  const uv = at === null || !usdc ? null : valueAt(usdc, at);
+  const cv = at === null ? null : valueAt(credits, at);
+  const left = at === null ? 0 : (g.X(at) / W) * 100;
   return (
-    <div
-      className="rfc"
-      role="img"
-      aria-label={`Credits earned: ${signedUsd(pts.xs[pts.xs.length - 1]!.v)}`}
-      onPointerDown={read}
-      onPointerMove={read}
-      onPointerLeave={() => setAt(null)}
-    >
+    <div className="rfc" role="img" aria-label="Rewards over time" onPointerDown={read} onPointerMove={read} onPointerLeave={() => setAt(null)}>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
-        <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--pos)" stopOpacity="0.26" /><stop offset="1" stopColor="var(--pos)" stopOpacity="0" /></linearGradient></defs>
+        <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--pos)" stopOpacity="0.24" /><stop offset="1" stopColor="var(--pos)" stopOpacity="0" /></linearGradient></defs>
         {[0.25, 0.5, 0.75].map((k) => <path key={k} className="rfc__g" d={`M0 ${H * k}H${W}`} />)}
-        <path d={`${pts.line}V${H}H0Z`} fill={`url(#${id})`} />
-        <path className="rfc__l" d={pts.line} />
+        {g.c && <path d={`${g.c}V${H}H0Z`} fill={`url(#${id})`} />}
+        {g.c && <path className="rfc__l is-credit" d={g.c} />}
+        {g.u && <path className="rfc__l is-usdc" d={g.u} />}
       </svg>
-      {p && <span className="rfc__x" style={{ left: `${(p.x / W) * 100}%` }} />}
-      {p && <span className="rfc__d" style={{ left: `${(p.x / W) * 100}%`, top: `calc((100% - 24px) * ${p.y / H})` }} />}
-      {p && (
-        <span className="rfc__tip" style={{ left: `clamp(64px, ${(p.x / W) * 100}%, calc(100% - 64px))` }}>
-          <b>{signedUsd(p.v)}</b><small>+{credit(p.usd)}{p.from ? ` · ${p.from}` : ''}</small><small>{day(p.t)}</small>
+      {at !== null && <span className="rfc__x" style={{ left: `${left}%` }} />}
+      {at !== null && cv !== null && <span className="rfc__d is-credit" style={{ left: `${left}%`, top: `calc((100% - 24px) * ${g.Y(cv) / H})` }} />}
+      {at !== null && uv !== null && <span className="rfc__d is-usdc" style={{ left: `${left}%`, top: `calc((100% - 24px) * ${g.Y(uv) / H})` }} />}
+      {at !== null && cv !== null && (
+        <span className="rfc__tip" style={{ left: `clamp(86px, ${left}%, calc(100% - 86px))` }}>
+          <small>{day(at)}</small>
+          {uv !== null && <span className="is-usdc"><i />USDC<b>{credit(uv)}</b></span>}
+          <span className="is-credit"><i />Fee credits<b>{credit(cv)}</b></span>
         </span>
       )}
-      <span className="rfc__ax"><i>{day(pts.t0)}</i><i>Today</i></span>
+      <span className="rfc__ax"><i>{day(g.t0)}</i><i>Today</i></span>
+    </div>
+  );
+}
+
+const PARTS = [['referral', 'Invited'], ['own', 'Own'], ['boost', 'Boost']] as const;
+
+/** Every week SoDEX has scored, both seasons: what came from invitees, from the wallet itself and from its squads. */
+export function PointsChart({ weeks }: { weeks: readonly AnyWeek[] }) {
+  const [at, setAt] = useState<number | null>(null);
+  const ws = useMemo(() => scoredWeeks(weeks), [weeks]);
+  const top = Math.max(0, ...ws.map((w) => w.split.week.points));
+  if (!ws.length || top <= 0) return <Empty steps>Your SoPoints draw here from your first scored week.</Empty>;
+  const w = at === null ? null : ws[Math.min(at, ws.length - 1)]!;
+  const step = 100 / ws.length;
+  // At most eight labels.
+  const every = Math.ceil(ws.length / 8);
+  const read = (e: React.PointerEvent<HTMLDivElement>) => setAt(Math.min(ws.length - 1, Math.floor(shareOf(e) * ws.length)));
+  return (
+    <div className="rfc is-bars" role="img" aria-label="SoPoints by week" onPointerDown={read} onPointerMove={read} onPointerLeave={() => setAt(null)}>
+      <div className="rfc__bars" aria-hidden="true">
+        {ws.map((x, i) => (
+          <span key={x.key} className={at === i ? 'is-on' : undefined}>
+            <span style={{ height: `${Math.max(1.5, (x.split.week.points / top) * 100)}%` }}>{PARTS.map(([k]) => x.split[k] > 0 && <i key={k} className={`is-${k}`} style={{ flexGrow: x.split[k] }} />)}</span>
+          </span>
+        ))}
+      </div>
+      {w && at !== null && (
+        <span className="rfc__tip" style={{ left: `clamp(86px, ${step * (at + 0.5)}%, calc(100% - 86px))` }}>
+          <small>{w.name}</small>
+          <span><i />All<b>{whole(w.split.week.points)}</b></span>
+          {PARTS.map(([k, l]) => <span key={k} className={`is-${k}`}><i />{l}<b>{whole(w.split[k])}</b></span>)}
+        </span>
+      )}
+      <span className="rfc__ax is-cells">{ws.map((x, i) => <i key={x.key}>{i % every === 0 ? x.short : ''}</i>)}</span>
     </div>
   );
 }

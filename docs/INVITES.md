@@ -55,7 +55,17 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   - left: the link, a "how it pays" banner, stats and a referrals table;
   - right: credit balance, credits earned, the welcome, and credit history.
 
-  There is nothing to claim: credits apply by themselves.
+  Since 2026-11-25 (owner) the page is the Gift page: the link, what each side gets, the weekly claim, the rewards over
+  time (USDC and credits, or SoPoints), traders and history.
+- **Weekly claim** (owner 2026-11-25): the credits earned from Tuesday 12:00 UTC to the next are claimable for the 7 days
+  after, once, by one free signature (`CreditClaim`, EIP-712, no chain), and only then pay fees. A week not claimed in its
+  7 days lapses; nothing is deleted from the ledger, so a lapsed week can be given back. Credits from before the first start
+  of this code (`claims-from`) need no claim. The rules: `claim.ts` (claimWindow), `store.ts` (totals, claim, lapsedMicro).
+- **SoDEX's rewards** on the same page: USDC rebates (10%) and SoPoints (25%) of the wallet's SoDEX invitees, read from SoDEX
+  in the browser with the wallet's SoDEX sign-in (the SoPoints page's, about 15 days) and, for what was claimed, from SoDEX's
+  contract on ValueChain. SoDEX settles on Saturday 00:00 UTC and pays from Tuesday on (its contract's weekly root: 09:38 to
+  10:51 UTC on 2026-11-03, -10, -17, -24), from $1, to wallets with $2,000 of volume; what is not claimed stays there. The
+  claim is SoDEX's own call and pays the signed-in wallet. No server of ours is in it. Code: `apps/web/src/invites/sodexRewards.ts`.
 
 ## Why it cannot be gamed
 
@@ -124,7 +134,7 @@ pay themselves, plus one welcome per wallet, without a limit on wallets. The ter
   - `sodex.ts`: the code's owner from SoDEX;
   - `store.ts`: `invites.db`;
   - `service.ts`: tiers, welcome, switch, perkBudget.
-- `routes/invites.ts`: `/api/vs/invites/{check,me,join}`.
+- `routes/invites.ts`: `/api/vs/invites/{check,me,join,claim}`.
 - BuilderService: `setExtraPrograms`, `setPerkBudget`, `standardFee`. `/api/vs/builder/volume` sends the budget with
   invite perks.
 - BuilderStore: `traded`, `tradedMicro`, `readThrough`, `oldestOpen`; the verifier fills `traded`.

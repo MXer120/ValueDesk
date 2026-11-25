@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { WELCOME_USD, type InviteMe, type InviteReferral } from '@sign/invites/claim';
 import { DASH, fmtUsd } from '../../format';
+import { localize } from '../../numStyle';
 import { track } from '../../analytics/usage';
 import { canShareNative, prefersNativeShare, shareNative } from '../../share/nativeShare';
 import { notify } from '../../toast';
@@ -14,20 +15,23 @@ import { Button, EmptyState, Icon, IconButton, Panel, Segmented, Skeleton, Statu
 import { inviteLink, loadMe, loadOwnCode, useOwnCode } from '../../invites/invites';
 
 const PAGE = 10;
-export const pct = (x: number) => `${Number((x * 100).toFixed(1))}%`;
-export const usd2 = (n: number) => `${n < 0 ? '−' : ''}$${Math.abs(n).toFixed(2)}`;
+/* Every figure in the reader's own number style (numStyle.ts), as the rest of the app. */
+export const pct = (x: number) => localize(`${Number((x * 100).toFixed(1))}%`);
+export const whole = (n: number) => localize(Math.round(n).toLocaleString('en-US'));
+const grouped = (n: number, d: number) => n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+export const usd2 = (n: number) => localize(`${n < 0 ? '−' : ''}$${grouped(Math.abs(n), 2)}`);
 /** +$396.32 for something earned, $0.00 for nothing (no plus on zero). */
 export const signedUsd = (n: number) => (n > 0 ? `+${usd2(n)}` : usd2(n));
 /** A credit: cents from a dollar on, else four places (a referral's first credits are fractions of a cent). */
-export const credit = (n: number) => `${n < 0 ? '−' : ''}$${Math.abs(n).toFixed(Math.abs(n) >= 1 || n === 0 ? 2 : 4)}`;
+export const credit = (n: number) => localize(`${n < 0 ? '−' : ''}$${grouped(Math.abs(n), Math.abs(n) >= 1 || n === 0 ? 2 : 4)}`);
 /** $53.9M, $2.57M, $48.9K, $140. */
-export const compact = (n: number) => (n >= 1e9 ? `$${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `$${(n / 1e6).toFixed(n >= 1e7 ? 1 : 2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(n >= 1e4 ? 1 : 2)}K` : `$${n.toFixed(0)}`);
+const cut = (x: number) => x.toFixed(x >= 100 ? 0 : x >= 10 ? 1 : 2);
+export const compact = (n: number) => localize(n >= 1e9 ? `$${cut(n / 1e9)}B` : n >= 1e6 ? `$${cut(n / 1e6)}M` : n >= 1e3 ? `$${cut(n / 1e3)}K` : `$${n.toFixed(0)}`);
 export const day = (t: number) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 export const welcomeText = () => fmtUsd(WELCOME_USD, 0);
 
 /** What every version draws from. `me` null: no wallet, not read yet, or this server has no referrals. */
 export interface RefView { address: string | null; me: InviteMe | null; loading: boolean; error: boolean; absent: boolean; sample: boolean }
-export const referredOf = (me: InviteMe | null): number | null => (me ? me.stats.referred.reduce((x, y) => x + y, 0) : null);
 
 /* --------------------------------------------------------------------- the link ----- */
 
@@ -173,42 +177,13 @@ export function ReferralTable({ rows }: { rows: InviteReferral[] | null }) {
   );
 }
 
-function Pager({ page, pages, onPage }: { page: number; pages: number; onPage: (p: number) => void }) {
+export function Pager({ page, pages, onPage }: { page: number; pages: number; onPage: (p: number) => void }) {
   return (
     <div className="bots-pager">
       <IconButton icon="arrowLeft" label="Previous page" disabled={page === 0} onClick={() => onPage(page - 1)} />
       <span>Page {page + 1} / {pages}</span>
       <IconButton icon="arrowRight" label="Next page" disabled={page >= pages - 1} onClick={() => onPage(page + 1)} />
     </div>
-  );
-}
-
-export function History({ me, loading }: { me: InviteMe | null; loading: boolean }) {
-  const [page, setPage] = useState(0);
-  const rows = me?.history ?? [];
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE));
-  return (
-    <Panel className="rf-hist">
-      {loading ? <div className="rf-skel-rows">{[0, 1, 2].map((i) => <Skeleton key={i} className="rf-skel-row" />)}</div> : !rows.length ? (
-        <EmptyState compact icon="clock" title="No credits yet" />
-      ) : (
-        <>
-          <table className="bots-table rf-tbl is-hist">
-            <thead><tr><th>Time</th><th>Type</th><th className="right">Credit</th></tr></thead>
-            <tbody>
-              {rows.slice(page * PAGE, page * PAGE + PAGE).map((h, i) => (
-                <tr key={`${h.at}-${i}`}>
-                  <td className="dim">{day(h.at)}</td>
-                  <td>{h.kind === 'earn' ? <span className="rf-type"><span className={`rf-tier is-${h.tier ?? 1}`}>T{h.tier ?? 1}</span>{h.from}</span> : h.kind === 'grant' ? <span className="rf-type"><b className="vip-text">VIP credit</b></span> : <span className="rf-type">Fees paid</span>}</td>
-                  <td className={`right num ${h.kind === 'spend' ? 'dim' : h.kind === 'grant' ? '' : 'pos'}`}>{h.kind === 'grant' ? <b className="vip-text">+{credit(h.usd)}</b> : <>{h.kind === 'spend' ? '−' : '+'}{credit(h.usd)}</>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {pages > 1 && <Pager page={page} pages={pages} onPage={setPage} />}
-        </>
-      )}
-    </Panel>
   );
 }
 

@@ -83,6 +83,7 @@ export const FEATURES: Readonly<Record<string, string>> = {
   'invite.copy': 'Copied or shared an invite link',
   'invite.bind': 'Joined with an invite',
   'credits.earn': 'Saw new fee credits',
+  'rewards.claim': 'Claimed weekly rewards',
   'settings.change': 'Changed a setting',
   'theme.change': 'Changed the theme',
   'privacy.toggle': 'Toggled privacy mode',

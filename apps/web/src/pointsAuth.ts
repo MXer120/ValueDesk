@@ -11,8 +11,9 @@
  * auth host answers no browser on this origin. The relay passes SoDEX's own sign-in text only ("Confirm wallet to
  * reveal your SoDEX referral code. No blockchain transaction or gas fee will occur."), keeps nothing and answers with
  * the token alone. The token (~15 days at SoDEX) is then used from this browser straight against
- * `alpha-biz.sodex.dev`, which allows this site. It reads points; it cannot move funds - every order, transfer and
- * withdrawal needs the wallet's or an API key's signature.
+ * `alpha-biz.sodex.dev`, which allows this site. It reads points and referral rewards and can make SoDEX pay the wallet's
+ * own referral rebates to that wallet (the Claim button, invites/sodexRewards.ts); it cannot move funds - every order,
+ * transfer and withdrawal needs the wallet's or an API key's signature.
  */
 import { signMessage, type Eip1193Provider } from './wallet';
 import { assertPointsSigninLive } from './sodexProgrammes';

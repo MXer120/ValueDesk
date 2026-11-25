@@ -24,7 +24,8 @@
  *   copy-key      CopyRequest 'create-key'      (an executor makes the copy key it
  *                                                then asks SoDEX to register: copy/live.ts approveKey)
  *   invite-join   InviteJoin                    (joining with a referral link: invites/invites.ts)
- * Every transaction, every personal_sign and any other typed data is refused
+ *   credit-claim  CreditClaim                   (claiming a week's fee credits: invites/invites.ts)
+ * Every transaction, every personal_sign (but a text a spec allows by `messages`) and any other typed data is refused
  * (EIP-1193 4100) and recorded, so a spec can assert both what was signed and
  * that nothing else was asked for. A kind in `reject` is answered as a user
  * clicking Reject would (4001): the flow runs to the wallet, and nothing is signed.
@@ -33,8 +34,8 @@ import type { BrowserContext, Page } from 'playwright-core';
 import { generatePrivateKey } from 'viem/accounts';
 import { createKeyProvider, type KeyProvider, type ProviderEvent, type TypedDataSeen } from '../live/provider';
 
-export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo' | 'username' | 'vip-move' | 'day-key' | 'invite-join';
-export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo', 'username', 'vip-move', 'day-key', 'invite-join'];
+export type Signable = 'trading-key' | 'builder' | 'site-terms' | 'copy-terms' | 'copy-sign-in' | 'copy-key' | 'algo' | 'username' | 'vip-move' | 'day-key' | 'invite-join' | 'credit-claim';
+export const SIGNABLE: readonly Signable[] = ['trading-key', 'builder', 'site-terms', 'copy-terms', 'copy-sign-in', 'copy-key', 'algo', 'username', 'vip-move', 'day-key', 'invite-join', 'credit-claim'];
 
 /** Which of the allowed signatures this typed data is, or null. */
 export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): Signable | null {
@@ -42,6 +43,7 @@ export function signableOf(td: Pick<TypedDataSeen, 'primaryType' | 'message'>): 
   if (td.primaryType === 'ApproveBuilderFeeAction') return 'builder';
   if (td.primaryType === 'UsernameChange') return 'username';
   if (td.primaryType === 'InviteJoin') return 'invite-join';
+  if (td.primaryType === 'CreditClaim') return 'credit-claim';
   if (td.primaryType === 'CopyRequest') {
     const action = (td.message as { action?: unknown }).action;
     if (action === 'accept-site-terms') return 'site-terms';
@@ -76,6 +78,8 @@ export interface TestWallet {
   reject: Set<Signable>;
   /** Narrow the policy for one step (default: all of SIGNABLE). */
   allow: Set<Signable>;
+  /** The only personal_sign text this step may sign (default: none). */
+  messages: RegExp | null;
   /** Install the wallet in a context: every page opened in it from now on has it. */
   install(ctx: BrowserContext): Promise<void>;
   /** The records since `mark()` (or all), optionally only signatures. */
@@ -146,6 +150,7 @@ export function createTestWallet(o: { privateKey?: string } = {}): TestWallet {
     log,
     reject: new Set(),
     allow: new Set(SIGNABLE),
+    messages: null,
     since: (mark = 0) => log.slice(mark),
     mark: () => log.length,
     async install(ctx) {
@@ -216,7 +221,7 @@ export function createTestWallet(o: { privateKey?: string } = {}): TestWallet {
         if (!wallet.allow.has(kind)) return `${kind} is not allowed in this step`;
         return null;
       },
-      message: () => 'the UI specs never sign a personal_sign message',
+      message: (hex) => (wallet.messages?.test(Buffer.from(hex.replace(/^0x/, ''), 'hex').toString('utf8')) ? null : 'the UI specs never sign a personal_sign message'),
       tx: () => 'the UI specs never send a transaction',
     },
   });

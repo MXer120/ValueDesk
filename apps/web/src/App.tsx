@@ -858,7 +858,7 @@ function AppShell({ onGate }: { onGate: (g: GateProps) => void }) {
         )}
 
         {shown === 'referrals' && (
-          <Guarded name="Referrals" bare><ReferralsPage address={address} /></Guarded>
+          <Guarded name="Referrals" bare><ReferralsPage address={address} provider={provider} /></Guarded>
         )}
 
 

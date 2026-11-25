@@ -5,14 +5,16 @@
  *   the two steps - one InviteJoin signature (and nothing else), then the same code on SoDEX - and joins;
  *   the Referrals page under More: without a wallet, and for the wallet that joined (its inviter, its welcome).
  *
- * Needs referral routes behind the dev web: the server, or on production's data (VALUETRADE_DEV_API=prod) the local
- * ones (apps/server tools/invites-dev.ts, launch config "invites-dev"). Without them the join test is skipped.
- * SoDEX's referral reads are real (GET only); nothing binds on SoDEX.
+ * Needs the local referral routes (apps/server tools/invites-dev.ts, launch config "invites-dev"; VS_DEV_INVITES names
+ * another port). Without them the join tests are skipped. A JOIN IS ONE-TIME AND KEPT, so nothing here may reach a real
+ * server: the browser's referral calls are answered by the local routes alone (`local`), whatever is behind the dev web,
+ * and every other call of the app that changes anything is refused. SoDEX's referral reads are real (GET only); nothing
+ * binds on SoDEX.
  */
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Page } from 'playwright-core';
+import type { BrowserContext, Page } from 'playwright-core';
 import { PHONE, connectWallet, uiSuite, until } from './harness';
 
 const h = uiSuite(import.meta.filename);
@@ -28,24 +30,34 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(dir, `${name}-${PHONE ? 'phone' : 'desktop'}.png`) });
 }
 
-/** The local referral routes themselves (tools/invites-dev.ts): a dev web on production's data answers /check too, and a join there is a real one. */
+/** The local referral routes themselves (tools/invites-dev.ts). Never anything but this machine. */
 const LOCAL = process.env.VS_DEV_INVITES?.trim() || 'http://127.0.0.1:18797';
-async function routesUp(origin: string): Promise<boolean> {
+if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(LOCAL)) throw new Error('VS_DEV_INVITES must be a local address');
+async function routesUp(): Promise<boolean> {
   try {
-    if (!(await fetch(`${LOCAL}/api/vs/invites/check?code=${CODE}`, { signal: AbortSignal.timeout(5_000) })).ok) return false;
-  } catch {
-    return false;
-  }
-  try {
-    const r = await fetch(`${origin}/api/vs/invites/check?code=${CODE}`, { signal: AbortSignal.timeout(15_000) });
+    const r = await fetch(`${LOCAL}/api/vs/invites/check?code=${CODE}`, { signal: AbortSignal.timeout(15_000) });
     return r.ok && ((await r.json()) as { valid?: boolean }).valid === true;
   } catch {
     return false;
   }
 }
+/** The browser's referral calls go to LOCAL; every other call to the app's own servers that changes anything is refused. */
+async function local(ctx: BrowserContext): Promise<void> {
+  await ctx.route((u) => u.pathname.startsWith('/api/'), (r) => (r.request().method() === 'GET' ? r.fallback() : r.abort()));
+  await ctx.route((u) => u.pathname.startsWith('/api/vs/invites/'), async (route) => {
+    const q = route.request();
+    const u = new URL(q.url());
+    try {
+      const r = await fetch(LOCAL + u.pathname + u.search, { method: q.method(), headers: { 'content-type': 'application/json' }, ...(q.postData() ? { body: q.postData()! } : {}) });
+      await route.fulfill({ status: r.status, contentType: 'application/json', body: await r.text() });
+    } catch {
+      await route.abort();
+    }
+  });
+}
 
 h.test('a referral link: kept and taken off the address; the wallet joins with one signature; the same code is offered on SoDEX; the page shows it', async ({ page, wallet, origin, skip }) => {
-  if (!(await routesUp(origin))) return skip('no referral routes behind this dev web (start "invites-dev")');
+  if (!(await routesUp())) return skip('no local referral routes (start "invites-dev")');
   // The address bar loses the code at once; this browser keeps it.
   await until(page, () => !page.url().includes('ref='), 'the code taken off the address', 15_000);
   await until(page, async () => (await page.evaluate(() => localStorage.getItem('vd.invite'))) !== null, 'the code kept', 15_000);
@@ -82,15 +94,17 @@ h.test('a referral link: kept and taken off the address; the wallet joins with o
   await page.getByRole('heading', { name: 'Referrals', exact: true }).waitFor();
   await page.getByText(/Referred by/).first().waitFor({ timeout: 20_000 });
   await page.getByText(/left at [$]0 ValueDesk fee/i).first().waitFor();
+  // The weekly claim of a wallet that earned nothing: the week, and nothing made up.
+  await page.getByRole('region', { name: 'Weekly claim' }).getByText('Nothing yet', { exact: true }).waitFor();
   // A throwaway wallet has no SoDEX account: no code of its own yet, said so - never an endless "making your link".
   await page.getByText('Your link appears with your SoDEX account').waitFor({ timeout: 20_000 });
   assert.equal(await page.getByText('Could not read your referrals').count(), 0);
   await shot(page, 'page-joined');
   // The link as the Referrals page gives it: on / (the test came by /trade until 2026-11-25, and / lost the code).
-}, { path: `/?ref=${CODE.toLowerCase()}`, timeout: 150_000 });
+}, { setup: local, path: `/?ref=${CODE.toLowerCase()}`, timeout: 150_000 });
 
-h.test('signing the terms with the code on screen joins by that signature: no popup signature needed', async ({ page, wallet, origin, skip }) => {
-  if (!(await routesUp(origin))) return skip('no referral routes behind this dev web (start "invites-dev")');
+h.test('signing the terms with the code on screen joins by that signature: no popup signature needed', async ({ page, wallet, skip }) => {
+  if (!(await routesUp())) return skip('no local referral routes (start "invites-dev")');
   const mark = wallet.mark();
   await connectWallet(page, { settle: false });
   // An action that needs the terms (any order): the app's own gate, through the page's own module.
@@ -107,11 +121,11 @@ h.test('signing the terms with the code on screen joins by that signature: no po
   await terms.getByRole('button', { name: /Only necessary|Sign and continue/ }).first().click();
   await terms.waitFor({ state: 'hidden', timeout: 30_000 });
   await until(page, async () => {
-    const r = await fetch(`${origin}/api/vs/invites/me?address=${wallet.address}`);
+    const r = await fetch(`${LOCAL}/api/vs/invites/me?address=${wallet.address}`);
     return ((await r.json()) as { joined?: { code?: string } | null }).joined?.code === CODE;
   }, 'the wallet joined', 30_000);
   assert.ok(!wallet.since(mark).some((r) => r.primaryType === 'InviteJoin'), 'by the terms signature alone');
-}, { path: `/?ref=${CODE}`, timeout: 150_000 });
+}, { setup: local, path: `/?ref=${CODE}`, timeout: 150_000 });
 
 h.test('the Referrals page: under More, and without a wallet a connect state', async ({ page }) => {
   if (!PHONE) {

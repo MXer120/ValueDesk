@@ -390,9 +390,9 @@ Against this inventory, HOSTED_ROUTES should be:
 - **Add**: `GET /api/vs/profile?address=`, `GET /api/vs/username/check?name=` (cls `read`), `POST /api/vs/username` and
   `POST /api/vs/username/change` (cls `write`, 1 and 4 KB, one limit of 12 a minute per client): a wallet's username.
   The first needs no signature, a change is signed by the wallet (routes/profiles.ts, `profiles.db`).
-- **Add**: `GET /api/vs/invites/check?code=`, `GET /api/vs/invites/me?address=` (cls `read`)
-  and `POST /api/vs/invites/join` (cls `write`, 4 KB, 12 a minute per client): invite codes, a signed join, a wallet's fee
-  credits (routes/invites.ts, `invites.db`). Upstream: one SoDEX `checkEligibility` read per code never seen before (whose code it is, kept); the credits come from the builder ledger on this server.
+- **Add**: `GET /api/vs/invites/check?code=`, `GET /api/vs/invites/me?address=` (cls `read`),
+  `POST /api/vs/invites/join` and `POST /api/vs/invites/claim` (cls `write`, 4 KB, 12 a minute per client): invite codes, a
+  signed join, a wallet's fee credits and the signed weekly claim of them (routes/invites.ts, `invites.db`). Upstream: one SoDEX `checkEligibility` read per code never seen before (whose code it is, kept); the credits come from the builder ledger on this server.
 - **Add**: `POST /api/vs/sopoints/log` (cls `write`, 64 KiB, 6 a minute per client): a signed-in wallet's SoPoints weeks (Season 1 and Layer 1 lists, summary, squad bonus) as SoDEX answered its page, kept in `sopoints.db` one row per wallet, season and week for the points formula fit (routes/sopointsLog.ts). No token or signature is sent. No upstream.
 - **Add**: `GET /api/vs/sodex/mm-daily?from=` (cls `upstream`, cached an hour): per UTC day, SoDEX accounts 1002 + 23342's volume (from 2026-11-06, our index) and SoDEX's internal pair's open interest (its sizes now x each day's mark close), for the SoPoints difficulty (valuedesk/sodex/mmDaily.ts). Upstream: one mark-candle read per market the pair holds (>= 0.2% of its USD) and one positions read, per hour.
 - **Add**: `POST /api/vs/sodex-auth/nonce` and `POST /api/vs/sodex-auth/verify` (cls `auth`: the site Origin exactly,

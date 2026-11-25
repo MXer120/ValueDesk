@@ -476,13 +476,19 @@ export class NeedsPointsToken extends Error {
   }
 }
 
-export async function authed<T>(url: string, address: string): Promise<T> {
+/** SoDEX's answer was an error of its own: `code` says which (a claim tells "claimed already" from "busy" by it). */
+export class SodexError extends Error {
+  constructor(message: string, readonly code: number | null) {
+    super(message);
+    this.name = 'SodexError';
+  }
+}
+
+async function authedCall<T>(url: string, address: string, init: RequestInit): Promise<T> {
   if (!SODEX_POINTS_SIGNIN_LIVE) throw new NeedsPointsToken();
   const token = getPointsToken(address);
   if (!token) throw new NeedsPointsToken();
-  const r = await fetch(url, {
-    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-  });
+  const r = await fetch(url, { ...init, headers: { Accept: 'application/json', ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${token}` } });
   const j = (await r.json().catch(() => null)) as
     | { code?: number; msg?: string; message?: string; data?: T }
     | null;
@@ -494,10 +500,16 @@ export async function authed<T>(url: string, address: string): Promise<T> {
     clearPointsToken();
     throw new NeedsPointsToken();
   }
-  if (!r.ok) throw new Error(`${r.status} from ${new URL(url).pathname}`);
-  if (j?.code !== 0) throw new Error(j?.msg || j?.message || `code ${j?.code}`);
+  if (!r.ok) throw new SodexError(`${r.status} from ${new URL(url).pathname}`, j?.code ?? null);
+  if (j?.code !== 0) throw new SodexError(j?.msg || j?.message || `code ${j?.code}`, j?.code ?? null);
   return j.data as T;
 }
+
+export const authed = <T>(url: string, address: string): Promise<T> => authedCall<T>(url, address, {});
+
+/** The same with a POST, as SoDEX's referral reads (and its claim) are made. */
+export const authedPost = <T>(url: string, address: string, body?: unknown): Promise<T> =>
+  authedCall<T>(url, address, { method: 'POST', ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) });
 
 /**
  * Your points balance and tier.

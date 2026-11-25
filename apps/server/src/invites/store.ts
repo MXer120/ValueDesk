@@ -14,13 +14,15 @@
  *              ('*', 'vip-removed') on, only what had been spent of them by then still counts (totals)
  *   counts     per UTC day: links opened with a real code ('link'), joins ('signed', 'terms', 'sodex'), refusals, errors -
  *              what the health check judges (deploy/server/bin/healthcheck.mjs: links opened, nobody joined)
+ *   claims     a week's credits claimed (claim.ts): one row per wallet and week, the signed claim kept whole. Entries are never
+ *              touched by it: a credit of a week since ('*', 'claims-from') counts into the balance once its week was claimed
  *   vip_codes  codes upgraded on the dev page: whoever joins with one gets the VIP fee for claim.ts VIP_CODE_DAYS
  */
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { dataDir } from '../builder/paths.js';
-import { TIERS, type InviteJoin, type JoinRefusal } from './claim.js';
+import { TIERS, weekOf, weekStart, type CreditClaim, type CreditDay, type InviteJoin, type JoinRefusal } from './claim.js';
 
 export const invitesDbPath = (): string => process.env.VALUESCAN_INVITES_DB?.trim() || join(dataDir(), 'invites.db');
 
@@ -70,6 +72,14 @@ CREATE TABLE IF NOT EXISTS grants (
   at INTEGER NOT NULL,
   PRIMARY KEY (address, reason)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS claims (
+  address TEXT NOT NULL,
+  week INTEGER NOT NULL,
+  micro INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  signed TEXT NOT NULL,
+  PRIMARY KEY (address, week)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS vip_codes (
   code TEXT PRIMARY KEY,
   added_at INTEGER NOT NULL,
@@ -105,7 +115,8 @@ const joinOfRow = (r: { wallet: string; inviter: string; code: string; at: numbe
 export class InviteStore {
   readonly db: DatabaseSync;
 
-  constructor(path = invitesDbPath(), now = Date.now()) {
+  /** `claimsFrom`: a test's own start of the claims (else this code's first start on the file). */
+  constructor(path = invitesDbPath(), now = Date.now(), claimsFrom = now) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
@@ -119,6 +130,8 @@ export class InviteStore {
     this.db.prepare("INSERT OR IGNORE INTO grants (address, reason, micro, at) VALUES ('*', 'vip-removed', 0, ?)").run(now);
     // From the first start of the SoDEX check on: only wallets first seen since then join by it (service.ts autoTick).
     this.db.prepare("INSERT OR IGNORE INTO grants (address, reason, micro, at) VALUES ('*', 'auto-from', 0, ?)").run(now);
+    // The weekly claim began (owner 2026-11-25): credits earned before need none.
+    this.db.prepare("INSERT OR IGNORE INTO grants (address, reason, micro, at) VALUES ('*', 'claims-from', 0, ?)").run(claimsFrom);
     if (!has('entries', 'tier')) this.db.exec('ALTER TABLE entries ADD COLUMN tier INTEGER');
   }
 
@@ -303,10 +316,11 @@ export class InviteStore {
   }
 
   /**
-   * Earned (from referrals), granted, spent and the balance of a wallet, micro-USD. Granted: the removed VIP credit counts
+   * Earned (from referrals, claimed or not), granted, spent, claimed and the balance of a wallet, micro-USD. The balance is
+   * what was earned before the claims began, what was claimed since and what was granted, less what was spent. Granted: the removed VIP credit counts
    * only for what it had paid by its removal, so no balance is left of it and nobody owes what it paid.
    */
-  totals(address: string): { earned: number; granted: number; spent: number; balance: number } {
+  totals(address: string): { earned: number; granted: number; spent: number; claimed: number; balance: number } {
     const rows = this.db.prepare('SELECT kind, sum(micro) AS m FROM entries WHERE address = ? GROUP BY kind').all(address.toLowerCase()) as Array<{ kind: string; m: number }>;
     let earned = 0;
     let granted = 0;
@@ -320,7 +334,66 @@ export class InviteStore {
       const r = this.db.prepare("SELECT coalesce(sum(micro), 0) AS m FROM entries WHERE address = ? AND kind = 'spend' AND at <= ?").get(address.toLowerCase(), this.removedAt() + REMOVED_LATE_MS) as { m: number };
       granted = Math.min(granted, Number(r.m));
     }
-    return { earned, granted, spent, balance: earned + granted - spent };
+    const a = address.toLowerCase();
+    const claimed = this.claimedMicro(a);
+    const given = this.earnedBetween(a, 0, this.claimsFrom());
+    return { earned, granted, spent, claimed, balance: given + claimed + granted - spent };
+  }
+
+  /* ------------------------------------------------------------------- the weekly claim ----- */
+
+  /** From when on credits are claimed; before it they needed no claim. */
+  claimsFrom(): number {
+    const r = this.db.prepare("SELECT at FROM grants WHERE address = '*' AND reason = 'claims-from'").get() as { at: number } | undefined;
+    return Number(r?.at ?? 0);
+  }
+
+  /** Earned from `from` up to (not including) `to`, micro-USD. */
+  private earnedBetween(address: string, from: number, to: number): number {
+    const r = this.db.prepare("SELECT coalesce(sum(micro), 0) AS m FROM entries WHERE address = ? AND kind = 'earn' AND at >= ? AND at < ?").get(address, from, to) as { m: number };
+    return Number(r.m);
+  }
+
+  /** What a wallet earned in a week that has to be claimed, micro-USD. */
+  earnedInWeek(address: string, week: number): number {
+    return this.earnedBetween(address.toLowerCase(), Math.max(weekStart(week), this.claimsFrom()), weekStart(week + 1));
+  }
+
+  claimOf(address: string, week: number): { micro: number; at: number } | null {
+    const r = this.db.prepare('SELECT micro, at FROM claims WHERE address = ? AND week = ?').get(address.toLowerCase(), week) as { micro: number; at: number } | undefined;
+    return r ? { micro: Number(r.micro), at: Number(r.at) } : null;
+  }
+
+  private claimedMicro(address: string): number {
+    const r = this.db.prepare('SELECT coalesce(sum(micro), 0) AS m FROM claims WHERE address = ?').get(address) as { m: number };
+    return Number(r.m);
+  }
+
+  /** Claim a week's credits, once: false when it was claimed already. The caller has checked that its claim is open. */
+  claim(c: CreditClaim, micro: number, now: number): boolean {
+    return Number(this.db.prepare('INSERT OR IGNORE INTO claims (address, week, micro, at, signed) VALUES (?, ?, ?, ?, ?)')
+      .run(c.wallet.toLowerCase(), c.week, micro, now, JSON.stringify(c)).changes) === 1;
+  }
+
+  /** What was earned in weeks whose claim closed without one, micro-USD. */
+  lapsedMicro(address: string, now: number): number {
+    const a = address.toLowerCase();
+    const open = weekOf(now) - 1; // the week whose claim is open
+    const from = this.claimsFrom();
+    const due = this.earnedBetween(a, from, weekStart(open));
+    const r = this.db.prepare('SELECT coalesce(sum(micro), 0) AS m FROM claims WHERE address = ? AND week < ?').get(a, open) as { m: number };
+    return Math.max(0, due - Number(r.m));
+  }
+
+  /** The whole ledger by UTC day, oldest first. Grants (the removed VIP credit) are not in it. */
+  days(address: string): CreditDay[] {
+    const a = address.toLowerCase();
+    const rows = this.db.prepare("SELECT at / 86400000 AS day, kind, tier, sum(micro) AS m FROM entries WHERE address = ? AND kind IN ('earn', 'spend') GROUP BY day, kind, tier ORDER BY day").all(a) as Array<{ day: number; kind: string; tier: number | null; m: number }>;
+    const claims = this.db.prepare('SELECT at / 86400000 AS day, sum(micro) AS m FROM claims WHERE address = ? GROUP BY day ORDER BY day').all(a) as Array<{ day: number; m: number }>;
+    return [
+      ...rows.map((r): CreditDay => ({ day: Number(r.day), kind: r.kind === 'spend' ? 'spend' : 'earn', tier: r.tier === null ? null : Number(r.tier), usd: Number(r.m) / 1e6 })),
+      ...claims.map((r): CreditDay => ({ day: Number(r.day), kind: 'claim', tier: null, usd: Number(r.m) / 1e6 })),
+    ].sort((x, y) => x.day - y.day);
   }
 
   /** Credit earned from each referral (any tier), micro-USD. */
@@ -330,9 +403,13 @@ export class InviteStore {
   }
 
   /** The newest entries of a wallet. */
-  history(address: string, limit = 300): Array<{ at: number; kind: 'earn' | 'spend' | 'grant'; micro: number; tier: number | null; source: string | null }> {
-    return (this.db.prepare('SELECT at, kind, micro, tier, source FROM entries WHERE address = ? ORDER BY at DESC, id DESC LIMIT ?').all(address.toLowerCase(), limit) as Array<{ at: number; kind: string; micro: number; tier: number | null; source: string | null }>)
-      .map((r) => ({ at: Number(r.at), kind: r.kind === 'spend' ? 'spend' : r.kind === 'grant' ? 'grant' : 'earn', micro: Number(r.micro), tier: r.tier === null ? null : Number(r.tier), source: r.source }));
+  history(address: string, limit = 300): Array<{ at: number; kind: 'earn' | 'spend' | 'grant' | 'claim'; micro: number; tier: number | null; source: string | null }> {
+    const a = address.toLowerCase();
+    const rows = (this.db.prepare('SELECT at, kind, micro, tier, source FROM entries WHERE address = ? ORDER BY at DESC, id DESC LIMIT ?').all(a, limit) as Array<{ at: number; kind: string; micro: number; tier: number | null; source: string | null }>)
+      .map((r) => ({ at: Number(r.at), kind: (r.kind === 'spend' ? 'spend' : r.kind === 'grant' ? 'grant' : 'earn') as 'earn' | 'spend' | 'grant' | 'claim', micro: Number(r.micro), tier: r.tier === null ? null : Number(r.tier), source: r.source }));
+    const claims = (this.db.prepare('SELECT at, micro FROM claims WHERE address = ? ORDER BY at DESC LIMIT ?').all(a, limit) as Array<{ at: number; micro: number }>)
+      .map((r) => ({ at: Number(r.at), kind: 'claim' as const, micro: Number(r.micro), tier: null, source: null }));
+    return [...rows, ...claims].sort((x, y) => y.at - x.at).slice(0, limit);
   }
 
   /** Wallets that ever had credit, earned or granted (the job's list of whom to spend for). */

@@ -1,59 +1,99 @@
-/** The credit calendar's figures: credits per day and tier, and what was spent, from the wallet's credit history. Pure. */
-import type { InviteMe } from '@sign/invites/claim';
+/**
+ * The Referrals page's figures over time, pure: fee credits by UTC day and tier (the server's whole ledger by day), the
+ * credits line, and the calendar's grids - rewards by day, SoPoints by week. UTC throughout: the claim weeks turn on a
+ * Tuesday 12:00 UTC, and so do SoDEX's.
+ */
+import type { CreditDay, InviteMe } from '@sign/invites/claim';
+import type { LinePoint, SodexClaim } from '../../invites/sodexRewards';
+import type { AnyWeek } from '../sodex/soPointsV2';
 
-export const ROWS = ['All', 'T1', 'T2', 'T3', 'Spent'] as const;
-export type RowKey = (typeof ROWS)[number];
-/** The server sends this many entries at most: a full page may not reach back to the first day it names. */
-export const HISTORY_CAP = 300;
+export const DAY_MS = 86_400_000;
+export const dayOf = (t: number): number => Math.floor(t / DAY_MS);
 
-export interface CalCell { usd: number; /** 0 nothing, 1 low, 2 medium, 3 high, 4 best of its row. */ level: 0 | 1 | 2 | 3 | 4; /** Before what is known. */ out: boolean }
-export interface CalDay { at: number; date: Date; cells: Record<RowKey, CalCell> }
-
-/** Local midnight of the day `back` days before `now` (calendar days, so a clock change never shifts one). */
-export function dayBack(now: number, back: number): Date {
-  const d = new Date(now);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - back);
-}
-const keyOf = (d: Date): number => d.getFullYear() * 10_000 + d.getMonth() * 100 + d.getDate();
-
-/** How far the calendar may page back: the days from the oldest known entry to today. */
-export function knownDays(history: InviteMe['history'], now: number): number {
-  if (!history.length) return 0;
-  const oldest = Math.min(...history.map((h) => h.at));
-  let n = 0;
-  while (n < 3_650 && dayBack(now, n).getTime() > oldest) n += 1;
-  // A full page cuts its oldest day somewhere in the middle: that day is not shown as if it were whole.
-  return history.length >= HISTORY_CAP ? n : n + 1;
+/** The ledger by day: the server's own, or (a server from before it) what its history lists. */
+export function ledgerDays(me: InviteMe | null): CreditDay[] {
+  if (!me) return [];
+  if (me.days) return me.days;
+  return me.history.filter((h) => h.kind !== 'grant').map((h) => ({ day: dayOf(h.at), kind: h.kind as CreditDay['kind'], tier: h.tier, usd: h.usd }));
 }
 
-/** `cols` days ending `offset` days ago, oldest first. Levels are within each row, over the days shown. */
-export function calendarDays(history: InviteMe['history'], now: number, cols: number, offset = 0): CalDay[] {
-  const sums = new Map<number, Record<RowKey, number>>();
-  for (const h of history) {
-    if (h.kind === 'grant') continue;
-    const k = keyOf(new Date(h.at));
-    let s = sums.get(k);
-    if (!s) { s = { All: 0, T1: 0, T2: 0, T3: 0, Spent: 0 }; sums.set(k, s); }
-    if (h.kind === 'spend') s.Spent += h.usd;
-    else {
-      s.All += h.usd;
-      s[h.tier === 3 ? 'T3' : h.tier === 2 ? 'T2' : 'T1'] += h.usd;
-    }
+/** Credits earned, added up by day: each day's sum stands from the day it was earned. */
+export function creditsLine(me: InviteMe | null, now: number): LinePoint[] {
+  const by = new Map<number, number>();
+  for (const d of ledgerDays(me)) if (d.kind === 'earn') by.set(d.day, (by.get(d.day) ?? 0) + d.usd);
+  const days = [...by].sort((a, b) => a[0] - b[0]);
+  if (!me || !days.length) return [];
+  // A history that does not reach back to the first credit: the line starts at what was earned before it.
+  let sum = Math.max(0, me.credits.earnedUsd - days.reduce((x, [, u]) => x + u, 0));
+  const out: LinePoint[] = [];
+  for (const [d, usd] of days) { sum += usd; out.push({ t: Math.min(now, d * DAY_MS + DAY_MS / 2), v: sum }); }
+  return out;
+}
+
+/** A step line's value at `t` (0 before its first point). */
+export function valueAt(line: readonly LinePoint[], t: number): number {
+  let v = 0;
+  for (const p of line) { if (p.t > t) break; v = p.v; }
+  return v;
+}
+
+/* -------------------------------------------------------------------------------------- grids ----- */
+
+export interface GridCell { v: number; /** 0 nothing, 1 low, 2 medium, 3 high, 4 best of its row. */ level: 0 | 1 | 2 | 3 | 4 }
+export interface GridRow { key: string; label: string; name: string; tone: 'credit' | 'usdc' | 'spent' | 'points'; cells: GridCell[] }
+export interface GridCol { key: string; label: string; title: string }
+export interface Grid { cols: GridCol[]; rows: GridRow[]; /** More columns before these. */ more: boolean; unit: 'usd' | 'points' }
+
+/** Levels within one row, over the columns shown. */
+export function levels(vs: readonly number[]): GridCell[] {
+  const max = Math.max(0, ...vs);
+  return vs.map((v) => ({ v, level: v <= 0 || max <= 0 ? 0 : v >= max ? 4 : v >= max * 0.6 ? 3 : v >= max * 0.25 ? 2 : 1 }));
+}
+const utc = (t: number, o: Intl.DateTimeFormatOptions) => new Date(t).toLocaleDateString('en-US', { timeZone: 'UTC', ...o });
+
+/** Rewards by day: USDC claimed, credits per tier, credits spent. `cols` days ending `offset` days ago. */
+export function rewardsGrid(me: InviteMe | null, claims: readonly SodexClaim[] | null, now: number, cols: number, offset: number): Grid {
+  const today = dayOf(now);
+  const days = Array.from({ length: cols }, (_, i) => today - offset - (cols - 1 - i));
+  const sums = new Map<string, number>();
+  const add = (k: string, usd: number) => sums.set(k, (sums.get(k) ?? 0) + usd);
+  let oldest = today;
+  for (const d of ledgerDays(me)) {
+    oldest = Math.min(oldest, d.day);
+    if (d.kind === 'earn') add(`${d.tier === 3 ? 'T3' : d.tier === 2 ? 'T2' : 'T1'}|${d.day}`, d.usd);
+    else if (d.kind === 'spend') add(`Spent|${d.day}`, d.usd);
   }
-  const known = knownDays(history, now);
-  const days = Array.from({ length: cols }, (_, i) => {
-    const back = offset + cols - 1 - i;
-    const date = dayBack(now, back);
-    return { back, date, s: sums.get(keyOf(date)) };
-  });
-  const max = Object.fromEntries(ROWS.map((r) => [r, Math.max(0, ...days.map((d) => d.s?.[r] ?? 0))])) as Record<RowKey, number>;
-  return days.map(({ back, date, s }) => ({
-    at: date.getTime(),
-    date,
-    cells: Object.fromEntries(ROWS.map((r) => {
-      const usd = s?.[r] ?? 0;
-      const level = usd <= 0 ? 0 : usd >= max[r] ? 4 : usd >= max[r] * 0.6 ? 3 : usd >= max[r] * 0.25 ? 2 : 1;
-      return [r, { usd, level, out: back >= known } as CalCell];
-    })) as Record<RowKey, CalCell>,
-  }));
+  for (const c of claims ?? []) { oldest = Math.min(oldest, dayOf(c.at)); add(`USDC|${dayOf(c.at)}`, c.usd); }
+  const row = (key: string, name: string, tone: GridRow['tone']): GridRow => ({ key, label: key, name, tone, cells: levels(days.map((d) => sums.get(`${key}|${d}`) ?? 0)) });
+  return {
+    unit: 'usd',
+    more: oldest < days[0]!,
+    cols: days.map((d) => ({ key: String(d), label: utc(d * DAY_MS, { day: 'numeric' }), title: utc(d * DAY_MS, { month: 'short', day: 'numeric', year: 'numeric' }) })),
+    rows: [
+      ...(claims ? [row('USDC', 'USDC claimed', 'usdc' as const)] : []),
+      row('T1', 'Credits, tier 1', 'credit'), row('T2', 'Credits, tier 2', 'credit'), row('T3', 'Credits, tier 3', 'credit'), row('Spent', 'Credits spent on fees', 'spent'),
+    ],
+  };
 }
+
+/** SoPoints by week, of every week SoDEX has scored: all, the wallet's own, from invitees, from its squads' boost. */
+export function pointsGrid(weeks: readonly AnyWeek[], cols: number, offset: number): Grid {
+  const scored = scoredWeeks(weeks);
+  const end = Math.max(0, scored.length - offset);
+  const shown = scored.slice(Math.max(0, end - cols), end);
+  const row = (key: string, label: string, name: string, f: (w: AnyWeek) => number): GridRow => ({ key, label, name, tone: 'points', cells: levels(shown.map(f)) });
+  return {
+    unit: 'points',
+    more: end - cols > 0,
+    cols: shown.map((w) => ({ key: w.key, label: w.short, title: `${w.name}, from ${utc(w.start * 1000, { month: 'short', day: 'numeric', year: 'numeric' })}` })),
+    rows: [
+      row('all', 'All', 'SoPoints', (w) => w.split.week.points),
+      row('ref', 'Invited', 'From invitees (25%)', (w) => w.split.referral),
+      row('own', 'Own', 'Own trading and holdings', (w) => w.split.own),
+      row('boost', 'Boost', 'Squad boost', (w) => w.split.boost),
+    ],
+  };
+}
+
+/** The weeks SoDEX has scored, oldest first: an unscored week's 0 is no result. */
+export const scoredWeeks = (weeks: readonly AnyWeek[]): AnyWeek[] => weeks.filter((w) => w.split.week.pointsStatus === 'CONFIRMED');

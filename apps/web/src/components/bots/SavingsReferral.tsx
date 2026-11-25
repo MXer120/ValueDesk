@@ -69,7 +69,7 @@ export function SavingsReferral({ address, me, onOpen }: { address: string; me: 
             <ProgressBar value={w.usedUsd} max={w.limitUsd} tone="positive" size="sm" label="Welcome volume used" />
           </div>
         )}
-        <p className="sv-ref__fine">Credits are never paid out: they lower your own fee to {CREDIT_FEE / 10} bp while they last, and switch on by themselves.</p>
+        <p className="sv-ref__fine">Credits are never paid out: they lower your own fee to {CREDIT_FEE / 10} bp while they last. Claim them every week on Referrals.</p>
       </Panel>
     </Shell>
   );
