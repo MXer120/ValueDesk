@@ -22,10 +22,12 @@ export function sampleMe(now = Date.now()): InviteMe {
     credits: { balanceUsd: earned - 4.1, earnedUsd: earned, grantedUsd: 0, spentUsd: 4.1, paying: true, rates: [0.2, 0.075, 0.02] },
     stats: { referred: [4, 2, 1], perpsUsd: 4_820_700, spotUsd: 22_400, earnedUsd: earned },
     referrals,
+    // Every credit of the rows above, so the earnings line starts at zero.
     history: [
-      { at: now - D, kind: 'earn', usd: 0.42, tier: 1, from: '0xc04f…71aa' }, { at: now - D, kind: 'spend', usd: 0.31, tier: null, from: null },
-      { at: now - 2 * D, kind: 'earn', usd: 0.09, tier: 2, from: '0x3ff7…0b65' }, { at: now - 3 * D, kind: 'earn', usd: 0.0214, tier: 3, from: '0x41c6…f29e' },
-      { at: now - 4 * D, kind: 'spend', usd: 1.2, tier: null, from: null },
-    ],
+      ...[[16, 0.31, 1, '0x9d22…ab18'], [14, 0.12, 1, '0x9d22…ab18'], [12, 0.23, 2, '0xe8a0…5d3c'], [10, 1.84, 1, '0xc04f…71aa'], [9, 2.1, 1, '0xc04f…71aa'], [8, 0.4, 2, '0x3ff7…0b65'], [7, 1.3, 1, '0xc04f…71aa'], [5, 0.62, 1, '0x17bb…4e0d'],
+        [4, 0.4, 3, '0x41c6…f29e'], [4, 0.77, 2, '0x3ff7…0b65'], [3, 2.6, 1, '0xc04f…71aa'], [2, 0.94, 1, '0x17bb…4e0d'], [1, 0.4, 1, '0x17bb…4e0d'], [0.5, 1.4, 1, '0xc04f…71aa']]
+        .map(([ago, usd, tier, from]) => ({ at: now - Number(ago) * D, kind: 'earn' as const, usd: Number(usd), tier: Number(tier), from: String(from) })),
+      { at: now - 1.2 * D, kind: 'spend' as const, usd: 1.7, tier: null, from: null }, { at: now - 4.4 * D, kind: 'spend' as const, usd: 2.4, tier: null, from: null },
+    ].sort((a, b) => b.at - a.at),
   };
 }

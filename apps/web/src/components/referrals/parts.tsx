@@ -11,7 +11,7 @@ import { notify } from '../../toast';
 import { Identicon } from '../Identicon';
 import { Modal } from '../Modal';
 import { openConnectDialog } from '../account/connect';
-import { Button, EmptyState, Icon, IconButton, Panel, ProgressBar, Segmented, Skeleton, StatusPill, type IconName } from '../bots/kit/kit';
+import { Button, EmptyState, Icon, IconButton, Panel, Segmented, Skeleton, StatusPill, type IconName } from '../bots/kit/kit';
 import { inviteLink, loadMe, loadOwnCode, useOwnCode } from '../../invites/invites';
 import { WE_GET, YOU_GET } from '../../onboarding/referralRules';
 
@@ -30,7 +30,6 @@ export const welcomeText = () => fmtUsd(WELCOME_USD, 0);
 /** What every version draws from. `me` null: no wallet, not read yet, or this server has no referrals. */
 export interface RefView { address: string | null; me: InviteMe | null; loading: boolean; error: boolean; absent: boolean; sample: boolean; how: () => void }
 export const referredOf = (me: InviteMe | null): number | null => (me ? me.stats.referred.reduce((x, y) => x + y, 0) : null);
-export const earnedOfTier = (me: InviteMe | null, t: number): number => (me?.referrals ?? []).filter((r) => r.tier === t).reduce((x, r) => x + r.earnedUsd, 0);
 
 /* --------------------------------------------------------------------- the link ----- */
 
@@ -98,117 +97,41 @@ export function LinkButton({ l, label = 'Copy link', share, className, icon }: {
   );
 }
 
-/** The smaller ones beside it. */
-export function LinkMore({ l, copy }: { l: LinkState; copy?: boolean }) {
+/* --------------------------------------------------------------------- the tables ----- */
+
+/** Post on X, the share sheet (a phone: copy), as icons. */
+export function LinkIcons({ l }: { l: LinkState }) {
   if (!l.code) return null;
   return (
-    <div className="rf-more">
-      {(copy || l.phone) && <button type="button" className="rf-ghost" onClick={() => void l.copy()}>Copy link</button>}
-      <button type="button" className="rf-ghost" onClick={l.post}>Post on X</button>
-      {!l.phone && !copy && l.canShare && <button type="button" className="rf-ghost" onClick={() => void l.share()}>Share</button>}
-    </div>
+    <>
+      <button type="button" className="rf-icon" aria-label="Post on X" title="Post on X" onClick={l.post}><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M11.7 8.6 17.4 2h-1.8l-4.7 5.5L7.100 2H2.500l6 8.700L2.500 17.700h1.800l5.200-6.100 4.200 6.100h4.600zM5 3.400h1.500l9 13h-1.500z" /></svg></button>
+      {l.phone ? <button type="button" className="rf-icon" aria-label="Copy link" title="Copy link" onClick={() => void l.copy()}><Icon name="layers" size={16} /></button>
+        : l.canShare && <button type="button" className="rf-icon" aria-label="Share" title="Share" onClick={() => void l.share()}><Icon name="share" size={16} /></button>}
+    </>
   );
 }
 
-/** Joined with whose code, and what this wallet's own code gives. */
-export function LinkPills({ me }: { me: InviteMe | null }) {
-  if (!me?.vipCode && !me?.joined && !me?.vipUntil) return null;
-  return (
-    <div className="rf-pills">
-      {me.vipCode && <StatusPill size="md" icon="star" className="vip-pill">Your link gives {VIP_CODE_DAYS} days of VIP fee</StatusPill>}
-      {me.vipUntil && <StatusPill size="md" icon="star" className="vip-pill">VIP fee until {day(me.vipUntil)}</StatusPill>}
-      {me.joined && <StatusPill size="md" tone="positive" icon="check">Referred by {me.joined.inviter}</StatusPill>}
-    </div>
-  );
+/** One quiet line: whose code this wallet joined with, its VIP fee days, what its own link gives. */
+export function Standing({ me }: { me: InviteMe | null }) {
+  if (!me) return null;
+  const xs: ReactNode[] = [];
+  if (me.vipCode) xs.push(<b className="vip-text">Your link gives {VIP_CODE_DAYS} days of VIP fee</b>);
+  if (me.vipUntil) xs.push(<b className="vip-text">VIP fee until {day(me.vipUntil)}</b>);
+  if (me.joined) xs.push(<>Referred by {me.joined.inviter}</>);
+  if (me.welcome?.active) xs.push(<>{fmtUsd(me.welcome.leftUsd, 0)} left at $0 ValueDesk fee</>);
+  return xs.length ? <p className="rf-standing">{xs.map((x, i) => <span key={i}>{x}</span>)}</p> : null;
 }
 
-/* --------------------------------------------------------------------- the figures ----- */
-
-/** The home page's strip of figures, hairlines between them. */
-export function StatStrip({ me, loading }: { me: InviteMe | null; loading: boolean }) {
-  const xs: Array<{ l: string; v: string; s: ReactNode; pos?: boolean; neg?: boolean }> = [
-    { l: 'Credit balance', v: me ? usd2(me.credits.balanceUsd) : DASH, s: me ? <StatusPill size="sm" tone={me.credits.paying ? 'positive' : 'neutral'} dot>{me.credits.paying ? 'Paying your fees' : me.credits.balanceUsd > 0 ? 'Collecting' : 'Empty'}</StatusPill> : 'Pays your ValueDesk fees', neg: !!me && me.credits.balanceUsd < 0 },
-    { l: 'Credits earned', v: me ? signedUsd(me.stats.earnedUsd) : DASH, s: me ? `${usd2(me.credits.spentUsd)} spent on fees` : 'From three tiers', pos: !!me && me.stats.earnedUsd > 0 },
-    { l: 'Referred traders', v: me ? String(referredOf(me)) : DASH, s: me ? `${me.stats.referred.join(' · ')} by tier` : 'Tier 1, 2 and 3' },
-    { l: 'Volume referred', v: me ? compact(me.stats.perpsUsd + me.stats.spotUsd) : DASH, s: me ? `${compact(me.stats.perpsUsd)} futures · ${compact(me.stats.spotUsd)} spot` : 'Futures and spot' },
-  ];
-  return (
-    <section className="rf-strip" aria-label="Your referrals">
-      {xs.map((x) => (
-        <div key={x.l}>
-          <span className="rf-k">{x.l}</span>
-          {loading ? <Skeleton className="rf-skel-big" /> : <b className={`rf-big${x.pos ? ' pos' : ''}${x.neg ? ' neg' : ''}`}>{x.v}</b>}
-          <small>{x.s}</small>
-        </div>
-      ))}
-    </section>
-  );
+/** Why the figures are missing, if they are. */
+export function Missing({ v }: { v: RefView }) {
+  if (v.absent) return <EmptyState compact icon="clock" title="Referral stats are not on this server yet" description="Your link works now; stats and credits show here once the server has them." />;
+  if (v.error && !v.me && v.address) return <RetryState address={v.address} what="your referrals" />;
+  return null;
 }
-
-/** The wallet's welcome, if it joined with one. */
-export function WelcomeBar({ me }: { me: InviteMe | null }) {
-  const w = me?.welcome;
-  if (!w) return null;
-  return (
-    <section className="rf-welcome" aria-label="Your welcome">
-      <div><span className="rf-k">Your welcome</span><span><b>{fmtUsd(w.leftUsd, 0)}</b> left</span><StatusPill size="sm" tone={w.active ? 'positive' : 'neutral'} dot>{w.active ? '$0 ValueDesk fee' : 'Used'}</StatusPill></div>
-      <ProgressBar value={w.usedUsd} max={w.limitUsd} size="md" tone="positive" label="Welcome volume used" />
-      <small>{fmtUsd(w.usedUsd, 0)} of {fmtUsd(w.limitUsd, 0)} traded since you joined</small>
-    </section>
-  );
-}
-
-/** What both sides get. SoDEX's own lines carry their source. */
-export function Benefits() {
-  const src = (u: string) => <a href={u} target="_blank" rel="noopener noreferrer" className="rf-src">source</a>;
-  const you: Array<{ v: string; t: ReactNode; vip?: boolean }> = [
-    { v: pct(TIER_SHARES[0]), t: 'of the ValueDesk fees they pay, as credits' },
-    { v: pct(TIER_SHARES[1]), t: 'from the traders they bring' },
-    { v: pct(TIER_SHARES[2]), t: 'one level further' },
-    ...WE_GET.map((b) => ({ v: b.title.split(' ')[0]!, t: <>{b.title.slice(b.title.indexOf(' ') + 1)} on SoDEX {src(b.source.url)}</> })),
-  ];
-  const they: Array<{ v: string; t: ReactNode; vip?: boolean }> = [
-    { v: '$0', t: `ValueDesk fee on their first ${welcomeText()}` },
-    { v: `$${REFERRED_START_USD / 1000}K`, t: 'fee tier from the first trade' },
-    { v: `${VIP_CODE_DAYS} days`, t: 'of VIP fee, with the code of a VIP', vip: true },
-    ...YOU_GET.slice(0, 1).map((b) => ({ v: b.title.split(' ')[0]!, t: <>{b.title.slice(b.title.indexOf(' ') + 1)} on SoDEX {src(b.source.url)}</> })),
-  ];
-  return (
-    <section className="rf-bens" aria-label="Benefits">
-      {([['You get', you], ['They get', they]] as const).map(([h, xs]) => (
-        <div key={h} className="rf-ben">
-          <h3>{h}</h3>
-          <ul>{xs.map((x, i) => <li key={i}><b className={x.vip ? 'vip-text' : undefined}>{x.v}</b><span>{x.t}</span></li>)}</ul>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-/** The referrals and the credit history, or why they cannot be read. */
-export function Tables({ v }: { v: RefView }) {
-  if (!v.address && !v.sample) return null;
-  return (
-    <div className="rf-tables">
-      <section>
-        <h3>Referrals</h3>
-        {v.absent ? (
-          <Panel className="rf-state"><EmptyState compact icon="clock" title="Referral stats are not on this server yet" description="Your link works now; stats and credits show here once the server has them." /></Panel>
-        ) : v.error && !v.me && v.address ? <RetryState address={v.address} what="your referrals" /> : <ReferralTable rows={v.me?.referrals ?? null} />}
-      </section>
-      <section>
-        <h3>Credit history</h3>
-        <History me={v.me} loading={v.loading && !v.absent} />
-      </section>
-    </div>
-  );
-}
-
-/* --------------------------------------------------------------------- the tables ----- */
 
 type TierFilter = 'all' | '1' | '2' | '3';
 
-function ReferralTable({ rows }: { rows: InviteReferral[] | null }) {
+export function ReferralTable({ rows }: { rows: InviteReferral[] | null }) {
   const [tier, setTier] = useState<TierFilter>('all');
   const [page, setPage] = useState(0);
   const shown = useMemo(() => (rows ?? []).filter((r) => tier === 'all' || String(r.tier) === tier), [rows, tier]);
@@ -273,7 +196,7 @@ function Pager({ page, pages, onPage }: { page: number; pages: number; onPage: (
   );
 }
 
-function History({ me, loading }: { me: InviteMe | null; loading: boolean }) {
+export function History({ me, loading }: { me: InviteMe | null; loading: boolean }) {
   const [page, setPage] = useState(0);
   const rows = me?.history ?? [];
   const pages = Math.max(1, Math.ceil(rows.length / PAGE));
@@ -302,7 +225,7 @@ function History({ me, loading }: { me: InviteMe | null; loading: boolean }) {
   );
 }
 
-function RetryState({ address, what }: { address: string; what: string }) {
+export function RetryState({ address, what }: { address: string; what: string }) {
   return (
     <Panel>
       <EmptyState compact icon="warning" title={`Could not read ${what}`} actions={<Button variant="secondary" onClick={() => void loadMe(address)}>Try again</Button>} />
@@ -328,6 +251,7 @@ export function HowItWorks({ onClose }: { onClose: () => void }) {
     { t: 'They join', l: `One free signature. No ValueDesk fee on their first ${usd(WELCOME_USD)} (${WELCOME_CAP} welcomes per link in ${WELCOME_CAP_DAYS} days), and they start at the ${usd(REFERRED_START_USD)} fee tier.` },
     { t: 'You earn, three tiers deep', l: `${TIER_SHARES.map(pct).join(' / ')} of the ValueDesk fees paid by your referrals, theirs, and the next. For as long as they trade.` },
     { t: 'Credits pay your fees', l: `While you have credits your ValueDesk fee is ${(CREDIT_FEE / 10).toFixed(1)} bp and credits pay the rest. Never cash, never moved.` },
+    { t: 'On SoDEX', l: `They get ${YOU_GET[0]!.title}. You get a ${WE_GET.map((b) => b.title).join(' and a ')}.` },
     { t: 'VIP codes', l: `Join with a VIP's code and you pay the VIP fee for ${VIP_CODE_DAYS} days.`, vip: true },
   ];
   return (
@@ -337,6 +261,7 @@ export function HowItWorks({ onClose }: { onClose: () => void }) {
           <li key={s.t} className={s.vip ? 'is-vip' : undefined}><i aria-hidden="true">{i + 1}</i><div><b className={s.vip ? 'vip-text' : undefined}>{s.t}</b><small>{s.l}</small></div></li>
         ))}
       </ol>
+      <p className="rf-srcs">SoDEX sources: {[...new Map([...YOU_GET, ...WE_GET].map((b) => [b.source.url, b.source])).values()].map((s) => <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer">{s.label}</a>)}</p>
     </Modal>
   );
 }

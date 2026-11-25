@@ -3,7 +3,7 @@
  * it earns three tiers deep, its referrals, and its fee credits with their history. Credits pay the wallet's own
  * ValueDesk fees by themselves: there is nothing to claim.
  *
- * Redesigned 2026-11-25 on the home page's look, in five versions (versions.tsx) while the owner picks one: on
+ * Redesigned 2026-11-25 on the home page's look, in three versions (versions.tsx) while the owner picks one: on
  * localhost a pill switches between them (and fills the page with sample data); a build shows the first.
  */
 import { useEffect, useMemo, useState } from 'react';
@@ -11,18 +11,16 @@ import { track } from '../../analytics/usage';
 import { useInviteMeState } from '../../invites/invites';
 import { HowItWorks, type RefView } from './parts';
 import { sampleMe } from './devSample';
-import { V1Card, V2Orbit, V3Steps, V4Gift, V5Tiers } from './versions';
+import { V1Steps, V2Gift, V3Network } from './versions';
 import '../bots/kit/kit.css';
 import '../bots/botsPages.css';
 import '../vip.css';
 import './referrals.css';
 
 const VERSIONS = [
-  { name: 'Card', C: V1Card },
-  { name: 'Orbit', C: V2Orbit },
-  { name: 'Steps', C: V3Steps },
-  { name: 'Gift', C: V4Gift },
-  { name: 'Tiers', C: V5Tiers },
+  { name: 'Steps', C: V1Steps },
+  { name: 'Gift', C: V2Gift },
+  { name: 'Network', C: V3Network },
 ] as const;
 const DEV = import.meta.env.DEV;
 const KEY = 'vs.dev.referrals';

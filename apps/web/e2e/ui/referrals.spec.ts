@@ -72,10 +72,9 @@ h.test('a referral link: kept and taken off the address; the wallet joins with o
 
   // The Referrals page, from More: whom it joined, and its welcome.
   await page.goto(`${origin}/referrals`, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('heading', { name: 'Refer & Earn', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Referrals', exact: true }).waitFor();
   await page.getByText(/Referred by/).first().waitFor({ timeout: 20_000 });
-  await page.getByText('Your welcome', { exact: true }).waitFor();
-  await page.getByText('$0 ValueDesk fee').first().waitFor();
+  await page.getByText(/left at [$]0 ValueDesk fee/).first().waitFor();
   // A throwaway wallet has no SoDEX account: no code of its own yet, said so - never an endless "making your link".
   await page.getByText('Your link appears with your SoDEX account').waitFor({ timeout: 20_000 });
   assert.equal(await page.getByText('Could not read your referrals').count(), 0);
@@ -89,7 +88,7 @@ h.test('the Referrals page: under More, and without a wallet a connect state', a
   } else {
     await page.goto(page.url().replace(/\/[^/]*$/, '/referrals'), { waitUntil: 'domcontentloaded' });
   }
-  await page.getByRole('heading', { name: 'Refer & Earn', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Referrals', exact: true }).waitFor();
   assert.ok(new URL(page.url()).pathname === '/referrals');
   await page.getByText('Connect a wallet to get your link', { exact: true }).waitFor();
 }, { path: '/trade' });
