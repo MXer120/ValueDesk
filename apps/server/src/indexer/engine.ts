@@ -40,6 +40,7 @@ import { TradexyzVenue } from './ext/tradexyz.js';
 import type { ExtVenue } from './ext/types.js';
 import { CohortTracker } from './cohortTracker.js';
 import { PerformanceObserver, performance } from 'node:perf_hooks';
+import { getHeapStatistics } from 'node:v8';
 import { STALL_LOG_MS, gcWithin, mark, noteGc, startedBefore, within } from './busy.js';
 import { SlicedWork } from './slicedWork.js';
 import { hlCoinName } from '../valuedesk/extra/account.js';
@@ -241,6 +242,11 @@ const BUILD_TURN_MS = 120;
  */
 const FLUSH_FILLS = 50;
 const FLUSH_ACTIVITY = 300;
+/** This thread's heap: near its limit it is all garbage collection, then a crash (2026-11-25: 8.37 of 8.79 GB, stalls of 10-70 s for hours). */
+const heapMb = (): { used: number; limit: number } => {
+  const h = getHeapStatistics();
+  return { used: Math.round(h.used_heap_size / 1048576), limit: Math.round(h.heap_size_limit / 1048576) };
+};
 /** How long the SoDEX checks wait for the catch-up to cover the newest break. */
 const BREAK_FRESH_MS = 20 * 60_000;
 /**
@@ -260,6 +266,9 @@ const REPLAY_WINDOW = 64;
 /** A start's replay: parts a batch, sent once fewer than this many rows wait at the thread. */
 const REPLAY_BATCH = 60;
 const REPLAY_IDLE_ROWS = 4_000;
+/** With live rows always waiting (2026-11-25: 8.3M spilled rows and not one written back in hours): a small batch this often, unless the flushes wait. */
+const REPLAY_BUSY_MS = 10_000;
+const REPLAY_BUSY_BATCH = 10;
 /** A held range this fresh answers for "now" even without the stream. */
 const STALE_MS = 10 * 60_000;
 /** Candidates waiting for a trade check per board before the walk stops. */
@@ -1111,6 +1120,7 @@ export class Indexer {
       lastBuildVenueMs: this.lastBuildVenueMs,
       lastBuildStepMs: this.lastBuildStepMs,
       lastError: this.lastError,
+      heapMb: heapMb(),
       loopLagMs: { lastMinute: this.lag.window, sinceStart: this.lag.max, spikes: this.spikes },
       hlBudget: Math.round(hlInfo.budget.available()),
       cohorts: this.cohorts.status(),
@@ -1228,10 +1238,13 @@ export class Indexer {
     let after = 0;
     let n = 0;
     const t0 = Date.now();
+    let last = 0;
     while (!this.stopped) {
-      if (this.store.writerPendingRows > REPLAY_IDLE_ROWS) { await new Promise<void>((ok) => { setTimeout(ok, 50).unref?.(); }); continue; }
+      const busy = this.store.writerPendingRows > REPLAY_IDLE_ROWS;
+      if (busy && (this.heldSince > 0 || Date.now() - last < REPLAY_BUSY_MS)) { await new Promise<void>((ok) => { setTimeout(ok, 50).unref?.(); }); continue; }
       try {
-        const parts = this.store.spillBatch(after, REPLAY_BATCH);
+        last = Date.now();
+        const parts = this.store.spillBatch(after, busy ? REPLAY_BUSY_BATCH : REPLAY_BATCH);
         if (!parts.length) break;
         if (!n) console.log('[indexer] start: rows spilled by the last stop, written back as the writer has room');
         await this.store.replayBatch(parts);

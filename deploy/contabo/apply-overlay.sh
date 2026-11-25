@@ -86,7 +86,15 @@ if [ -d "$SRC/units" ]; then
     put "$f" "/etc/systemd/system/$(basename "$f")" 0644 root:root && reload=1 || true
   done
 fi
+if [ -d "$SRC/bin" ]; then
+  for f in "$SRC"/bin/*; do
+    put "$f" "/opt/valuescan/bin/$(basename "$f")" 0755 root:root || true
+  done
+fi
 [ "$reload" = 0 ] || do_ systemctl daemon-reload
+for t in valuescan-walguard valuescan-netguard; do
+  [ ! -e "$SRC/units/$t.timer" ] || systemctl is-enabled -q "$t.timer" 2>/dev/null || do_ systemctl enable --now "$t.timer"
+done
 if [ "$SERVER" = server2 ]; then
   # The copy executor runs here (server 1 holds it with the same file absent).
   [ -e /etc/valuescan/executor-here ] || { log "create /etc/valuescan/executor-here"; do_ install -m 0644 /dev/null /etc/valuescan/executor-here; }

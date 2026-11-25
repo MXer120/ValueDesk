@@ -1,0 +1,10 @@
+[Unit]
+Description=Loop device of the index's ext4 image (XFS blocks reads and writes of one file against each other, 2026-11-25)
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=local-fs.target umount.target
+Conflicts=umount.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '/sbin/losetup -j /var/lib/valuescan/index-ext4.img | grep -q /dev/loop0 || /sbin/losetup --direct-io=on /dev/loop0 /var/lib/valuescan/index-ext4.img'
