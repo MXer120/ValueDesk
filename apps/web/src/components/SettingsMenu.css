@@ -124,7 +124,7 @@
   color: var(--text); font: inherit; font-size: 14px; cursor: pointer; box-shadow: inset 0 1px 0 rgb(var(--ink) / 0.04);
 }
 .stg__select:disabled { cursor: default; }
-.stg__select option { background: #1c1b1a; }
+.stg__select option { background: #111112; }
 .stg__pill { padding: 4px 10px; border-radius: 999px; background: rgb(var(--ink) / 0.08); color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
 .stg__pill.is-ok { background: color-mix(in srgb, var(--pos) 18%, transparent); color: var(--pos); }
 

@@ -86,7 +86,7 @@ const USED = { 'vd.site.terms.look': '"x"' };
 function boot(path: string, extra: Record<string, string> | null = {}, search = '', hostname = 'www.valuedesk.so') {
   const store: Record<string, string> = extra === null ? {} : { ...USED, ...extra };
   const attrs = new Map<string, string>();
-  const metas = new Map<string, string>([['color-scheme', 'dark'], ['theme-color', '#0e0e0e']]);
+  const metas = new Map<string, string>([['color-scheme', 'dark'], ['theme-color', '#050505']]);
   const links: { rel: string; href: string; crossOrigin: string | null }[] = [];
   const root = { setAttribute: (k: string, v: string) => attrs.set(k, v), style: {} as Record<string, string> };
   const document = {
@@ -133,7 +133,7 @@ test('theme-boot.js: the light theme before the first paint, the toolbar include
   assert.equal(light.attrs.get('data-theme'), 'light');
   assert.equal(light.metas.get('color-scheme'), 'light');
   assert.equal(light.metas.get('theme-color'), '#efefed');
-  assert.equal(boot('/').metas.get('theme-color'), '#0e0e0e');
+  assert.equal(boot('/').metas.get('theme-color'), '#050505');
 });
 
 test('theme-boot.js connects to SoDEX\'s points host on /points only', () => {
@@ -160,7 +160,7 @@ test('the shell draws with the app\'s own colours, dark and light', () => {
     assert.equal(tokenIn(lightShell, `vb-${vb}`), tokenIn(light, app), `light --${app}`);
   }
   assert.equal(tokenIn(lightShell, 'vb-ink'), tokenIn(light, 'brand-ink'));
-  assert.match(html, /<meta name="theme-color" content="#0e0e0e" \/>/);
+  assert.match(html, /<meta name="theme-color" content="#050505" \/>/);
 });
 
 test('the shell is first in <body>, hidden from assistive tech and from the translation layer', () => {

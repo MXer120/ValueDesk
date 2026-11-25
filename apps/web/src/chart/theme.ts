@@ -27,13 +27,13 @@ import { isLight, onTheme } from '../theme';
 
 /** Values copied from :root in web/src/styles.css. */
 const DARK = {
-  bg: '#141310', // --bg, the chart surface
-  panel: '#1b1a14', // --bg-panel
-  elevated: '#2a2620', // --bg-elevated
-  control: '#544a4c', // --bg-control
-  text: '#fffeef', // --text
-  muted: '#c6b6ba', // --muted
-  dim: '#807678', // --dim
+  bg: '#050505', // --bg, the chart surface
+  panel: '#0f0f10', // --bg-panel
+  elevated: '#1a1a1b', // --bg-elevated
+  control: '#3a3a3b', // --bg-control
+  text: '#f4f4f2', // --text
+  muted: '#a8a8a5', // --muted
+  dim: '#7d7d7a', // --dim
   pos: '#00b481', // --pos
   neg: '#ef4a3c', // --neg
   accent: '#ffb547', // --accent (amber)
@@ -44,7 +44,7 @@ const DARK = {
      on that surface is a flat #272621. Flat rather than alpha because the two
      surfaces it can land on (panel fill, candle body) are far enough apart in
      luminance that one alpha cannot serve both. */
-  grid: '#272621',
+  grid: '#1a1a1b',
   /* Indicator lines. Deliberately NOT --pos/--neg (green and red mean
      direction on a trading screen, and an MA that borrows them reads as a
      signal it is not) and deliberately not the violet/cyan pair this file used

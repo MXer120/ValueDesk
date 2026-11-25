@@ -61,33 +61,36 @@
   --mix-pos-base: #0b0d0c;
   --mix-neg-base: #0d0b0b;
 
-  --bg: #0e0e0e;         /* page base, darkest */
-  --bg-panel: #1a1a1b;   /* panel / navbar / tab-bar fill */
-  --bg-elevated: #272727;
-  --bg-hover: #363636;
+  /* THE HOME PAGE'S INK (owner 2026-11-25: the app takes the new landing page's colours; components/landing/home.css
+     .h): near-black ink, warm chrome type, hairlines of light, the V's green as the one accent; the heat ramp's
+     indigo and blue only as the light behind the page (appearance). */
+  --bg: #050505;         /* page base, darkest */
+  --bg-panel: #0f0f10;   /* panel / navbar / tab-bar fill */
+  --bg-elevated: #1a1a1b;
+  --bg-hover: #262627;
   /* Raised CONTROL fill (segmented buttons, active toggles). Deliberately far
      lighter than --bg-elevated: on the reference a pressed control is a solid
      mid-tone, not a one-stop lift. */
-  --bg-control: #4e4e4e;
+  --bg-control: #3a3a3b;
 
-  --line: #4e4e4e;
+  --line: #3a3a3b;
   /* The panel hairline. --line at 40%: visible as an edge, invisible as a box.
      Shared, because the portfolio cards and the trade panels draw the same one -
      it lived in Portfolio.css as --pf-line while only that page had an outline. */
-  --panel-line: rgba(78, 78, 78, 0.4);
-  --line-soft: rgb(var(--ink) / 0.10);
-  --line-strong: rgb(var(--ink) / 0.20);
+  --panel-line: rgb(var(--ink) / 0.08);
+  --line-soft: rgb(var(--ink) / 0.08);
+  --line-strong: rgb(var(--ink) / 0.16);
   /* Gradient hairline used by every bordered button. A flat border cannot
      reproduce it - the reference fades the stroke from light at the top to
      near-nothing at the bottom, which is what stops a row of outlined buttons
      reading as a wireframe. */
-  --button-border: linear-gradient(180deg, #bcbcbc40 0%, #4e4e4e40 100%);
+  --button-border: linear-gradient(180deg, rgb(var(--ink) / 0.18) 0%, rgb(var(--ink) / 0.06) 100%);
   --tint: rgb(var(--ink) / 0.035);
 
-  --text: #f7f7f7;       /* values, active */
-  --muted: #bcbcbc;      /* labels, inactive */
-  --dim: #7b7b7b;        /* separators, faint */
-  --disabled: #4e4e4e;
+  --text: #f4f4f2;       /* values, active */
+  --muted: #a8a8a5;      /* labels, inactive */
+  --dim: #7d7d7a;        /* separators, faint */
+  --disabled: #4a4a48;
   --pos: #00b481;
   --neg: #ef4a3c;
   --pos-deep: #134a55;
@@ -115,11 +118,11 @@
      the selected state are levels of white on the dark surfaces (the owner's
      call - cyan is gone). The only hues left mean something: --pos / --neg for
      money, --warn amber for attention. */
-  --accent: #e6e6e6;
+  --accent: #f4f4f2;
   --accent-hover: #ffffff;
-  --accent-active: #cfcfcf;
-  --accent-text: #111111;   /* text ON the (near-white) accent - dark */
-  --accent-secondary: #3d3d3d;
+  --accent-active: #d9d9d6;
+  --accent-text: #0a0a0a;   /* text ON the (near-white) accent - dark */
+  --accent-secondary: #2c2c2d;
   --focus: #ffffff;
 
   /* Buy/sell buttons are HORIZONTAL GRADIENTS, not flat fills: saturated at
@@ -451,8 +454,8 @@ h3 { font-size: var(--fs-xs); line-height: 18px; margin: 0 0 var(--sp-1); font-w
      the button, and the two bottom edges land together by construction rather
      than by a nudge that a future height change would silently undo. */
   margin-top: 2px;
-  background: #242424;
-  border: 1px solid #3a3a3a;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
   border-radius: var(--radius-full);
   color: var(--accent);
   font-size: var(--fs-xs); font-weight: 500; line-height: var(--lh-xs);

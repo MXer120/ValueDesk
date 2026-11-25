@@ -36,25 +36,25 @@ export interface Appearance {
   pageGlow2Alpha: number;
 }
 
-/** The owner's own settings (2026-10-26), the glass on the trading page included. */
+/** The home page's ink and heat (owner 2026-11-25; before: the owner's settings of 2026-10-26). */
 export const APPEARANCE_DEFAULT: Appearance = {
-  tint: '#1c1f21',
-  tintAlpha: 74,
+  tint: '#101012',
+  tintAlpha: 78,
   shade: 45,
   shadeAlpha: 50,
   blur: 20,
   saturate: 1,
-  glow: '#e0e0e0',
+  glow: '#f4f4f2',
   glowAlpha: 5,
   lift: 5,
   innerGlow: 9,
   trade: true,
-  panelAlpha: 49,
+  panelAlpha: 62,
   panelBlur: 25,
-  pageGlow: '#1c1f21',
-  pageGlowAlpha: 8,
-  pageGlow2: '#2f4a6b',
-  pageGlow2Alpha: 15,
+  pageGlow: '#440154',
+  pageGlowAlpha: 20,
+  pageGlow2: '#3b528b',
+  pageGlow2Alpha: 20,
 };
 
 /**
@@ -75,13 +75,14 @@ const LIGHT_GLASS: Appearance = {
   trade: true,
   panelAlpha: 58,
   panelBlur: 30,
-  pageGlow: '#cfdcf0',
+  pageGlow: '#ddcfe6',
   pageGlowAlpha: 60,
-  pageGlow2: '#d9cfe8',
+  pageGlow2: '#cdd7ec',
   pageGlow2Alpha: 55,
 };
 
-const KEY = 'vs.appearance';
+// .2: values kept under the old key were the old palette's, and no control writes them any more.
+const KEY = 'vs.appearance.2';
 const listeners = new Set<() => void>();
 
 function load(): Appearance {

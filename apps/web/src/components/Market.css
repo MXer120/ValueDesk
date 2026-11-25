@@ -1760,12 +1760,12 @@
   max-height: 52px;
   min-height: 38px;
   border-radius: 14px;
-  background: #1c1c1e;
+  background: #111112;
   box-shadow: 0 0 0 1px rgb(var(--ink) / 0.05);
   transition: background 140ms, box-shadow 140ms;
 }
-.mkt-favchip:hover { background: #212123; }
-.mkt-favchip.is-active { background: #262628; box-shadow: 0 0 0 1px rgb(var(--ink) / 0.1), 0 2px 6px rgba(0, 0, 0, 0.32); }
+.mkt-favchip:hover { background: #18181a; }
+.mkt-favchip.is-active { background: #1e1e20; box-shadow: 0 0 0 1px rgb(var(--ink) / 0.1), 0 2px 6px rgba(0, 0, 0, 0.32); }
 .mkt-favchip__open {
   display: flex;
   align-items: center;
@@ -1787,11 +1787,11 @@
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: #2b2b2e;
+  background: #222224;
 }
 .mkt-favchip__t { display: flex; flex-direction: column; gap: 1px; min-width: 64px; padding-right: 6px; }
 .mkt-favchip__t b { font-size: 14px; font-weight: 500; line-height: 18px; white-space: nowrap; }
-.mkt-favchip__t small { color: #8e8e93; font-family: var(--font-num); font-size: 11px; line-height: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mkt-favchip__t small { color: #8f8f8b; font-family: var(--font-num); font-size: 11px; line-height: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mkt-favchip__x {
   flex: none;
   display: grid;
@@ -1820,7 +1820,7 @@
   border: 1px dashed rgb(var(--ink) / 0.14);
   border-radius: 11px;
   background: transparent;
-  color: #8e8e93;
+  color: #8f8f8b;
   cursor: pointer;
 }
 .mkt-favs__add:hover { color: var(--text); border-color: rgb(var(--ink) / 0.28); }
@@ -1857,7 +1857,7 @@
 .mkt-info__div { flex: none; width: 1px; height: 28px; background: rgb(var(--ink) / 0.1); }
 .mkt-header--info .mkt-stats { gap: 24px; margin-left: 2px; }
 .mkt-header--info .mkt-stat { gap: 2px; padding-top: 0; }
-.mkt-header--info .mkt-stat-l { color: #8e8e93; font-size: 11px; line-height: 14px; }
+.mkt-header--info .mkt-stat-l { color: #8f8f8b; font-size: 11px; line-height: 14px; }
 .mkt-header--info .mkt-stat-v { color: var(--text); font-size: 14px; font-weight: 400; line-height: 18px; font-variant-numeric: tabular-nums; }
 .mkt-header--info .mkt-stat-v.pos,
 .mkt-header--info .mkt-stat-v.pos .mkt-stat-sub { color: var(--pos); }

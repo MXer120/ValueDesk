@@ -17,7 +17,7 @@
 .cpy {
   --cpy-card: var(--bg-panel);
   --cpy-surface: var(--bg-panel);
-  --cpy-surface-2: #232325;
+  --cpy-surface-2: #19191b;
   --cpy-line: var(--panel-line);
   --cpy-r: 18px;
   max-width: 1720px;

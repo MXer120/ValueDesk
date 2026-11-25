@@ -61,7 +61,7 @@
   border: 0;
   border-radius: 12px;
   background: transparent;
-  color: #8e8e93;
+  color: #8f8f8b;
   cursor: pointer;
   transition: background 140ms, color 140ms, box-shadow 140ms;
 }
@@ -75,11 +75,11 @@
   width: 48px;
   height: 48px;
   border-radius: 14px;
-  background: #242426;
+  background: #1a1a1c;
   color: var(--text);
   box-shadow: inset 0 1px 0 rgb(var(--ink) / 0.07), 0 0 0 1px rgb(var(--ink) / 0.06), 0 2px 6px rgba(0, 0, 0, 0.4);
 }
-.side__btn.is-raised:hover { background: #2a2a2d; }
+.side__btn.is-raised:hover { background: #222224; }
 .side .navnotes__dot,
 .side__addr .settings__dot { top: 6px; right: 6px; z-index: 3; }
 
@@ -136,7 +136,7 @@
 .navbar--rail .navlinks { gap: 4px; margin-left: 0; }
 .navbar--rail .navlinks a {
   padding: 0 11px;
-  color: #8e8e93;
+  color: #8f8f8b;
   font-size: 15px;
   font-weight: 400;
   letter-spacing: -0.005em;
@@ -144,10 +144,10 @@
 }
 .navbar--rail .navlinks a:hover { color: var(--text); }
 .navbar--rail .navlinks a.active { color: var(--text); font-weight: 500; }
-.navbar--rail .navlinks .navlink--soon { padding: 0 11px; color: #8e8e93; font-size: 15px; letter-spacing: -0.005em; }
+.navbar--rail .navlinks .navlink--soon { padding: 0 11px; color: #8f8f8b; font-size: 15px; letter-spacing: -0.005em; }
 /* More (NavMore.tsx) in the rail's look: its links' size and grey, 4px from the last one (the bar's gap is 14px). */
 .navbar--rail .navmore { margin-left: -10px; }
-.navbar--rail .navmore__btn { padding: 0 11px; color: #8e8e93; font-size: 15px; letter-spacing: -0.005em; transition: color 140ms; }
+.navbar--rail .navmore__btn { padding: 0 11px; color: #8f8f8b; font-size: 15px; letter-spacing: -0.005em; transition: color 140ms; }
 .navbar--rail .navmore__btn:hover,
 .navbar--rail .navmore__btn.is-open,
 .navbar--rail .navmore__btn.is-here { color: var(--text); }
@@ -159,7 +159,7 @@
   gap: 2px;
   padding: 3px;
   border-radius: 12px;
-  background: #18181a;
+  background: #0f0f10;
   box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.05);
 }
 .nav-seg > button {
@@ -169,7 +169,7 @@
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: #8e8e93;
+  color: #8f8f8b;
   font: inherit;
   font-size: 14px;
   font-weight: 500;
@@ -202,7 +202,7 @@
 }
 @media (prefers-reduced-motion: reduce) { .nav-seg-slot, .nav-seg-slot.is-on, .nav-seg-slot__in { transition: none; } }
 .nav-seg > button.is-on {
-  background: #2b2b2e;
+  background: #232325;
   color: var(--text);
   box-shadow: inset 0 1px 0 rgb(var(--ink) / 0.07), 0 2px 6px rgba(0, 0, 0, 0.4);
 }
@@ -228,9 +228,9 @@
 .side__btn.side__connect:hover { background: color-mix(in srgb, var(--pos) 42%, var(--mix-pos-base)); color: #fff; }
 .side__btn.side__connect:disabled { opacity: 0.7; cursor: progress; }
 .side__connect-t { font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: 0.01em; }
-.side__btn.side__addr { width: 44px; height: 44px; border-radius: 12px; background: #1c1c1e; box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.06); }
+.side__btn.side__addr { width: 44px; height: 44px; border-radius: 12px; background: #111112; box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.06); }
 .side__btn.side__addr:hover,
-.side__btn.side__addr[aria-expanded="true"] { background: #262628; }
+.side__btn.side__addr[aria-expanded="true"] { background: #1c1c1e; }
 /* The address menu opens beside the rail, its foot level with the button. */
 .side .navaddr__menu {
   position: fixed;

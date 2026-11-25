@@ -15,7 +15,7 @@ export type Theme = 'dark' | 'light';
 const KEY = 'vs.theme';
 const listeners = new Set<() => void>();
 /** Each theme's --bg: the browser toolbar's colour (`<meta name="theme-color">`, index.html). */
-export const THEME_COLOR: Record<Theme, string> = { dark: '#0e0e0e', light: '#efefed' };
+export const THEME_COLOR: Record<Theme, string> = { dark: '#050505', light: '#efefed' };
 
 function stored(): Theme {
   try {

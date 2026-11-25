@@ -38,7 +38,7 @@
   min-width: 230px;
   padding: 6px;
   border-radius: 12px;
-  background: var(--glass-pop-bg, #1f1f21);
+  background: var(--glass-pop-bg, #101012);
   -webkit-backdrop-filter: var(--glass-pop-blur, none);
   backdrop-filter: var(--glass-pop-blur, none);
   box-shadow: var(--depth-2), 0 0 0 1px rgb(var(--ink) / 0.06);

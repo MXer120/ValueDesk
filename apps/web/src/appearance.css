@@ -3,11 +3,11 @@
    glass: with `data-glass` on <html>, coloured light behind the page and every
    panel a tinted, blurred pane over it - the Settings window's look. */
 :root {
-  --stg-tint: #1c1f21; --stg-tint-a: 74%; --stg-shade: 45%; --stg-shade-a: 50%;
-  --stg-blur: 20px; --stg-sat: 1; --stg-glow: #e0e0e0; --stg-glow-a: 5%;
+  --stg-tint: #101012; --stg-tint-a: 78%; --stg-shade: 45%; --stg-shade-a: 50%;
+  --stg-blur: 20px; --stg-sat: 1; --stg-glow: #f4f4f2; --stg-glow-a: 5%;
   --stg-lift: 5%; --stg-inner-glow: 9%;
-  --pn-a: 49%; --pn-blur: 25px;
-  --pg-glow: #1c1f21; --pg-glow-a: 8%; --pg-glow2: #2f4a6b; --pg-glow2-a: 15%;
+  --pn-a: 62%; --pn-blur: 25px;
+  --pg-glow: #440154; --pg-glow-a: 20%; --pg-glow2: #3b528b; --pg-glow2-a: 20%;
 }
 
 html[data-glass] body {
@@ -163,7 +163,7 @@ html .menu-popup .menu-sep { background: rgb(var(--ink) / 0.07); }
    root, so nothing behind it can blur through - the glass fill is made near-solid there, or the
    ticket's text shows through it. The leverage pop-up floats outside the panel and keeps its blur. */
 html .oe .oe-pop:not(.oe-pop--float) {
-  background-color: color-mix(in srgb, var(--stg-tint, #1c1f21) 97%, #000);
+  background-color: color-mix(in srgb, var(--stg-tint, #101012) 97%, #000);
 }
 /* ...and the row holding an open pop-up rises above the ticket's later rows, which stack on their own. */
 html .oe :is(.oe-anchor, .oe-compact):has(> .oe-pop) { position: relative; z-index: 60; }

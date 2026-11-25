@@ -67,7 +67,7 @@
 .algo-sf__unit { flex: none; color: var(--muted); font-size: 13px; white-space: nowrap; }
 select.algo-sf__pick { height: 30px; padding: 0 4px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
 select.algo-sf__pick:hover, select.algo-sf__pick:focus-visible { color: var(--text); outline: none; background: rgb(var(--ink) / 0.06); }
-select.algo-sf__pick option { background: #1c1b1a; }
+select.algo-sf__pick option { background: #111112; }
 .algo-sf + .algo-ferr, .algo-ctl > .algo-ferr { margin: 0; }
 /* One of a few: Settings' segmented pill. */
 .algo-sseg { display: inline-flex; flex-wrap: wrap; gap: 4px; max-width: 100%; padding: 3px; border-radius: 10px; background: rgb(var(--ink) / 0.06); }
@@ -721,7 +721,7 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-sum__why .acctf-view:hover { color: var(--text); border-color: var(--algo-paper); }
 
 /* Slide to confirm (SlideConfirm.tsx): drag the knob to the end and let go. */
-.algo-slide { --tint: var(--pos); position: relative; height: 56px; border-radius: 16px; background: color-mix(in srgb, var(--tint) 7%, #1c1c20); overflow: hidden; user-select: none; touch-action: none; }
+.algo-slide { --tint: var(--pos); position: relative; height: 56px; border-radius: 16px; background: color-mix(in srgb, var(--tint) 7%, #141416); overflow: hidden; user-select: none; touch-action: none; }
 .algo-slide.is-sell { --tint: var(--neg); }
 .algo-slide.is-paper { --tint: var(--algo-paper); }
 .algo-slide__fill { position: absolute; inset: 0 auto 0 0; width: calc(4px + var(--knob) + var(--p) * (100% - var(--knob) - 8px)); background: color-mix(in srgb, var(--tint) 32%, transparent); border-radius: 16px; transition: width 260ms var(--ease-out, ease-out); }

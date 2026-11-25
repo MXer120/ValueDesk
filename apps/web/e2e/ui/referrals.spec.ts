@@ -72,7 +72,7 @@ h.test('a referral link: kept and taken off the address; the wallet joins with o
 
   // The Referrals page, from More: whom it joined, and its welcome.
   await page.goto(`${origin}/referrals`, { waitUntil: 'domcontentloaded' });
-  await page.getByRole('heading', { name: 'Referrals', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Refer & Earn', exact: true }).waitFor();
   await page.getByText(/Referred by/).first().waitFor({ timeout: 20_000 });
   await page.getByText('Your welcome', { exact: true }).waitFor();
   await page.getByText('$0 ValueDesk fee').first().waitFor();
@@ -89,7 +89,7 @@ h.test('the Referrals page: under More, and without a wallet a connect state', a
   } else {
     await page.goto(page.url().replace(/\/[^/]*$/, '/referrals'), { waitUntil: 'domcontentloaded' });
   }
-  await page.getByRole('heading', { name: 'Referrals', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Refer & Earn', exact: true }).waitFor();
   assert.ok(new URL(page.url()).pathname === '/referrals');
-  await page.getByText('Connect a wallet', { exact: true }).waitFor();
+  await page.getByText('Connect a wallet to get your link', { exact: true }).waitFor();
 }, { path: '/trade' });
