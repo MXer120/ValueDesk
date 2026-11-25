@@ -57,10 +57,11 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
 
   Since 2026-11-25 (owner) the page is the Gift page: the link, what each side gets, the weekly claim, the rewards over
   time (USDC and credits, or SoPoints), traders and history.
-- **Weekly claim** (owner 2026-11-25): the credits earned from Tuesday 12:00 UTC to the next are claimable for the 7 days
-  after, once, by one free signature (`CreditClaim`, EIP-712, no chain), and only then pay fees. A week not claimed in its
-  7 days lapses; nothing is deleted from the ledger, so a lapsed week can be given back. Credits from before the first start
-  of this code (`claims-from`) need no claim. The rules: `claim.ts` (claimWindow), `store.ts` (totals, claim, lapsedMicro).
+- **Weekly claim** (owner 2026-11-25, "make it just like sodex"): what was earned until a Tuesday 12:00 UTC is claimable
+  from then on by one free signature (`CreditClaim`, EIP-712, no chain), and only then pays fees. As SoDEX's rebates: one
+  claim a week takes all that is claimable, from $1 (CLAIM_MIN_USD); less, or anything not claimed, stays claimable - nothing
+  lapses. Credits from before the first start of this code (`claims-from`) need no claim. The rules: `claim.ts`
+  (claimWindow), `store.ts` (totals, claimableMicro, claim).
 - **SoDEX's rewards** on the same page: USDC rebates (10%) and SoPoints (25%) of the wallet's SoDEX invitees, read from SoDEX
   in the browser with the wallet's SoDEX sign-in (the SoPoints page's, about 15 days) and, for what was claimed, from SoDEX's
   contract on ValueChain. SoDEX settles on Saturday 00:00 UTC and pays from Tuesday on (its contract's weekly root: 09:38 to
@@ -88,13 +89,18 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   - Credits switch on only when they cover 15 minutes of the wallet's own recent pace. A trickle of credit therefore
     never opens 0.1 bp to a fast trader's burst.
   - Anything that still runs over goes to a negative balance, which the next credits repay first.
-- **Invites have no limit** (owner 2026-11-25; was 50 welcomes per inviter in 30 days). Welcome farming is bounded only by:
-  - each welcome needs a fresh wallet with its own SoDEX deposit (SoDEX has no transfers between wallets).
+- **3 joins a code a week**, as SoDEX's (owner 2026-11-25 "reuse same for us"; SoDEX: "Maximum of 3 successful referrals
+  per week. Quota resets every Monday at 00:00 UTC", sodex.com/assets/locales/en/referrals.json). The 4th join of a week is
+  refused (`limit`) and /check says `full`; a join SoDEX made itself (via 'sodex') is counted, never refused. Before that
+  (2026-11-25) invites had no limit, and before that 50 welcomes per inviter in 30 days. Each welcome also needs a fresh
+  wallet with its own SoDEX deposit (SoDEX has no transfers between wallets).
+- **$2,000 to earn**: SoDEX gives a wallet its code only after $2,000 of SoDEX volume or a $500 vault stake ("Complete
+  $2,000 in volume to start earning"), and every ValueDesk link is a SoDEX code, so only such wallets can earn here.
 - **Where it can't be enforced:** a page can always be bypassed, just as anyone can trade on sodex.com and pay no
   ValueDesk fee. The fee is enforced exactly where ValueDesk places the orders (copy trading, bots).
 
 What remains possible: one person can invite their own fresh wallets. That earns them at most 20/7.5/2% of fees they
-pay themselves, plus one welcome per wallet, without a limit on wallets. The terms line below lets ValueDesk withhold credits for that.
+pay themselves, plus one welcome per wallet, 3 wallets a week. The terms line below lets ValueDesk withhold credits for that.
 
 ## Cost (builder ledger on server 1, read-only, 2026-11-14)
 

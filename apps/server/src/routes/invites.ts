@@ -37,12 +37,14 @@ const words: Record<JoinRefusal, string> = {
   'has-volume': 'This wallet has traded on ValueDesk already: links are for new wallets.',
   'has-referrals': 'Others joined with this wallet already, so it cannot join anyone.',
   'sodex-silent': 'SoDEX did not answer. Try again in a minute.',
+  limit: 'This code has taken its 3 joins this week. Try another, or again from Monday 00:00 UTC.',
 };
 
 const claimWords: Record<ClaimRefusal, string> = {
-  closed: 'This week\'s claim is closed. Reload the page for the open one.',
-  nothing: 'There are no credits to claim for this week.',
-  claimed: 'This week\'s credits were claimed already.',
+  closed: 'This claim is closed. Reload the page for the open one.',
+  nothing: 'There are no credits to claim.',
+  small: 'Credits are claimed from $1. Yours stay until then.',
+  claimed: 'This week\'s claim was made already. The next opens on Tuesday 12:00 UTC.',
 };
 
 export interface InviteRouteOptions {
@@ -112,7 +114,7 @@ export async function inviteRoutes(app: FastifyInstance, opts: InviteRouteOption
     const c = await service().check(code);
     if (c.valid) service().store.count('link', now());
     // SoDEX did not answer: the page keeps the code and the join asks again.
-    return { ok: true, valid: c.valid, welcome: c.welcome, vipDays: c.vipDays, ...(c.silent ? { unknown: true } : {}) };
+    return { ok: true, valid: c.valid, welcome: c.welcome, vipDays: c.vipDays, ...(c.full ? { full: c.full } : {}), ...(c.silent ? { unknown: true } : {}) };
   });
 
   app.get('/api/vs/invites/me', async (req, reply) => {

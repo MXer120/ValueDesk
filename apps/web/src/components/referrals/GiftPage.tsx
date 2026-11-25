@@ -163,9 +163,9 @@ export function GiftPage({ v, s, provider }: { v: RefView; s: SodexRewards; prov
             <div><dt>Your fee while they last</dt><dd>{localize((CREDIT_FEE / 10).toFixed(1))} bp</dd></div>
             <div><dt>Credits spent on fees</dt><dd>{me ? usd2(me.credits.spentUsd) : DASH}</dd></div>
             <div><dt>USDC claimed from SoDEX</dt><dd>{s.claimedUsd !== null ? usd2(s.claimedUsd) : DASH}</dd></div>
-            {s.stats && s.stats.weekInvitesMax !== null && s.stats.weekInvitesMax > 0 && <div><dt>SoDEX invites this week</dt><dd>{s.stats.weekInvites} of {s.stats.weekInvitesMax}</dd></div>}
+            {me?.invites ? <div title="Joins with your code this week. SoDEX's limit, reset every Monday 00:00 UTC"><dt>Joins this week</dt><dd>{me.invites.week} of {me.invites.max}</dd></div>
+              : s.stats && s.stats.weekInvitesMax !== null && s.stats.weekInvitesMax > 0 ? <div><dt>SoDEX invites this week</dt><dd>{s.stats.weekInvites} of {s.stats.weekInvitesMax}</dd></div> : null}
             <div><dt>Volume referred</dt><dd>{me ? compact(me.stats.perpsUsd + me.stats.spotUsd) : DASH}</dd></div>
-            {me?.claims && me.claims.lapsedUsd > 0 && <div><dt>Credits lapsed</dt><dd>{credit(me.claims.lapsedUsd)}</dd></div>}
             {me?.welcome?.active && <div><dt>Left at $0 ValueDesk fee</dt><dd>{fmtUsd(me.welcome.leftUsd, 0)}</dd></div>}
             {me?.vipUntil && <div><dt className="vip-text">VIP fee until</dt><dd className="vip-text">{day(me.vipUntil)}</dd></div>}
             {me?.vipCode && <div><dt className="vip-text">Your link gives</dt><dd className="vip-text">{VIP_CODE_DAYS} days of VIP fee</dd></div>}

@@ -20,7 +20,7 @@ import { track } from '../analytics/usage';
 import { notify } from '../toast';
 import type { Eip1193Provider } from '../wallet';
 import { loadReferral, referralUrl, useReferral } from '../onboarding/referral';
-import { InviteError, dropInvite, joinByTerms, joinInvite, loadMe, pendingInvite, useInviteRevision, type Pending } from './invites';
+import { InviteError, dropInvite, fullText, joinByTerms, joinInvite, loadMe, pendingInvite, useInviteRevision, type Pending } from './invites';
 import '../onboarding/onboarding.css';
 
 const SETTLE_MS = 2_500;
@@ -90,6 +90,8 @@ function InviteDialog({ pending, joined: joinedAt, address, provider, onClose }:
   const sodexDone = sodex === 'bound' || sodex === 'pending';
   const sodexOpen = sodex === 'none';
   const allDone = joined && !sodexOpen;
+  // SoDEX's weekly quota, as the server keeps it for the code.
+  const full = !joined && !!pending.fullUntil && pending.fullUntil > Date.now();
 
   const join = async () => {
     setBusy(true);
@@ -125,7 +127,7 @@ function InviteDialog({ pending, joined: joinedAt, address, provider, onClose }:
           <i aria-hidden="true">{joined ? <Check /> : 1}</i>
           <div><b>Join on ValueDesk</b><small>One signature. Free, never a transaction.</small></div>
           {joined ? <span className="inv-pill is-on">Joined</span> : (
-            <button type="button" className="dlg-btn is-go" disabled={busy} onClick={() => void join()}>{busy ? 'Check wallet…' : 'Sign'}</button>
+            <button type="button" className="dlg-btn is-go" disabled={busy || full} onClick={() => void join()}>{busy ? 'Check wallet…' : 'Sign'}</button>
           )}
         </li>
         <li className={sodexDone ? 'is-done' : sodexOpen ? '' : 'is-off'}>
@@ -136,6 +138,7 @@ function InviteDialog({ pending, joined: joinedAt, address, provider, onClose }:
             : sodex === 'unknown' ? null : <span className="inv-pill">Skipped</span>}
         </li>
       </ol>
+      {full && <p className="ref-offer__note" role="status">{fullText(pending.fullUntil!)}</p>}
       {error && <p className="ref-offer__note" role="alert">{error}</p>}
       <DlgFoot left={allDone ? undefined : <button type="button" className="dlg-btn" onClick={() => onClose(false)}>Not now</button>}>
         <button type="button" className={`dlg-btn${allDone ? ' is-go' : ''}`} disabled={!joined} onClick={() => onClose(true)}>Done</button>

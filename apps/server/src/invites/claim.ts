@@ -65,25 +65,41 @@ export const REFERRED_START_USD = 100_000;
 /* ------------------------------------------------------------------- the weekly claim ----- */
 
 /**
- * Credits are claimed by the week (owner 2026-11-25: "only be claimabile every tuesday from 12utc, then the whole 7days,
- * but only for that week"). A week runs from a Tuesday 12:00 UTC to the next, as SoDEX's own. What a wallet earned in one
- * week it can claim from that week's end, for the 7 days until the next week ends; then the next week's claim takes its
- * place. A claimed credit pays fees until it is used up, however long that takes. Credits from before the claims began
- * (the store's 'claims-from') needed none and keep paying.
+ * Credits are claimed as SoDEX's rebates are (owner 2026-11-25: "every tuesday from 12utc", then "make it just like sodex"):
+ * what a wallet earned until a Tuesday 12:00 UTC becomes claimable then, and stays claimable until it is claimed - nothing
+ * lapses. A claim takes all that is claimable, from CLAIM_MIN_USD on (SoDEX: "A minimum claimable balance of $1 is
+ * required to claim"); less stays for a later week. One claim a week. A claimed credit pays fees until it is used up.
+ * Credits from before the claims began (the store's 'claims-from') needed none and keep paying.
  */
 export const WEEK_MS = 7 * 86_400_000;
 /** A Tuesday, 12:00 UTC (SoDEX's Layer 1 Season began on it). */
 export const WEEK_ANCHOR = Date.UTC(2026, 8, 1, 12);
 export const weekOf = (t: number): number => Math.floor((t - WEEK_ANCHOR) / WEEK_MS);
 export const weekStart = (week: number): number => WEEK_ANCHOR + week * WEEK_MS;
-/** The week whose claim is open at `t`: the one that ended last. Open until `closesAt`. */
+/** The claim of `t`: `week` names it (the week that ended last), `opensAt` is when it opened, `closesAt` when the next one opens. */
 export const claimWindow = (t: number): { week: number; opensAt: number; closesAt: number } => {
   const now = weekOf(t);
   return { week: now - 1, opensAt: weekStart(now), closesAt: weekStart(now + 1) };
 };
 
+/** SoDEX's smallest claim, ours too. */
+export const CLAIM_MIN_USD = 1;
+
+/**
+ * Joins a code takes a week, as SoDEX's (owner 2026-11-25 "reuse same for us"; SoDEX: "Maximum of 3 successful referrals
+ * per week. Quota resets every Monday at 00:00 UTC", sodex.com/assets/locales/en/referrals.json). A join SoDEX already made
+ * (via 'sodex') is counted, never refused: SoDEX's own quota let it through.
+ */
+export const INVITES_PER_WEEK = 3;
+/** Monday 00:00 UTC on or before `t`. */
+export const inviteWeekStart = (t: number): number => {
+  const d = new Date(t);
+  const day = (d.getUTCDay() + 6) % 7; // Monday 0
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day);
+};
+
 export const CLAIM_DOMAIN = { name: 'ValueDesk Credits', version: '1' } as const;
-export const CLAIM_STATEMENT = 'Claim my ValueDesk fee credits of this week. Free: a signature, never a transaction.';
+export const CLAIM_STATEMENT = 'Claim my ValueDesk fee credits. Free: a signature, never a transaction.';
 export const CLAIM_TYPE = 'CreditClaim(address wallet,uint64 week,string statement,string nonce,uint64 issuedAt,uint64 expiresAt)';
 
 export interface CreditClaim {
@@ -123,21 +139,24 @@ export function claimTypedData(c: Omit<CreditClaim, 'signature'>) {
 }
 
 /** Why a claim is refused. */
-export type ClaimRefusal = 'closed' | 'nothing' | 'claimed';
+export type ClaimRefusal = 'closed' | 'nothing' | 'small' | 'claimed';
 
 /** A wallet's claim as /api/vs/invites/me answers it. */
 export interface InviteClaims {
-  /** The week whose claim is open now, what it holds, and whether it was claimed. */
+  /** The claim of this week (claimWindow): when it opened, when the next opens. */
   week: number;
   opensAt: number;
   closesAt: number;
+  /** Claimable now: earned until `opensAt` and not claimed yet, every week before included. */
   usd: number;
+  /** Claimed this week already (the next claim opens at `closesAt`). */
   claimed: boolean;
-  /** Earned in the week that runs now: claimable from `closesAt` on. */
+  /** Earned since `opensAt`: claimable from `closesAt` on. */
   pendingUsd: number;
-  /** Claimed so far, and what lapsed unclaimed. */
+  /** Claimed so far, in all. */
   claimedUsd: number;
-  lapsedUsd: number;
+  /** The smallest claim. */
+  minUsd: number;
 }
 
 /** One UTC day of a wallet's credit ledger: every day there is, summed (the history lists only the newest entries). */
@@ -195,7 +214,7 @@ export function inviteTypedData(c: Omit<InviteJoin, 'signature'>) {
 }
 
 /** Why a join is refused. */
-export type JoinRefusal = 'unknown-code' | 'ours' | 'self' | 'joined' | 'has-volume' | 'has-referrals' | 'sodex-silent';
+export type JoinRefusal = 'unknown-code' | 'ours' | 'self' | 'joined' | 'has-volume' | 'has-referrals' | 'sodex-silent' | 'limit';
 
 /** A code as /api/vs/invites/check answers it. */
 export interface InviteCheck {
@@ -205,6 +224,8 @@ export interface InviteCheck {
   welcome: boolean;
   /** Days of the VIP fee a wallet joining now gets (0: not a VIP code). */
   vipDays?: number;
+  /** The code took its INVITES_PER_WEEK joins this week: none until `until` (absent: room, or a server from before). */
+  full?: { until: number };
 }
 
 export interface InviteReferral {
@@ -253,4 +274,6 @@ export interface InviteMe {
   claims?: InviteClaims;
   /** The whole ledger by UTC day (absent: as above). */
   days?: CreditDay[];
+  /** Joins with this wallet's code this week, of INVITES_PER_WEEK (absent: a server from before the limit). */
+  invites?: { week: number; max: number; resetsAt: number };
 }

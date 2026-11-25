@@ -37,7 +37,8 @@ export function sampleMe(vip: boolean, now = Date.now()): InviteMe {
   };
   me.days = me.history.map((h): CreditDay => ({ day: Math.floor(h.at / D), kind: h.kind as CreditDay['kind'], tier: h.tier, usd: h.usd }));
   const open = me.history.filter((h) => h.kind === 'earn' && h.at >= w.opensAt - 7 * D && h.at < w.opensAt).reduce((x, h) => x + h.usd, 0);
-  me.claims = { week: w.week, opensAt: w.opensAt, closesAt: w.closesAt, usd: open, claimed: false, pendingUsd: me.history.filter((h) => h.kind === 'earn' && h.at >= w.opensAt).reduce((x, h) => x + h.usd, 0), claimedUsd: 6.2, lapsedUsd: 0 };
+  me.claims = { week: w.week, opensAt: w.opensAt, closesAt: w.closesAt, usd: open, claimed: false, pendingUsd: me.history.filter((h) => h.kind === 'earn' && h.at >= w.opensAt).reduce((x, h) => x + h.usd, 0), claimedUsd: 6.2, minUsd: 1 };
+  me.invites = { week: 2, max: 3, resetsAt: now + 3 * D };
   return me;
 }
 

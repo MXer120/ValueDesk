@@ -14,7 +14,7 @@ export const OWN_KEY = 'vd.ref.own';
 /** A kept invite older than this is let go (the visitor never connected a wallet). */
 export const KEEP_MS = 30 * 86_400_000;
 
-export interface Pending { code: string; at: number; welcome: boolean; vipDays?: number; /** Asked about and someone's. */ checked: boolean }
+export interface Pending { code: string; at: number; welcome: boolean; vipDays?: number; /** The code took its joins of the week, until then (SoDEX's quota, claim.ts INVITES_PER_WEEK). */ fullUntil?: number; /** Asked about and someone's. */ checked: boolean }
 
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 const mem = new Map<string, string>();
@@ -61,7 +61,7 @@ export function pendingInvite(now = Date.now(), s: Store | null = local()): Pend
     if (!v?.code || !CODE_RE.test(v.code) || now - Number(v.at ?? 0) >= KEEP_MS) return null;
     if (readOwn(s).includes(v.code)) return null;
     // Kept before 2026-11-25: only ever after the check.
-    return { code: v.code, at: Number(v.at), welcome: v.welcome !== false, vipDays: Number(v.vipDays) || 0, checked: v.checked !== false };
+    return { code: v.code, at: Number(v.at), welcome: v.welcome !== false, vipDays: Number(v.vipDays) || 0, ...(Number(v.fullUntil) > 0 ? { fullUntil: Number(v.fullUntil) } : {}), checked: v.checked !== false };
   } catch {
     return null;
   }

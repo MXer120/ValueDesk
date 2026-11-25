@@ -42,7 +42,7 @@ test('levels are within a row', () => {
   assert.deepEqual(levels([0, 0]).map((c) => c.level), [0, 0]);
 });
 
-test('SoPoints by week: only weeks SoDEX has scored; own, invited and boost add up to the week', () => {
+test('SoPoints by week: only weeks SoDEX has scored; all of them and what came from invitees, nothing else', () => {
   const wk = (n: number, points: number, ref: number, status = 'CONFIRMED'): S2Week => ({
     weekNo: n, weekName: `Week ${n}`, status: 'COMPLETED', weekStartTime: 1_788_264_000 + n * 604_800, weekEndTime: 0, distributionTime: 0, isLive: false, spotVolume: 0, futuresVolume: 1000, vaultHolding: 0, wealthTvl: 0, oi: 0, accountValue: 0,
     teamWeekVolume: 0, teamWindowVolume: 0, totalBonusPct: 20, points, referralPoints: ref, pointsStatus: status, rank: 1, totalUser: 2, rankPercentile: '',
@@ -51,6 +51,7 @@ test('SoPoints by week: only weeks SoDEX has scored; own, invited and boost add 
   assert.equal(scoredWeeks(weeks).length, 2);
   const g = pointsGrid(weeks, 8, 0);
   assert.deepEqual(g.rows[0]!.cells.map((c) => c.v), [120, 60]);
-  for (let i = 0; i < 2; i++) assert.ok(Math.abs(g.rows[1]!.cells[i]!.v + g.rows[2]!.cells[i]!.v + g.rows[3]!.cells[i]!.v - g.rows[0]!.cells[i]!.v) < 1e-9);
+  assert.deepEqual(g.rows.map((r) => r.key), ['all', 'ref']);
+  assert.deepEqual(g.rows[1]!.cells.map((c) => c.v), [40, 10]);
   assert.equal(pointsGrid(weeks, 1, 0).more, true);
 });

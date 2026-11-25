@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import { CODE_RE, OURS_CODE, REFERRED_START_USD, TIER_SHARES, VIP_CODE_DAYS, VIP_TIER_SHARES, normCode, type InviteMe } from '@sign/invites/claim';
 import { track } from '../../analytics/usage';
-import { InviteError, checkCode, dropInvite, joinInvite, loadMe, pendingInvite, useSodexCode, type CodeCheck } from '../../invites/invites';
+import { InviteError, checkCode, dropInvite, fullText, joinInvite, loadMe, pendingInvite, useSodexCode, type CodeCheck } from '../../invites/invites';
 import { loadReferral, referralUrl, useReferral } from '../../onboarding/referral';
 import { markOffered } from '../../onboarding/referralRules';
 import { notify } from '../../toast';
@@ -73,7 +73,8 @@ export function UseCodeDialog({ address, provider, me, initial, locked, onClose 
   const sodex = useReferral(address, shaped ? code : OURS_CODE);
   const applied = sodex === 'bound' || sodex === 'pending';
   /** A person's code is joined on ValueDesk too, while this wallet still may. */
-  const canJoin = !!ok && !ours && (joined || me?.canJoin === true);
+  const full = !!ok?.check?.fullUntil && ok.check.fullUntil > Date.now() && !joined;
+  const canJoin = !!ok && !ours && !full && (joined || me?.canJoin === true);
   const done = applied && (!canJoin || joined);
 
   const join = async () => {
@@ -105,8 +106,8 @@ export function UseCodeDialog({ address, provider, me, initial, locked, onClose 
           value={text} onChange={(e) => { setText(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20)); setError(null); setOpened(false); }}
           disabled={!!locked || joined || applied} spellCheck={false} autoCapitalize="characters" autoComplete="off" aria-label="Referral code" aria-invalid={cur?.state === 'bad' || cur?.state === 'own'}
         />
-        <i className={ok ? 'is-ok' : cur && cur.state !== 'asking' ? 'is-bad' : undefined} aria-live="polite">
-          {!text ? '' : !shaped ? '4 to 20 letters and numbers' : !cur || cur.state === 'asking' ? 'Checking…' : cur.state === 'ok' ? (ours ? "ValueDesk's code" : 'Valid') : cur.state === 'own' ? 'Your own code' : cur.state === 'silent' ? 'SoDEX did not answer' : 'SoDEX has no such code'}
+        <i className={ok && !full ? 'is-ok' : cur && cur.state !== 'asking' ? 'is-bad' : undefined} aria-live="polite">
+          {!text ? '' : !shaped ? '4 to 20 letters and numbers' : !cur || cur.state === 'asking' ? 'Checking…' : cur.state === 'ok' ? (ours ? "ValueDesk's code" : full ? 'Full this week' : 'Valid') : cur.state === 'own' ? 'Your own code' : cur.state === 'silent' ? 'SoDEX did not answer' : 'SoDEX has no such code'}
         </i>
       </label>
       {ok && (
@@ -120,8 +121,9 @@ export function UseCodeDialog({ address, provider, me, initial, locked, onClose 
           <p className="inv-they">
             {ours ? "ValueDesk gets SoDEX's 10% fee rebate and 25% of your SoPoints on top, paid by SoDEX. Your SoDEX fees stay the same."
               : `${canJoin ? `Your inviter gets ${pct(TIER_SHARES[0])} (${pct(VIP_TIER_SHARES[0])} as a VIP) of the ValueDesk fees you pay, as fee credits, and ` : 'Your inviter gets '}SoDEX's 10% fee rebate and 25% of your SoPoints on top. Your SoDEX fees stay the same.`}
-            {!ours && !canJoin && me?.blocked === 'has-volume' && ' This wallet has traded on ValueDesk already, so the code counts on SoDEX only.'}
-            {!ours && !canJoin && me?.blocked === 'has-referrals' && ' Others joined with your code already, so this one counts on SoDEX only.'}
+            {full && ` ${fullText(ok!.check!.fullUntil!)}`}
+            {!ours && !canJoin && !full && me?.blocked === 'has-volume' && ' This wallet has traded on ValueDesk already, so the code counts on SoDEX only.'}
+            {!ours && !canJoin && !full && me?.blocked === 'has-referrals' && ' Others joined with your code already, so this one counts on SoDEX only.'}
           </p>
           <ol className="inv-steps">
             {canJoin && (

@@ -26,7 +26,7 @@ import { dayOf } from '../builder/counting.js';
 import { MICRO } from '../builder/tiers.js';
 import {
   CREDIT_COVER_MIN, CREDIT_FEE, REFERRED_START_USD, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIERS, VIP_CODE_DAYS, VIP_CODE_LABEL,
-  WELCOME_FEE, WELCOME_USD, claimWindow, sharesFor, weekOf, type ClaimRefusal, type CreditClaim, type InviteClaims, type InviteMe, type InviteReferral,
+  WELCOME_FEE, WELCOME_USD, CLAIM_MIN_USD, INVITES_PER_WEEK, claimWindow, inviteWeekStart, sharesFor, weekOf, type ClaimRefusal, type CreditClaim, type InviteClaims, type InviteMe, type InviteReferral,
 } from './claim.js';
 import { sodexCodeOf, sodexInviterOf, sodexOwnerOf } from './sodex.js';
 import type { InviteStore } from './store.js';
@@ -238,11 +238,16 @@ export class InviteService {
   }
 
   /** A code as the page checks it: valid (someone's, not ValueDesk's own), and whether it brings the welcome. */
-  async check(code: string): Promise<{ valid: boolean; welcome: boolean; vipDays: number; silent: boolean }> {
+  async check(code: string): Promise<{ valid: boolean; welcome: boolean; vipDays: number; silent: boolean; full?: { until: number } }> {
     if (code === OURS_CODE) return { valid: false, welcome: false, vipDays: 0, silent: false };
     const owner = await this.ownerOf(code);
     if (owner === undefined) return { valid: false, welcome: false, vipDays: 0, silent: true };
-    return owner ? { valid: true, welcome: true, vipDays: this.vipDaysOf(code, owner), silent: false } : { valid: false, welcome: false, vipDays: 0, silent: false };
+    return owner ? { valid: true, welcome: true, vipDays: this.vipDaysOf(code, owner), silent: false, ...this.fullOf(owner) } : { valid: false, welcome: false, vipDays: 0, silent: false };
+  }
+
+  /** The code's joins of this week are taken: until when. */
+  fullOf(owner: string, now = this.now()): { full?: { until: number } } {
+    return this.store.joinsThisWeek(owner, now) >= INVITES_PER_WEEK ? { full: { until: inviteWeekStart(now) + 7 * 86_400_000 } } : {};
   }
 
   /* -------------------------------------------------------------- ledger readings ----- */
@@ -407,24 +412,24 @@ export class InviteService {
 
   claimsOf(address: string, now = this.now()): InviteClaims {
     const w = claimWindow(now);
-    const done = this.store.claimOf(address, w.week);
     return {
       week: w.week, opensAt: w.opensAt, closesAt: w.closesAt,
-      usd: (done?.micro ?? this.store.earnedInWeek(address, w.week)) / MICRO,
-      claimed: !!done,
+      usd: this.store.claimableMicro(address, now) / MICRO,
+      claimed: !!this.store.claimOf(address, w.week),
       pendingUsd: this.store.earnedInWeek(address, weekOf(now)) / MICRO,
       claimedUsd: this.store.totals(address).claimed / MICRO,
-      lapsedUsd: this.store.lapsedMicro(address, now) / MICRO,
+      minUsd: CLAIM_MIN_USD,
     };
   }
 
-  /** A signed claim of a week's credits: only the week whose claim is open, only once, only when it holds something. */
+  /** A signed claim: this week's, once a week, of all that is claimable, from CLAIM_MIN_USD on. */
   claim(c: CreditClaim): { ok: true; usd: number } | { ok: false; code: ClaimRefusal } {
     const now = this.now();
     if (c.week !== claimWindow(now).week) return { ok: false, code: 'closed' };
     if (this.store.claimOf(c.wallet, c.week)) return { ok: false, code: 'claimed' };
-    const micro = this.store.earnedInWeek(c.wallet, c.week);
+    const micro = this.store.claimableMicro(c.wallet, now);
     if (micro <= 0) return { ok: false, code: 'nothing' };
+    if (micro < CLAIM_MIN_USD * MICRO) return { ok: false, code: 'small' };
     if (!this.store.claim(c, micro, now)) return { ok: false, code: 'claimed' };
     // The balance grew: credits may switch on before the next tick.
     this.switch(c.wallet.toLowerCase(), now);
@@ -481,6 +486,7 @@ export class InviteService {
       stats: { referred, perpsUsd: perps / MICRO, spotUsd: spot / MICRO, earnedUsd: t.earned / MICRO },
       referrals,
       claims: this.claimsOf(a),
+      invites: { week: this.store.joinsThisWeek(a, this.now()), max: INVITES_PER_WEEK, resetsAt: inviteWeekStart(this.now()) + 7 * 86_400_000 },
       days: this.store.days(a),
       // The removed VIP credit: shown only for what it paid.
       history: this.store.history(a).filter((e) => e.kind !== 'grant' || t.granted > 0).map((e) => (e.kind === 'grant' ? { ...e, micro: t.granted } : e)).map((e) => ({ at: e.at, kind: e.kind, usd: e.micro / MICRO, tier: e.tier, from: e.source ? short(e.source) : null })),

@@ -3,7 +3,8 @@
  *
  *   use a code     offered only to a wallet SoDEX says has no referrer; ValueDesk's code first; another code joins and applies
  *   rewards        the SoDEX sign-in, USDC and fee credits over time, SoPoints by week, traders and history of both kinds
- *   the claim      both at once; one failing never holds back the other; what a closed week or a lost sign-in does
+ *   the claim      both at once; one failing never holds back the other; under $1 it waits; signed out it asks for the sign-in
+ *   the quota      a code that took its 3 joins of the week (SoDEX's) says so and asks for no signature
  *
  * NOTHING LEAVES THIS MACHINE that could change anything: the referral routes are the server's own code on a store in memory
  * (this process), SoDEX's sign-in, referral and points hosts and the rewards contract are answered here, and an unknown path on
@@ -47,6 +48,8 @@ class World {
   unlocked = true;
   claim: 'paid' | 'busy' | 'claimed' = 'paid';
   claimCalls = 0;
+  /** Invitees SoDEX lists beyond the two named ones. */
+  extraTraders = 0;
   /** Requests answered, and anything asked that this world does not know. */
   readonly seen: string[] = [];
   readonly unknown: string[] = [];
@@ -105,7 +108,7 @@ class World {
     if (q.headers().authorization !== `Bearer ${this.token}`) return route.fulfill({ status: 401, headers: cors, contentType: 'application/json', body: JSON.stringify({ code: 401, msg: 'Unauthorized: missing bearer token' }) });
     if (p === '/biz/referral/myStats') return ok({ eligible: true, referrerState: { stage: 'ready', data: { code: 'MYCODE99', canModify: false, totalReferrals: 2 } }, earnedRewardsOnChain: String(this.settled), totalFeesEarned: this.settled + this.pending, pendingRewards: this.pending, cumVlm: this.unlocked ? 48_000 : 800, vlmThreshold: 2000, vaultNetStake: 0, vaultNetStakeThreshold: 500, weeklyInviteCount: 2, maxInvitesPerWeek: 100, nextAvailableTime: null, referredBy: null, bonusDistributions: [] });
     if (p === '/biz/referral/myClaimHistory') return ok({ total: 2, list: [{ fees: '5.44', txHash: `0x${'a'.repeat(64)}`, time: Date.now() - 5 * D }, { fees: '3.18', txHash: `0x${'b'.repeat(64)}`, time: Date.now() - 12 * D }] });
-    if (p === '/biz/referral/myList') return ok({ total: 2, list: [{ inviteeWallet: '0xc04f0000000000000000000000000000000071aa', referralCode: 'MYCODE99', volume: 210_000, paidFees: 80, yourRewardedFees: 8, yourRewardedPoints: 640, referralTime: Date.now() - 20 * D }, { inviteeWallet: '0x66aa0000000000000000000000000000000010f3', referralCode: 'MYCODE99', volume: 88_000, paidFees: 23, yourRewardedFees: '2.3', yourRewardedPoints: 96, referralTime: Date.now() - 30 * D }] });
+    if (p === '/biz/referral/myList') return ok({ total: 2 + this.extraTraders, list: [...Array.from({ length: this.extraTraders }, (_, i) => ({ inviteeWallet: `0x77${String(i).padStart(38, '0')}`, referralCode: 'MYCODE99', volume: 5_000 + i, paidFees: 1, yourRewardedFees: 0.1, yourRewardedPoints: 1, referralTime: Date.now() - 40 * D })),{ inviteeWallet: '0xc04f0000000000000000000000000000000071aa', referralCode: 'MYCODE99', volume: 210_000, paidFees: 80, yourRewardedFees: 8, yourRewardedPoints: 640, referralTime: Date.now() - 20 * D }, { inviteeWallet: '0x66aa0000000000000000000000000000000010f3', referralCode: 'MYCODE99', volume: 88_000, paidFees: 23, yourRewardedFees: '2.3', yourRewardedPoints: 96, referralTime: Date.now() - 30 * D }] });
     if (p === '/biz/sopoints/v2/summary') return ok({ totalPoints: 666, currentTier: 'Silver', nextTier: 'Gold', nextTierPoints: 1000, referralPoints: 100 });
     if (p === '/biz/sopoints/v2/week/list') return ok([this.week(1, 120, 20), this.week(2, 240, 60), this.week(3, 0, 0, 'TBD')]);
     if (p === '/biz/sopoints/week/list') return ok([]);
@@ -246,7 +249,9 @@ h.test('rewards: signed out nothing is made up; signed in every figure is SoDEX\
   const bars = points.locator('.rfc.is-bars');
   if (PHONE) await bars.tap({ position: { x: 10, y: 60 } }); else await bars.hover({ position: { x: 10, y: 60 } });
   await points.locator('.rfc__tip').getByText('Layer 1 · Week 1').waitFor();
-  assert.match(await points.locator('.rfc__tip').innerText(), /All\s*120[\s\S]*Invited\s*20[\s\S]*Own\s*80[\s\S]*Boost\s*20/);
+  const tip = await points.locator('.rfc__tip').innerText();
+  assert.match(tip, /From invitees\s*20/);
+  assert.doesNotMatch(tip, /Own|Boost/, 'only what invitees brought');
   await shot(page, 'points');
   await points.getByRole('radio', { name: 'Calendar', exact: true }).click();
   await points.getByRole('button', { name: /^From invitees \(25%\), Layer 1 · Week 2.*: 60$/ }).waitFor();
@@ -261,12 +266,19 @@ h.test('rewards: signed out nothing is made up; signed in every figure is SoDEX\
   const box = (await chart.boundingBox())!;
   if (PHONE) await chart.tap({ position: { x: box.width - 2, y: 60 } }); else await chart.hover({ position: { x: box.width - 2, y: 60 } });
   assert.match(await panel.locator('.rfc__tip').innerText(), /USDC\s*\$14,30[\s\S]*Fee credits\s*\$3,65/);
+  // Between two points the pointer reads where it is: the line moves with it, never jumps to a point.
+  const lefts: string[] = [];
+  for (const k of [0.3, 0.33, 0.36]) {
+    if (PHONE) await chart.tap({ position: { x: box.width * k, y: 60 } }); else await chart.hover({ position: { x: box.width * k, y: 60 } });
+    lefts.push(await panel.locator('.rfc__x').evaluate((e) => (e as HTMLElement).style.left));
+  }
+  assert.equal(new Set(lefts).size, 3, `the cross follows the pointer: ${lefts.join(' ')}`);
   await shot(page, 'chart');
   // The card and the field: claimable is 12.82 - 8.62.
   await page.getByRole('region', { name: 'Your rewards' }).getByText('$4,20', { exact: true }).waitFor();
   await field.getByText('$4,20', { exact: true }).waitFor();
   await field.getByText('$3,25', { exact: true }).waitFor(); // 2.50 + 0.75: the week that ended
-  await field.getByText('$0,4000 for next week', { exact: true }).waitFor();
+  await field.getByText('$0,40 pending', { exact: true }).waitFor(); // two decimals
   // Traders: SoDEX's invitee and its rebate; the history: both kinds.
   const list = page.getByRole('region', { name: 'Your traders' });
   await list.getByText('0xc04f…71aa', { exact: true }).waitFor();
@@ -320,6 +332,56 @@ h.test('the claim: both at once, one signature; claimed once; the figures follow
   const again = page.getByRole('dialog', { name: 'Weekly claim' });
   assert.equal(await again.getByRole('button', { name: 'Nothing to claim', exact: true }).isDisabled(), true);
   assert.equal(w.claimCalls, 1);
+}, { setup, timeout: 120_000 });
+
+h.test('signed out, the popup asks for the SoDEX sign-in, never "Nothing to claim"; credits under $1 wait; traders and history by page', async ({ page, wallet }) => {
+  const w = await arrive(page, wallet);
+  w.referrer = INVITER;
+  w.extraTraders = 9;
+  const cw = claimWindow(Date.now());
+  w.earn(0.6, cw.opensAt - D, 1, 'a');
+  for (let i = 0; i < 12; i++) w.earn(0.01, cw.opensAt - (i + 2) * 3_600_000, 1, `h${i}`);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  const field = claimField(page);
+  await field.getByText('Claimable from $1,00', { exact: true }).waitFor({ timeout: 20_000 });
+  await field.getByRole('button', { name: 'See my rewards', exact: true }).click();
+  const dlg = page.getByRole('dialog', { name: 'Weekly claim' });
+  await dlg.getByRole('button', { name: 'Sign in to SoDEX', exact: true }).waitFor();
+  assert.equal(await dlg.getByRole('button', { name: 'Nothing to claim' }).count(), 0);
+  assert.equal(await dlg.getByRole('button', { name: 'Sign in', exact: true }).count(), 0, 'one sign-in button');
+  await dlg.getByText('Claimable from $1,00. They stay yours until then', { exact: true }).waitFor();
+  await shot(page, 'claim-signedout');
+  wallet.messages = SIGN_IN;
+  await dlg.getByRole('button', { name: 'Sign in to SoDEX', exact: true }).click();
+  await dlg.getByRole('button', { name: /^Claim \$4,20 USDC$/ }).waitFor({ timeout: 20_000 });
+  await dlg.getByRole('button', { name: 'Not now', exact: true }).click();
+  // 11 traders (9 + SoDEX's 2): 6 a page.
+  const list = page.getByRole('region', { name: 'Your traders' });
+  await list.getByText('Page 1 / 2', { exact: true }).waitFor({ timeout: 20_000 });
+  assert.equal(await list.locator('.rf-list > li').count(), 6);
+  await list.getByRole('button', { name: 'Next page' }).click();
+  await list.getByText('Page 2 / 2', { exact: true }).waitFor();
+  assert.equal(await list.locator('.rf-list > li').count(), 5);
+  // History: 13 credits + 2 USDC claims, 8 a page.
+  await list.getByRole('radio', { name: 'History', exact: true }).click();
+  await list.getByText('Page 1 / 2', { exact: true }).waitFor();
+  assert.equal(await list.locator('tbody tr').count(), 8);
+  await shot(page, 'pages');
+  assert.deepEqual(w.unknown, []);
+}, { setup, timeout: 120_000 });
+
+h.test("SoDEX's quota: a code that took its 3 joins this week says so, and no signature is asked", async ({ page, wallet }) => {
+  const w = await arrive(page, wallet);
+  for (let i = 0; i < 3; i++) w.store.join({ wallet: `0x88${String(i).padStart(38, '0')}`, code: 'FRIEND01', statement: '', nonce: 'n', issuedAt: '0', expiresAt: '0', chainId: 1, signature: '0x' }, INVITER, { hasVolume: false, welcome: true }, Date.now() - 60_000);
+  await page.getByRole('button', { name: 'Use a code', exact: true }).click({ timeout: 20_000 });
+  const dlg = page.getByRole('dialog', { name: 'Use a code' });
+  const field = dlg.getByRole('textbox', { name: 'Referral code' });
+  await field.fill('FRIEND01');
+  await dlg.getByText('Full this week', { exact: true }).waitFor({ timeout: 15_000 });
+  await dlg.getByText(/took its 3 joins this week, SoDEX's limit\. It takes new ones from Monday/).waitFor();
+  assert.equal(await dlg.getByRole('button', { name: 'Sign', exact: true }).count(), 0);
+  await shot(page, 'code-full');
+  assert.equal(w.store.joinOf(w.wallet), null);
 }, { setup, timeout: 120_000 });
 
 h.test('the claim: SoDEX busy never holds back the credits; a rejected signature leaves them; under a dollar SoDEX is not asked', async ({ page, wallet }) => {

@@ -125,22 +125,24 @@ export function mergeHistory(v: RefView, s: SodexRewards): HistoryRow[] {
 
 export function Traders({ v, s }: { v: RefView; s: SodexRewards }) {
   const [tab, setTab] = useState<'traders' | 'history'>('traders');
-  const [all, setAll] = useState(false);
+  const [page, setPage] = useState(0);
   const rows = useMemo(() => mergeTraders(v.me?.referrals ?? [], s.traders), [v.me, s.traders]);
   const n = v.me || s.traders ? rows.length : null;
   const phone = usePhone();
   const sum = (r: TraderRow) => (r.creditUsd ?? 0) + (r.usdcUsd ?? 0);
+  const pages = Math.max(1, Math.ceil(rows.length / TRADERS_PAGE));
+  const at = Math.min(page, pages - 1);
   return (
     <section className="rf-tr" aria-label="Your traders">
       <div className="rf-tr__h">
         <Segmented<'traders' | 'history'> label="List" value={tab} onChange={setTab} options={[{ value: 'traders', label: `Traders${n === null ? '' : ` (${n})`}` }, { value: 'history', label: 'History' }]} />
-        {tab === 'traders' && rows.length > 6 && <button type="button" className="rf-text" onClick={() => setAll(!all)}>{all ? 'Show less' : 'Show all'}</button>}
       </div>
       {tab === 'history' ? <History rows={mergeHistory(v, s)} loading={v.loading && !!v.address} partial={!s.signedIn && !!v.address} />
         : v.absent || (v.error && !v.me) ? <Missing v={v} />
         : rows.length ? (
-          <ul className={all ? 'rf-list is-all' : 'rf-list'}>
-            {(all ? rows : rows.slice(0, 6)).map((r) => (
+          <>
+          <ul className="rf-list">
+            {rows.slice(at * TRADERS_PAGE, at * TRADERS_PAGE + TRADERS_PAGE).map((r) => (
               <li key={r.key}>
                 <Face seed={r.wallet} size={36} />
                 <span><b>{r.wallet}</b><small>{r.tier === null ? 'SoDEX' : `Tier ${r.tier}`} · {compact(r.volumeUsd)}{r.welcome ? ' · in the welcome' : ''}{!phone && r.points ? ` · ${whole(r.points)} pts` : ''}</small></span>
@@ -152,18 +154,21 @@ export function Traders({ v, s }: { v: RefView; s: SodexRewards }) {
               </li>
             ))}
           </ul>
+          {pages > 1 && <Pager page={at} pages={pages} onPage={setPage} />}
+          </>
         ) : (
           <div className="rf-none">
             <span aria-hidden="true">{[0, 1, 2, 3].map((i) => <i key={i} />)}</span>
             <p>No traders yet</p><small>Each one who joins stands here with what they earned you.</small>
           </div>
         )}
-      {tab === 'traders' && all && !phone && v.me && v.me.referrals.length > 0 && <details className="rf-more"><summary>Table by tier</summary><ReferralTable rows={v.me.referrals} /></details>}
+      {tab === 'traders' && !phone && v.me && v.me.referrals.length > 0 && <details className="rf-more"><summary>Table by tier</summary><ReferralTable rows={v.me.referrals} /></details>}
     </section>
   );
 }
 
-const PAGE = 9;
+const PAGE = 8;
+const TRADERS_PAGE = 6;
 const TX = 'https://main-scan.valuechain.xyz/tx/';
 function History({ rows, loading, partial }: { rows: HistoryRow[]; loading: boolean; partial: boolean }) {
   const [page, setPage] = useState(0);

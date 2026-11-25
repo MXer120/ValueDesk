@@ -434,6 +434,8 @@ html[data-theme='light'] .rf-page > .bots-col > .rf-claim .rf-cta:not(.is-green)
 .rf-howbtn.is-code:hover { background: rgb(0 180 129 / 0.32); }
 .rf-usecode__field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; margin-bottom: 12px; padding: 12px 16px; border-radius: 14px; background: rgb(var(--ink) / 0.05); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.09); }
 .rf-usecode__field:focus-within { box-shadow: inset 0 0 0 1px var(--pos); }
+/* The field's own ring shows focus; the global input ring would draw a second one inside it. */
+.rf-usecode__field input:focus-visible { outline: none; }
 .rf-usecode__field .inv-code__k { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); }
 .rf-usecode__field input { min-width: 0; width: 100%; padding: 0; border: 0; outline: 0; background: none; color: var(--text); font: 500 22px/32px var(--font-num); letter-spacing: 0.08em; }
 .rf-usecode__field input:disabled { opacity: 1; -webkit-text-fill-color: currentColor; }

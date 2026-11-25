@@ -33,12 +33,15 @@ async function shot(page: Page, name: string): Promise<void> {
 /** The local referral routes themselves (tools/invites-dev.ts). Never anything but this machine. */
 const LOCAL = process.env.VS_DEV_INVITES?.trim() || 'http://127.0.0.1:18797';
 if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(LOCAL)) throw new Error('VS_DEV_INVITES must be a local address');
-async function routesUp(): Promise<boolean> {
+/** Null: the routes are up and the code takes joins; else why the join tests cannot run. */
+async function routesUp(): Promise<string | null> {
   try {
     const r = await fetch(`${LOCAL}/api/vs/invites/check?code=${CODE}`, { signal: AbortSignal.timeout(15_000) });
-    return r.ok && ((await r.json()) as { valid?: boolean }).valid === true;
+    const b = (await r.json()) as { valid?: boolean; full?: unknown };
+    // SoDEX's quota (3 joins a code a week) holds on the local routes too: a fresh VS_INVITES_DEV_DB gives room again.
+    return !r.ok || b.valid !== true ? 'no local referral routes (start "invites-dev")' : b.full ? `${CODE} took its 3 joins this week on the local routes (start "invites-dev" on a fresh VS_INVITES_DEV_DB)` : null;
   } catch {
-    return false;
+    return 'no local referral routes (start "invites-dev")';
   }
 }
 /** The browser's referral calls go to LOCAL; every other call to the app's own servers that changes anything is refused. */
@@ -57,7 +60,8 @@ async function local(ctx: BrowserContext): Promise<void> {
 }
 
 h.test('a referral link: kept and taken off the address; the wallet joins with one signature; the same code is offered on SoDEX; the page shows it', async ({ page, wallet, origin, skip }) => {
-  if (!(await routesUp())) return skip('no local referral routes (start "invites-dev")');
+  const why = await routesUp();
+  if (why) return skip(why);
   // The address bar loses the code at once; this browser keeps it.
   await until(page, () => !page.url().includes('ref='), 'the code taken off the address', 15_000);
   await until(page, async () => (await page.evaluate(() => localStorage.getItem('vd.invite'))) !== null, 'the code kept', 15_000);
@@ -104,7 +108,8 @@ h.test('a referral link: kept and taken off the address; the wallet joins with o
 }, { setup: local, path: `/?ref=${CODE.toLowerCase()}`, timeout: 150_000 });
 
 h.test('signing the terms with the code on screen joins by that signature: no popup signature needed', async ({ page, wallet, skip }) => {
-  if (!(await routesUp())) return skip('no local referral routes (start "invites-dev")');
+  const why = await routesUp();
+  if (why) return skip(why);
   const mark = wallet.mark();
   await connectWallet(page, { settle: false });
   // An action that needs the terms (any order): the app's own gate, through the page's own module.

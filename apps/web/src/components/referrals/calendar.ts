@@ -89,8 +89,6 @@ export function pointsGrid(weeks: readonly AnyWeek[], cols: number, offset: numb
     rows: [
       row('all', 'All', 'SoPoints', (w) => w.split.week.points),
       row('ref', 'Invited', 'From invitees (25%)', (w) => w.split.referral),
-      row('own', 'Own', 'Own trading and holdings', (w) => w.split.own),
-      row('boost', 'Boost', 'Squad boost', (w) => w.split.boost),
     ],
   };
 }

@@ -14,15 +14,16 @@
  *              ('*', 'vip-removed') on, only what had been spent of them by then still counts (totals)
  *   counts     per UTC day: links opened with a real code ('link'), joins ('signed', 'terms', 'sodex'), refusals, errors -
  *              what the health check judges (deploy/server/bin/healthcheck.mjs: links opened, nobody joined)
- *   claims     a week's credits claimed (claim.ts): one row per wallet and week, the signed claim kept whole. Entries are never
- *              touched by it: a credit of a week since ('*', 'claims-from') counts into the balance once its week was claimed
+ *   claims     credits claimed (claim.ts): at most one row per wallet and week, the signed claim kept whole, `micro` all that
+ *              was claimable then. Entries are never touched by it: a credit since ('*', 'claims-from') counts into the balance
+ *              once claimed, and what is not claimed stays claimable
  *   vip_codes  codes upgraded on the dev page: whoever joins with one gets the VIP fee for claim.ts VIP_CODE_DAYS
  */
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { dataDir } from '../builder/paths.js';
-import { TIERS, weekOf, weekStart, type CreditClaim, type CreditDay, type InviteJoin, type JoinRefusal } from './claim.js';
+import { INVITES_PER_WEEK, TIERS, inviteWeekStart, weekOf, weekStart, type CreditClaim, type CreditDay, type InviteJoin, type JoinRefusal } from './claim.js';
 
 export const invitesDbPath = (): string => process.env.VALUESCAN_INVITES_DB?.trim() || join(dataDir(), 'invites.db');
 
@@ -252,6 +253,8 @@ export class InviteStore {
     if (o.hasVolume) return { ok: false, code: 'has-volume' };
     // No loops: a wallet others joined already joins nobody (and so a chain only ever grows downwards).
     if (this.hasReferrals(wallet)) return { ok: false, code: 'has-referrals' };
+    // SoDEX's weekly quota per code; a join SoDEX made itself passed SoDEX's.
+    if ((o.via ?? 'signed') !== 'sodex' && this.joinsThisWeek(by, now) >= INVITES_PER_WEEK) return { ok: false, code: 'limit' };
     try {
       this.db.prepare('INSERT INTO joins (wallet, inviter, code, at, nonce, issued_at, expires_at, chain_id, signature, welcome, vip_until, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(wallet, by, j.code, now, j.nonce, Number(j.issuedAt), Number(j.expiresAt), j.chainId, j.signature, o.welcome ? 1 : 0, o.vipUntil ?? null, o.via ?? 'signed');
@@ -354,9 +357,23 @@ export class InviteStore {
     return Number(r.m);
   }
 
+  /** Joins under an inviter since Monday 00:00 UTC, every kind. */
+  joinsThisWeek(inviter: string, now: number): number {
+    const r = this.db.prepare('SELECT count(*) AS n FROM joins WHERE inviter = ? AND at >= ?').get(inviter.toLowerCase(), inviteWeekStart(now)) as { n: number };
+    return Number(r.n);
+  }
+
   /** What a wallet earned in a week that has to be claimed, micro-USD. */
   earnedInWeek(address: string, week: number): number {
     return this.earnedBetween(address.toLowerCase(), Math.max(weekStart(week), this.claimsFrom()), weekStart(week + 1));
+  }
+
+  /** Claimable at `now`: earned since the claims began until this week's claim opened, less what was claimed, micro-USD. */
+  claimableMicro(address: string, now: number): number {
+    const a = address.toLowerCase();
+    const from = this.claimsFrom();
+    const until = weekStart(weekOf(now));
+    return Math.max(0, (until > from ? this.earnedBetween(a, from, until) : 0) - this.claimedMicro(a));
   }
 
   claimOf(address: string, week: number): { micro: number; at: number } | null {
@@ -375,15 +392,6 @@ export class InviteStore {
       .run(c.wallet.toLowerCase(), c.week, micro, now, JSON.stringify(c)).changes) === 1;
   }
 
-  /** What was earned in weeks whose claim closed without one, micro-USD. */
-  lapsedMicro(address: string, now: number): number {
-    const a = address.toLowerCase();
-    const open = weekOf(now) - 1; // the week whose claim is open
-    const from = this.claimsFrom();
-    const due = this.earnedBetween(a, from, weekStart(open));
-    const r = this.db.prepare('SELECT coalesce(sum(micro), 0) AS m FROM claims WHERE address = ? AND week < ?').get(a, open) as { m: number };
-    return Math.max(0, due - Number(r.m));
-  }
 
   /** The whole ledger by UTC day, oldest first. Grants (the removed VIP credit) are not in it. */
   days(address: string): CreditDay[] {

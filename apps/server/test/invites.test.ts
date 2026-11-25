@@ -150,17 +150,22 @@ test('joining: the wallet signs; never itself, never a wallet with volume or wit
   assert.deepEqual(await join(inviter, 'FRESH123'), { ok: false, code: 'has-referrals' });
 });
 
-test('invites have no limit: every join under a code comes with the welcome, and a VIP code with its days', async () => {
+test("invites as SoDEX's: 3 a code a week, each with the welcome; the check says when it is full", async () => {
   const inviter = wallet();
   const vips = new Set([inviter.address]);
-  const { s, svc, join } = setup({ INVITER1: inviter.address }, {}, vips);
-  for (let i = 0; i < 120; i++) { const r = await join(wallet(), 'INVITER1'); assert.ok(r.ok && r.join.welcome); }
+  const { s, svc, join, clock } = setup({ INVITER1: inviter.address }, {}, vips);
+  for (let i = 0; i < 3; i++) { const r = await join(wallet(), 'INVITER1'); assert.ok(r.ok && r.join.welcome); }
+  assert.deepEqual(await join(wallet(), 'INVITER1'), { ok: false, code: 'limit' });
+  const full = await svc.check('INVITER1');
+  assert.ok(full.valid && full.full && full.full.until > clock.now && full.full.until - clock.now <= 7 * 86_400_000);
+  // The next week: three more, the welcome for each.
+  clock.now += 7 * 86_400_000;
+  assert.deepEqual(await svc.check('INVITER1'), { valid: true, welcome: true, vipDays: VIP_CODE_DAYS, silent: false });
   const late = wallet();
   assert.ok((await join(late, 'INVITER1')).ok);
   assert.equal(svc.welcomeActive(late.address), true);
-  assert.deepEqual(await svc.check('INVITER1'), { valid: true, welcome: true, vipDays: VIP_CODE_DAYS, silent: false });
-  assert.equal(s.referralsOf(inviter.address).length, 121);
-  assert.deepEqual(svc.me(inviter.address).stats.referred, [121, 0, 0]);
+  assert.equal(s.referralsOf(inviter.address).length, 4);
+  assert.deepEqual(svc.me(inviter.address).stats.referred, [4, 0, 0]);
 });
 
 test('an order is valued by what it was: copies, bots (algo children), site trading', () => {

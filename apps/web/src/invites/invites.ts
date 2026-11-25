@@ -9,7 +9,7 @@
  *   me          a wallet's join, welcome, credits, referrals and history (the Referrals page).
  */
 import { useEffect, useSyncExternalStore } from 'react';
-import { CLAIM_STATEMENT, CODE_RE, INVITE_PARAM, INVITE_STATEMENT, INVITE_TTL_MS, OURS_CODE, claimTypedData, inviteTypedData, normCode, type CreditClaim, type InviteJoin, type InviteMe } from '@sign/invites/claim';
+import { CLAIM_STATEMENT, CODE_RE, INVITE_PARAM, INVITE_STATEMENT, INVITE_TTL_MS, OURS_CODE, claimTypedData, inviteTypedData, normCode, type CreditClaim, type InviteJoin, type InviteMe, INVITES_PER_WEEK } from '@sign/invites/claim';
 import { OWN_KEY, dropKept, inviteParam, keepInvite, pendingInvite, readOwn, writeInvite, type Pending } from './capture';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
@@ -71,10 +71,10 @@ export async function captureInvite(): Promise<void> {
   const kept = pendingInvite();
   if (!kept || kept.checked) return;
   try {
-    const { status, body } = await json<{ valid?: boolean; welcome?: boolean; vipDays?: number; unknown?: boolean }>(`/api/vs/invites/check?code=${kept.code}`);
+    const { status, body } = await json<{ valid?: boolean; welcome?: boolean; vipDays?: number; full?: { until?: number }; unknown?: boolean }>(`/api/vs/invites/check?code=${kept.code}`);
     if (pendingInvite()?.code !== kept.code || status !== 200) return;
     if (body.valid) {
-      writeInvite({ ...kept, welcome: body.welcome !== false, vipDays: body.vipDays ?? 0, checked: true });
+      writeInvite({ ...kept, welcome: body.welcome !== false, vipDays: body.vipDays ?? 0, ...(body.full?.until ? { fullUntil: body.full.until } : {}), checked: true });
       changed();
     } else if (body.valid === false && !body.unknown) dropInvite();
   } catch {
@@ -198,19 +198,23 @@ export async function joinInvite(provider: Eip1193Provider, address: string, cod
   throw new InviteError(body.error || `The link was not taken (${status}).`, body.code);
 }
 
+/** A code whose joins of the week are taken, as SoDEX says it of its own. */
+export const fullText = (until: number): string => `This code took its ${INVITES_PER_WEEK} joins this week, SoDEX's limit. It takes new ones from ${new Date(until).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'short', day: 'numeric' })}, 00:00 UTC.`;
+
 /** A typed code, as the server (which asks SoDEX) knows it. */
-export interface CodeCheck { welcome: boolean; vipDays: number }
+/** `fullUntil`: the code took its joins of the week (SoDEX's quota) until then. */
+export interface CodeCheck { welcome: boolean; vipDays: number; fullUntil?: number }
 export async function checkCode(code: string): Promise<{ state: 'ok' } & CodeCheck | { state: 'bad' } | { state: 'silent' }> {
   try {
-    const { status, body } = await json<{ ok?: boolean; valid?: boolean; welcome?: boolean; vipDays?: number; unknown?: boolean }>(`/api/vs/invites/check?code=${encodeURIComponent(normCode(code))}`);
+    const { status, body } = await json<{ ok?: boolean; valid?: boolean; welcome?: boolean; vipDays?: number; full?: { until?: number }; unknown?: boolean }>(`/api/vs/invites/check?code=${encodeURIComponent(normCode(code))}`);
     if (status !== 200 || body.unknown) return { state: 'silent' };
-    return body.valid ? { state: 'ok', welcome: body.welcome !== false, vipDays: body.vipDays ?? 0 } : { state: 'bad' };
+    return body.valid ? { state: 'ok', welcome: body.welcome !== false, vipDays: body.vipDays ?? 0, ...(body.full?.until ? { fullUntil: body.full.until } : {}) } : { state: 'bad' };
   } catch {
     return { state: 'silent' };
   }
 }
 
-/** Claim the open week's fee credits: the wallet's one free signature. Returns the USD claimed. */
+/** Claim the fee credits that are claimable: the wallet's one free signature. Returns the USD claimed. */
 export async function claimCredits(provider: Eip1193Provider, address: string, week: number): Promise<number> {
   const chainId = await getChainId(provider).catch(() => 1);
   const t = Date.now();

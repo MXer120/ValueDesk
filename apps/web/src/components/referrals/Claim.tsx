@@ -1,15 +1,15 @@
 /**
- * The weekly claim (owner 2026-11-25): USDC from SoDEX and ValueDesk fee credits, in one field and one popup. A new claim opens
- * every Tuesday 12:00 UTC and is open for 7 days.
+ * The weekly claim (owner 2026-11-25): USDC from SoDEX and ValueDesk fee credits, in one field and one popup, by the same
+ * rules (owner: "make it just like sodex"): what was earned until a Tuesday 12:00 UTC is claimable from then, from $1.00 on,
+ * once a week, and what is not claimed stays claimable.
  *
- *   USDC     SoDEX's own claim (sodexRewards.ts claimRebates): it pays the signed-in wallet, from $1.00 on; what is not claimed
- *            stays claimable on SoDEX
- *   credits  one free signature (invites.ts claimCredits); a week that is not claimed in its 7 days lapses
+ *   USDC     SoDEX's own claim (sodexRewards.ts claimRebates): it pays the signed-in wallet
+ *   credits  one free signature (invites.ts claimCredits)
  *
  * The two are independent: one failing never holds back the other, and each says its own outcome.
  */
 import { useEffect, useState, type ReactNode } from 'react';
-import { WEEK_MS, claimWindow, type InviteMe } from '@sign/invites/claim';
+import { claimWindow, type InviteMe } from '@sign/invites/claim';
 import { track } from '../../analytics/usage';
 import { InviteError, claimCredits, loadMe } from '../../invites/invites';
 import { MIN_CLAIM_USD, claimRebates, floorCents } from '../../invites/sodexRewards';
@@ -20,7 +20,7 @@ import { DASH, fmtUsd } from '../../format';
 import { BrandMark } from '../BrandMark';
 import { DlgFoot } from '../dialogParts';
 import { Modal } from '../Modal';
-import { credit, usd2, type RefView } from './parts';
+import { usd2, type RefView } from './parts';
 
 const when = (t: number, o: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' }) => new Date(t).toLocaleDateString('en-US', { timeZone: 'UTC', ...o });
 /** "6d 3h", "3h 12m", "8m". */
@@ -39,7 +39,7 @@ function useNow(ms: number): number {
 /** What each side holds now. */
 export interface ClaimState {
   opensAt: number; closesAt: number;
-  credits: { state: 'none' | 'open' | 'claimed' | 'auto' | 'unknown'; usd: number; pendingUsd: number; lapsedUsd: number };
+  credits: { state: 'none' | 'open' | 'small' | 'claimed' | 'auto' | 'unknown'; usd: number; pendingUsd: number };
   usdc: { state: 'signin' | 'reading' | 'locked' | 'none' | 'small' | 'open'; usd: number; pendingUsd: number; needUsd: number; volumeUsd: number };
   /** Something can be claimed now. */
   any: boolean;
@@ -50,10 +50,11 @@ export function claimState(me: InviteMe | null, s: SodexRewards, now: number): C
   const c = me?.claims;
   // A page left open over a Tuesday: the server's week is the last one until it is read again.
   const cur = c && c.week === w.week ? c : null;
-  const credits: ClaimState['credits'] = !me ? { state: 'unknown', usd: 0, pendingUsd: 0, lapsedUsd: 0 }
-    : !c ? { state: 'auto', usd: me.credits.balanceUsd, pendingUsd: 0, lapsedUsd: 0 }
-    : !cur ? { state: 'unknown', usd: 0, pendingUsd: 0, lapsedUsd: c.lapsedUsd }
-    : { state: cur.claimed ? 'claimed' : cur.usd > 0 ? 'open' : 'none', usd: cur.usd, pendingUsd: cur.pendingUsd, lapsedUsd: cur.lapsedUsd };
+  const min = cur?.minUsd ?? MIN_CLAIM_USD;
+  const credits: ClaimState['credits'] = !me ? { state: 'unknown', usd: 0, pendingUsd: 0 }
+    : !c ? { state: 'auto', usd: me.credits.balanceUsd, pendingUsd: 0 }
+    : !cur ? { state: 'unknown', usd: 0, pendingUsd: 0 }
+    : { state: cur.claimed ? 'claimed' : cur.usd >= min ? 'open' : cur.usd > 0 ? 'small' : 'none', usd: cur.usd, pendingUsd: cur.pendingUsd };
   const st = s.stats;
   const can = s.claimableUsd;
   const usdc: ClaimState['usdc'] = {
@@ -86,9 +87,9 @@ export function ClaimField({ v, s, provider }: { v: RefView; s: SodexRewards; pr
   useEffect(() => { if (stale && v.address) void loadMe(v.address); }, [stale, stale ? minute : 0, v.address]);
   const usdcLine = !v.address && !v.sample ? 'From SoDEX' : c.usdc.state === 'signin' ? 'Sign in to SoDEX to see it' : c.usdc.state === 'reading' ? 'Reading SoDEX…'
     : c.usdc.state === 'locked' ? `Unlocks at ${fmtUsd(c.usdc.needUsd, 0)} SoDEX volume` : c.usdc.state === 'small' ? `SoDEX pays out from ${usd2(MIN_CLAIM_USD)}`
-    : c.usdc.pendingUsd > 0 ? `${credit(c.usdc.pendingUsd)} pending` : c.usdc.state === 'open' ? 'Ready to claim' : 'Nothing yet';
-  const creditLine = c.credits.state === 'auto' ? 'Pays your fees by itself' : c.credits.state === 'claimed' ? `Claimed · ${credit(c.credits.pendingUsd)} for next week`
-    : c.credits.state === 'unknown' ? 'From ValueDesk' : c.credits.pendingUsd > 0 ? `${credit(c.credits.pendingUsd)} for next week` : c.credits.state === 'open' ? 'Ready to claim' : 'Nothing yet';
+    : c.usdc.pendingUsd > 0 ? `${usd2(c.usdc.pendingUsd)} pending` : c.usdc.state === 'open' ? 'Ready to claim' : 'Nothing yet';
+  const creditLine = c.credits.state === 'auto' ? 'Pays your fees by itself' : c.credits.state === 'claimed' ? `Claimed this week · ${usd2(c.credits.pendingUsd + c.credits.usd)} next`
+    : c.credits.state === 'unknown' ? 'From ValueDesk' : c.credits.state === 'small' ? `Claimable from ${usd2(MIN_CLAIM_USD)}` : c.credits.pendingUsd > 0 ? `${usd2(c.credits.pendingUsd)} pending` : c.credits.state === 'open' ? 'Ready to claim' : 'Nothing yet';
   const label = !v.address && !v.sample ? 'Connect a wallet' : c.usdc.state === 'signin' && c.credits.state !== 'open' ? 'See my rewards' : 'Claim';
   return (
     <section className="rf-claim" aria-label="Weekly claim">
@@ -98,7 +99,7 @@ export function ClaimField({ v, s, provider }: { v: RefView; s: SodexRewards; pr
         <small>Next one opens in {left(c.closesAt - now)}</small>
       </div>
       <Side mark={<SodexMark />} name="USDC" on={c.usdc.state === 'open'} value={c.usdc.state === 'signin' || c.usdc.state === 'reading' ? DASH : usdcText(c.usdc.usd)} line={usdcLine} />
-      <Side mark={<BrandMark size={22} />} name="Fee credits" on={c.credits.state === 'open'} value={c.credits.state === 'unknown' ? DASH : credit(c.credits.state === 'claimed' ? 0 : c.credits.usd)} line={creditLine} />
+      <Side mark={<BrandMark size={22} />} name="Fee credits" on={c.credits.state === 'open'} value={c.credits.state === 'unknown' ? DASH : usd2(c.credits.state === 'claimed' ? 0 : c.credits.usd)} line={creditLine} />
       <button type="button" className={`rf-cta${c.any ? ' is-green' : ''}`} disabled={!v.address && !v.sample} onClick={() => setOpen(true)}>{label}</button>
       {open && <ClaimDialog v={v} s={s} provider={provider} onClose={() => setOpen(false)} />}
     </section>
@@ -165,26 +166,29 @@ export function ClaimDialog({ v, s, provider, onClose }: { v: RefView; s: SodexR
   return (
     <Modal open size="sm" title={finished ? 'Claimed' : 'Weekly claim'} className="dlg rf-claimdlg" onClose={() => { if (!busy) onClose(); }} dismissOnBackdrop={!busy}>
       <div className="rf-claimdlg__top" aria-hidden="true"><span className="is-usdc"><SodexMark size={30} /></span><span className="is-credit"><BrandMark size={32} /></span></div>
-      <p className="rf-claimdlg__when">{when(c.opensAt - WEEK_MS, { month: 'short', day: 'numeric' })} to {when(c.opensAt, { month: 'short', day: 'numeric' })}<small>Open until {when(c.closesAt)}, 12:00 UTC · {left(c.closesAt - now)} left</small></p>
+      <p className="rf-claimdlg__when">Earned until {when(c.opensAt, { month: 'short', day: 'numeric' })}<small>Next claim {when(c.closesAt)}, 12:00 UTC · in {left(c.closesAt - now)}</small></p>
       <ul className="rf-claimdlg__rows">
         <Row
           mark={<SodexMark size={22} />} name="USDC" note="From SoDEX, to your wallet" step={usdc}
           value={usdc.state === 'done' ? `+${usdcText(usdc.usd ?? 0)}` : c.usdc.state === 'signin' || c.usdc.state === 'reading' ? DASH : usdcText(c.usdc.usd)}
           line={usdc.state === 'done' ? (usdc.tx ? <a href={`${TX}${usdc.tx}`} target="_blank" rel="noopener noreferrer">See the transaction</a> : 'Paid to your wallet') : c.usdc.state === 'locked' ? <>Unlocks at {fmtUsd(c.usdc.needUsd, 0)} SoDEX volume: you have {fmtUsd(c.usdc.volumeUsd, 0)}</>
-            : c.usdc.state === 'small' ? <>SoDEX pays out from {usd2(MIN_CLAIM_USD)}. It stays yours until then</> : c.usdc.pendingUsd > 0 ? <>{credit(c.usdc.pendingUsd)} more is pending at SoDEX</> : c.usdc.state === 'none' ? 'Nothing to claim' : c.usdc.state === 'open' ? 'No signature needed' : null}
-          action={c.usdc.state === 'signin' ? <button type="button" className="dlg-btn" disabled={s.signingIn || !provider} onClick={s.signIn}>{s.signingIn ? 'Check wallet…' : 'Sign in'}</button> : null}
+            : c.usdc.state === 'small' ? <>SoDEX pays out from {usd2(MIN_CLAIM_USD)}. It stays yours until then</> : c.usdc.pendingUsd > 0 ? <>{usd2(c.usdc.pendingUsd)} more is pending at SoDEX</> : c.usdc.state === 'none' ? 'Nothing to claim' : c.usdc.state === 'open' ? 'No signature needed' : null}
+          action={c.usdc.state === 'signin' && n > 0 ? <button type="button" className="dlg-btn" disabled={s.signingIn || !provider} onClick={s.signIn}>{s.signingIn ? 'Check wallet…' : 'Sign in'}</button> : null}
         />
         <Row
           mark={<BrandMark size={24} />} name="Fee credits" note="Pay your ValueDesk fees" step={cred}
-          value={cred.state === 'done' ? `+${credit(cred.usd ?? 0)}` : c.credits.state === 'unknown' ? DASH : credit(c.credits.usd)}
-          line={cred.state === 'done' || c.credits.state === 'claimed' ? 'Claimed for this week' : c.credits.state === 'auto' ? 'They pay your fees by themselves' : c.credits.state === 'none' ? (c.credits.pendingUsd > 0 ? <>{credit(c.credits.pendingUsd)} opens on {when(c.closesAt)}</> : 'Nothing to claim') : c.credits.state === 'open' ? 'One free signature. This week only' : null}
+          value={cred.state === 'done' ? `+${usd2(cred.usd ?? 0)}` : c.credits.state === 'unknown' ? DASH : usd2(c.credits.state === 'claimed' ? 0 : c.credits.usd)}
+          line={cred.state === 'done' || c.credits.state === 'claimed' ? <>Claimed this week. The next claim opens {when(c.closesAt)}</> : c.credits.state === 'auto' ? 'They pay your fees by themselves'
+            : c.credits.state === 'small' ? <>Claimable from {usd2(MIN_CLAIM_USD)}. They stay yours until then</>
+            : c.credits.state === 'none' ? (c.credits.pendingUsd > 0 ? <>{usd2(c.credits.pendingUsd)} opens on {when(c.closesAt)}</> : 'Nothing to claim') : c.credits.state === 'open' ? 'One free signature. What you leave stays yours' : null}
         />
       </ul>
       {s.signInError && <p className="ref-offer__note" role="alert">{s.signInError}</p>}
       {s.error && s.signedIn && <p className="ref-offer__note" role="alert">Some of SoDEX's figures could not be read. <button type="button" className="rf-text" onClick={s.refresh}>Try again</button></p>}
       <DlgFoot left={<button type="button" className="dlg-btn" disabled={busy} onClick={onClose}>{finished ? 'Close' : 'Not now'}</button>}>
         {finished ? <span className="rf-claimdlg__ok">Next claim {when(c.closesAt)}</span>
-          : <button type="button" className="dlg-btn is-go" disabled={busy || n === 0} onClick={() => void all()}>{busy ? 'Claiming…' : n === 0 ? 'Nothing to claim' : canUsdc && canCred ? 'Claim both' : canUsdc ? `Claim ${usdcText(c.usdc.usd)} USDC` : `Claim ${credit(c.credits.usd)}`}</button>}
+          : n === 0 && c.usdc.state === 'signin' ? <button type="button" className="dlg-btn is-go" disabled={s.signingIn || !provider} onClick={s.signIn}>{s.signingIn ? 'Check wallet…' : 'Sign in to SoDEX'}</button>
+          : <button type="button" className="dlg-btn is-go" disabled={busy || n === 0} onClick={() => void all()}>{busy ? 'Claiming…' : n === 0 ? 'Nothing to claim' : canUsdc && canCred ? 'Claim both' : canUsdc ? `Claim ${usdcText(c.usdc.usd)} USDC` : `Claim ${usd2(c.credits.usd)}`}</button>}
       </DlgFoot>
     </Modal>
   );

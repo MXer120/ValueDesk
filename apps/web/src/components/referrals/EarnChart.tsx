@@ -41,13 +41,12 @@ export function RewardsChart({ usdc, credits, now }: { usdc: LinePoint[] | null;
     const t0 = first - (now - first) * 0.04;
     const X = (t: number) => ((t - t0) / Math.max(1, now - t0)) * W;
     const Y = (v: number) => H - 4 - (v / top) * (H - 22);
-    return { times: [t0, ...times, ...(times[times.length - 1] === now ? [] : [now])], t0, X, Y, c: path(credits, X, Y, now), u: usdc ? path(usdc, X, Y, now) : '' };
+    return { first, t0, X, Y, c: path(credits, X, Y, now), u: usdc ? path(usdc, X, Y, now) : '' };
   }, [usdc, credits, now]);
   if (!g) return <Empty>Your rewards draw here from your first referral.</Empty>;
-  const read = (e: React.PointerEvent<HTMLDivElement>) => {
-    const t = g.t0 + shareOf(e) * (now - g.t0);
-    setAt(g.times.reduce((b, x) => (Math.abs(x - t) < Math.abs(b - t) ? x : b), g.times[0]!));
-  };
+  // Every moment has a value (the lines step from point to point): the pointer reads where it is, never jumps to a point.
+  // The right edge is now, with all that is known now (what is pending lands there).
+  const read = (e: React.PointerEvent<HTMLDivElement>) => { const k = shareOf(e); setAt(k >= 0.985 ? now : Math.max(g.first, g.t0 + k * (now - g.t0))); };
   const uv = at === null || !usdc ? null : valueAt(usdc, at);
   const cv = at === null ? null : valueAt(credits, at);
   const left = at === null ? 0 : (g.X(at) / W) * 100;
@@ -75,14 +74,12 @@ export function RewardsChart({ usdc, credits, now }: { usdc: LinePoint[] | null;
   );
 }
 
-const PARTS = [['referral', 'Invited'], ['own', 'Own'], ['boost', 'Boost']] as const;
-
-/** Every week SoDEX has scored, both seasons: what came from invitees, from the wallet itself and from its squads. */
+/** Every week SoDEX has scored, both seasons: the SoPoints that came from invitees (owner 2026-11-25: not the wallet's own or its squads'). */
 export function PointsChart({ weeks }: { weeks: readonly AnyWeek[] }) {
   const [at, setAt] = useState<number | null>(null);
   const ws = useMemo(() => scoredWeeks(weeks), [weeks]);
-  const top = Math.max(0, ...ws.map((w) => w.split.week.points));
-  if (!ws.length || top <= 0) return <Empty steps>Your SoPoints draw here from your first scored week.</Empty>;
+  const top = Math.max(0, ...ws.map((w) => w.split.referral));
+  if (!ws.length || top <= 0) return <Empty steps>SoPoints from your invitees draw here from their first scored week.</Empty>;
   const w = at === null ? null : ws[Math.min(at, ws.length - 1)]!;
   const step = 100 / ws.length;
   // At most eight labels.
@@ -93,15 +90,14 @@ export function PointsChart({ weeks }: { weeks: readonly AnyWeek[] }) {
       <div className="rfc__bars" aria-hidden="true">
         {ws.map((x, i) => (
           <span key={x.key} className={at === i ? 'is-on' : undefined}>
-            <span style={{ height: `${Math.max(1.5, (x.split.week.points / top) * 100)}%` }}>{PARTS.map(([k]) => x.split[k] > 0 && <i key={k} className={`is-${k}`} style={{ flexGrow: x.split[k] }} />)}</span>
+            <span style={{ height: `${Math.max(1.5, (x.split.referral / top) * 100)}%` }}>{x.split.referral > 0 && <i className="is-referral" style={{ flexGrow: 1 }} />}</span>
           </span>
         ))}
       </div>
       {w && at !== null && (
         <span className="rfc__tip" style={{ left: `clamp(86px, ${step * (at + 0.5)}%, calc(100% - 86px))` }}>
           <small>{w.name}</small>
-          <span><i />All<b>{whole(w.split.week.points)}</b></span>
-          {PARTS.map(([k, l]) => <span key={k} className={`is-${k}`}><i />{l}<b>{whole(w.split[k])}</b></span>)}
+          <span className="is-referral"><i />From invitees<b>{whole(w.split.referral)}</b></span>
         </span>
       )}
       <span className="rfc__ax is-cells">{ws.map((x, i) => <i key={x.key}>{i % every === 0 ? x.short : ''}</i>)}</span>
