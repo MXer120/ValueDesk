@@ -236,7 +236,9 @@ test('a metas file of version 2 (no venues per snapshot) is still read: no rebui
 test('a tile cut to what a view draws holds exactly those numbers of the full tile: slim rows, the newest snapshot per bar, one snapshot alone', async () => {
   const T = await import('../src/indexer/liqTiles.js');
   T.resetLiqTiles();
-  const ts = await seed('CUT', 2 * 96 + 7, 80_000);
+  // Never ending on a slot's first snapshot (the test failed for a quarter of an hour at each slot's start, 2026-11-25 18:15 UTC).
+  const newest = Math.floor((Date.now() - Q) / Q) * Q;
+  const ts = await seed('CUT', 2 * 96 + 7, 80_000, newest % T.SLOT_MS === 0 ? newest - Q : newest);
   const V = ['hyperliquid', 'sodex', 'lighter'] as const;
   const idx = (await T.liqTileIndex('CUT', [...V]))!;
   const span = T.bandSpan(idx.bw, 0);
