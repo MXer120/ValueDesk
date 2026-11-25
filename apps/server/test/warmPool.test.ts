@@ -47,6 +47,15 @@ test('warm-up: no bad lookup, every row written, the spill written back through 
     assert.equal(revs.at(-1), before + 321);
     await s.warmCohort('members', Array.from({ length: 100 }, (_, i): [string, string] => ['lighter', member(i, 0).address]));
     await s.warmCohort('books', Array.from({ length: 100 }, (_, i): [string, string] => ['lighter', member(i, 0).address]));
+    // A wallet's stream copies in a range go (trade.xyz's too), its REST rows and the rows outside it stay.
+    const who = `0x${'ab'.repeat(20)}`;
+    const mk = (id: string, t: number, src: number, symbol = 'BTC') => ({ venue: 'hyperliquid', address: who, id, t, symbol, side: 1, px: 1, sz: 1, fee: 0, closedPnl: null, oid: null, src }) as unknown as FillRow;
+    await s.putFillsAsync([...Array.from({ length: 5_200 }, (_, i) => mk(`s${i}`, now - 1_000_000 + i, 0, i % 100 ? 'BTC' : 'xyz:TSLA')), ...Array.from({ length: 700 }, (_, i) => mk(`r${i}`, now - 1_000_000 + i, 1)), mk('old', now - 2_000_000, 0)]);
+    const whoN = (src: number) => Number((s.db.prepare('SELECT COUNT(*) AS n FROM fills WHERE address = ? AND src = ?').get(who, src) as { n: number }).n);
+    assert.equal(whoN(0), 5_200 + 52 + 1);
+    await s.dropStreamRowsAsync('hyperliquid', who, now - 1_500_000, now, async () => {});
+    assert.equal(whoN(0), 1);
+    assert.equal(whoN(1), 700);
     const left = n0(s);
     await s.dropStreamRowsAsync('hyperliquid', rows[0]!.address, 0, now, async () => {});
     assert.equal(n0(s), left, 'no stream row, nothing dropped');
@@ -55,7 +64,7 @@ test('warm-up: no bad lookup, every row written, the spill written back through 
     assert.equal(w.timeouts, 0);
     assert.ok(w.keys > 2_000);
     const n = (sql: string) => Number((s.db.prepare(sql).get() as { n: number }).n);
-    assert.equal(n('SELECT COUNT(*) AS n FROM fills'), 2 * (900 + 180));
+    assert.equal(n('SELECT COUNT(*) AS n FROM fills'), 2 * (900 + 180) + 701);
     assert.equal(n("SELECT SUM(trades) AS n FROM activity_hour WHERE venue = 'lighter'"), 400);
   } finally {
     delete process.env.VALUESCAN_WARM_THREADS;

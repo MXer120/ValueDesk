@@ -30,9 +30,12 @@ export type WarmActivity = [string, string, number];
 export type WarmLiq = [number, string, number, number, number];
 /** venue, address */
 export type WarmBook = readonly [string, string];
-/** venue, address, from t, to t */
-export type WarmRange = [string, string, number, number];
-export type WarmKind = 'fills' | 'activity' | 'liq' | 'wallets' | 'members' | 'books' | 'range';
+/** venue, address, after t, after id, to t, ids at most */
+export type ScanAsk = [string, string, number, string, number, number];
+export interface ScanAnswer { ids: string[]; next: [number, string] | null }
+/** A scan may take this long (a whale's range of cold rows); then the caller reads it itself. */
+export const SCAN_MAX_MS = 5 * 60_000;
+export type WarmKind = 'fills' | 'activity' | 'liq' | 'wallets' | 'members' | 'books' | 'scan';
 
 const CODE = `
 const { workerData, parentPort } = require('node:worker_threads');
@@ -67,23 +70,35 @@ const RUN = {
     const r = q(db, 'SELECT rev, at FROM cohort_book WHERE venue = ? AND address = ?').get(k[0], k[1]);
     if (r) q(db, 'SELECT 1 FROM cohort_book INDEXED BY cohort_book_rev WHERE venue = ? AND rev >= ? LIMIT 1').get(k[0], r.rev);
   },
-  // The same read as store.dropStreamRowsAsync makes of a wallet's range, each row's src looked up in the table.
-  range(k) {
-    let t = k[2], id = '';
-    for (let n = 0; n < 40; n++) {
-      const rows = q(db, 'SELECT id, t, src FROM fills WHERE venue = ? AND address = ? AND (t, id) > (?, ?) AND t <= ? ORDER BY t, id LIMIT 1000').all(k[0], k[1], t, id, k[3]);
-      if (rows.length < 1000) return;
-      t = rows[999].t; id = rows[999].id;
-    }
-  },
   liq(k) {
     q(ldb, 'SELECT 1 FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t >= ? LIMIT 1').get(k[0], k[1], k[2], k[3]);
     q(ldb, 'SELECT 1 FROM liq_log INDEXED BY liq_log_cell WHERE coin = ? AND liq = ? AND t >= ? LIMIT 1').get(k[1], k[4], k[3]);
     q(ldb, 'SELECT 1 FROM liq_cur WHERE aid = ? AND coin = ? AND venue = ?').get(k[0], k[1], k[2]);
   },
 };
+// The ids of a wallet's stream rows in a range (store.dropStreamRowsAsync), up to max of them, and where to go on (null: all).
+function scan(k) {
+  const ids = [];
+  let t = k[2], id = k[3];
+  for (;;) {
+    const rows = q(db, 'SELECT id, t, src FROM fills WHERE venue = ? AND address = ? AND (t, id) > (?, ?) AND t <= ? ORDER BY t, id LIMIT 500').all(k[0], k[1], t, id, k[4]);
+    for (const r of rows) if (r.src === 0) ids.push(r.id);
+    if (rows.length < 500) return { ids, next: null };
+    t = rows[499].t; id = rows[499].id;
+    if (ids.length >= k[5]) return { ids, next: [t, id] };
+  }
+}
 parentPort.on('message', (m) => {
   let bad = 0;
+  if (m.kind === 'scan') {
+    let out = null;
+    try {
+      if (!db) { db = open(workerData.path); ldb = workerData.liqPath ? open(workerData.liqPath) : db; }
+      out = scan(m.keys[0]);
+    } catch (e) { bad = 1; }
+    parentPort.postMessage({ bad, out });
+    return;
+  }
   try {
     if (!db) { db = open(workerData.path); ldb = workerData.liqPath ? open(workerData.liqPath) : db; }
     const run = RUN[m.kind];
@@ -93,7 +108,7 @@ parentPort.on('message', (m) => {
 });
 `;
 
-type Job = { id: number; kind: WarmKind; chunks: Array<ReadonlyArray<readonly unknown[]>>; next: number; left: number; low: boolean; done: () => void };
+type Job = { id: number; kind: WarmKind; chunks: Array<ReadonlyArray<readonly unknown[]>>; next: number; left: number; low: boolean; out: ScanAnswer | null; done: () => void };
 type Slot = { w: Worker | null; job: Job | null };
 
 /**
@@ -119,14 +134,23 @@ export class WarmPool {
   }
 
   /** Read these keys' pages. Resolves when they are read, or after WARM_MAX_MS; never rejects. */
-  warm(kind: WarmKind, keys: ReadonlyArray<readonly unknown[]>): Promise<void> {
-    if (!this.on || !keys.length) return Promise.resolve();
+  async warm(kind: WarmKind, keys: ReadonlyArray<readonly unknown[]>): Promise<void> {
+    await this.run(kind, keys, WARM_MAX_MS);
+  }
+
+  /** A wallet's stream rows in a range; null: not answered (no pool, an error, SCAN_MAX_MS). */
+  scan(ask: ScanAsk): Promise<ScanAnswer | null> {
+    return this.run('scan', [ask], SCAN_MAX_MS);
+  }
+
+  private run(kind: WarmKind, keys: ReadonlyArray<readonly unknown[]>, maxMs: number): Promise<ScanAnswer | null> {
+    if (!this.on || !keys.length) return Promise.resolve(null);
     const t0 = Date.now();
-    return new Promise<void>((ok) => {
+    return new Promise<ScanAnswer | null>((ok) => {
       const chunks: Job['chunks'] = [];
       for (let i = 0; i < keys.length; i += CHUNK) chunks.push(keys.slice(i, i + CHUNK));
       const job: Job = {
-        id: this.nextId++, kind, chunks, next: 0, left: chunks.length, low: kind === 'liq',
+        id: this.nextId++, kind, chunks, next: 0, left: chunks.length, low: kind === 'liq', out: null,
         done: () => {
           const i = this.jobs.indexOf(job);
           if (i < 0) return;
@@ -135,10 +159,10 @@ export class WarmPool {
           this.state.queued = this.jobs.length;
           this.state.lastMs = Date.now() - t0;
           this.state.maxMs = Math.max(this.state.maxMs, this.state.lastMs);
-          ok();
+          ok(job.out);
         },
       };
-      const timer = setTimeout(() => { this.state.timeouts++; job.done(); }, WARM_MAX_MS);
+      const timer = setTimeout(() => { this.state.timeouts++; job.done(); }, maxMs);
       this.state.waits++;
       this.state.keys += keys.length;
       this.jobs.push(job);
@@ -176,8 +200,9 @@ export class WarmPool {
       if (j && --j.left <= 0) j.done();
       this.pump();
     };
-    w.on('message', (m: { bad: number }) => {
+    w.on('message', (m: { bad: number; out?: ScanAnswer | null }) => {
       this.state.bad += m.bad;
+      if (m.out && s.job) s.job.out = m.out;
       answered();
     });
     w.on('error', () => {});
