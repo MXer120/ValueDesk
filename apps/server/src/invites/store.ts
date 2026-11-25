@@ -12,6 +12,8 @@
  *   state      per wallet: whether credits are paying now, and since when
  *   grants     credits given rather than earned (the VIP credit, until 2026-11-25). Nothing is deleted: from the row
  *              ('*', 'vip-removed') on, only what had been spent of them by then still counts (totals)
+ *   counts     per UTC day: links opened with a real code ('link'), joins ('signed', 'terms', 'sodex'), refusals, errors -
+ *              what the health check judges (deploy/server/bin/healthcheck.mjs: links opened, nobody joined)
  *   vip_codes  codes upgraded on the dev page: whoever joins with one gets the VIP fee for claim.ts VIP_CODE_DAYS
  */
 import { DatabaseSync } from 'node:sqlite';
@@ -73,6 +75,12 @@ CREATE TABLE IF NOT EXISTS vip_codes (
   added_at INTEGER NOT NULL,
   added_by TEXT NOT NULL
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS counts (
+  day INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  n INTEGER NOT NULL,
+  PRIMARY KEY (day, kind)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS state (
   address TEXT PRIMARY KEY,
   paying INTEGER NOT NULL,
@@ -86,6 +94,7 @@ const REMOVED_LATE_MS = 15 * 60_000;
 
 export interface Join { wallet: string; inviter: string; code: string; at: number; welcome: boolean; vipUntil: number | null }
 export interface VipCode { code: string; addedAt: number; addedBy: string }
+export type JoinVia = 'signed' | 'terms' | 'sodex';
 export type JoinResult = { ok: true; join: Join; fresh: boolean } | { ok: false; code: JoinRefusal };
 export interface Entry { address: string; kind: 'earn' | 'spend' | 'grant'; micro: number; source: string | null; tier: number | null }
 
@@ -104,9 +113,12 @@ export class InviteStore {
     // A file from before the tiers: the columns they added.
     const has = (t: string, c: string) => (this.db.prepare(`PRAGMA table_info(${t})`).all() as Array<{ name: string }>).some((x) => x.name === c);
     if (!has('joins', 'welcome')) this.db.exec('ALTER TABLE joins ADD COLUMN welcome INTEGER NOT NULL DEFAULT 1');
+    if (!has('joins', 'via')) this.db.exec("ALTER TABLE joins ADD COLUMN via TEXT NOT NULL DEFAULT 'signed'");
     if (!has('joins', 'vip_until')) this.db.exec('ALTER TABLE joins ADD COLUMN vip_until INTEGER');
     // The VIP credit ended (owner 2026-11-25), from the first start of this code on.
     this.db.prepare("INSERT OR IGNORE INTO grants (address, reason, micro, at) VALUES ('*', 'vip-removed', 0, ?)").run(now);
+    // From the first start of the SoDEX check on: only wallets first seen since then join by it (service.ts autoTick).
+    this.db.prepare("INSERT OR IGNORE INTO grants (address, reason, micro, at) VALUES ('*', 'auto-from', 0, ?)").run(now);
     if (!has('entries', 'tier')) this.db.exec('ALTER TABLE entries ADD COLUMN tier INTEGER');
   }
 
@@ -123,6 +135,27 @@ export class InviteStore {
 
   noteCode(code: string, owner: string, now: number): void {
     this.db.prepare('INSERT INTO sodex_codes (code, owner, at) VALUES (?, ?, ?) ON CONFLICT (code) DO NOTHING').run(code, owner.toLowerCase(), now);
+  }
+
+  /** A code kept for this owner. */
+  codeOfOwner(owner: string): string | null {
+    const r = this.db.prepare('SELECT code FROM sodex_codes WHERE owner = ? ORDER BY at DESC LIMIT 1').get(owner.toLowerCase()) as { code: string } | undefined;
+    return r?.code ?? null;
+  }
+
+  /** When the SoDEX check began. */
+  autoFrom(): number {
+    const r = this.db.prepare("SELECT at FROM grants WHERE address = '*' AND reason = 'auto-from'").get() as { at: number } | undefined;
+    return Number(r?.at ?? 0);
+  }
+
+  count(kind: string, now: number): void {
+    this.db.prepare('INSERT INTO counts (day, kind, n) VALUES (?, ?, 1) ON CONFLICT (day, kind) DO UPDATE SET n = n + 1').run(Math.floor(now / 86_400_000), kind);
+  }
+
+  counted(kind: string, sinceDay: number): number {
+    const r = this.db.prepare('SELECT coalesce(sum(n), 0) AS n FROM counts WHERE kind = ? AND day >= ?').get(kind, sinceDay) as { n: number };
+    return Number(r.n);
   }
 
   /* ------------------------------------------------------------------- VIP codes ----- */
@@ -203,7 +236,7 @@ export class InviteStore {
    * A signed join under `inviter` (the code's owner, from SoDEX). The first join of a wallet stands; a repeat of it is
    * answered as done. `hasVolume`: the builder ledger counts volume for the wallet already.
    */
-  join(j: InviteJoin, inviter: string, o: { hasVolume: boolean; welcome: boolean; vipUntil?: number | null }, now = Date.now()): JoinResult {
+  join(j: InviteJoin, inviter: string, o: { hasVolume: boolean; welcome: boolean; vipUntil?: number | null; /** Signed by the wallet (default), by its terms signature (check.ts checkTermsJoin), or on SoDEX's word (service.ts restore). */ via?: JoinVia }, now = Date.now()): JoinResult {
     const wallet = j.wallet.toLowerCase();
     const by = inviter.toLowerCase();
     if (by === wallet) return { ok: false, code: 'self' };
@@ -213,8 +246,8 @@ export class InviteStore {
     // No loops: a wallet others joined already joins nobody (and so a chain only ever grows downwards).
     if (this.hasReferrals(wallet)) return { ok: false, code: 'has-referrals' };
     try {
-      this.db.prepare('INSERT INTO joins (wallet, inviter, code, at, nonce, issued_at, expires_at, chain_id, signature, welcome, vip_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(wallet, by, j.code, now, j.nonce, Number(j.issuedAt), Number(j.expiresAt), j.chainId, j.signature, o.welcome ? 1 : 0, o.vipUntil ?? null);
+      this.db.prepare('INSERT INTO joins (wallet, inviter, code, at, nonce, issued_at, expires_at, chain_id, signature, welcome, vip_until, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(wallet, by, j.code, now, j.nonce, Number(j.issuedAt), Number(j.expiresAt), j.chainId, j.signature, o.welcome ? 1 : 0, o.vipUntil ?? null, o.via ?? 'signed');
     } catch (e) {
       if (!isUnique(e)) throw e;
       const again = this.joinOf(wallet);

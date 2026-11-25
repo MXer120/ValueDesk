@@ -4,7 +4,7 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import { keccak_256 } from '@noble/hashes/sha3';
 import type { BuilderService } from '../src/builder/service.js';
 import { CODE_RE, CREDIT_FEE, INVITE_STATEMENT, OURS_CODE, TIER_SHARES, WELCOME_CAP, WELCOME_FEE, WELCOME_USD, normCode } from '../src/invites/claim.js';
-import { checkInviteJoin, inviteJoinDigest } from '../src/invites/check.js';
+import { checkInviteJoin, checkTermsJoin, inviteJoinDigest, termsDigest } from '../src/invites/check.js';
 import { InviteService, payingNext, productOf } from '../src/invites/service.js';
 import { InviteStore } from '../src/invites/store.js';
 
@@ -26,6 +26,7 @@ function signJoin(w: { pk: Uint8Array; address: string }, code: string, now = Da
 
 const T0 = 1_800_000_000_000;
 const DAY = 86_400_000;
+const HOUR = 3_600_000;
 const near = (x: number, y: number) => Math.abs(x - y) < 1e-6;
 
 test("codes are SoDEX referral codes, any case; ValueDesk's own is not a referral", () => {
@@ -88,13 +89,14 @@ function fakeLedger() {
   return L;
 }
 
-function setup(owners: Record<string, string> = {}) {
+function setup(owners: Record<string, string> = {}, inviters: Record<string, string> = {}) {
   const L = fakeLedger();
   const s = new InviteStore(':memory:');
   const clock = { now: T0 };
   const asked: string[] = [];
   const svc = new InviteService(s, L.builder, {
     now: () => clock.now,
+    inviterOf: async (w) => (inviters[w] === 'SILENT' ? undefined : inviters[w] ?? null),
     ownerOf: async (code) => { asked.push(code); return code === 'SILENT' ? undefined : owners[code] ?? null; },
   });
   /** A wallet joins under `code` the way the route does it. */
@@ -270,4 +272,106 @@ test('credits: a trickle does not switch them on for a fast trader; what runs pa
   assert.equal(c.paying, false);
   assert.ok(c.balanceUsd < 0 && c.balanceUsd > -0.1, String(c.balanceUsd));
   assert.deepEqual(two.L.extra(slow.address, two.clock.now), []);
+});
+
+test('a lost referral put back on SoDEX\'s word: only the inviter SoDEX names, no loop, once; its fees count from the first visit', async () => {
+  const [inv, w1, w2, w3, alt, silent] = Array.from({ length: 6 }, () => wallet().address) as [string, string, string, string, string, string];
+  const inviters: Record<string, string> = { [w1]: inv, [w2]: alt, [inv]: alt, [alt]: w3, [w3]: inv, [silent]: 'SILENT' };
+  const { L, s, svc } = setup({ EDDIE: inv, OTHER123: alt }, inviters);
+  // It traded before it could join: that is what the lost link cost it.
+  L.trade(w1, 'o1', T0 - HOUR, 15, 10_000);
+  assert.deepEqual(await svc.restore(w1, inv, 'eddie', T0 - 2 * HOUR, true), { ok: true, welcome: true, vipUntil: null });
+  assert.equal(s.joinOf(w1), null, 'a dry run writes nothing');
+  assert.equal((await svc.restore(w1, inv, 'EDDIE', T0 - 2 * HOUR)).ok, true);
+  assert.deepEqual({ ...s.joinOf(w1) }, { wallet: w1, inviter: inv, code: 'EDDIE', at: T0 - 2 * HOUR, welcome: true, vipUntil: null });
+  assert.equal(svc.me(inv).stats.referred[0], 1);
+  svc.tick();
+  assert.ok(Math.abs(svc.me(inv).credits.earnedUsd - 10_000 * 0.00015 * 0.2) < 1e-6, 'what it paid since its first visit counts');
+  const no = async (w: string, by: string, code: string) => { const r = await svc.restore(w, by, code, T0); return r.ok ? 'ok' : r.why; };
+  assert.equal(await no(w1, inv, 'EDDIE'), 'joined already');
+  assert.match(await no(w2, inv, 'EDDIE'), /another inviter/);
+  assert.match(await no(w2, inv, 'OTHER123'), /someone else's/);
+  assert.match(await no(w2, inv, 'NOBODY12'), /nobody's/);
+  assert.match(await no(silent, inv, 'EDDIE'), /did not answer/);
+  assert.match(await no(wallet().address, inv, 'EDDIE'), /no inviter/);
+  // inv -> alt -> w3 -> inv: the inviter's own other wallets.
+  assert.match(await no(w3, inv, 'EDDIE'), /a loop/);
+});
+
+// Not by a literal path: the server's type check does not take the engine's own .ts imports.
+const COPY_ENGINE: string = '../../../packages/copy-engine/src/api.js';
+interface CopyEngine {
+  SITE_TERMS_EXECUTOR: string;
+  COPY_TERMS_EXECUTOR: string;
+  buildCopyRequest(o: object): { action: string; owner: string; executor: string; payload: string; nonce: string; deadline: string; chainId: number };
+  signCopyRequestWithKey(r: object, pk: Uint8Array): string;
+  copyRequestDigest(r: object): string;
+}
+/** The terms as a wallet signs them in the browser (packages/copy-engine). */
+async function signTerms(w: { pk: Uint8Array; address: string }, at: number, o: { action?: string; executor?: string } = {}) {
+  const ce = (await import(COPY_ENGINE)) as CopyEngine;
+  const req = ce.buildCopyRequest({ action: o.action ?? 'accept-site-terms', owner: w.address, executor: o.executor ?? ce.SITE_TERMS_EXECUTOR, payload: { termsVersion: '2026-11-23', agree: true }, chainId: 286623, now: at });
+  return { ...req, signature: ce.signCopyRequestWithKey(req, w.pk) };
+}
+
+test('a join by the terms signature: exactly what the wallet signs, only its own, only an acceptance of the terms, only while it is fresh', async () => {
+  const ce = (await import(COPY_ENGINE)) as CopyEngine;
+  const w = wallet();
+  const request = await signTerms(w, T0);
+  assert.equal(hex(termsDigest(request)), ce.copyRequestDigest(request), 'the digest is that of the copy engine');
+  const ok = checkTermsJoin({ code: 'EDDIE', request }, T0 + 1_000);
+  assert.ok(ok.ok && ok.join.wallet === w.address && ok.join.code === 'EDDIE' && ok.join.nonce === `terms:${T0}`);
+  assert.equal(checkTermsJoin({ code: 'EDDIE', request: await signTerms(w, T0, { action: 'accept-terms', executor: ce.COPY_TERMS_EXECUTOR }) }, T0).ok, true);
+  const no = (r: ReturnType<typeof checkTermsJoin>) => (r.ok ? 'ok' : r.error);
+  assert.match(no(checkTermsJoin({ code: 'EDDIE', request: { ...request, owner: wallet().address } }, T0)), /not from this wallet/);
+  assert.match(no(checkTermsJoin({ code: 'EDDIE', request: { ...request, payload: '{}' } }, T0)), /not from this wallet/);
+  assert.match(no(checkTermsJoin({ code: 'EDDIE', request: await signTerms(w, T0, { action: 'session', executor: 'x' }) }, T0)), /not an acceptance/);
+  assert.match(no(checkTermsJoin({ code: 'EDDIE', request: await signTerms(w, T0, { executor: 'x' }) }, T0)), /not an acceptance/);
+  assert.match(no(checkTermsJoin({ code: 'EDDIE', request }, T0 + 8 * DAY)), /too old/);
+  assert.match(no(checkTermsJoin({ code: 'a b', request }, T0)), /not an invite code/);
+  for (const bad of [null, {}, { code: 'EDDIE' }, { code: 'EDDIE', request: 'x' }, { code: 'EDDIE', request: { ...request, signature: '0x' } }]) assert.equal(checkTermsJoin(bad, T0).ok, false);
+});
+
+test('the SoDEX check: a new wallet SoDEX names an inviter for becomes its referral, whatever its browser lost; nobody else', async () => {
+  const [inv, late, stranger, fresh, old, soon, traded] = Array.from({ length: 7 }, () => wallet().address) as [string, string, string, string, string, string, string];
+  const inviters: Record<string, string> = { [fresh]: inv, [old]: inv, [soon]: inv, [traded]: stranger };
+  const seen: Record<string, number> = { [inv]: T0 - 9 * DAY, [late]: T0 + 5 * HOUR, [fresh]: T0 + HOUR, [old]: T0 - DAY, [soon]: T0 + HOUR + 55 * 60_000, [traded]: T0 + HOUR };
+  const L = fakeLedger();
+  const s = new InviteStore(':memory:', T0);
+  const clock = { now: T0 + 2 * HOUR };
+  const asked: string[] = [];
+  const svc = new InviteService(s, L.builder, {
+    now: () => clock.now,
+    ownerOf: async (c) => (c === 'EDDIE' ? inv : c === 'LATE1234' ? late : c === 'STRANGER' ? stranger : null),
+    codeOf: async (w) => (w === inv ? 'EDDIE' : w === late ? 'LATE1234' : 'STRANGER'),
+    inviterOf: async (w) => { asked.push(w); return inviters[w] === 'SILENT' ? undefined : inviters[w] ?? null; },
+    people: { since: (t) => Object.entries(seen).filter(([, at]) => at >= t).map(([w, at]) => ({ wallet: w, at })), firstSeen: (w) => seen[w] ?? null },
+  });
+  assert.equal(await svc.autoTick(), 1);
+  assert.equal(s.joinOf(fresh)?.inviter, inv);
+  assert.equal(s.joinOf(fresh)?.at, T0 + HOUR, 'from its first visit');
+  assert.equal(s.joinOf(old), null, 'known before the check began');
+  assert.equal(s.joinOf(soon), null, 'the page has its ten minutes first');
+  assert.equal(s.joinOf(traded), null, 'an inviter ValueDesk does not know');
+  assert.equal(s.counted('sodex', 0), 1);
+  clock.now += 10 * 60_000;
+  assert.equal(await svc.autoTick(), 1);
+  assert.equal(s.joinOf(soon)?.inviter, inv);
+  // SoDEX silent: asked again, and it counts once it answers. An inviter that came after the wallet never does.
+  const quiet = wallet().address;
+  const after = wallet().address;
+  seen[quiet] = clock.now; seen[after] = clock.now;
+  inviters[quiet] = 'SILENT'; inviters[after] = late;
+  clock.now += 11 * 60_000;
+  assert.equal(await svc.autoTick(), 0);
+  inviters[quiet] = inv;
+  clock.now += 4 * 60_000;
+  assert.equal(await svc.autoTick(), 1);
+  assert.equal(s.joinOf(quiet)?.inviter, inv);
+  assert.equal(s.joinOf(after), null);
+  // Joined wallets are not asked about again.
+  asked.length = 0;
+  clock.now += 2 * HOUR;
+  await svc.autoTick();
+  assert.ok(!asked.includes(fresh) && !asked.includes(quiet));
 });

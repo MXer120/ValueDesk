@@ -7,7 +7,8 @@
  *                  is the one the invited wallet is offered on SoDEX (owner: "they get their valuedesk code applied +
  *                  the underlying sodex code").
  *   Joining        the invited wallet signs once (free EIP-712 typed data, never a transaction) after it accepted the
- *                  site's terms. Refused: its own code, ValueDesk's own code, a wallet that traded on ValueDesk already,
+ *                  site's terms. Refused: its own code, ValueDesk's own code, a wallet that traded on ValueDesk already
+ *                  (not when SoDEX has it under this very inviter: every link lost its code until 2026-11-25),
  *                  a wallet that has referrals of its own (no loops), a second join (the first stands).
  *   Credits        of the ValueDesk builder fees a wallet really pays (the builder ledger's counted orders), its inviter
  *                  gets TIER_SHARES[0], the inviter's inviter TIER_SHARES[1], the next TIER_SHARES[2] - for as long as
@@ -153,6 +154,8 @@ export interface InviteMe {
   joined: { inviter: string; code: string; at: number } | null;
   /** May this wallet still join: never joined, no ValueDesk volume, no referrals of its own. */
   canJoin: boolean;
+  /** Why not, when it may not ('has-volume' is lifted by SoDEX naming the same inviter, routes/invites.ts). */
+  blocked?: 'joined' | 'has-volume' | 'has-referrals' | null;
   welcome: { active: boolean; usedUsd: number; leftUsd: number; limitUsd: number } | null;
   /** The VIP fee from a VIP code: until when (null: none, or over). */
   vipUntil?: number | null;

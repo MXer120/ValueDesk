@@ -3,23 +3,20 @@
  *
  *   the code    a wallet's own SoDEX referral code, read from SoDEX itself (every SoDEX account has one): no server of
  *               ours is asked, so every wallet with a SoDEX account has its link at once. valuedesk.so/?ref=<CODE>.
- *   ?ref=CODE   a visitor who came on a referral link: the code is checked with the server, kept in this browser and
- *               taken off the address bar; once the wallet accepted the site's terms it is offered to join
+ *   ?ref=CODE   a visitor who came on a referral link: the code is kept in this browser at once (capture.ts), taken off
+ *               the address bar and checked with the server; once the wallet accepted the site's terms it is offered to join
  *               (InviteHost) - one signature for ValueDesk, and the same code on SoDEX.
  *   me          a wallet's join, welcome, credits, referrals and history (the Referrals page).
  */
 import { useEffect, useSyncExternalStore } from 'react';
 import { CODE_RE, INVITE_PARAM, INVITE_STATEMENT, INVITE_TTL_MS, OURS_CODE, inviteTypedData, normCode, type InviteJoin, type InviteMe } from '@sign/invites/claim';
+import { OWN_KEY, dropKept, inviteParam, keepInvite, pendingInvite, readOwn, writeInvite, type Pending } from './capture';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
 export const SITE = 'https://valuedesk.so';
-const KEY = 'vd.invite';
-/** SoDEX codes of the wallets this browser connected: a link of one of them is never offered here (own link). */
-const OWN_KEY = 'vd.ref.own';
+export { inviteParam, pendingInvite, type Pending };
 const BIZ = 'https://alpha-biz.sodex.dev';
 const TIMEOUT_MS = 15_000;
-/** A kept invite older than this is let go (the visitor never connected a wallet). */
-const KEEP_MS = 30 * 86_400_000;
 
 export class InviteError extends Error {
   constructor(message: string, readonly code?: string) {
@@ -46,17 +43,6 @@ export const inviteLinkShown = (code: string): string => `valuedesk.so/?${INVITE
 
 /* ------------------------------------------------------------- the code it came with ----- */
 
-export interface Pending { code: string; at: number; welcome: boolean; vipDays?: number }
-
-function readOwn(): string[] {
-  try {
-    const v = JSON.parse(localStorage.getItem(OWN_KEY) ?? '[]') as unknown;
-    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
 /** Remember a code as one of this browser's own wallets'. */
 function noteOwn(code: string): void {
   const have = readOwn();
@@ -64,49 +50,35 @@ function noteOwn(code: string): void {
   try { localStorage.setItem(OWN_KEY, JSON.stringify([...have, code].slice(-20))); } catch { /* private mode */ }
 }
 
-/** The referral this browser came with, if any (not older than KEEP_MS, not one of its own wallets' codes). */
-export function pendingInvite(now = Date.now()): Pending | null {
-  try {
-    const v = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<Pending> | null;
-    if (!v?.code || !CODE_RE.test(v.code) || now - Number(v.at ?? 0) >= KEEP_MS) return null;
-    if (readOwn().includes(v.code)) return null;
-    return { code: v.code, at: Number(v.at), welcome: v.welcome !== false, vipDays: Number(v.vipDays) || 0 };
-  } catch {
-    return null;
-  }
-}
-
 export function dropInvite(): void {
-  try { localStorage.removeItem(KEY); } catch { /* private mode */ }
+  dropKept();
   changed();
 }
 
-/** The code in an address's query, or null. Pure. */
-export function inviteParam(search: string): string | null {
-  const c = normCode(new URLSearchParams(search).get(INVITE_PARAM) ?? '');
-  return CODE_RE.test(c) && c !== OURS_CODE ? c : null;
-}
-
 /**
- * On load: a code in the address bar is checked, kept (a first one only: a referral this browser holds already
- * stands) and taken off the address, so a shared link is never passed on with someone else's code in it.
+ * On load: the code is taken off the address, so a shared link is never passed on with someone else's code in it, and a
+ * kept one not asked about yet is checked. Only a clear "nobody's" lets it go; no answer keeps it, and it is asked again
+ * on the next load (the join asks too).
  */
 export async function captureInvite(): Promise<void> {
-  if (!new URLSearchParams(location.search).has(INVITE_PARAM)) return;
-  const code = inviteParam(location.search);
-  const url = new URL(location.href);
-  url.searchParams.delete(INVITE_PARAM);
-  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
-  if (!code || pendingInvite() || readOwn().includes(code)) return;
+  if (new URLSearchParams(location.search).has(INVITE_PARAM)) {
+    keepInvite(location.search);
+    const url = new URL(location.href);
+    url.searchParams.delete(INVITE_PARAM);
+    history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    changed();
+  }
+  const kept = pendingInvite();
+  if (!kept || kept.checked) return;
   try {
-    const { status, body } = await json<{ valid?: boolean; welcome?: boolean; vipDays?: number; unknown?: boolean }>(`/api/vs/invites/check?code=${code}`);
-    // SoDEX did not answer the server: kept, and the join asks again.
-    if (status === 200 && (body.valid || body.unknown)) {
-      localStorage.setItem(KEY, JSON.stringify({ code, at: Date.now(), welcome: body.welcome !== false, vipDays: body.vipDays ?? 0 }));
+    const { status, body } = await json<{ valid?: boolean; welcome?: boolean; vipDays?: number; unknown?: boolean }>(`/api/vs/invites/check?code=${kept.code}`);
+    if (pendingInvite()?.code !== kept.code || status !== 200) return;
+    if (body.valid) {
+      writeInvite({ ...kept, welcome: body.welcome !== false, vipDays: body.vipDays ?? 0, checked: true });
       changed();
-    }
+    } else if (body.valid === false && !body.unknown) dropInvite();
   } catch {
-    /* no referral then */
+    /* asked again on the next load */
   }
 }
 
@@ -215,16 +187,48 @@ export async function joinInvite(provider: Eip1193Provider, address: string, cod
     wallet: address.toLowerCase(), code: normCode(code), statement: INVITE_STATEMENT, nonce: nonce(), issuedAt: String(t), expiresAt: String(t + INVITE_TTL_MS - 30_000), chainId,
   };
   const signature = await signTypedData(provider, address, inviteTypedData(fields));
-  const { status, body } = await json<{ ok?: boolean; code?: string; error?: string; welcome?: boolean; vipUntil?: number | null }>('/api/vs/invites/join', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ join: { ...fields, signature } }),
-  });
+  const { status, body } = await postJoin({ join: { ...fields, signature } }, [2_000, 5_000, 15_000]);
   if (status === 200 && body.ok) {
     void loadMe(address);
     return { welcome: body.welcome !== false, vipUntil: body.vipUntil ?? null };
   }
   throw new InviteError(body.error || `The link was not taken (${status}).`, body.code);
+}
+
+const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+type JoinAnswer = { ok?: boolean; code?: string; error?: string; welcome?: boolean; vipUntil?: number | null };
+
+/** A join as signed, sent until the server takes it or refuses it: no answer, 429 and 5xx are tried again. */
+async function postJoin(body: unknown, waits: readonly number[]): Promise<{ status: number; body: JoinAnswer }> {
+  for (let i = 0; ; i++) {
+    let r: { status: number; body: JoinAnswer } | null = null;
+    try {
+      r = await json<JoinAnswer>('/api/vs/invites/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    } catch { /* no answer */ }
+    if (r && r.status < 500 && r.status !== 429) return r;
+    const wait = waits[i];
+    if (wait === undefined) return r ?? { status: 0, body: {} };
+    await pause(wait);
+  }
+}
+
+/**
+ * Join by the wallet's terms signature (the terms window showed the code): sent with the kept signed acceptance, again
+ * and again while the server does not answer. 'done': joined (or joined before); 'refused': it may not; 'later': no answer.
+ */
+const termsJoins = new Map<string, Promise<'done' | 'refused' | 'later'>>();
+export function joinByTerms(address: string, code: string, request: unknown): Promise<'done' | 'refused' | 'later'> {
+  const k = `${address.toLowerCase()}|${code}`;
+  let p = termsJoins.get(k);
+  if (!p) {
+    p = postJoin({ terms: { code, request } }, [3_000, 10_000, 30_000, 60_000, 120_000]).then((r) => {
+      if (r.status !== 200) termsJoins.delete(k);
+      if (r.status === 200) void loadMe(address);
+      return r.status === 200 ? 'done' : r.status >= 400 && r.status < 500 && r.status !== 429 ? 'refused' : 'later';
+    });
+    termsJoins.set(k, p);
+  }
+  return p;
 }
 
 /** The pending invite's subscription (InviteHost re-reads it when it changes). */

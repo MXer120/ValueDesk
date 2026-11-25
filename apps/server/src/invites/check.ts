@@ -33,6 +33,62 @@ export function inviteJoinDigest(c: Omit<InviteJoin, 'signature'>): Uint8Array {
   return keccak_256(concat(new Uint8Array([0x19, 0x01]), domain, struct));
 }
 
+/** What a wallet signs when it accepts ValueDesk's terms (packages/copy-engine/src/api.ts CopyRequest; kept equal by test/invites.test.ts). */
+const TERMS_TYPEHASH = keccak_256(utf8('CopyRequest(string action,address owner,string executor,string payload,uint64 nonce,uint64 deadline)'));
+export const TERMS_DOMAIN = { name: 'ValueDesk Copy', version: '1' } as const;
+/** The statements of the terms, and the executor each names: ValueDesk's own terms, or the copy and bot terms that carry them. */
+const TERMS_ACTIONS: Record<string, string> = { 'accept-site-terms': 'valuedesk-site-terms', 'accept-terms': 'valuedesk-copy-terms' };
+/** A terms signature joins for this long after it was given (the page sends it at once, and again while the server does not answer). */
+export const TERMS_JOIN_MS = 7 * 86_400_000;
+
+export interface TermsRequest { action: string; owner: string; executor: string; payload: string; nonce: string; deadline: string; chainId: number; signature: string }
+
+export function termsDigest(r: Omit<TermsRequest, 'signature'>): Uint8Array {
+  const struct = keccak_256(concat(
+    TERMS_TYPEHASH,
+    keccak_256(utf8(r.action)),
+    addressWord(r.owner.toLowerCase()),
+    keccak_256(utf8(r.executor)),
+    keccak_256(utf8(r.payload)),
+    word(BigInt(r.nonce)),
+    word(BigInt(r.deadline)),
+  ));
+  const domain = domainSeparator({ name: TERMS_DOMAIN.name, version: TERMS_DOMAIN.version, chainId: r.chainId, verifyingContract: INVITE_ZERO_ADDRESS });
+  return keccak_256(concat(new Uint8Array([0x19, 0x01]), domain, struct));
+}
+
+/**
+ * A join by the terms signature: the wallet accepted ValueDesk's terms in a window that showed the referral code, and the
+ * page sends that signed acceptance with the code. The signature proves the wallet; it is not public (the wallet's browser
+ * and ValueDesk have it), so nobody else can join a wallet with it.
+ */
+export function checkTermsJoin(raw: unknown, now = Date.now()): JoinCheck {
+  const t = raw as { code?: unknown; request?: unknown } | null;
+  const q = t?.request as Partial<TermsRequest> | null;
+  if (!t || !q || typeof q !== 'object') return { ok: false, error: 'missing terms' };
+  if (typeof t.code !== 'string' || !CODE_RE.test(t.code)) return { ok: false, error: 'this is not an invite code' };
+  const owner = typeof q.owner === 'string' ? q.owner.toLowerCase() : '';
+  if (!ADDRESS.test(owner)) return { ok: false, error: 'wallet must be a 0x address' };
+  if (typeof q.action !== 'string' || !Object.hasOwn(TERMS_ACTIONS, q.action) || q.executor !== TERMS_ACTIONS[q.action]) return { ok: false, error: 'this is not an acceptance of the terms' };
+  if (typeof q.payload !== 'string' || q.payload.length > 12_000) return { ok: false, error: 'payload must be text' };
+  if (typeof q.nonce !== 'string' || !STAMP.test(q.nonce) || typeof q.deadline !== 'string' || !STAMP.test(q.deadline)) return { ok: false, error: 'nonce and deadline must be times in ms' };
+  const chainId = Number(q.chainId);
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) return { ok: false, error: 'chainId must be a positive integer' };
+  if (typeof q.signature !== 'string' || !SIGNATURE.test(q.signature)) return { ok: false, error: 'signature must be 65 bytes of hex' };
+  const signedAt = Number(q.nonce);
+  if (signedAt - now > 5 * 60_000) return { ok: false, error: 'the signature time is too far ahead; check your clock' };
+  if (now - signedAt > TERMS_JOIN_MS || Number(q.deadline) <= now) return { ok: false, error: 'this signature is too old to join with' };
+  const r = { action: q.action, owner, executor: TERMS_ACTIONS[q.action]!, payload: q.payload, nonce: q.nonce, deadline: q.deadline, chainId };
+  let signer: string;
+  try {
+    signer = recoverAddress(termsDigest(r), hexToBytes(q.signature)).toLowerCase();
+  } catch {
+    return { ok: false, error: 'the signature cannot be read' };
+  }
+  if (signer !== owner) return { ok: false, error: 'the signature is not from this wallet' };
+  return { ok: true, join: { wallet: owner, code: t.code, statement: INVITE_STATEMENT, nonce: `terms:${q.nonce}`, issuedAt: q.nonce, expiresAt: q.deadline, chainId, signature: q.signature } };
+}
+
 export type JoinCheck = { ok: true; join: InviteJoin } | { ok: false; error: string };
 
 export function checkInviteJoin(raw: unknown, now = Date.now()): JoinCheck {

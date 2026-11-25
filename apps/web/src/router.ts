@@ -182,6 +182,12 @@ export function landingTab(pathname: string): Tab {
 }
 
 /**
+ * Where an address that is no page of ours goes (the bare / among them), with its query and hash: without them `/?ref=CODE`
+ * lost its code (until 2026-11-25, on every referral link).
+ */
+export const landingUrl = (loc: { pathname: string; search: string; hash: string }): string => `${pathForTab(landingTab(loc.pathname))}${loc.search}${loc.hash}`;
+
+/**
  * Resolve a pathname to a tab, or null when it is not one of ours.
  *
  * Tolerates a trailing slash and is case-insensitive, because a URL a person
@@ -282,8 +288,7 @@ export function useRoute(ready?: RouteReady): [Tab, (tab: Tab) => void, LegalPag
     const apply = () => {
       const path = window.location.pathname;
       if (tabForPath(path) === null && legalForPath(path) === null && !isStatusPath(path) && !isExcludedPath(path) && !isLimitsPath(path) && sodexViewForPath(path) === null) {
-        const seg = path.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() ?? '';
-        window.history.replaceState(window.history.state, '', pathForTab(MOVED[seg] ?? DEFAULT_TAB));
+        window.history.replaceState(window.history.state, '', landingUrl(window.location));
       }
       setTab(tabForPath(window.location.pathname) ?? DEFAULT_TAB);
       setLegal(legalForPath(window.location.pathname));

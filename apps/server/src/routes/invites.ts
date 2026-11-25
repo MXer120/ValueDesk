@@ -6,6 +6,7 @@
  *                                           one) and whether joining under it now comes with the welcome
  *   GET  /api/vs/invites/me?address=0x…     the wallet's join, welcome, credits, referrals (shortened) and history
  *   POST /api/vs/invites/join {join}         a signed join (the invited wallet's own signature)
+ *                             {terms}        the same by its terms signature: the terms window showed the code
  *
  * The credit job runs on the main API only (the beta API reads the same file).
  */
@@ -15,8 +16,9 @@ import { KeyedLimiter, type Limit } from '../rateLimit.js';
 import { builderService, type BuilderService } from '../builder/service.js';
 import { channelFrom } from '../beta/gate.js';
 import { CODE_RE, OURS_CODE, normCode, type JoinRefusal } from '../invites/claim.js';
-import { checkInviteJoin } from '../invites/check.js';
-import { InviteService } from '../invites/service.js';
+import { checkInviteJoin, checkTermsJoin } from '../invites/check.js';
+import { InviteService, type People } from '../invites/service.js';
+import { ProfileStore } from '../profiles/store.js';
 import { InviteStore } from '../invites/store.js';
 
 const MINUTE = 60_000;
@@ -46,9 +48,32 @@ export interface InviteRouteOptions {
 
 let instance: InviteService | null = null;
 
+/** Who uses ValueDesk, as its own records have it: wallets with a username, wallets the builder ledger counts. */
+function peopleOf(builder: BuilderService): People {
+  let opened: ProfileStore | null = null;
+  const names = () => (opened ??= new ProfileStore());
+  const ledger = () => { const cfg = builder.tiers.current(); return cfg && builder.store ? { id: cfg.builderId, st: builder.store } : null; };
+  return {
+    since(t) {
+      const by = new Map<string, number>();
+      const add = (w: string, at: number) => { const have = by.get(w); if (have === undefined || at < have) by.set(w, at); };
+      for (const p of names().since(t)) add(p.address, p.at);
+      const l = ledger();
+      if (l) for (const p of l.st.walletsSince(l.id, t)) add(p.address, p.at);
+      // First seen before `t` by the other record: not new.
+      return [...by].filter(([w]) => (this.firstSeen(w) ?? t) >= t).map(([wallet, at]) => ({ wallet, at }));
+    },
+    firstSeen(wallet) {
+      const l = ledger();
+      const at = [names().createdAt(wallet), l?.st.wallet(l.id, wallet.toLowerCase())?.createdAt ?? null].filter((x): x is number => typeof x === 'number' && x > 0);
+      return at.length ? Math.min(...at) : null;
+    },
+  };
+}
+
 /** The running server's service (one per process: it hooks into the builder's fee decisions). */
 export function inviteService(builder: BuilderService = builderService()): InviteService {
-  return (instance ??= new InviteService(new InviteStore(), builder));
+  return (instance ??= new InviteService(new InviteStore(), builder, { people: peopleOf(builder), log: console as unknown as { warn(o: object, m: string): void } }));
 }
 
 export async function inviteRoutes(app: FastifyInstance, opts: InviteRouteOptions = {}): Promise<void> {
@@ -77,6 +102,7 @@ export async function inviteRoutes(app: FastifyInstance, opts: InviteRouteOption
     const code = normCode(String((req.query as { code?: unknown }).code ?? ''));
     if (!CODE_RE.test(code)) return { ok: true, valid: false, welcome: false, vipDays: 0 };
     const c = await service().check(code);
+    if (c.valid) service().store.count('link', now());
     // SoDEX did not answer: the page keeps the code and the join asks again.
     return { ok: true, valid: c.valid, welcome: c.welcome, vipDays: c.vipDays, ...(c.silent ? { unknown: true } : {}) };
   });
@@ -90,25 +116,37 @@ export async function inviteRoutes(app: FastifyInstance, opts: InviteRouteOption
     return service().me(address);
   });
 
-  app.post('/api/vs/invites/join', { bodyLimit: 4 * 1024 }, async (req, reply) => {
+  app.post('/api/vs/invites/join', { bodyLimit: 20 * 1024 }, async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const wait = limited(req.ip, 'iw', INVITE_LIMITS.write);
     if (wait !== null) return slow(reply, wait);
-    const c = checkInviteJoin((req.body as { join?: unknown } | null)?.join, now());
-    if (!c.ok) return reply.code(400).send({ ok: false, error: c.error });
+    const body = req.body as { join?: unknown; terms?: unknown } | null;
+    const via = body?.terms ? 'terms' : 'signed';
     const s = service();
+    const c = via === 'terms' ? checkTermsJoin(body!.terms, now()) : checkInviteJoin(body?.join, now());
+    if (!c.ok) {
+      s.store.count('bad-join', now());
+      return reply.code(400).send({ ok: false, error: c.error });
+    }
     const code = normCode(c.join.code);
     if (code !== c.join.code || code === OURS_CODE) return reply.code(409).send({ ok: false, code: 'ours', error: words.ours });
     const owner = await s.ownerOf(code);
+    if (owner === undefined) s.store.count('sodex-silent', now());
     if (owner === undefined) return reply.code(503).send({ ok: false, code: 'sodex-silent', error: words['sodex-silent'] });
     if (owner === null) return reply.code(409).send({ ok: false, code: 'unknown-code', error: words['unknown-code'] });
     const at = now();
     const days = s.vipDaysOf(code, owner);
-    const r = s.store.join(c.join, owner, { hasVolume: s.hasVolume(c.join.wallet), welcome: s.welcomeOpen(owner), vipUntil: days ? at + days * 86_400_000 : null }, at);
+    // Traded here before it could join: taken all the same when SoDEX has it under this very inviter.
+    const traded = s.hasOldVolume(c.join.wallet) && (await s.inviterOf(c.join.wallet)) !== owner;
+    const r = s.store.join(c.join, owner, { hasVolume: traded, welcome: s.welcomeOpen(owner), vipUntil: days ? at + days * 86_400_000 : null, via }, at);
     if (r.ok) {
-      if (r.fresh) app.log.info({ wallet: r.join.wallet, code: r.join.code }, 'invites: joined');
+      if (r.fresh) {
+        s.store.count(via, at);
+        app.log.info({ wallet: r.join.wallet, code: r.join.code, via }, 'invites: joined');
+      }
       return { ok: true, at: r.join.at, welcome: r.join.welcome, vipUntil: r.join.vipUntil };
     }
+    s.store.count(`refused:${r.code}`, at);
     return reply.code(409).send({ ok: false, code: r.code, error: words[r.code] });
   });
 }

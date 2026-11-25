@@ -10,6 +10,33 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 export type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
 
+/** Whom SoDEX names as a wallet's inviter: an address, null for nobody, undefined when SoDEX did not answer. */
+export async function sodexInviterOf(wallet: string, fetcher: FetchLike = fetch as unknown as FetchLike): Promise<string | null | undefined> {
+  try {
+    const r = await fetcher(`${BIZ}/biz/referral/checkEligibility?walletAddress=${encodeURIComponent(wallet)}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!r.ok) return undefined;
+    const j = (await r.json()) as { code?: number; data?: { inviterWalletAddress?: unknown } };
+    if (j.code !== 0 || !j.data) return undefined;
+    const w = typeof j.data.inviterWalletAddress === 'string' ? j.data.inviterWalletAddress : '';
+    return ADDRESS.test(w) ? w.toLowerCase() : null;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A wallet's own SoDEX code (null: it has none; undefined: SoDEX did not answer). */
+export async function sodexCodeOf(wallet: string, fetcher: FetchLike = fetch as unknown as FetchLike): Promise<string | null | undefined> {
+  try {
+    const r = await fetcher(`${BIZ}/biz/referral/public/referralCode?walletAddress=${encodeURIComponent(wallet)}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!r.ok) return undefined;
+    const j = (await r.json()) as { code?: number; data?: { referralCode?: unknown } };
+    if (j.code !== 0) return undefined;
+    return typeof j.data?.referralCode === 'string' && j.data.referralCode ? j.data.referralCode.trim().toUpperCase() : null;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The owner of a code: an address, null for no such code, undefined when SoDEX did not answer. */
 export async function sodexOwnerOf(code: string, fetcher: FetchLike = fetch as unknown as FetchLike): Promise<string | null | undefined> {
   try {

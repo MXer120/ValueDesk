@@ -28,7 +28,7 @@ import {
   CREDIT_COVER_MIN, CREDIT_FEE, REFERRED_START_USD, CREDIT_MIN_USD, OURS_CODE, PERK_HORIZON_MS, TIER_SHARES, TIERS, VIP_CODE_DAYS, VIP_CODE_LABEL, WELCOME_CAP,
   WELCOME_CAP_DAYS, WELCOME_FEE, WELCOME_USD, type InviteMe, type InviteReferral,
 } from './claim.js';
-import { sodexOwnerOf } from './sodex.js';
+import { sodexCodeOf, sodexInviterOf, sodexOwnerOf } from './sodex.js';
 import type { InviteStore } from './store.js';
 
 export const TICK_MS = 60_000;
@@ -38,6 +38,18 @@ const HOUR = 3_600_000;
 const ALL: FeeProduct[] = ['perps', 'spot', 'copy', 'bots'];
 /** A code SoDEX said nobody owns is asked about again after this long. */
 const NO_OWNER_MS = 10 * 60_000;
+/** Volume blocks a join only once it is this old: a join that could not reach the server in time still counts. */
+export const VOLUME_GRACE_MS = 24 * 3_600_000;
+/** The SoDEX check (autoTick): not before the page's own ways had this long, and for this long after a wallet's first visit. */
+export const AUTO_GRACE_MS = 10 * 60_000;
+const AUTO_FOR_MS = 30 * 86_400_000;
+const AUTO_PER_TICK = 8;
+
+/** Wallets as ValueDesk first saw them: the builder ledger's and the usernames'. */
+export interface People {
+  since(t: number): Array<{ wallet: string; at: number }>;
+  firstSeen(wallet: string): number | null;
+}
 
 /** What an order is, by the client order id the engines give theirs (builder/tiers.ts ENGINE_ORDER_ID). */
 export function productOf(engine: 'perps' | 'spot', cl: string | null): FeeProduct {
@@ -86,6 +98,12 @@ export class InviteService {
       log?: { warn(o: object, m: string): void };
       /** Whose a SoDEX code is (default: SoDEX's public API, sodex.ts). */
       ownerOf?: (code: string) => Promise<string | null | undefined>;
+      /** A wallet's own SoDEX code (default: sodex.ts). */
+      codeOf?: (wallet: string) => Promise<string | null | undefined>;
+      /** Who uses ValueDesk since when (default: nobody - no SoDEX check). */
+      people?: People;
+      /** Whom SoDEX names as a wallet's inviter (default: sodex.ts). */
+      inviterOf?: (wallet: string) => Promise<string | null | undefined>;
       /** Whether a wallet is VIP now (default: as the app shows it - builder vipNow or a VIP program). */
       isVip?: (address: string) => boolean;
     } = {},
@@ -105,7 +123,10 @@ export class InviteService {
   /** Keep the ledger (main API). */
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => { try { this.tick(); } catch (e) { this.o.log?.warn({ err: String(e) }, 'invites: the credit tick failed'); } }, TICK_MS);
+    this.timer = setInterval(() => {
+      try { this.tick(); } catch (e) { this.o.log?.warn({ err: String(e) }, 'invites: the credit tick failed'); }
+      void this.autoTick().catch((e) => this.o.log?.warn({ err: String(e) }, 'invites: the SoDEX check failed'));
+    }, TICK_MS);
     this.timer.unref?.();
   }
 
@@ -140,6 +161,80 @@ export class InviteService {
       this.noOwner.set(code, this.now());
     }
     return owner;
+  }
+
+  /** Whom SoDEX names as this wallet's inviter. null: nobody; undefined: SoDEX did not answer. */
+  inviterOf(wallet: string): Promise<string | null | undefined> {
+    return (this.o.inviterOf ?? sodexInviterOf)(wallet.toLowerCase());
+  }
+
+  /**
+   * A referral that was lost (until 2026-11-25 the link dropped its code), put back on SoDEX's word: SoDEX names `inviter`
+   * as the wallet's inviter, so it signed that code there. Refused: anyone SoDEX does not name, a code that is not the
+   * inviter's, a wallet that joined, has referrals, or stands above its inviter on SoDEX (the inviter's own other wallet).
+   * `at`: since when its fees count for the inviter (its first visit); the VIP days run from now.
+   */
+  async restore(wallet: string, inviter: string, code: string, at: number, dry = false): Promise<{ ok: true; welcome: boolean; vipUntil: number | null } | { ok: false; why: string }> {
+    const a = wallet.toLowerCase();
+    const by = inviter.toLowerCase();
+    const c = code.toUpperCase();
+    const owner = await this.ownerOf(c);
+    if (owner !== by) return { ok: false, why: `the code ${c} is ${owner === undefined ? 'not answered for by SoDEX' : owner === null ? "nobody's" : "someone else's"}` };
+    const named = await this.inviterOf(a);
+    if (named !== by) return { ok: false, why: named === undefined ? 'SoDEX did not answer' : named === null ? 'SoDEX names no inviter' : `SoDEX names another inviter: ${short(named)}` };
+    for (let up: string | null | undefined = by, i = 0; i < 12; i++) {
+      up = await this.inviterOf(up);
+      if (up === undefined) return { ok: false, why: 'SoDEX did not answer' };
+      if (up === null || up === by) break;
+      if (up === a) return { ok: false, why: 'a loop: the inviter stands below this wallet on SoDEX' };
+    }
+    if (this.store.joinOf(a)) return { ok: false, why: 'joined already' };
+    if (this.store.hasReferrals(a)) return { ok: false, why: 'has referrals of its own' };
+    const now = this.now();
+    const welcome = this.welcomeOpen(by);
+    const days = this.vipDaysOf(c, by);
+    const vipUntil = days ? now + days * 86_400_000 : null;
+    if (dry) return { ok: true, welcome, vipUntil };
+    const r = this.store.join({ wallet: a, code: c, statement: '', nonce: 'sodex', issuedAt: String(now), expiresAt: String(now), chainId: 0, signature: 'sodex' }, by, { hasVolume: false, welcome, vipUntil, via: 'sodex' }, Math.min(at, now));
+    return r.ok ? { ok: true, welcome, vipUntil } : { ok: false, why: r.code };
+  }
+
+  /**
+   * The SoDEX check: a wallet first seen since it began, not joined, whom SoDEX names an inviter for, becomes that
+   * inviter's referral - whatever its browser lost on the way. Only an inviter that used ValueDesk before the wallet came,
+   * or has referrals already: SoDEX's inviters of wallets that found ValueDesk on their own are not ValueDesk's.
+   */
+  private readonly autoNext = new Map<string, number>();
+  private autoOn = false;
+  async autoTick(): Promise<number> {
+    const people = this.o.people;
+    if (!people || this.autoOn) return 0;
+    this.autoOn = true;
+    let joined = 0;
+    try {
+      const now = this.now();
+      const from = Math.max(this.store.autoFrom(), now - AUTO_FOR_MS);
+      const due = people.since(from).filter((p) => now - p.at >= AUTO_GRACE_MS && (this.autoNext.get(p.wallet) ?? 0) <= now && !this.store.joinOf(p.wallet));
+      for (const { wallet, at } of due.slice(0, AUTO_PER_TICK)) {
+        // Often while it is new (it may bind on SoDEX any minute), hourly for two days, then daily.
+        const age = now - at;
+        const again = now + (age < HOUR ? 3 * 60_000 : age < 48 * HOUR ? HOUR : 24 * HOUR);
+        this.autoNext.set(wallet, again);
+        const inviter = await this.inviterOf(wallet);
+        if (!inviter) { if (inviter === undefined) this.autoNext.set(wallet, now + 3 * 60_000); continue; }
+        const first = people.firstSeen(inviter);
+        if ((first === null || first >= at) && !this.store.hasReferrals(inviter)) continue;
+        const code = this.store.codeOfOwner(inviter) ?? (await (this.o.codeOf ?? sodexCodeOf)(inviter));
+        if (!code || code === OURS_CODE) continue;
+        const r = await this.restore(wallet, inviter, code, at);
+        if (r.ok) { joined++; this.store.count('sodex', now); this.o.log?.warn({ wallet, code }, "invites: joined on SoDEX's word"); }
+        else this.autoNext.set(wallet, now + (/did not answer/.test(r.why) ? 3 * 60_000 : 24 * HOUR));
+      }
+      if (this.autoNext.size > 20_000) this.autoNext.clear();
+    } finally {
+      this.autoOn = false;
+    }
+    return joined;
   }
 
   /** Whether a join under this inviter would come with the welcome now (its cap). */
@@ -189,6 +284,13 @@ export class InviteService {
 
   hasVolume(address: string): boolean {
     return this.lifetimeMicro(address) > 0;
+  }
+
+  /** Volume that stands against a join: the ledger has known the wallet for VOLUME_GRACE_MS. */
+  hasOldVolume(address: string): boolean {
+    const c = this.cfgStore();
+    const w = c?.st.wallet(c.id, address.toLowerCase());
+    return !!w && w.perpsMicro + w.spotMicro > 0 && this.now() - Number(w.createdAt ?? 0) >= VOLUME_GRACE_MS;
   }
 
   /** All the wallet traded on SoDEX since the UTC day it joined, per engine, micro-USD (the day counts whole). */
@@ -307,7 +409,7 @@ export class InviteService {
     const a = address.toLowerCase();
     const t = this.store.totals(a);
     const join = this.store.joinOf(a);
-    const life = this.lifetimeMicro(a);
+    const traded = this.hasOldVolume(a);
     const earned = this.store.earnedBySource(a);
     const referrals: InviteReferral[] = [];
     const referred: [number, number, number] = [0, 0, 0];
@@ -337,7 +439,8 @@ export class InviteService {
     return {
       ok: true,
       joined: join ? { inviter: short(join.inviter), code: join.code, at: join.at } : null,
-      canJoin: !join && life === 0 && !this.store.hasReferrals(a),
+      canJoin: !join && !traded && !this.store.hasReferrals(a),
+      blocked: join ? 'joined' : this.store.hasReferrals(a) ? 'has-referrals' : traded ? 'has-volume' : null,
       welcome: used === null ? null : { active: used < WELCOME_USD * MICRO, usedUsd: Math.min(WELCOME_USD, used / MICRO), leftUsd: Math.max(0, WELCOME_USD - used / MICRO), limitUsd: WELCOME_USD },
       vipUntil: join?.vipUntil && join.vipUntil > this.now() ? join.vipUntil : null,
       vipCode: this.isVip(a) || this.store.ownsVipCode(a),

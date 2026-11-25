@@ -34,6 +34,12 @@ test('a wallet that documents no link gets none, and says where to paste instead
   }
 });
 
+test('the page handed to a wallet carries the referral this browser keeps (the wallet\'s browser has none of it)', () => {
+  assert.equal(new URL(pageForWallet('https://valuedesk.so/trade', 'EDDIE')).searchParams.get('ref'), 'EDDIE');
+  assert.equal(new URL(pageForWallet('https://valuedesk.so/trade?ref=ABC', 'EDDIE')).searchParams.get('ref'), 'ABC');
+  assert.equal(new URL(pageForWallet('https://valuedesk.so/trade', null)).searchParams.has('ref'), false);
+});
+
 test('the page handed to a wallet asks to connect, and the mark comes off again', () => {
   const sent = pageForWallet(page);
   assert.equal(new URL(sent).searchParams.get(CONNECT_PARAM), '1');

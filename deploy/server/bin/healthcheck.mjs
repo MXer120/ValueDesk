@@ -89,6 +89,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import tls from 'node:tls';
 import { labelled, sendTelegram } from './telegram.mjs';
 
@@ -124,7 +125,7 @@ const MAINT_FILE = env('HEALTH_MAINT_FILE', '/var/lib/valuescan/maintenance.json
 // How long after a window a failure is said to have come right after it.
 const AFTER_MAINT_MS = 30 * 60_000;
 
-const ALL_CHECKS = ['api', 'lockdown', 'index', 'indexer', 'disk', 'backup', 'executor', 'tls', 'units'];
+const ALL_CHECKS = ['api', 'lockdown', 'index', 'indexer', 'disk', 'backup', 'executor', 'tls', 'units', 'referrals'];
 const CHECKS = list('HEALTH_CHECKS').length ? list('HEALTH_CHECKS') : ALL_CHECKS;
 for (const c of CHECKS) if (!ALL_CHECKS.includes(c)) console.error(`healthcheck: HEALTH_CHECKS names an unknown check "${c}" (known: ${ALL_CHECKS.join(', ')})`);
 const MARKERS = list('HEALTH_BACKUP_MARKERS').length ? list('HEALTH_BACKUP_MARKERS') : [join(STATE_DIR, 'last-backup.json')];
@@ -251,6 +252,26 @@ await check('indexer', async () => {
   }
   // A stream that is down right after a restart is normal (Lighter needs minutes): a warning.
   return { ok: true, warn: down.length > 0, note };
+});
+
+// Referrals (2026-11-25: ten days of links that all lost their code, and nobody knew): links opened and nobody joined.
+await check('referrals', async () => {
+  const path = env('HEALTH_INVITES_DB', '/var/lib/valuescan/state/invites.db');
+  if (!existsSync(path)) return { ok: true, note: 'no referrals here' };
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'counts'").get()) return { ok: true, note: 'not counted yet' };
+    const today = Math.floor(Date.now() / 86_400_000);
+    const n = (kind, days) => Number(db.prepare('SELECT coalesce(sum(n), 0) AS n FROM counts WHERE kind = ? AND day > ?').get(kind, today - days).n);
+    const links = n('link', 3);
+    const joins = n('signed', 3) + n('terms', 3) + n('sodex', 3);
+    const bad = n('bad-join', 1) + n('sodex-silent', 1);
+    const note = `3 days: ${links} links opened, ${joins} joined; today ${bad} joins failed`;
+    if (links >= 6 && joins === 0) return { ok: false, note: `${note} - referral links are opened and nobody joins` };
+    return { ok: true, warn: bad >= 5, note };
+  } finally {
+    db.close();
+  }
 });
 
 await check('disk', async () => {

@@ -21,6 +21,17 @@ Details were decided here. The terms line at the end needs the owner's sign-off 
   2. is offered the same code on SoDEX (sodex.com/join/CODE), only when SoDEX says it has no referrer.
   Wherever VALUEDESK would be offered (popup, first-signup step, Profile), a wallet that came on a link is offered
   its inviter's code instead.
+- **A referral is never lost on one step** (2026-11-25: until then `/?ref=CODE` lost its code in the router, and not one
+  join was recorded in ten days). Independent ways, whichever comes first:
+  1. the code is kept before anything renders (`web/src/invites/capture.ts`: memory, tab, browser) and goes along into a
+     phone wallet's browser; an unanswered check keeps it;
+  2. the terms signature joins: the terms window shows the code (`joinByTerms`, server `checkTermsJoin`), sent until the
+     server answers;
+  3. the popup's own signature, on every visit until it is answered, with retries;
+  4. the SoDEX check (`InviteService.autoTick`): a new wallet whose SoDEX inviter used ValueDesk before it joins by
+     SoDEX's word, whatever its browser lost.
+  Volume blocks a join only after 24 h, and not when SoDEX names the same inviter. `counts` in invites.db and the health
+  check `referrals` alert when links are opened and nobody joins. Lost ones: `apps/server/tools/invites-restore.ts`.
 - **Welcome.** A joined wallet pays no ValueDesk builder fee on its first **$100,000**. All its SoDEX fills since the
   join day count, wherever it traded, so trading elsewhere cannot stretch the welcome. The builder verifier's sweep now
   also adds every fill's notional to a `traded` table.
