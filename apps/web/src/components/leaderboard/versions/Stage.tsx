@@ -17,7 +17,7 @@ import { Search, SideTabs, Venues, WindowSeg } from './controls';
 import { Assets, BoardState, Move, Notes, Place, SizePill, TraderDetail, VenueMarks, Who, bps, toneOf, tradesText, useMasks, usdShort, useWidth } from './parts';
 import {
   ASSET_GROUPS, SIZE_BANDS, SORT_HINT, SORT_LABEL, WINDOW_LONG, WINDOW_WORD, dirOf, edgeOf, hasVolume, metricOf, shape, usableSort, useBoard,
-  type AssetGroup, type Row, type SizeBand, type SortKey,
+  type AssetGroup, type Board, type Row, type SizeBand, type SortKey,
 } from './useBoard';
 import type { VersionProps } from './types';
 
@@ -122,6 +122,42 @@ function Sum({ rows, w, side }: { rows: TraderRow[]; w: BoardWindow; side: 'top'
   );
 }
 
+/* --------------------------------------------------------------------------------------- the hero ----- */
+
+/**
+ * The stage: title, side and window, the board's three best (or worst) by PnL with their curves and Copy, and what the
+ * hundred adds up to. Stage and Desk both open with it (owner 2026-11-26: "use hero of stage for leaderboard and rest
+ * from desk version"); `onOpen` is what a podium card does on each page.
+ */
+export function StageHero({ board, width, me, since, embedded, onOpen, onScan, onCopy }: {
+  board: Board; width: number; me: string | null; since: number | null; embedded?: boolean;
+  onOpen: (r: Row) => void; onScan: VersionProps['onScan']; onCopy: VersionProps['onCopy'];
+}) {
+  const { view } = board;
+  const podium = useMemo(() => (board.rows ? shape(board.rows, { window: view.window, side: view.side, sort: 'pnl', q: '', asset: 'all', size: 'all' }).slice(0, 3) : null), [board.rows, view.window, view.side]);
+  return (
+    <div className="lbv-hero">
+      <span className="lbv-hero__light" aria-hidden="true" /><span className="lbv-hero__ribs" aria-hidden="true" />
+      <div className="lbv-hero__top">
+        <div className="lbv-hero__t">
+          {!embedded && <h1 className="lbv-h1">Leaderboard</h1>}
+          <p className="lbv-lede">{view.side === 'top' ? 'The best' : 'The worst'} 100 by PnL over {WINDOW_LONG[view.window]}</p>
+        </div>
+        <div className="lbv-hero__ctl">
+          <SideTabs board={board} compact={width < 560} />
+          <WindowSeg board={board} />
+        </div>
+      </div>
+      {podium ? (
+        podium.length ? <Podium rows={podium} w={view.window} side={view.side} me={me} since={since} onOpen={onOpen} onScan={onScan} onCopy={onCopy} /> : null
+      ) : !board.unavailable && !(board.failed && !board.rows) ? (
+        <div className="lbv-pod is-wait">{[2, 1, 3].map((n) => <Skeleton key={n} className={`lbv-skel-pod is-${n}`} />)}</div>
+      ) : null}
+      {board.rows && board.rows.length > 0 && <Sum rows={board.rows} w={view.window} side={view.side} />}
+    </div>
+  );
+}
+
 /* --------------------------------------------------------------------------------------- the page ----- */
 
 export function Stage({ address, onScan, onCopy, embedded }: VersionProps) {
@@ -144,7 +180,6 @@ export function Stage({ address, onScan, onCopy, embedded }: VersionProps) {
   const vol = hasVolume(board.rows, view.window);
   const sort = usableSort(sortPick, vol);
 
-  const podium = useMemo(() => (board.rows ? shape(board.rows, { window: view.window, side: view.side, sort: 'pnl', q: '', asset: 'all', size: 'all' }).slice(0, 3) : null), [board.rows, view.window, view.side]);
   const rows = useMemo(
     () => (board.rows ? shape(board.rows, { window: view.window, side: view.side, sort, q: view.q, asset, size }) : null),
     [board.rows, view.window, view.side, sort, view.q, asset, size],
@@ -172,25 +207,7 @@ export function Stage({ address, onScan, onCopy, embedded }: VersionProps) {
 
   return (
     <section ref={setRoot} className={`tf lbv lbv-stage${embedded ? ' is-embedded' : ''}`} aria-busy={board.loading}>
-      <div className="lbv-hero">
-        <span className="lbv-hero__light" aria-hidden="true" /><span className="lbv-hero__ribs" aria-hidden="true" />
-        <div className="lbv-hero__top">
-          <div className="lbv-hero__t">
-            {!embedded && <h1 className="lbv-h1">Leaderboard</h1>}
-            <p className="lbv-lede">{view.side === 'top' ? 'The best' : 'The worst'} 100 by PnL over {WINDOW_LONG[view.window]}</p>
-          </div>
-          <div className="lbv-hero__ctl">
-            <SideTabs board={board} compact={width < 560} />
-            <WindowSeg board={board} />
-          </div>
-        </div>
-        {podium ? (
-          podium.length ? <Podium rows={podium} w={view.window} side={view.side} me={me} since={since} onOpen={openFromPodium} onScan={onScan} onCopy={onCopy} /> : null
-        ) : !board.unavailable && !(board.failed && !board.rows) ? (
-          <div className="lbv-pod is-wait">{[2, 1, 3].map((n) => <Skeleton key={n} className={`lbv-skel-pod is-${n}`} />)}</div>
-        ) : null}
-        {board.rows && board.rows.length > 0 && <Sum rows={board.rows} w={view.window} side={view.side} />}
-      </div>
+      <StageHero board={board} width={width} me={me} since={since} embedded={embedded} onOpen={openFromPodium} onScan={onScan} onCopy={onCopy} />
 
       <div className="lbv-stage__body">
         <div className="lbv-stage__head">

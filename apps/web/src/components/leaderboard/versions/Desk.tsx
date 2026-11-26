@@ -2,6 +2,10 @@
  * Version "Desk": the hundred as a dense ranked list, the chosen trader beside it - their curve, what they hold now
  * and Copy / Counter / Scan - without leaving the page. Arrow keys walk the list. Under 1,060px of its own width (a
  * phone, a terminal widget) the list stands alone and a trader opens as a sheet.
+ *
+ * On the page it opens with Stage's hero (owner 2026-11-26: "use hero of stage for leaderboard and rest from desk
+ * version"): the three best on the dark stage, the hundred's sum, side and window; a podium card picks that trader here.
+ * The terminal widget (embedded) keeps the plain bar.
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { fmtNum } from '../../../numStyle';
@@ -10,9 +14,10 @@ import { Skeleton } from '../../bots/kit/kit';
 import { WinRate } from '../../copy/TraderCard';
 import { ActiveChips, FilterButton, Search, SideTabs, Venues, WindowSeg, type Narrow } from './controls';
 import { Assets, BoardState, DetailSheet, Move, Notes, Place, TraderDetail, VenueMarks, Who, bps, toneOf, useMasks, usdShort, useWidth } from './parts';
-import { SORT_HINT, SORT_LABEL, WINDOW_LONG, dirOf, edgeOf, hasVolume, shape, usableSort, type AssetGroup, type Row, type SizeBand, type SortKey } from './useBoard';
+import { SORT_HINT, SORT_LABEL, dirOf, edgeOf, hasVolume, shape, usableSort, type AssetGroup, type Row, type SizeBand, type SortKey } from './useBoard';
 import { useBoard } from './useBoard';
 import type { VersionProps } from './types';
+import { StageHero } from './Stage';
 
 const keyOf = (r: Row) => `${r.venue}:${r.address}`;
 const COLS: SortKey[] = ['pnl', 'accountValue', 'volume', 'edge', 'winRate'];
@@ -38,10 +43,13 @@ export function Desk({ address, onScan, onCopy, embedded }: VersionProps) {
   const [setRoot, width] = useWidth<HTMLDivElement>();
   const split = width >= 1060;
   const [picked, setPicked] = useState<string | null>(null);
+  // A podium pick the list's filters hide still opens: the podium hands over its own row.
+  const [pinned, setPinned] = useState<Row | null>(null);
   const [sheet, setSheet] = useState(false);
   // A new hundred starts on its first trader (side by side); a phone opens nobody until a tap.
-  useEffect(() => { setPicked(null); setSheet(false); }, [board.key]);
-  const sel = rows?.find((r) => keyOf(r) === picked) ?? (split ? rows?.[0] ?? null : null);
+  useEffect(() => { setPicked(null); setPinned(null); setSheet(false); }, [board.key]);
+  const sel = rows?.find((r) => keyOf(r) === picked) ?? (pinned && keyOf(pinned) === picked ? pinned : null) ?? (split ? rows?.[0] ?? null : null);
+  const grid = useRef<HTMLDivElement>(null);
   const me = address ? address.toLowerCase() : null;
   const masks = useMasks(me);
   const since = board.page?.index?.rankSince ?? null;
@@ -51,6 +59,14 @@ export function Desk({ address, onScan, onCopy, embedded }: VersionProps) {
   const open = (r: Row) => {
     setPicked(keyOf(r));
     if (!split) setSheet(true);
+  };
+  /** A podium card: that trader in the panel beside the list (scrolled to), or the sheet on a narrow page. */
+  const openFromPodium = (r: Row) => {
+    setPinned(r);
+    open(r);
+    if (!split) return;
+    // One smooth scroll to the list and its panel (a second scroll call would cancel it); the podium's three sit at its top.
+    window.setTimeout(() => grid.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 40);
   };
   const onKey = (e: KeyboardEvent) => {
     if (!rows?.length || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
@@ -71,16 +87,20 @@ export function Desk({ address, onScan, onCopy, embedded }: VersionProps) {
 
   return (
     <section ref={setRoot} className={`tf lbv lbv-desk${split ? ' is-split' : ''}${vol ? '' : ' is-novol'}${embedded ? ' is-embedded' : ''}`} aria-busy={board.loading}>
-      {!embedded && (
-        <header className="lbv-desk__top">
-          <div>
-            <h1 className="lbv-h1">Leaderboard</h1>
-            <p className="lbv-lede">{view.side === 'top' ? 'Highest' : 'Lowest'} PnL over {WINDOW_LONG[view.window]} · {venuesText}</p>
+      {!embedded ? (
+        <>
+          {/* Stage's hero carries the title, side and window; the bar under it the platforms, filters and search. */}
+          <StageHero board={board} width={width} me={me} since={since} onOpen={openFromPodium} onScan={onScan} onCopy={onCopy} />
+          <div className={`lbv-desk__bar is-under${width > 0 && width < 560 ? ' is-phone' : ''}`}>
+            <div className="lbv-bar-row">
+              <Venues board={board} noMode={width > 0 && width < 560} />
+              <FilterButton board={board} narrow={narrow} sort={sort} onSort={pickSort} mode={width > 0 && width < 560} iconOnly={width > 0 && width < 560} />
+              <span className="lbv-desk__count">{venuesText}</span>
+            </div>
+            <Search board={board} />
           </div>
-          <Search board={board} />
-        </header>
-      )}
-      {width > 0 && width < 560 ? (
+        </>
+      ) : width > 0 && width < 560 ? (
         <div className="lbv-desk__bar is-phone">
           <div className="lbv-bar-row">
             <SideTabs board={board} compact />
@@ -88,7 +108,7 @@ export function Desk({ address, onScan, onCopy, embedded }: VersionProps) {
             <FilterButton board={board} narrow={narrow} sort={sort} onSort={pickSort} mode iconOnly />
           </div>
           <WindowSeg board={board} />
-          {embedded && <Search board={board} placeholder="Search address" />}
+          <Search board={board} placeholder="Search address" />
         </div>
       ) : (
         <div className="lbv-desk__bar">
@@ -96,12 +116,12 @@ export function Desk({ address, onScan, onCopy, embedded }: VersionProps) {
           <WindowSeg board={board} />
           <Venues board={board} />
           <FilterButton board={board} narrow={narrow} sort={sort} onSort={pickSort} />
-          {embedded && <Search board={board} placeholder="Search" />}
+          <Search board={board} placeholder="Search" />
         </div>
       )}
       <ActiveChips board={board} narrow={narrow} />
 
-      <div className="lbv-desk__grid">
+      <div className="lbv-desk__grid" ref={grid}>
         <div className="lbv-desk__list">
           <div className="lbv-desk__lh" role="presentation">
             <span className="c-rank">#</span>

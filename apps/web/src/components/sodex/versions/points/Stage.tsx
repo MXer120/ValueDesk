@@ -33,7 +33,8 @@ export function Stage({ address, provider, sample }: { address: string | null; p
   const id = useId();
   const [how, setHow] = useState(false);
   const [toggled, setToggled] = useState(false);
-  const glow = v.mine ? TIER_STYLE[v.tier]!.border : '#00b481';
+  // The tier's own colour glows softly behind its card; signed out, a neutral light (owner 2026-11-26: no colour the stage does not show).
+  const glow = v.mine ? TIER_STYLE[v.tier]!.border : '#d4d4d2';
   const share = boostedShare(v);
   // The cards lean a little toward the mouse (owner 2026-11-26), as the VIP pass does.
   const tierTilt = useTilt(6, 5, 0.5);
@@ -41,7 +42,7 @@ export function Stage({ address, provider, sample }: { address: string | null; p
     <div className="tf bots-page rf-page sx spx">
       <div className="bots-col">
         <section className={`rf-dark spx-st${how ? ' is-how' : ''}${toggled ? ' is-toggled' : ''}`} style={{ '--spx-glow': glow } as CSSProperties}>
-          <span className="spx-st__ribs" aria-hidden="true" /><span className="spx-st__light" aria-hidden="true" />
+          <span className="spx-st__light" aria-hidden="true" />
           <div className="spx-st__k">
             <h1>SoPoints</h1>
             <WeekPill week={week} />

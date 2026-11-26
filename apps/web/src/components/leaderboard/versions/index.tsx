@@ -19,7 +19,8 @@ import './map.css';
 const KEY = 'vs.dev.leaderboard.version';
 const VERSIONS = [
   { id: 'original', name: 'Original' },
-  { id: 'desk', name: 'Desk' },
+  // Desk with Stage's hero on top (owner 2026-11-26); the key stays, so a browser that had Desk picked opens it.
+  { id: 'desk', name: 'Stage + Desk' },
   { id: 'stage', name: 'Stage' },
   { id: 'map', name: 'Map' },
 ] as const;
