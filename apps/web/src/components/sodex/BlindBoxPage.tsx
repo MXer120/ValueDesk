@@ -7,7 +7,7 @@
  * Opening and merging stay on SoDEX's page. A wallet's boxes are read off the chain from this browser; what
  * only SoDEX's sign-in can read sits behind SODEX_SIGNIN_LIVE (BoxVault.tsx).
  */
-import { useState, type ReactNode } from 'react';
+import { Suspense, lazy, useState, type ReactNode } from 'react';
 import { CoinIcon } from '../CoinIcon';
 import { EmptyState } from '../EmptyState';
 import { usePolled } from '../explore/cohorts/parts';
@@ -24,7 +24,20 @@ import { LockedSection, Pill, ProgrammeHero, ProgrammePage, ReadFailed, SegSwitc
 
 const FEED_SIZE = LOTTERY_FEED_SIZE;
 
-export function BlindBoxPage({ address }: { address: string | null; provider: Eip1193Provider | null }) {
+/*
+ * Localhost only (owner 2026-11-26): the page's versions behind a switch (versions/boxes/BoxVersions.tsx), Original
+ * among them. A build never loads that file: `import.meta.env.DEV` is false there, so the import is dropped and
+ * production renders BlindBoxOriginal, today's page, unchanged.
+ */
+const BoxVersions = import.meta.env.DEV ? lazy(() => import('./versions/boxes/BoxVersions')) : null;
+
+export function BlindBoxPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
+  if (BoxVersions) return <Suspense fallback={null}><BoxVersions address={address} provider={provider} Original={BlindBoxOriginal} /></Suspense>;
+  return <BlindBoxOriginal address={address} provider={provider} />;
+}
+
+/** Today's page, as it was: the "Original" of the switch, and the only one a build has. */
+export function BlindBoxOriginal({ address }: { address: string | null; provider: Eip1193Provider | null }) {
   const meta = usePolled('lottery-meta', (signal) => fetchLotteryMeta(signal), 60_000);
   const rules = meta.data?.rules ?? null;
 
@@ -131,12 +144,18 @@ function Mine({ address, meta }: { address: string | null; meta: LotteryMeta }) 
   );
 }
 
+/** SoDEX's page text for the PFP drop (shared with the localhost versions). */
+export const PFP_DROP = {
+  title: 'Exclusive drop: Cybereator PFP',
+  line: 'Every box has an extra chance to drop a PFP NFT. The earlier you open, the better your odds.',
+} as const;
+
 function PfpDrop() {
   return (
     <section className="sdx-pfp">
       <div className="sdx-pfp__text">
-        <h2>Exclusive drop: Cybereator PFP</h2>
-        <p>Every box has an extra chance to drop a PFP NFT. The earlier you open, the better your odds.</p>
+        <h2>{PFP_DROP.title}</h2>
+        <p>{PFP_DROP.line}</p>
       </div>
       <img className="sdx-pfp__cat" src="/sodex-art/cyber-cat.webp" alt="" loading="lazy" decoding="async" draggable={false} onError={(e) => { e.currentTarget.hidden = true; }} />
     </section>
@@ -175,7 +194,7 @@ function Earned({ rules }: { rules: LotteryRules }) {
   );
 }
 
-const BENEFICIARY: Record<string, string> = { self: 'Friend gets', inviter: 'You get' };
+export const BENEFICIARY: Record<string, string> = { self: 'Friend gets', inviter: 'You get' };
 
 function InviteRules({ rules }: { rules: LotteryRules }) {
   return (
@@ -213,7 +232,7 @@ function MergeRules({ rules }: { rules: LotteryRules }) {
   );
 }
 
-const DRAW_STEPS: ReadonlyArray<{ when: string; what: string; line: string }> = [
+export const DRAW_STEPS: ReadonlyArray<{ when: string; what: string; line: string }> = [
   { when: 'Every Tuesday, 13:00 UTC+2', what: 'Snapshot', line: "Counts this week's tickets and publishes the prize pool." },
   { when: 'Every Wednesday, 13:00 UTC+2', what: 'Live draw', line: 'Prizes are boxes of all four tiers.' },
   { when: 'After the draw', what: 'Results', line: 'Winners and the random seed are published; prizes go to winning wallets.' },

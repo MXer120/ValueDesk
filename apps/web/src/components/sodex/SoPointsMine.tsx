@@ -18,7 +18,7 @@ import { warmWalletModal } from '../../walletconnect';
 import { allWeeks, difficultyRows, earnTips, forecastWeek, mmByWeek, squadBreakdown, venueOiByWeek, venueVolumeByWeek, type AnyWeek, type DifficultyRow, type S2State, type SquadBreakdown, type Tip } from './soPointsV2';
 
 /* SoDEX's own tier styles, as their points page draws its card (bundle 2026-11-16). */
-const TIER_STYLE: Record<string, { bg: string; border: string; shadow: string; bar: string; chip: string }> = {
+export const TIER_STYLE: Record<string, { bg: string; border: string; shadow: string; bar: string; chip: string }> = {
   Iron: { bg: 'linear-gradient(165deg, #27272A 0%, #18181B 50%, #2D2D2D 100%)', border: '#3F3F46', shadow: 'rgba(0,0,0,0.5)', bar: 'linear-gradient(to right, #52525B, #A1A1AA)', chip: '#A1A1AA' },
   Bronze: { bg: 'linear-gradient(165deg, #9A6754 0%, #795546 50%, #451A03 100%)', border: '#9A6754', shadow: 'rgba(154,103,84,0.4)', bar: 'linear-gradient(90deg, rgba(255,255,255,0.6) 0%, #fff 100%)', chip: '#F9A789' },
   Silver: { bg: 'linear-gradient(165deg, #94A3B8 0%, #475569 50%, #0F172A 100%)', border: '#94A3B8', shadow: 'rgba(148,163,184,0.4)', bar: 'linear-gradient(90deg, rgba(255,255,255,0.6) 0%, #fff 100%)', chip: '#CBD5E1' },
@@ -27,13 +27,13 @@ const TIER_STYLE: Record<string, { bg: string; border: string; shadow: string; b
   Epic: { bg: 'linear-gradient(165deg, #1A1A1A 0%, #080808 50%, #000000 100%)', border: 'rgba(255,255,255,0.2)', shadow: 'rgba(0,0,0,0.8)', bar: 'linear-gradient(to right, #6B7280, #FFFFFF, #D1D5DB)', chip: '#FFFFFF' },
 };
 /** SoDEX's mapping: an unknown tier is Iron (their EV). */
-const tierKey = (t: string | null | undefined) => {
+export const tierKey = (t: string | null | undefined) => {
   const k = (t ?? '').toLowerCase();
   return Object.keys(TIER_STYLE).find((x) => x.toLowerCase() === k) ?? 'Iron';
 };
 const usd = (n: number) => (n >= 1e6 ? `$${fmt(n / 1e6, n >= 1e7 ? 0 : 1)}M` : n >= 1e4 ? `$${fmt(n / 1e3, 0)}K` : n >= 10 ? `$${fmt(n, 0)}` : `$${fmt(n, 2)}`);
 /** SoDEX's season card shows a fixed 900,000 (their bundle's constant), not the API's pool field. */
-const SODEX_POOL_SHOWN = 900_000;
+export const SODEX_POOL_SHOWN = 900_000;
 
 const copy = async (text: string, what: string) => {
   try {

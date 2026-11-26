@@ -8,6 +8,7 @@
  * estimate from public data (PointsEstimate.tsx) stands in for them. Every figure is the API's: the pool is the API's 1,000,000, not the
  * 900,000 in SoDEX's page text.
  */
+import { Suspense, lazy } from 'react';
 import { CoinIcon } from '../CoinIcon';
 import { Card, Group } from '../portfolio/parts';
 import { Fact, POINTS_PANELS, usePointsContext, type PointsContext } from '../Points';
@@ -38,7 +39,20 @@ const fmtEnergy = (raw: string): string => {
   return n >= 1_000_000 ? `$${fmt(n / 1_000_000, n % 1_000_000 ? 1 : 0)}M` : `$${fmt(n / 1000, 0)}K`;
 };
 
+/*
+ * Localhost only (owner 2026-11-26): the page's versions behind a switch (versions/points/PointsVersions.tsx), Original
+ * among them. A build never loads that file: `import.meta.env.DEV` is false there, so the import is dropped and
+ * production renders SoPointsOriginal, today's page, unchanged.
+ */
+const PointsVersions = import.meta.env.DEV ? lazy(() => import('./versions/points/PointsVersions')) : null;
+
 export function SoPointsPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
+  if (PointsVersions) return <Suspense fallback={null}><PointsVersions address={address} provider={provider} Original={SoPointsOriginal} /></Suspense>;
+  return <SoPointsOriginal address={address} provider={provider} />;
+}
+
+/** Today's page, as it was: the "Original" of the switch, and the only one a build has. */
+export function SoPointsOriginal({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
   const c = usePointsContext(address, provider);
   const now = useNow();
   const w = c.week;
