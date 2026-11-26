@@ -72,7 +72,7 @@ export function PhonePulse({ c, bookTrades }: { c: TradeContext; bookTrades: Rea
             onPrice={c.onPrice}
           />
         </div>
-        <div className="pls-phone__book" role="region" aria-label="Order book and trades">{bookTrades}</div>
+        <div className="pls-phone__book">{bookTrades}</div>
       </div>
       {createPortal(
         <>

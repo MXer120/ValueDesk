@@ -154,7 +154,8 @@ export function EditDock(p: EditorProps) {
           onChange={setTab}
           options={[
             { value: 'mine', label: 'My layouts', count: p.thumbs.length },
-            { value: 'presets', label: 'Presets' },
+            // Presets arrange the wide screen; a phone's arrangement is fixed, so it is not offered them.
+            ...(phone ? [] : [{ value: 'presets' as const, label: 'Presets' }]),
             { value: 'history', label: 'History', count: p.history.length },
           ]}
         />
@@ -240,7 +241,7 @@ export function EditDock(p: EditorProps) {
               <b>{p.layoutName}</b>
               <Caret />
             </button>
-            <Button size="sm" variant="primary" icon="plus" aria-expanded={pop === 'widgets'} onClick={() => toggle('widgets')}>Add<span className="ed-wide">&nbsp;widget</span></Button>
+            <Button size="sm" variant="primary" icon="plus" aria-label="Add widget" aria-expanded={pop === 'widgets'} onClick={() => toggle('widgets')}>Add<span className="ed-wide">widget</span></Button>
             <i className="ed-rule" aria-hidden="true" />
             <button type="button" className="ed-dk-tool" onClick={p.onUndo} title="Undo (Ctrl Z)" aria-keyshortcuts="Control+Z"><UndoIcon /><span>Undo</span></button>
             {!phone && <button type="button" className="ed-dk-tool" onClick={p.onFill} title="Grow panels into the empty space"><FillIcon /><span>Fill</span></button>}

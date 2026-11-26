@@ -49,8 +49,8 @@ export function PhoneDeck({ c, bookTrades }: { c: TradeContext; bookTrades: Reac
         )}
       </div>
       <div className="pdk-split">
-        <div className="pdk-book" role="region" aria-label="Order book and trades">{bookTrades}</div>
-        <div className="pdk-ticket" role="region" aria-label="Order entry">
+        <div className="pdk-book">{bookTrades}</div>
+        <div className="pdk-ticket" role="group" aria-label="Order entry">
           <LiveOrderEntry
             engine={c.engine}
             symbol={c.symbol}

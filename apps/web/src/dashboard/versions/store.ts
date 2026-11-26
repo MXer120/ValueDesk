@@ -41,8 +41,16 @@ function read<T extends string>(key: string, ok: ReadonlyArray<{ id: T }>, fallb
   }
 }
 
-let page: PageVersion = read(PAGE_KEY, PAGE_VERSIONS, 'original');
-let editor: EditorVersion = read(EDITOR_KEY, EDITOR_VERSIONS, 'original');
+/**
+ * A browser that never chose opens in the version a DEV server was started with (VITE_DEV_TRADE_PAGE /
+ * VITE_DEV_TRADE_EDITOR): how the UI specs (e2e/ui), whose every browser starts empty, run against a version.
+ */
+function started<T extends string>(v: string | undefined, ok: ReadonlyArray<{ id: T }>): T | null {
+  return DEV && ok.some((o) => o.id === v) ? (v as T) : null;
+}
+
+let page: PageVersion = read(PAGE_KEY, PAGE_VERSIONS, started(import.meta.env.VITE_DEV_TRADE_PAGE, PAGE_VERSIONS) ?? 'original');
+let editor: EditorVersion = read(EDITOR_KEY, EDITOR_VERSIONS, started(import.meta.env.VITE_DEV_TRADE_EDITOR, EDITOR_VERSIONS) ?? 'original');
 const subs = new Set<() => void>();
 const emit = () => { for (const f of [...subs]) f(); };
 const subscribe = (f: () => void) => {

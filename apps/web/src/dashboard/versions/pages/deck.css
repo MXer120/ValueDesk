@@ -164,8 +164,8 @@ html[data-tv='deck'] .tv-deck .panel.oe .oe-mode__btn::before {
   font-weight: 400;
   line-height: 14px;
 }
-html[data-tv='deck'] .tv-deck .panel.oe .oe-mode__btn--lev::before { content: 'Leverage'; }
-html[data-tv='deck'] .tv-deck .panel.oe .oe-anchor + .oe-anchor .oe-mode__btn::before { content: 'Margin'; }
+html[data-tv='deck'] .tv-deck .panel.oe .oe-mode__btn--lev::before { content: 'Leverage' / ''; }
+html[data-tv='deck'] .tv-deck .panel.oe .oe-anchor + .oe-anchor .oe-mode__btn::before { content: 'Margin' / ''; }
 html[data-tv='deck'] .tv-deck .panel.oe .oe-mode__btn:hover:not(:disabled) { filter: none; background: var(--dk-well-hi); }
 html[data-tv='deck'] .tv-deck .panel.oe .oe-mode__btn[aria-expanded='true'] { box-shadow: inset 0 0 0 1.5px var(--text); }
 /* The order type: a segmented pill. */
@@ -297,10 +297,12 @@ html[data-tv='deck'] .tv-deck .pdk-ticket .oe-field > .oe-inputrow .oe-inlabel {
 html[data-tv='deck'] .tv-deck .pdk-ticket .oe-field > .oe-inputrow .oe-input { height: 44px; min-width: 0; padding: 8px 4px 0 10px; line-height: 36px; font-size: 15px; text-align: left; }
 html[data-tv='deck'] .tv-deck .pdk-ticket .oe-field > .oe-inputrow .oe-chip {
   order: 3;
+  display: flex;
+  align-items: flex-end;
   align-self: stretch;
   height: auto;
   margin: 0;
-  padding: 0 10px 0 6px;
+  padding: 0 10px 13px 6px;
   border: 0;
   border-radius: 0;
   background: none;
@@ -321,6 +323,7 @@ html[data-tv='deck'] .tv-deck .pdk-ticket .oe-out { padding: 6px 10px; }
 html[data-tv='deck'] .tv-deck .pdk-ticket .oe-out__row { font-size: 11px; }
 
 /* The book's own controls on one line, the column heads unbroken. */
-html[data-tv='deck'] .tv-deck .pdk-book .mkt-book-ctl { flex-wrap: nowrap; gap: 4px; }
-html[data-tv='deck'] .tv-deck .pdk-book .mkt-view { width: 30px; padding: 0; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-book-ctl { flex-wrap: nowrap; gap: 4px; height: 44px; margin: 0; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-views { flex: 1 1 auto; min-width: 0; gap: 0; }
 html[data-tv='deck'] .tv-deck .pdk-book .mkt-booktable th { white-space: nowrap; font-size: 10.5px; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-view { align-items: center; justify-content: center; }

@@ -132,7 +132,8 @@ export function EditBoard(p: EditorProps) {
           </button>
         </div>
 
-        {p.presets.length > 0 && (
+        {/* Presets arrange the wide screen; a phone's arrangement is fixed, so it is not offered them. */}
+        {p.presets.length > 0 && !phone && (
           <section className="ed-bd__sec">
             <header><h3>Start from a preset</h3><p>Replaces <b>{active?.name ?? 'the layout on screen'}</b>; what it replaces goes to History.</p></header>
             <div className="ed-bd__presets">
