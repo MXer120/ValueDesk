@@ -54,7 +54,10 @@ export function TradeDashboard({ context }: { context: TradeContext }) {
   }, [version]);
   return (
     <>
+      {/* A version has its own layout id (versions/pageConfig.ts): a fresh grid per version, not the Original's
+          panels sliding into the version's places. A build has one id, so this never changes there. */}
       <Dashboard
+        key={config.id}
         config={config}
         panels={TRADE_PANELS}
         context={ctx}

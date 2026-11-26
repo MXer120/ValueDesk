@@ -1119,7 +1119,7 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
               return next;
             });
           }}
-          presets={config.id === 'trade' ? TRADE_PRESETS.map((preset) => ({
+          presets={config.id === 'trade' || config.id.startsWith('trade-') ? TRADE_PRESETS.map((preset) => ({
             id: preset.id,
             title: preset.title,
             blurb: preset.blurb,

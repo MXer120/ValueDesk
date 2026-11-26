@@ -236,3 +236,77 @@ html[data-tv='slate'] .tv-slate .empty-state__cta { border-radius: var(--sl-r); 
   html[data-tv='slate'] .tv-slate .mkt-header--info .mkt-stat { padding: 0 12px 0 0; }
   html[data-tv='slate'] .tv-slate .mkt-header--info .mkt-stat + .mkt-stat { padding-left: 12px; }
 }
+
+/* ============================================================================
+ * SLATE, second pass - the terminal (owner 2026-11-26: "Rework trade page more,
+ * and more uniquely"). Black and square: every figure in a monospaced face, every
+ * label in small capitals, nothing rounded inside the sheet. The book is a tall
+ * ladder from the market strip to the foot, between chart and ticket, and the
+ * strip runs the whole width (pageConfig.ts SLATE_LG).
+ * ========================================================================= */
+html[data-tv='slate'] .tv-slate {
+  /* The system's own monospaced face: no download, nothing fetched from anyone. */
+  --font-num: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --radius-xs: 0px; --radius-sm: 2px; --radius-md: 2px; --radius-tile: 2px; --radius-card: 0px;
+  --sl-sheet: #070707;
+  --sl-head: #0c0c0c;
+  --sl-seam: rgb(var(--ink) / 0.12);
+  --sl-r: 2px;
+  --sl-caps: 0.07em;
+}
+html[data-tv='slate'] body,
+html[data-tv='slate'][data-glass] body { background: #000; }
+html[data-tv='slate'][data-theme='light'] body { background: #e9e9e7; }
+html[data-tv='slate'] .tv-slate .dash-scroll { border-radius: 0; }
+
+/* Small capitals on every label: tabs, heads, figures' names, table heads. */
+html[data-tv='slate'] .tv-slate :is(.dash-tab, .dash-heading, .oe-tab, .oe-dir__btn, .mkt-stat-l, .mkt-booktable th, .acct-table th, .oe-inlabel, .oe-out__k) {
+  font-family: var(--font-text);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: var(--sl-caps);
+  text-transform: uppercase;
+}
+html[data-tv='slate'] .tv-slate .dash-tabs__bar { height: 32px; }
+html[data-tv='slate'] .tv-slate .dash-tabs__ink { height: 1px; }
+
+/* The strip: tickers in capitals, the price beside them in the monospaced face. */
+html[data-tv='slate'] .tv-slate .mkt-favchip__t b { font-family: var(--font-num); font-size: 12px; letter-spacing: 0.02em; text-transform: uppercase; }
+html[data-tv='slate'] .tv-slate .mkt-favchip__t small { font-family: var(--font-num); font-size: 11.5px; }
+html[data-tv='slate'] .tv-slate .mkt-favchip.is-active { box-shadow: inset -1px 0 0 var(--sl-seam), inset 0 -1px 0 var(--text); }
+
+/* The coin row: the price set like a quote screen. */
+html[data-tv='slate'] .tv-slate .mkt-header--info .mkt-price-v,
+html[data-tv='slate'] .tv-slate .mkt-header--info .mkt-price-v.up,
+html[data-tv='slate'] .tv-slate .mkt-header--info .mkt-price-v.down { font-family: var(--font-num); font-size: 19px; font-weight: 600; letter-spacing: 0; }
+html[data-tv='slate'] .tv-slate .mkt-header--info .mkt-stat-v { font-family: var(--font-num); font-size: 12px; }
+html[data-tv='slate'] .tv-slate .chart-tab { border-radius: 0; }
+
+/* The ladder: tight rows, the spread band in the monospaced face. */
+html[data-tv='slate'] .tv-slate .mkt-booktable td { font-family: var(--font-num); font-size: 11.5px; }
+html[data-tv='slate'] .tv-slate .mkt-mid-last { font-family: var(--font-num); font-size: 16px; font-weight: 600; }
+html[data-tv='slate'] .tv-slate .mkt-view,
+html[data-tv='slate'] .tv-slate .mkt-ratio-bar { border-radius: 0; }
+
+/* The ticket: square fields, the send a flat bar in capitals. */
+html[data-tv='slate'] .tv-slate .oe-dir--tabs .oe-dir__btn { height: 32px; }
+html[data-tv='slate'] .tv-slate .oe-input { font-family: var(--font-num); }
+html[data-tv='slate'] .tv-slate .oe-inputrow,
+html[data-tv='slate'] .tv-slate .panel.oe .oe-mode__btn,
+html[data-tv='slate'] .tv-slate .oe-chip,
+html[data-tv='slate'] .tv-slate .oe-slider .oe-pctbox { border-radius: var(--sl-r); }
+html[data-tv='slate'] .tv-slate .oe-side__btn {
+  height: 34px;
+  border-radius: var(--sl-r);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: var(--sl-caps);
+  text-transform: uppercase;
+}
+html[data-tv='slate'] .tv-slate .oe-out__v { font-family: var(--font-num); }
+
+/* Tables: monospaced cells on hairlines. */
+html[data-tv='slate'] .tv-slate .acct-table td { font-family: var(--font-num); font-size: 12px; }
+html[data-tv='slate'] .tv-slate .empty-state__cta { border-radius: var(--sl-r); }
+/* The ladder's column heads in a narrow book: capitals without the extra spacing, a size down, never overlapping. */
+html[data-tv='slate'] .tv-slate .mkt-booktable th { font-size: 9.5px; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -344,3 +344,57 @@ html[data-tv='pulse'] .oe-slider .oe-pctbox:focus-within { box-shadow: inset 0 0
   html[data-tv='pulse'] .pls-sheet .oe-slider .oe-pctbox .oe-suffix { align-self: center; }
 }
 html.pls-sheet-open .tvswitch { display: none; }
+
+/* ============================================================================
+ * PULSE, second pass - the focus (owner 2026-11-26: "Rework trade page more, and
+ * more uniquely"). The chart takes the page - 37 of 48 columns and most of the
+ * height (pageConfig.ts PULSE_LG) - on a dark backdrop with no card around it,
+ * under a large price in the display face. The ticket and a short book stand in
+ * a narrow rail on the right, lifted off the backdrop; positions and the account
+ * lie in a low, quiet drawer under the chart. Wide screens only: the phone keeps
+ * its own screen (PhonePulse.tsx).
+ * ========================================================================= */
+@media (min-width: 994px) {
+  html[data-tv='pulse'] body,
+  html[data-tv='pulse'][data-glass] body { background: radial-gradient(75% 65% at 38% 40%, #111113, #050506 72%) fixed; }
+  html[data-tv='pulse'][data-theme='light'] body { background: radial-gradient(75% 65% at 38% 40%, #f8f8f6, #e5e5e2 72%) fixed; }
+
+  /* The chart and its strip on the backdrop itself. */
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='chart'],
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='markets'] { background: transparent; box-shadow: none; }
+  html[data-tv='pulse'] .tv-pulse .chart-card > .mkt-header.mkt-header--info { background: transparent; }
+  html[data-tv='pulse'] .tv-pulse .mkt-header--info .mkt-price-v,
+  html[data-tv='pulse'] .tv-pulse .mkt-header--info .mkt-price-v.up,
+  html[data-tv='pulse'] .tv-pulse .mkt-header--info .mkt-price-v.down { font-family: var(--font-display); font-size: 36px; font-weight: 600; line-height: 40px; }
+  html[data-tv='pulse'] .tv-pulse .kc-toolbar { background: transparent; }
+
+  /* The rail: the ticket and the book lifted off the backdrop, a soft edge of light. */
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='exec'],
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] {
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgb(var(--ink) / 0.055), rgb(var(--ink) / 0.025));
+    box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.07), inset 0 1px 0 rgb(var(--ink) / 0.08), 0 24px 50px -30px rgb(0 0 0 / 0.85);
+  }
+  html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='exec'],
+  html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='book'] {
+    background: #fff;
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.06), 0 18px 40px -26px rgb(0 0 0 / 0.25);
+  }
+  html[data-tv='pulse'] .tv-pulse .mkt-mid-last { font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+  /* The rail's book is short: compact rows (the book measures them and fits more levels) under a lower tab bar. */
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] .dash-tabs__bar { height: 36px; }
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] .mkt-booktable tbody td { height: 17px; padding-top: 0; padding-bottom: 0; font-size: 11.5px; line-height: 17px; }
+
+  /* The drawer: positions and the account, quiet, under the chart. */
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='positions'],
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='account'] {
+    border-radius: 16px;
+    background: rgb(var(--ink) / 0.025);
+    box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.05);
+  }
+  html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='positions'],
+  html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='account'] { background: rgb(255 255 255 / 0.6); }
+
+  /* The send: a full pill. */
+  html[data-tv='pulse'] .oe-side__btn { border-radius: 999px; }
+}
