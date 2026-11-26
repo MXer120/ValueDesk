@@ -14,6 +14,7 @@ import type { ChartView } from '../PortfolioPage';
 import { SwapSheet } from '../SwapSheet';
 import { DASH, fmt, fmtUsd } from '../../../format';
 import { useStored } from '../../../hooks';
+import { useTilt } from '../../../tilt';
 import type { VersionProps } from './DevVersions';
 import { usePfData, type Bucket, type PfData } from './data';
 import {
@@ -72,6 +73,8 @@ export default function V3Wallet({ c, provider, onOpenMarket, onOpenTab }: Versi
   const goWealth = useCallback(() => { setView('wealth'); toTop(); }, []);
   const offers = useOffers(d, goWealth, onOpenTab, () => setCopies(true));
   const up = d.today === null || Math.abs(d.today) < 0.005 ? 'neutral' : d.today > 0 ? 'positive' : 'negative';
+  // The card leans a little toward the mouse (owner 2026-11-26), as the VIP pass does.
+  const tilt = useTilt<HTMLElement>(6, 5, 0.5);
 
   if (view === 'wealth') {
     return (
@@ -93,8 +96,7 @@ export default function V3Wallet({ c, provider, onOpenMarket, onOpenTab }: Versi
         <div className="pfv3-split">
           <div className="pfv3-left">
             {/* The card */}
-            <section className="pfv3-card" aria-label="Total value">
-              <span className="pfv3-card__glow" aria-hidden="true" />
+            <section className="pfv3-card tf-tilt" aria-label="Total value" ref={tilt.ref} onPointerMove={tilt.onMove} onPointerLeave={tilt.onLeave}>
               <div className="pfv3-card__top">
                 <span className="pfv3-card__brand"><BrandMark size={18} />ValueDesk</span>
                 <Identity c={c} />

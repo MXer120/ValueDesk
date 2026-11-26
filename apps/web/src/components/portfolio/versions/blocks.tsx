@@ -18,6 +18,7 @@ import { CrossFadeCal, fmtSigned, pnlAt, type Period, type PortfolioContext } fr
 import { EquityCurve, fmtCompactUsd, type CurveWindow } from '../parts';
 import { RANGES, atLevel, coverLine, curveFor, useActivityWindow, type ChartView } from '../PortfolioPage';
 import { requestConnect, requestDeposit, requestTransfer, requestWithdraw } from '../../account/actions';
+import { DepositIcon, TransferIcon, WithdrawIcon } from '../../account/moneyIcons';
 import { DASH, MINUS, fmt, fmtUsd, num, signClass } from '../../../format';
 import { fmtFixed } from '../../../numStyle';
 import { fmtRate, type VenueFeeRate } from '../../../fees';
@@ -94,19 +95,12 @@ export function MoneyKeys({ c, onSwap }: { c: PortfolioContext; onSwap: () => vo
   if (!c.address) return <Button variant="primary" size="md" icon="wallet" className="pfv-keys__connect" onClick={requestConnect}>Connect wallet</Button>;
   return (
     <div className="pfv-keys">
-      {key('Deposit', <Arrow dir="down" />, requestDeposit, false, true)}
-      {key('Withdraw', <Arrow dir="up" />, () => requestWithdraw(), noAccount)}
-      {key('Transfer', <Icon name="layers" size={18} />, () => requestTransfer(), noAccount)}
+      {/* The wallet menu's own icons (account/moneyIcons); Swap shows the two coins its sheet swaps. */}
+      {key('Deposit', <DepositIcon size={18} />, requestDeposit, false, true)}
+      {key('Withdraw', <WithdrawIcon size={18} />, () => requestWithdraw(), noAccount)}
+      {key('Transfer', <TransferIcon size={18} />, () => requestTransfer(), noAccount)}
       {key('Swap', <span className="pfv-pair"><CoinIcon coin="USDT" size={16} /><CoinIcon coin="USDC" size={16} /></span>, onSwap)}
     </div>
-  );
-}
-
-function Arrow({ dir }: { dir: 'up' | 'down' }) {
-  return (
-    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {dir === 'down' ? <path d="M10 4v11M5 10.5l5 5 5-5" /> : <path d="M10 16V5M5 9.5l5-5 5 5" />}
-    </svg>
   );
 }
 

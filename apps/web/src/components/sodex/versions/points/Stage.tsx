@@ -11,6 +11,7 @@
  */
 import { useId, useMemo, useState, type CSSProperties } from 'react';
 import type { Eip1193Provider } from '../../../../wallet';
+import { useTilt } from '../../../../tilt';
 import { WE_GET, YOU_GET } from '../../../../onboarding/referralRules';
 import { TIERS } from '../../../../points';
 import { Icon, IconTile, Segmented, Skeleton, Slider } from '../../../bots/kit/kit';
@@ -34,6 +35,8 @@ export function Stage({ address, provider, sample }: { address: string | null; p
   const [toggled, setToggled] = useState(false);
   const glow = v.mine ? TIER_STYLE[v.tier]!.border : '#00b481';
   const share = boostedShare(v);
+  // The cards lean a little toward the mouse (owner 2026-11-26), as the VIP pass does.
+  const tierTilt = useTilt(6, 5, 0.5);
   return (
     <div className="tf bots-page rf-page sx spx">
       <div className="bots-col">
@@ -49,7 +52,7 @@ export function Stage({ address, provider, sample }: { address: string | null; p
           <div className="spx-st__body">
             {/* SoDEX's own cards, as Original draws them; the season card carries the pool, the snapshot clock and the invite code. */}
             <div className={`spx-st__front spx-st__cards${v.mine ? '' : ' is-out'}`} aria-hidden={how} {...(how ? { inert: '' } : {})}>
-              {v.mine ? <SoPointsCard s={v.s} /> : <SignInFront v={v} />}
+              {v.mine ? <div className="spx-tilt tf-tilt" ref={tierTilt.ref} onPointerMove={tierTilt.onMove} onPointerLeave={tierTilt.onLeave}><SoPointsCard s={v.s} /></div> : <SignInFront v={v} />}
               <SeasonCard week={week} address={address} settled={c.publicSettled} />
             </div>
             <div className="spx-st__steps" id={id} aria-hidden={!how} {...(how ? {} : { inert: '' })}><How v={v} /></div>
@@ -193,10 +196,11 @@ function MineCol({ v }: { v: PointsView }) {
   const s1 = v.s.s1.reduce((t, w) => t + (w.pointsStatus === 'CONFIRMED' ? w.points : 0), 0);
   const live = v.live;
   const hold = live ? (live.wealthTvl ?? 0) + (live.vaultHolding ?? 0) : 0;
+  const tilt = useTilt<HTMLElement>(6, 5, 0.5);
   return (
     <div className="spx-col1">
       {/* The week in progress, SoDEX's own figures so far; its points are not estimated (Original veils that "Coming soon"). */}
-      <section className="rf-dark rf-cc spx-cc" aria-label="This week so far">
+      <section className="rf-dark rf-cc spx-cc tf-tilt" aria-label="This week so far" ref={tilt.ref} onPointerMove={tilt.onMove} onPointerLeave={tilt.onLeave}>
         <span className="rf-cc__sheen" aria-hidden="true" />
         <div><img src="/logos/brand/sodex.svg" width="28" height="28" alt="" /><em>This week so far</em></div>
         <dl>
@@ -224,9 +228,10 @@ function PublicCol({ v }: { v: PointsView }) {
   const st = c.standing;
   const week = st ? st.volumeUsd * (7 / days) : null;
   const e = week !== null ? bandOf(scoreOf({ futures: week })) : null;
+  const tilt = useTilt<HTMLElement>(6, 5, 0.5);
   return (
     <div className="spx-col1">
-      <section className="rf-dark rf-cc spx-cc" aria-label="Your trading">
+      <section className="rf-dark rf-cc spx-cc tf-tilt" aria-label="Your trading" ref={tilt.ref} onPointerMove={tilt.onMove} onPointerLeave={tilt.onLeave}>
         <span className="rf-cc__sheen" aria-hidden="true" />
         <div><img src="/logos/brand/sodex.svg" width="28" height="28" alt="" /><em>Your trading, {c.window}</em></div>
         {c.address ? (

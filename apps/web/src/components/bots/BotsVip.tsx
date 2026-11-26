@@ -17,6 +17,7 @@ import { goBots } from '../../bots/routes';
 import { Button, Icon, Panel, Shell, ShellHeader, StatusPill } from './kit/kit';
 import { GoldMark, VipGround, VipPass, vipPerks } from './VipScene';
 import { BrandMark } from '../BrandMark';
+import { useTilt } from '../../tilt';
 
 interface Eligibility { eligible: boolean; volumeUsd: number; minUsd: number; days: number; promo?: { until: number | null; label: string } | null; byVolume?: boolean }
 
@@ -196,34 +197,6 @@ function useExit(onDone: () => void, ms = 320, onStart?: () => void): [boolean, 
     window.setTimeout(() => done.current(), ms);
   };
   return [closing, close];
-}
-
-/** The pass leans toward the pointer a little (a few degrees), and back when it leaves; not on touch or reduced motion. */
-function useTilt(): { ref: React.RefObject<HTMLDivElement>; onMove: (e: React.PointerEvent) => void; onLeave: () => void } {
-  const ref = useRef<HTMLDivElement>(null);
-  const frame = useRef(0);
-  const set = (x: number, y: number) => {
-    cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(() => {
-      const el = ref.current;
-      if (!el) return;
-      el.style.setProperty('--tx', `${(x * 10).toFixed(2)}deg`);
-      el.style.setProperty('--ty', `${(-y * 8).toFixed(2)}deg`);
-      el.style.setProperty('--sx', `${50 + x * 40}%`);
-    });
-  };
-  const onMove = (e: React.PointerEvent) => {
-    if (e.pointerType === 'touch' || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    const el = ref.current;
-    if (!el) return;
-    const b = el.getBoundingClientRect();
-    // -1..1 from the pass's centre, eased so the far corners of the screen do not throw it around.
-    const x = Math.max(-1, Math.min(1, (e.clientX - (b.left + b.width / 2)) / (b.width * 1.2)));
-    const y = Math.max(-1, Math.min(1, (e.clientY - (b.top + b.height / 2)) / (b.height * 1.2)));
-    set(x, y);
-  };
-  useEffect(() => () => cancelAnimationFrame(frame.current), []);
-  return { ref, onMove, onLeave: () => set(0, 0) };
 }
 
 /** How long the mark stays plain, then gold, then flies to its place beside "ValueDesk" (owner 2026-11-08: slower). */
