@@ -2004,17 +2004,21 @@ export class Indexer {
         }
       }
       let i = 0;
+      const filedAll = snap.data.cols['pnl:all'];
       for (const address of pool) {
         const prio = 500 - Math.min(400, i++);
+        // The file's all-time figure: what decides whether the address's sub-accounts belong in its 90d / ytd.
+        const at = snap.indexOf(address);
+        const all = at === undefined ? Number.NaN : filedAll[at]!;
         this.hl.add({
           key: `chart:${address}`,
           prio,
           run: async () => {
-            const r = await hlChartWindows(address, starts);
+            const r = await hlChartWindows(address, starts, Number.isFinite(all) ? all : null);
             const t = this.now();
             if (r.d90 !== null) this.store.putPnl('hyperliquid', '90d', [{ address, pnl: r.d90, volume: null }], t, t);
             if (r.ytd !== null) this.store.putPnl('hyperliquid', 'ytd', [{ address, pnl: r.ytd, volume: null }], t, t);
-            return 20;
+            return r.weight;
           },
         });
       }

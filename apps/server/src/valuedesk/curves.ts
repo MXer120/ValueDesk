@@ -8,8 +8,9 @@
  * so the next plain leaderboard read can paint those three without waiting.
  */
 import type { TraderRow, Window } from './types.js';
-import { hlInfo } from './hyperliquid/index.js';
+import { hlInfo, hlLeaderboard } from './hyperliquid/index.js';
 import { mapPortfolio } from './hyperliquid/mappers.js';
+import { PERP_WINDOW, rowSeries } from './hyperliquid/scope.js';
 import type { HlPortfolio } from './hyperliquid/raw.js';
 import { decorate, enrichNow } from './sodex/enrich.js';
 import { within } from './sodex/util.js';
@@ -121,15 +122,21 @@ async function fillOne(row: TraderRow, window: Window): Promise<void> {
     // trade.xyz publishes no per-venue curve: none is drawn rather than another venue's.
     return;
   } else {
-    const portfolio = await hlInfo.post<HlPortfolio>(
-      { type: 'portfolio', user: row.address },
-      { ttlMs: TTL },
-    );
-    const series = mapPortfolio(portfolio)[window] ?? [];
-    const spark = take(series.flatMap((p) => (p.pnl == null ? [] : [p.pnl])), 48);
+    // The curve on the board's terms (hyperliquid/scope.ts): perp PnL, the master's sub-accounts added when the
+    // board's figure has them. It is matched against HL's own file row for the address (a lookup, no request), so a
+    // netted row's Hyperliquid part is matched too. A curve that still does not match its figure is not drawn.
+    const snap = hlLeaderboard.peek();
+    const i = snap?.indexOf(row.address);
+    const filed = snap && i !== undefined ? snap.data.cols[`pnl:${window}`][i]! : Number.NaN;
+    const got = await rowSeries(row.address, PERP_WINDOW[window], Number.isFinite(filed) ? filed : null, hlInfo.post.bind(hlInfo), { ttlMs: TTL });
+    const spark = got.explained ? take(got.series.flatMap((p) => (p.pnl == null ? [] : [p.pnl])), 48) : [];
     if (spark.length > 1) row.spark = spark;
-    const av = series[series.length - 1]?.accountValue ?? null;
-    if (row.accountValue == null && av != null) row.accountValue = av;
+    if (row.accountValue == null) {
+      // The whole account's value (spot included), the master's own as before: a read already kept (same request).
+      const series = mapPortfolio(await hlInfo.post<HlPortfolio>({ type: 'portfolio', user: row.address }, { ttlMs: TTL }))[window] ?? [];
+      const av = series[series.length - 1]?.accountValue ?? null;
+      if (av != null) row.accountValue = av;
+    }
   }
   remember(row, window);
 }

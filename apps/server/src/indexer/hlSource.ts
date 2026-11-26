@@ -16,6 +16,7 @@ import { mark, resumed } from './busy.js';
 import type { LbSnapshot } from '../valuedesk/hyperliquid/leaderboard.js';
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
 import { equitySeries, portfolioWindow } from '../valuedesk/hyperliquid/mappers.js';
+import { PERP_WINDOW, rowSeries } from '../valuedesk/hyperliquid/scope.js';
 import type { HlFillRaw, HlPortfolio } from '../valuedesk/hyperliquid/raw.js';
 import type { Window } from '../valuedesk/types.js';
 import type { Candidate } from './boards.js';
@@ -257,12 +258,26 @@ export function pnlSince(points: ReadonlyArray<{ t: number; pnl: number | null }
   return pts[pts.length - 1]!.pnl - base.pnl;
 }
 
-/** 90d / ytd PnL and account value from one portfolio read (20 weight). */
-export async function hlChartWindows(address: string, starts: { d90: number; ytd: number }): Promise<{ d90: number | null; ytd: number | null; accountValue: number | null }> {
-  const p = await hlInfo.post<HlPortfolio>({ type: 'portfolio', user: address }, { background: true, ttlMs: 30 * 60_000, timeoutMs: 20_000 });
-  const series = equitySeries(portfolioWindow(p, 'allTime'));
-  const av = [...series].reverse().find((pt) => pt.accountValue !== null)?.accountValue ?? null;
-  return { d90: pnlSince(series, starts.d90), ytd: pnlSince(series, starts.ytd), accountValue: av };
+/**
+ * 90d / ytd PnL and account value from the portfolio chart (20 weight a read), on the terms of the leaderboard file
+ * the other windows come from (valuedesk/hyperliquid/scope.ts): perp PnL (perpAllTime, never the spot-inclusive
+ * allTime), with the master's sub-accounts added when its own all-time perp PnL does not explain `filedAll`, the
+ * file's all-time figure for it. Before 2026-11-26 these two windows were the master's own spot-inclusive PnL beside a
+ * 30d that was neither (0xf5d8…ad53: 30d +34.45M from its subs, its own month -0.49M). `weight` is what it cost.
+ */
+export async function hlChartWindows(
+  address: string,
+  starts: { d90: number; ytd: number },
+  filedAll: number | null = null,
+): Promise<{ d90: number | null; ytd: number | null; accountValue: number | null; weight: number }> {
+  const opts = { background: true, ttlMs: 30 * 60_000, timeoutMs: 20_000 };
+  const post = hlInfo.post.bind(hlInfo);
+  const p = await post<HlPortfolio>({ type: 'portfolio', user: address }, opts);
+  const whole = equitySeries(portfolioWindow(p, 'allTime'));
+  const av = [...whole].reverse().find((pt) => pt.accountValue !== null)?.accountValue ?? null;
+  // The same read again comes from the kept answer (ttlMs): no second request for the master.
+  const { series, subs } = await rowSeries(address, PERP_WINDOW.all, filedAll, post, opts);
+  return { d90: pnlSince(series, starts.d90), ytd: pnlSince(series, starts.ytd), accountValue: av, weight: 20 + (subs ? 20 + 20 * subs : 0) };
 }
 
 /**
