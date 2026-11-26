@@ -186,6 +186,44 @@ export function estimateLiquidationPrice(input: LiquidationInput): LiquidationEs
   };
 }
 
+/**
+ * An OPEN position's liquidation price: SoDEX's own where its account state has one, else the estimate.
+ *
+ * The perps state (`/accounts/<address>/state`, and its stream) lists each position in `P` with `lp`, SoDEX's
+ * liquidation price. Checked 2026-11-26 on a cross account with 15 positions (0x1978…fe04): solving SoDEX's cross
+ * rule (account value = maintenance margin, one position's price moving) from that account's own `av` and the
+ * published tiers lands 0.1-1.4 % from `lp` on all 6 shorts (AAPL: lp 1,034.68, solved 1,029.02), and every long
+ * there has `lp` 0 (the account covers it at any price). Isolated: `lp` equals the estimate from the position's own
+ * margin (32 of 32, 2026-10-31). The estimate alone cannot see a cross account's other collateral: for that AAPL
+ * short (10x, entry 331.56) it said 346.91, below the mark of 355 - a price already passed.
+ *
+ *   `venueLp` undefined: the state was not read, or does not list this position yet -> the estimate, marked so.
+ *   `venueLp` > 0: SoDEX's price.
+ *   `venueLp` 0: SoDEX gives this position no liquidation price -> none.
+ */
+export interface PositionLiquidation {
+  price: number | null;
+  source: 'venue' | 'estimate' | 'none';
+}
+
+export function positionLiquidation(venueLp: number | undefined, estimate: () => number | null): PositionLiquidation {
+  if (venueLp === undefined || !Number.isFinite(venueLp) || venueLp < 0) return { price: estimate(), source: 'estimate' };
+  if (venueLp === 0) return { price: null, source: 'none' };
+  return { price: venueLp, source: 'venue' };
+}
+
+/** `lp` of every position in a perps state payload (`{state: {P}}` as api.state returns it), by position id. */
+export function venueLiqById(statePayload: unknown): Map<string, number> {
+  const out = new Map<string, number>();
+  const P = (statePayload as { state?: { P?: unknown } } | null | undefined)?.state?.P;
+  for (const p of Array.isArray(P) ? (P as Array<Record<string, unknown>>) : []) {
+    const id = p?.i ?? p?.id;
+    const lp = typeof p?.lp === 'number' ? p.lp : typeof p?.lp === 'string' && p.lp.trim() !== '' ? Number(p.lp) : NaN;
+    if ((typeof id === 'number' || typeof id === 'string') && Number.isFinite(lp)) out.set(String(id), lp);
+  }
+  return out;
+}
+
 export type StopVerdict = 'ok' | 'beyond-liquidation' | 'at-liquidation' | 'near-liquidation' | 'wrong-side';
 
 export interface StopCheck {

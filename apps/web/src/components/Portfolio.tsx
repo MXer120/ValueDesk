@@ -111,14 +111,11 @@
  * disclosure for a quieter panel, not an oversight: the annotation is still on
  * every row, and turning it back on is a one-line change.
  *
- * A venue liquidation price is also deliberately absent. The state payload
- * carries a per-position `lp` which is very likely one: it is always on the
- * losing side of entry (0 of 30 non-zero samples were on the wrong side), it is
- * exactly 0 for longs that cannot be liquidated by price alone, and it is
- * distinct from `takeOverPrice`, which is 0 on every position observed. That is
- * strong circumstantial evidence and not documentation, and a mislabelled
- * liquidation price is precisely the number a trader would bet size on - so the
- * column here is risk.ts's own estimate, labelled "est.".
+ * The state payload's per-position `lp` IS SoDEX's liquidation price: solved
+ * from an account's own state with SoDEX's cross rule it lands within 0.1-1.4 %
+ * of `lp` (2026-11-26, risk.ts positionLiquidation), and isolated it equals the
+ * margin-tier estimate. The positions band (Account.tsx) shows it; `liq` below
+ * is still the estimate alone, which no view draws.
  *
  * WHAT THIS PAGE NO LONGER DRAWS FOR ITSELF
  * -----------------------------------------

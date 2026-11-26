@@ -20,11 +20,12 @@
  * There is no `markPrice`, no `unrealizedPnl` and no `liquidationPrice`, so:
  *   - `Mark` is the live mark feed (WS `markPrice`, seeded from REST tickers).
  *   - `Unreal. PnL` is DERIVED: (mark - entry) x size, signed by direction.
- *   - `Liq.` is computed by risk.ts against the venue's published margin
- *     tiers. ISOLATED: from the position's own margin (`initialMargin`, which
- *     includes margin added or removed) - SoDEX's own liquidation price, to the
- *     digit. CROSS: an estimate that ignores collateral held elsewhere, which can
- *     only push real liquidation FURTHER away - it warns early, never late.
+ *   - `Liq.` is SoDEX's own liquidation price, `lp` in the perps account state
+ *     (joined on position id; risk.ts positionLiquidation has the evidence). A
+ *     cross position's `lp` counts the whole account's collateral; 0 means SoDEX
+ *     gives it none (an em-dash). Only a position the state does not list yet
+ *     shows risk.ts's estimate, tagged "est.". The estimate alone said 346.91
+ *     for a cross AAPL short whose mark was 355 and whose `lp` was 1,034.68.
  * Every other cell renders exactly what the payload holds, and an absent value
  * is an em-dash. Nothing in this file prints a 0 it was not given.
  *
@@ -50,7 +51,7 @@ import { useAsync, useChannel, useStatus, useTickers } from '../hooks';
 import { notify, notifyTrade } from '../toast';
 import { coinLabel, fmt, fmtBalance, fmtDateTime, fmtPrice, fmtQty, fmtUsd, num, pick } from '../format';
 import { Private } from '../privacy';
-import { estimateLiquidationPrice } from '../risk';
+import { estimateLiquidationPrice, positionLiquidation, venueLiqById, type PositionLiquidation } from '../risk';
 import { signedMarginAmount } from '../trading/orderParams';
 import { useConfirm } from './Modal';
 import { askTrade } from './TradeConfirm';
@@ -546,6 +547,29 @@ function PositionsInner({
   useEffect(() => onCount?.(positions.length), [positions.length, onCount]);
 
   const markOf = useMarkPrices(open.map(symbolOf));
+  // SoDEX's own liquidation price per position (`lp`), from the perps state - the same shared feed the account
+  // figures read (AccountKeepAlive), so it adds no read where those are on screen.
+  const stateKey = address && engine === 'perps' ? `state:perps:${address}` : null;
+  const stateFeed = useAccountResource(stateKey, () => api.state('perps', address!), 20_000);
+  const venueLiq = venueLiqById(stateFeed.data);
+  const liqOf = (p: any): PositionLiquidation => {
+    const id = pick(p, 'id');
+    const dir = positionDirection(p);
+    const entry = num(pick(p, 'avgEntryPrice'));
+    const size = Math.abs(num(pick(p, 'size', 'positionAmt', 'pa', 'q')));
+    return positionLiquidation(id == null ? undefined : venueLiq.get(String(id)), () =>
+      dir && entry > 0 && size > 0
+        ? estimateLiquidationPrice({
+            entryPrice: entry,
+            quantity: size,
+            side: dir === 'long' ? 'buy' : 'sell',
+            leverage: num(pick(p, 'leverage')),
+            sym: byName.get(symbolOf(p)),
+            // An isolated position's initialMargin is SoDEX's iw (added and removed margin included): SoDEX's own lp.
+            isolatedMargin: marginOf(pick(p, 'marginMode')) === 'isolated' && num(pick(p, 'initialMargin')) > 0 ? num(pick(p, 'initialMargin')) : undefined,
+          }).price
+        : null);
+  };
   const ordersKey = address && engine === 'perps' ? `orders:perps:${address}` : null;
   const ordersFeed = useAccountResource(ordersKey, () => api.openOrders('perps', address!), 10_000);
   // Market A-Z until a column head is pressed: the venue returns positions in no fixed order.
@@ -783,15 +807,7 @@ function PositionsInner({
     if (key === 'value') return mark === null ? null : mark * size;
     if (key === 'entry') return entry > 0 ? entry : null;
     if (key === 'mark') return mark;
-    if (key === 'liq') {
-      const sym = byName.get(symbol);
-      const lev = num(pick(p, 'leverage'));
-      if (!dir || !(entry > 0) || !(size > 0)) return null;
-      return estimateLiquidationPrice({
-        entryPrice: entry, quantity: size, side: dir === 'long' ? 'buy' : 'sell', leverage: lev, sym,
-        isolatedMargin: marginOf(pick(p, 'marginMode')) === 'isolated' && im > 0 ? im : undefined,
-      }).price;
-    }
+    if (key === 'liq') return liqOf(p).price;
     if (key === 'upnl') return upnl;
     if (key === 'margin') return im > 0 ? im : null;
     if (key === 'tpsl') {
@@ -819,7 +835,7 @@ function PositionsInner({
               <SortTh k="value" label="Value" numeric sort={sort} onSort={toggle} className="num" />
               <SortTh k="entry" label="Entry" numeric sort={sort} onSort={toggle} className="num" />
               <SortTh k="mark" label="Mark" numeric sort={sort} onSort={toggle} className="num" />
-              <SortTh k="liq" label={<>Liq. <span className="acct-tag">est.</span></>} numeric sort={sort} onSort={toggle} className="num" title="Isolated: from the position's own margin against the venue's published margin tiers, which is SoDEX's own liquidation price. Cross: an estimate that ignores collateral held elsewhere in the account, which can only move real liquidation further away." />
+              <SortTh k="liq" label="Liq." numeric sort={sort} onSort={toggle} className="num" title="SoDEX's own liquidation price, from its account state. For a cross position it counts the whole account's collateral. A dash: SoDEX gives the position none. Marked est.: SoDEX's state does not list the position yet, so it is estimated from the margin tiers." />
               <SortTh k="upnl" label="PnL" numeric sort={sort} onSort={toggle} className="num" title="Derived here: (mark − entry) × size, signed by direction; the % is against the position's margin. The venue does not publish an unrealised PnL for a position." />
               <SortTh k="margin" label="Margin" numeric sort={sort} onSort={toggle} className="num" />
               <SortTh k="tpsl" label="TP/SL" numeric sort={sort} onSort={toggle} title="Positions with a take-profit and stop-loss first." />
@@ -848,18 +864,7 @@ function PositionsInner({
               const roe = upnl !== null && im > 0 ? upnl / im : null;
 
               const exits = exitsFor(openOrders, symbol, pick(p, 'id'));
-              const liq =
-                dir && entry > 0 && size > 0
-                  ? estimateLiquidationPrice({
-                      entryPrice: entry,
-                      quantity: size,
-                      side: dir === 'long' ? 'buy' : 'sell',
-                      leverage: lev,
-                      sym,
-                      // An isolated position's initialMargin is SoDEX's iw (added and removed margin included): SoDEX's own lp.
-                      isolatedMargin: margin === 'isolated' && im > 0 ? im : undefined,
-                    }).price
-                  : null;
+              const liq = liqOf(p);
 
               return (
                 <tr key={String(pick(p, 'id') ?? i)}>
@@ -886,7 +891,12 @@ function PositionsInner({
                   <td className="num">{mark === null ? EM : fmtUsd(mark * size)}</td>
                   <td className="num">{price(pick(p, 'avgEntryPrice'), sym?.tickSize)}</td>
                   <td className="num">{mark === null ? EM : fmtPrice(mark, sym?.tickSize)}</td>
-                  <td className="num acct-dim">{liq === null ? EM : fmtPrice(liq, sym?.tickSize)}</td>
+                  <td
+                    className="num acct-dim"
+                    title={liq.source === 'none' ? 'SoDEX gives this position no liquidation price: the account covers it.' : liq.source === 'estimate' && liq.price !== null ? 'Estimated from the margin tiers: SoDEX\'s account state does not list this position yet.' : undefined}
+                  >
+                    {liq.price === null ? EM : <>{fmtPrice(liq.price, sym?.tickSize)}{liq.source === 'estimate' && <span className="acct-tag"> est.</span>}</>}
+                  </td>
                   <td className={`num ${toneOf(upnl)}`}>
                     {upnl === null ? EM : <>{signedUsd(upnl)}{roe !== null && <span className="acct-sub"> {signedPct(roe)}</span>}</>}
                   </td>
