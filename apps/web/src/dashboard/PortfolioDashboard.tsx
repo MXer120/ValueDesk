@@ -28,8 +28,12 @@ import {
   type PortfolioProps,
 } from '../components/Portfolio';
 import { PortfolioPage, type PortfolioPageLinks } from '../components/portfolio/PortfolioPage';
+import { useDevWatch } from '../components/portfolio/devWatch';
 
 export function PortfolioDashboard({ provider, onOpenMarket, onOpenTab, ...props }: PortfolioProps & PortfolioPageLinks) {
-  const context = usePortfolioContext(props);
-  return <PortfolioPage c={context} provider={provider} onOpenMarket={onOpenMarket} onOpenTab={onOpenTab} />;
+  // Localhost only: the version switch can show another wallet, read-only (always null in a build).
+  const watch = useDevWatch();
+  const context = usePortfolioContext(watch ? { ...props, address: watch, unlocked: false } : props);
+  const c = watch ? { ...context, readOnly: true } : context;
+  return <PortfolioPage c={c} provider={provider} onOpenMarket={onOpenMarket} onOpenTab={onOpenTab} />;
 }
