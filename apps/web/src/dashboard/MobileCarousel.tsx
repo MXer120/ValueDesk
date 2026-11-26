@@ -42,8 +42,6 @@ interface Page {
 /** The carousel a page's content sits in: open one of its pages by key. Null outside a carousel (a wide screen). */
 const CarouselContext = createContext<{ goTo: (key: string) => void } | null>(null);
 export const useCarouselPage = () => useContext(CarouselContext);
-/** For a phone screen that is not this carousel but opens its ticket the same way (versions/pages/PhonePulse.tsx). */
-export const CarouselPageProvider = CarouselContext.Provider;
 
 export function MobileCarousel({ pages }: { pages: Page[] }) {
   const uid = useId();

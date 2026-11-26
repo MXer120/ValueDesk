@@ -9,8 +9,7 @@
  * market's tab shows that market's figures; a widget tab keeps the market on
  * screen's), and the body fades across a switch.
  */
-import { Suspense, useCallback, useState } from 'react';
-import { DevRangeBar } from './versions/dev';
+import { useCallback, useState } from 'react';
 import { LiveChart } from './livePrice';
 import { TickerBar } from '../components/Market';
 import { AccountTabs } from '../components/AccountTabs';
@@ -198,10 +197,6 @@ export function ChartCard({ c }: { c: TradeContext }) {
         onSymbolClick={() => c.onOpenSearch(asset ?? undefined)}
         aside={tabs}
       />
-      {/* Pulse (localhost only): where the price sits in its 24 hours, under the coin row. */}
-      {c.pageVersion === 'pulse' && DevRangeBar && (
-        <Suspense fallback={null}><DevRangeBar engine={c.engine} symbol={symbol} sym={sym} /></Suspense>
-      )}
       <div key={on} className={`chart-card__body mo-switch${widget ? ' is-widget' : ''}`}>
         {widget ? widget.content : (
           <LiveChart

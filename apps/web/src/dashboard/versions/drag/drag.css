@@ -1,0 +1,191 @@
+/* ============================================================================
+ * The layout editor's drag and resize versions (versions/store.ts; localhost).
+ * Every rule starts at the version's class on the dashboard (`.dash.drag-swap`,
+ * `.drag-split`, `.drag-flow`, set only while a layout is edited) or at the
+ * overlay's own classes (ArrangeOverlay.tsx: `.arr-*`, SeamLayer's readout).
+ * ========================================================================= */
+
+/* --- swap and split: the head moves the panel, the lines between panels resize */
+.dash.drag-swap.is-arrange .ed-ov,
+.dash.drag-split.is-arrange .ed-ov { cursor: grab; }
+.dash.is-moving,
+.dash.is-moving * { cursor: grabbing !important; }
+.dash.is-moving .dash-grid { user-select: none; }
+
+/* The lines: always shown while arranging, a pill with a grip in its middle; lit under the pointer, full length while
+   dragged. They sit over the panels (the seam layer is a sibling of the grid). */
+.dash.drag-swap.is-arrange .dash-seams,
+.dash.drag-split.is-arrange .dash-seams { z-index: 8; }
+.dash.drag-swap.is-arrange .dash-seam::after,
+.dash.drag-split.is-arrange .dash-seam::after {
+  opacity: 0.5;
+  border-radius: 999px;
+  background: var(--text);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bg) 70%, transparent);
+  transition: opacity 120ms, width 160ms var(--ease-out), height 160ms var(--ease-out);
+}
+.dash.drag-swap.is-arrange .dash-seam--v::after,
+.dash.drag-split.is-arrange .dash-seam--v::after { width: 4px; height: 32px; }
+.dash.drag-swap.is-arrange .dash-seam--h::after,
+.dash.drag-split.is-arrange .dash-seam--h::after { width: 32px; height: 4px; }
+.dash.drag-swap.is-arrange .dash-seam:hover::after,
+.dash.drag-split.is-arrange .dash-seam:hover::after { opacity: 1; }
+.dash.drag-swap.is-arrange .dash-seam--v:hover::after,
+.dash.drag-split.is-arrange .dash-seam--v:hover::after { height: 52px; }
+.dash.drag-swap.is-arrange .dash-seam--h:hover::after,
+.dash.drag-split.is-arrange .dash-seam--h:hover::after { width: 52px; }
+.dash.drag-swap.is-arrange .dash-seam.is-active::after,
+.dash.drag-split.is-arrange .dash-seam.is-active::after { opacity: 1; box-shadow: none; }
+.dash.drag-swap.is-arrange .dash-seam--v.is-active::after,
+.dash.drag-split.is-arrange .dash-seam--v.is-active::after { width: 2px; height: 100%; }
+.dash.drag-swap.is-arrange .dash-seam--h.is-active::after,
+.dash.drag-split.is-arrange .dash-seam--h.is-active::after { width: 100%; height: 2px; }
+/* A move hides the lines: one gesture at a time. */
+.dash.is-moving .dash-seams { display: none; }
+
+/* The moved panel, drawn where a release puts it: its content faded, a dashed edge. */
+.dash.is-moving .dash-panel.is-moving { box-shadow: none; outline: 1.5px dashed rgb(var(--ink) / 0.5); outline-offset: -1.5px; }
+.dash.is-moving .dash-panel.is-moving > :not(.ed-ov) { opacity: 0.18; transition: opacity 160ms var(--ease-out); }
+.dash.is-moving .dash-panel.is-moving > .ed-ov { opacity: 0.6; }
+/* The panel it trades places with (swap), at the place it gets. */
+.dash.is-moving .dash-panel.is-target { box-shadow: 0 0 0 1.5px rgb(var(--ink) / 0.55); }
+.dash.is-moving .dash-panel.is-refused { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--neg) 75%, transparent); }
+/* While a move is held the panels glide to the plan, a touch slower than the grid's own snap. */
+.dash.is-moving .dash-grid > .react-grid-item.cssTransforms {
+  transition: transform 220ms var(--ease-out), width 220ms var(--ease-out), height 220ms var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash.is-moving .dash-grid > .react-grid-item.cssTransforms { transition: none; }
+}
+
+/* --- the overlay (ArrangeOverlay.tsx), over the grid in its coordinates ------ */
+.arr-overlay { position: absolute; inset: 0 0 auto 0; height: 0; z-index: 9; pointer-events: none; }
+.arr-land,
+.arr-target,
+.arr-zones { position: absolute; }
+.arr-land,
+.arr-target { display: grid; place-items: center; padding: 10px; }
+.arr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 8px 14px 8px 11px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.14), 0 14px 36px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  font: 500 12px/1.25 var(--font-text);
+  white-space: nowrap;
+  animation: arr-in 140ms var(--ease-out);
+}
+html[data-theme='light'] .arr-badge { background: rgb(255 255 255 / 0.97); box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 14px 36px rgba(0, 0, 0, 0.14); }
+.arr-badge > svg { flex: none; color: var(--muted); }
+.arr-badge > span { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.arr-badge b { overflow: hidden; text-overflow: ellipsis; font-size: 13px; font-weight: 600; }
+.arr-badge small { overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.arr-badge.is-refused > svg { color: var(--neg); }
+.arr-badge.is-refused small { color: color-mix(in srgb, var(--neg) 85%, var(--text)); }
+.arr-target.is-refused { border-radius: var(--radius-card, 12px); background: color-mix(in srgb, var(--neg) 7%, transparent); }
+@keyframes arr-in { from { opacity: 0; transform: translateY(3px) scale(0.98); } }
+@media (prefers-reduced-motion: reduce) { .arr-badge { animation: none; } }
+
+/* split: the target's four side bands and its middle; the one under the pointer lit. Drawn on the target as it was
+   when the drag began, which is where the pointer is aimed. */
+.arr-zones { border-radius: var(--radius-card, 12px); outline: 1px dashed rgb(var(--ink) / 0.32); outline-offset: -1px; }
+.arr-zone { position: absolute; border-radius: 10px; transition: background-color 120ms, box-shadow 120ms; }
+.arr-zone--left { top: 0; bottom: 0; left: 0; width: var(--band); }
+.arr-zone--right { top: 0; bottom: 0; right: 0; width: var(--band); }
+.arr-zone--top { top: 0; left: var(--band); right: var(--band); height: var(--band); }
+.arr-zone--bottom { bottom: 0; left: var(--band); right: var(--band); height: var(--band); }
+.arr-zone--center { inset: var(--band); }
+.arr-zones.is-left .arr-zone--left,
+.arr-zones.is-right .arr-zone--right,
+.arr-zones.is-top .arr-zone--top,
+.arr-zones.is-bottom .arr-zone--bottom,
+.arr-zones.is-center .arr-zone--center { background: rgb(var(--ink) / 0.06); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.28); }
+
+/* --- the seams' read-out (SeamLayer.tsx, with labels): both sides' new sizes on the line ---------- */
+.dash-seam-readout {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 11px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.14), 0 10px 28px rgba(0, 0, 0, 0.45);
+  color: var(--muted);
+  font: 500 11.5px/1.2 var(--font-text);
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+html[data-theme='light'] .dash-seam-readout { background: rgb(255 255 255 / 0.97); box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 10px 28px rgba(0, 0, 0, 0.12); }
+.dash-seam-readout__side { display: flex; align-items: center; gap: 10px; }
+.dash-seam-readout__side b { margin-left: 3px; color: var(--text); font-family: var(--font-num); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dash-seam-readout > i { padding: 2px 6px; border-radius: 6px; background: rgb(var(--ink) / 0.07); font-style: normal; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* --- flow: every edge resizes; the placeholder, the size and the guide lines -- */
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle {
+  margin: 0;
+  padding: 0;
+  background: none;
+  transform: none;
+  opacity: 0;
+  z-index: 7;
+  transition: opacity 120ms;
+}
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item:hover > .react-resizable-handle,
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item.resizing > .react-resizable-handle { opacity: 1; }
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle-e { top: 14px; bottom: 14px; right: 0; left: auto; width: 10px; height: auto; cursor: ew-resize; }
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle-w { top: 14px; bottom: 14px; left: 0; right: auto; width: 10px; height: auto; cursor: ew-resize; }
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle-s { left: 14px; right: 14px; bottom: 0; top: auto; height: 10px; width: auto; cursor: ns-resize; }
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle-se { right: 0; bottom: 0; left: auto; top: auto; width: 16px; height: 16px; cursor: nwse-resize; }
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle-sw { left: 0; bottom: 0; right: auto; top: auto; width: 16px; height: 16px; cursor: nesw-resize; }
+/* The marks: a pill on each edge's middle, a dot in each corner, in the text colour on a ring of the page. */
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle::after {
+  content: '';
+  position: absolute;
+  inset: auto;
+  width: auto;
+  height: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--text);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg) 80%, transparent);
+  opacity: 0.9;
+  animation: none;
+  transform: none;
+}
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle-e::after,
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle-w::after { top: 50%; left: 3px; width: 4px; height: 30px; margin-top: -15px; }
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle-s::after { left: 50%; top: 3px; width: 30px; height: 4px; margin-left: -15px; }
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle-se::after { right: 4px; bottom: 4px; width: 8px; height: 8px; }
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle-sw::after { left: 4px; bottom: 4px; width: 8px; height: 8px; }
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item > .react-resizable-handle:hover::after { background: var(--text); opacity: 1; }
+
+/* The panel in hand: lifted. The place it will drop: a dashed outline on a faint fill. */
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item.react-draggable-dragging,
+.dash.drag-flow.is-arrange .dash-grid .react-grid-item.resizing {
+  opacity: 0.92;
+  box-shadow: 0 0 0 1.5px rgb(var(--ink) / 0.5), 0 28px 70px rgba(0, 0, 0, 0.55);
+}
+.dash.drag-flow.is-arrange .dash-grid .react-grid-placeholder {
+  opacity: 1;
+  border-radius: var(--radius-card, 12px);
+  background: rgb(var(--ink) / 0.05);
+  box-shadow: none;
+  outline: 1.5px dashed rgb(var(--ink) / 0.45);
+  outline-offset: -1.5px;
+}
+.arr-land--flow { align-content: center; }
+.arr-badge--size { padding: 7px 12px; }
+.arr-badge--size > span { flex-direction: row; align-items: baseline; gap: 10px; }
+.arr-badge--size small { color: var(--text); font-family: var(--font-num); font-size: 12px; font-weight: 600; }
+.arr-badge--size.is-resizing small { color: var(--text); }
+.arr-guide { position: absolute; z-index: 1; }
+.arr-guide--v { width: 1px; margin-left: -0.5px; background: repeating-linear-gradient(to bottom, rgb(var(--ink) / 0.7) 0 5px, transparent 5px 9px); }
+.arr-guide--h { height: 1px; margin-top: -0.5px; background: repeating-linear-gradient(to right, rgb(var(--ink) / 0.7) 0 5px, transparent 5px 9px); }

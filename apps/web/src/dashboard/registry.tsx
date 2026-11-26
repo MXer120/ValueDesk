@@ -36,9 +36,6 @@ import { widgetBody, widgetBodyShape } from './widgetBodies';
 import { ChartCard, TradeAccountBand } from './tradeTabs';
 /* The opt-in panels draw with code of their own, like the catalog's widgets (lazyWidgets.tsx). */
 import { FeeTier, LazyWidget, Leaderboard, Stats } from './lazyWidgets';
-import { Suspense } from 'react';
-import { DevPhoneDeck, DevPhonePulse, DevRangeBar } from './versions/dev';
-import type { PageVersion } from './versions/store';
 
 /**
  * The two breakpoints where the terminal has no column to spare for the chart.
@@ -122,8 +119,6 @@ export interface TradeContext {
    * row carries it. Never both: the e2e specs find ONE "Market type" switch at every width.
    */
   marketTypeInPage?: boolean;
-  /** The page's version on localhost (versions/store.ts; TradeDashboard.tsx sets it). Absent: the original. */
-  pageVersion?: PageVersion;
 }
 
 /** The prop bag the Account.tsx components take. Pulled out once, not six times. */
@@ -182,20 +177,16 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     minH: 2,
     maxH: 10,
     render: (c) => (
-      <>
-        <TickerBar
-          engine={c.engine}
-          symbol={c.symbol}
-          sym={c.sym}
-          onLast={c.onLastPrice}
-          onSymbolClick={() => c.onOpenSearch()}
-          favorites={c.favorites}
-          onToggleFavorite={c.onToggleFavorite}
-          aside={c.marketTypeInPage && c.onEngine ? <MarketTypeSwitch engine={c.engine} onEngine={c.onEngine} /> : undefined}
-        />
-        {/* Pulse (localhost only): the 24-hour line under the coin row, as on a wide screen (tradeTabs.tsx). */}
-        {c.pageVersion === 'pulse' && DevRangeBar && <Suspense fallback={null}><DevRangeBar engine={c.engine} symbol={c.symbol} sym={c.sym} /></Suspense>}
-      </>
+      <TickerBar
+        engine={c.engine}
+        symbol={c.symbol}
+        sym={c.sym}
+        onLast={c.onLastPrice}
+        onSymbolClick={() => c.onOpenSearch()}
+        favorites={c.favorites}
+        onToggleFavorite={c.onToggleFavorite}
+        aside={c.marketTypeInPage && c.onEngine ? <MarketTypeSwitch engine={c.engine} onEngine={c.onEngine} /> : undefined}
+      />
     ),
   },
 
@@ -297,10 +288,6 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
       );
 
       if (!isNarrow(bp)) return bookTrades;
-
-      // A version's own phone screen (localhost only): the same book, chart and ticket, composed another way.
-      if (c.pageVersion === 'deck' && DevPhoneDeck) return <Suspense fallback={null}><DevPhoneDeck c={c} bookTrades={bookTrades} /></Suspense>;
-      if (c.pageVersion === 'pulse' && DevPhonePulse) return <Suspense fallback={null}><DevPhonePulse c={c} bookTrades={bookTrades} /></Suspense>;
 
       return (
         <MobileCarousel

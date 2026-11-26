@@ -1,5 +1,5 @@
 /**
- * DOCK - the layout edited in place, at full size (localhost version of the editor, versions/store.ts).
+ * DOCK - the layout editor (owner 2026-11-26: "editor, dock new default"): the layout edited in place, at full size.
  *
  * Nothing is scaled: what you arrange is the page as you will use it. Each panel carries a head while you edit -
  * a grip to move it, its name and size in columns x rows, its own x - and its corner resizes it. Everything else is
@@ -13,8 +13,9 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, Icon, IconButton, Segmented, StatusPill } from '../../../components/bots/kit/kit';
+import { Button, Icon, IconButton, Segmented, StatusPill } from '../../components/bots/kit/kit';
 import type { EditorProps } from './types';
+import './dock.css';
 import {
   Caret, ConfirmDelete, EyeIcon, FillIcon, GROUP_PICKS, LayoutMenu, MoreIcon, Thumb, UndoIcon, WidgetSketch, menuAt, menuAtButton,
   splitBlurb, usePreviewPress, useSlashFocus, useWidgetGroups, type GroupPick,

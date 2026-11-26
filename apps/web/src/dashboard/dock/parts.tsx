@@ -1,15 +1,15 @@
 /**
- * Parts the three editor versions share: a layout's thumbnail (the same sketches the original's cards draw), the
+ * The layout editor's parts (EditDock.tsx): a layout's thumbnail (the widget catalogue's sketches), the
  * Preview button's press-and-hold, the widget search with its groups, a layout's menu and the delete that counts
  * down before it can be pressed. Built on the app's own pieces: Sketch (sketches.tsx), the tab menu (tabExtras.tsx),
  * the widget catalogue (widgetCatalog.ts) and the Bots kit's controls.
  */
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
-import { PREVIEW_HOLD_MS, type ThumbBlock } from '../../editPlace';
-import type { EditThumb, EditWidget, PreviewGesture } from '../../EditMode';
-import { Sketch } from '../../sketches';
-import { MENU_ICONS, TabMenu, menuAt } from '../../tabExtras';
-import { WIDGET_FACES, WIDGET_GROUPS, faceFor, matchesWidget, type WidgetGroup } from '../../widgetCatalog';
+import { PREVIEW_HOLD_MS, type ThumbBlock } from '../editPlace';
+import type { EditThumb, EditWidget, PreviewGesture } from './types';
+import { Sketch } from '../sketches';
+import { MENU_ICONS, TabMenu, menuAt } from '../tabExtras';
+import { WIDGET_FACES, WIDGET_GROUPS, faceFor, matchesWidget, type WidgetGroup } from '../widgetCatalog';
 
 /** A layout drawn small: each panel its sketch, in its place. */
 export function Thumb({ blocks, cols, className, style }: { blocks: readonly ThumbBlock[]; cols: number; className?: string; style?: CSSProperties }) {
@@ -64,7 +64,7 @@ export function WidgetSketch({ id, className }: { id: string; className?: string
 
 /**
  * Preview: a short press latches it (the page at full size until pressed again or `\`), a press held past
- * PREVIEW_HOLD_MS shows it only while held - the original editor's gesture (EditMode.tsx), as handlers to spread.
+ * PREVIEW_HOLD_MS shows it only while held, as handlers to spread.
  */
 export function usePreviewPress(onPreview: (g: PreviewGesture) => void) {
   const timer = useRef<number | null>(null);

@@ -1,13 +1,44 @@
 /**
- * What every editor version is handed by Dashboard.tsx: exactly what the original editor (EditMode.tsx) gets - the
- * same saved layouts, presets, history and the same actions on them - and a few more facts and actions the new
- * designs draw with (the panels' places on the page, a picked panel, remove and resize one).
+ * What the layout editor (EditDock.tsx) is handed by Dashboard.tsx: the saved layouts, presets, history and the
+ * actions on them, and the panels' places on the page, a picked panel, remove and resize one.
  *
  * Nothing here writes storage itself: every change goes through Dashboard's own commit (Undo, the layout history on
- * Done), so a layout made in any editor is the same record and loads in every version of the page.
+ * Done). Dock became the editor on the owner's word (2026-11-26: "editor, dock new default"); the editor before it
+ * (EditMode.tsx) is gone and its types live here.
  */
-import type { EditPreset, EditThumb, EditWidget, PreviewGesture } from '../../EditMode';
-import type { BreakpointName } from '../../types';
+import type { ThumbBlock } from '../editPlace';
+import type { BreakpointName } from '../types';
+import type { WidgetGroup } from '../widgetCatalog';
+
+export interface EditThumb {
+  id: string;
+  /** What the rail calls it. */
+  name: string;
+  /** Taken off the icon rail. */
+  off: boolean;
+  active: boolean;
+  blocks: ThumbBlock[];
+}
+
+export interface EditWidget {
+  id: string;
+  name: string;
+  /** What it shows, for the search. */
+  blurb?: string;
+  /** Already on the canvas. Dragging it must not create a second copy. */
+  present: boolean;
+  group?: WidgetGroup;
+}
+
+export type PreviewGesture = 'hold-start' | 'hold-end' | 'toggle';
+
+export interface EditPreset {
+  id: string;
+  title: string;
+  blurb: string;
+  active: boolean;
+  blocks: ThumbBlock[];
+}
 
 /** Where the page sits while a layout is edited: scaled by `scale` from its top-left, moved by x / y px. */
 export interface EditStage { scale: number; x: number; y: number }
@@ -26,7 +57,7 @@ export interface PagePanel {
   maxH?: number;
 }
 
-/** What the original editor is handed too (Dashboard.tsx builds it once for either). */
+/** What Dashboard.tsx builds once per render for the editor; the rest it adds at the call. */
 export type EditBaseProps = Omit<EditorProps, 'bp' | 'phone' | 'pagePanels' | 'rows' | 'layoutName' | 'selected' | 'onSelect' | 'onRemove' | 'onResize' | 'onStage'>;
 
 export interface EditorProps {

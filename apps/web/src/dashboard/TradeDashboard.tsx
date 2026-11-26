@@ -12,19 +12,17 @@
  * It also says which widgets' code (lazyWidgets.tsx) the page waits for before its first render, and which it
  * fetches after the load event.
  *
- * On localhost it also draws the page in the version the switch chose (versions/store.ts): the same panels, the
- * same saved layouts and the same ticket, in another design. A build always draws the original.
+ * On localhost it also mounts the switch between the layout editor's drag and resize versions (versions/store.ts). A
+ * build has no switch.
  */
-import { Suspense, useEffect, useLayoutEffect, useMemo } from 'react';
+import { Suspense, useEffect } from 'react';
 import { prefetchAfterLoad } from '../afterLoad';
 import { Dashboard } from './Dashboard';
 import { bandTabIds, firstRenderWidgetIds } from './firstWidgets';
 import { TRADE_DASHBOARD } from './layout';
 import { preloadAllWidgets, preloadWidgets } from './lazyWidgets';
 import { TRADE_PANELS, type TradeContext } from './registry';
-import { DevVersionSwitch, useDevReady } from './versions/dev';
-import { tradeConfigFor } from './versions/pageConfig';
-import { usePageVersion } from './versions/store';
+import { DevVersionSwitch } from './versions/dev';
 
 /** App.tsx's loader for /trade waits for this: the code of every widget the first render draws is in. */
 export const tradeWidgetsReady = (): Promise<void> => preloadWidgets(firstRenderWidgetIds(TRADE_DASHBOARD, TRADE_PANELS));
@@ -40,28 +38,12 @@ function prefetchWidgets(): Promise<void> {
 
 export function TradeDashboard({ context }: { context: TradeContext }) {
   useEffect(() => prefetchAfterLoad(prefetchWidgets), []);
-  const chosen = usePageVersion();
-  // A version is drawn once its styles are in (DEV only); until then, and always in a build, the original.
-  const version = useDevReady(chosen !== 'original') ? chosen : 'original';
-  const config = useMemo(() => tradeConfigFor(version, TRADE_DASHBOARD), [version]);
-  const ctx = useMemo<TradeContext>(() => (version === 'original' ? context : { ...context, pageVersion: version }), [context, version]);
-  // The page's own surroundings (the body behind the panels, the coin row's menus) read the version off <html>.
-  useLayoutEffect(() => {
-    if (version === 'original') return;
-    const root = document.documentElement;
-    root.dataset.tv = version;
-    return () => { delete root.dataset.tv; };
-  }, [version]);
   return (
     <>
-      {/* A version has its own layout id (versions/pageConfig.ts): a fresh grid per version, not the Original's
-          panels sliding into the version's places. A build has one id, so this never changes there. */}
       <Dashboard
-        key={config.id}
-        config={config}
+        config={TRADE_DASHBOARD}
         panels={TRADE_PANELS}
-        context={ctx}
-        className={version === 'original' ? undefined : `tv tv-${version}`}
+        context={context}
         onNotificationSettings={context.onOpenNotificationSettings}
         onEditing={preloadAllWidgets}
       />

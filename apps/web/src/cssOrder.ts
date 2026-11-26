@@ -35,6 +35,7 @@ import 'react-resizable/css/styles.css';
 import './dashboard/dashboard.css';
 import './dashboard/sketches.css';
 import './dashboard/editMode.css';
+import './dashboard/dock/dock.css';
 import './dashboard/responsive.css';
 import './components/Leaderboard.css';
 import './components/FeeTier.css';

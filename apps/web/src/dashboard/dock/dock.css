@@ -1,8 +1,8 @@
 /* ============================================================================
- * The layout editor's version (localhost, versions/store.ts): Dock. Studio and
- * Board were removed on the owner's word (2026-11-26). Shared first - where the page sits, the head on each panel, the parts
- * every editor draws (thumbnails, history rows, the delete that counts down,
- * the undo toast) - then each editor's own chrome.
+ * The layout editor, Dock (EditDock.tsx; owner 2026-11-26: "editor, dock new
+ * default"). First where the page sits, the head on each panel, the parts the
+ * editor draws (thumbnails, history rows, the delete that counts down, the undo
+ * toast), then the dock's own chrome.
  *
  * Roots: `.shell.is-edit-v[data-edit-v]` (the page), `.dash.ed-<name>` (the
  * panels), `.ed-root.ed-<name>-root` (the editor's own windows, a body
