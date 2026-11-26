@@ -11,18 +11,14 @@
  *
  * It also says which widgets' code (lazyWidgets.tsx) the page waits for before its first render, and which it
  * fetches after the load event.
- *
- * On localhost it also mounts the switch between the layout editor's drag and resize versions (versions/store.ts). A
- * build has no switch.
  */
-import { Suspense, useEffect } from 'react';
+import { useEffect } from 'react';
 import { prefetchAfterLoad } from '../afterLoad';
 import { Dashboard } from './Dashboard';
 import { bandTabIds, firstRenderWidgetIds } from './firstWidgets';
 import { TRADE_DASHBOARD } from './layout';
 import { preloadAllWidgets, preloadWidgets } from './lazyWidgets';
 import { TRADE_PANELS, type TradeContext } from './registry';
-import { DevVersionSwitch } from './versions/dev';
 
 /** App.tsx's loader for /trade waits for this: the code of every widget the first render draws is in. */
 export const tradeWidgetsReady = (): Promise<void> => preloadWidgets(firstRenderWidgetIds(TRADE_DASHBOARD, TRADE_PANELS));
@@ -39,15 +35,12 @@ function prefetchWidgets(): Promise<void> {
 export function TradeDashboard({ context }: { context: TradeContext }) {
   useEffect(() => prefetchAfterLoad(prefetchWidgets), []);
   return (
-    <>
-      <Dashboard
-        config={TRADE_DASHBOARD}
-        panels={TRADE_PANELS}
-        context={context}
-        onNotificationSettings={context.onOpenNotificationSettings}
-        onEditing={preloadAllWidgets}
-      />
-      {DevVersionSwitch && <Suspense fallback={null}><DevVersionSwitch /></Suspense>}
-    </>
+    <Dashboard
+      config={TRADE_DASHBOARD}
+      panels={TRADE_PANELS}
+      context={context}
+      onNotificationSettings={context.onOpenNotificationSettings}
+      onEditing={preloadAllWidgets}
+    />
   );
 }

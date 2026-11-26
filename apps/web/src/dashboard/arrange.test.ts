@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { alignedEdges, closeGap, splitMove, swapMove, zoneAt, type ArrangeBox } from './arrange';
+import { closeGap, splitMove, swapMove, zoneAt, type ArrangeBox } from './arrange';
 
 const box = (i: string, x: number, y: number, w: number, h: number, more: Partial<ArrangeBox> = {}): ArrangeBox => ({ i, x, y, w, h, growW: true, growH: true, minW: 4, minH: 4, ...more });
 
@@ -99,10 +99,4 @@ test('split: a strip keeps its height when it goes over a panel', () => {
   assert.ok(r.ok);
   assert.ok(tiled(r.plan.placements));
   assert.equal(r.plan.box.h, 4);
-});
-
-test('alignedEdges: the edges that meet another panel\'s line', () => {
-  const a = alignedEdges(page(), { i: 'x', x: 29, y: 10, w: 10, h: 50 });
-  assert.deepEqual(a.xs, [29]);
-  assert.deepEqual(a.ys, [60]);
 });

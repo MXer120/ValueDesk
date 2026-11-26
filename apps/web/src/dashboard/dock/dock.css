@@ -53,19 +53,20 @@ html[data-theme='light'] .ed-root {
 }
 
 /* --- each panel while arranging: a ring, its content stilled, a head on top -- */
-.dash[class*=' ed-'].is-arrange .dash-panel {
-  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.16);
-}
-.dash[class*=' ed-'].is-arrange .dash-panel.is-picked { box-shadow: 0 0 0 2px var(--text); }
-.dash[class*=' ed-'].is-arrange:not(.is-trash) .dash-panel::after {
+/* The ring is drawn INSIDE each panel, on a layer over its content: a ring outside it (a box-shadow spread) was cut by
+   the scroller along the top row, under the navbar, and sat in the gutters the seams' handles use. */
+.dash[class*=' ed-'].is-arrange .dash-panel { box-shadow: none; }
+.dash[class*=' ed-'].is-arrange .dash-panel::after {
   content: '';
   position: absolute;
   inset: 0;
   z-index: 5;
   border-radius: inherit;
-  background: color-mix(in srgb, var(--bg) 22%, transparent);
+  box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.16);
   pointer-events: none;
 }
+.dash[class*=' ed-'].is-arrange:not(.is-trash) .dash-panel::after { background: color-mix(in srgb, var(--bg) 22%, transparent); }
+.dash[class*=' ed-'].is-arrange .dash-panel.is-picked::after { box-shadow: inset 0 0 0 2px var(--text); }
 .dash[class*=' ed-'].is-arrange .dash-panel > .dash-panel__grip { display: none; }
 .dash[class*=' ed-'].is-arrange .dash-grid .react-resizable-handle::after { animation: none; }
 .dash[class*=' ed-'].is-arrange .dash-grid .react-resizable-handle { z-index: 7; }
@@ -246,6 +247,8 @@ button.ed-linkbtn {
 }
 @keyframes ed-toast-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes ed-pop-in { from { opacity: 0; transform: translateY(8px) scale(0.985); } }
+/* Up from behind the dock: from its height, a touch smaller, out of its middle. */
+@keyframes ed-dk-rise { from { opacity: 0; transform: translateY(44px) scale(0.96); } }
 @media (prefers-reduced-motion: reduce) { .ed-toast, .ed-root [class*='-pop'] { animation: none !important; } }
 
 /* ============================================================================
@@ -320,6 +323,7 @@ button.ed-dk-tool.is-on { color: var(--text); background: var(--ed-well-hi); }
   z-index: 59;
   left: 50%;
   bottom: 84px;
+  transform-origin: 50% 100%;
   display: flex;
   flex-direction: column;
   width: min(1080px, calc(100vw - 32px));
@@ -327,12 +331,12 @@ button.ed-dk-tool.is-on { color: var(--text); background: var(--ed-well-hi); }
   border-radius: 18px;
   background: var(--ed-surface);
   box-shadow: 0 0 0 1px var(--ed-ring), var(--ed-shadow);
-  transform: translateX(-50%);
-  animation: ed-pop-in 200ms var(--ease-out) both;
+  translate: -50% 0;
+  animation: ed-dk-rise 240ms var(--ease-out) both;
   transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
 }
 .ed-dk-layouts { width: min(820px, calc(100vw - 32px)); }
-.ed-dk-drawer.is-ghosting { opacity: 0; pointer-events: none; transform: translate(-50%, 18px); }
+.ed-dk-drawer.is-ghosting { opacity: 0; pointer-events: none; transform: translateY(18px); }
 .ed-dock-root.is-quiet .ed-dk-pop,
 .ed-dock-root.is-quiet .ed-dk-scrim { display: none; }
 .ed-dk-pop__head { display: flex; align-items: center; gap: 12px; padding: 14px 12px 10px 16px; }
@@ -460,7 +464,7 @@ button.ed-dk-lnew {
 }
 button.ed-dk-lnew small { color: var(--ed-label); font-size: 11.5px; font-weight: 400; }
 button.ed-dk-lnew:hover { background: var(--ed-well); border-color: rgb(var(--ink) / 0.34); }
-.ed-dk-toast { left: 50%; bottom: 84px; transform: translateX(-50%); }
+.ed-dk-toast { left: 50%; bottom: 84px; translate: -50% 0; }
 .ed-dock-root:has(.ed-dk-pop) .ed-dk-toast { bottom: calc(84px + min(560px, 100vh - 190px) + 10px); }
 
 /* Dock on a phone: the bar across the foot, the drawer and the layouts as sheets. */
@@ -479,7 +483,7 @@ button.ed-dk-lnew:hover { background: var(--ed-well); border-color: rgb(var(--in
     max-height: calc(100dvh - 72px);
     padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     border-radius: 18px 18px 0 0;
-    transform: none;
+    translate: none;
   }
   .ed-dk-scrim { background: rgba(8, 9, 11, 0.45); }
   .ed-dk-pop__head { flex-wrap: wrap; }
@@ -504,3 +508,113 @@ button.ed-dk-lnew:hover { background: var(--ed-well); border-color: rgb(var(--in
 .ed-root.is-phone .ed-hist > li { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; }
 .ed-dock-root.is-phone .ed-dk-lgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .ed-dock-root.is-phone .ed-dk-lcard__t { flex-direction: column; align-items: flex-start; gap: 4px; }
+
+/* ============================================================================
+ * MOVING AND RESIZING (Dashboard.tsx `is-tiles`, arrange.ts; owner 2026-11-26:
+ * "keep split"). A panel is moved by its head; nothing on the page moves until
+ * the release - the overlay draws what it would do. Panels are resized on the
+ * lines between them (SeamLayer.tsx), which show while a layout is edited.
+ * ========================================================================= */
+.dash.is-tiles .ed-ov { cursor: grab; }
+.dash.is-moving,
+.dash.is-moving * { cursor: grabbing !important; }
+.dash.is-moving .dash-grid { user-select: none; }
+
+/* The lines: a pill in the gutter's middle, lit under the pointer, full length while dragged. Over the panels. */
+.dash.is-tiles .dash-seams { z-index: 8; }
+.dash.is-tiles .dash-seam::after {
+  opacity: 0.45;
+  border-radius: 999px;
+  background: var(--text);
+  transition: opacity 120ms, width 160ms var(--ease-out), height 160ms var(--ease-out);
+}
+.dash.is-tiles .dash-seam--v::after { width: 4px; height: 32px; }
+.dash.is-tiles .dash-seam--h::after { width: 32px; height: 4px; }
+.dash.is-tiles .dash-seam:hover::after { opacity: 1; }
+.dash.is-tiles .dash-seam--v:hover::after { height: 56px; }
+.dash.is-tiles .dash-seam--h:hover::after { width: 56px; }
+.dash.is-tiles .dash-seam.is-active::after { opacity: 1; }
+.dash.is-tiles .dash-seam--v.is-active::after { width: 2px; height: 100%; }
+.dash.is-tiles .dash-seam--h.is-active::after { width: 100%; height: 2px; }
+/* One gesture at a time: a move hides the lines. */
+.dash.is-moving .dash-seams { display: none; }
+
+/* The held panel stays where it is, faded, until the release. */
+.dash.is-moving .dash-panel.is-moving > :not(.ed-ov) { opacity: 0.25; transition: opacity 140ms var(--ease-out); }
+.dash.is-moving .dash-panel.is-moving::after { box-shadow: inset 0 0 0 1.5px rgb(var(--ink) / 0.4); }
+.dash.is-moving .dash-panel.is-refused::after { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--neg) 80%, transparent); }
+
+/* --- what a release would do (ArrangeOverlay.tsx), over the grid ----------- */
+.arr-overlay { position: absolute; inset: 0 0 auto 0; height: 0; z-index: 9; pointer-events: none; }
+.arr-frame,
+.arr-refused {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  border-radius: var(--radius-card, 12px);
+}
+/* Every panel the move changes, at its new place and size: a blueprint over the page. */
+.arr-frame {
+  background: color-mix(in srgb, var(--bg-panel) 90%, transparent);
+  box-shadow: inset 0 0 0 1.5px rgb(var(--ink) / 0.28);
+  transition: left 160ms var(--ease-out), top 160ms var(--ease-out), width 160ms var(--ease-out), height 160ms var(--ease-out);
+  animation: arr-in 140ms var(--ease-out);
+}
+.arr-frame.is-moved {
+  z-index: 1;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  box-shadow: inset 0 0 0 2px var(--text), 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+html[data-theme='light'] .arr-frame { background: rgb(255 255 255 / 0.9); box-shadow: inset 0 0 0 1.5px rgb(0 0 0 / 0.22); }
+html[data-theme='light'] .arr-frame.is-moved { background: rgb(255 255 255 / 0.97); box-shadow: inset 0 0 0 2px #141414, 0 18px 48px rgba(0, 0, 0, 0.14); }
+.arr-frame__t { display: flex; flex-direction: column; align-items: center; gap: 2px; max-width: 100%; color: var(--muted); font: 500 12px/1.2 var(--font-text); white-space: nowrap; }
+.arr-frame__t b { max-width: 100%; overflow: hidden; color: var(--text); font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; }
+.arr-frame__t small { font-family: var(--font-num); font-size: 11px; font-variant-numeric: tabular-nums; }
+.arr-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 8px 14px 8px 11px;
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.14), 0 14px 36px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font: 500 12px/1.25 var(--font-text);
+  white-space: nowrap;
+}
+html[data-theme='light'] .arr-badge { background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 14px 36px rgba(0, 0, 0, 0.14); }
+.arr-badge > svg { flex: none; color: var(--muted); }
+.arr-badge > span { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.arr-badge b { overflow: hidden; text-overflow: ellipsis; font-size: 13px; font-weight: 600; }
+.arr-badge small { overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.arr-badge.is-refused > svg { color: var(--neg); }
+.arr-badge.is-refused small { color: color-mix(in srgb, var(--neg) 85%, var(--text)); }
+.arr-refused { background: color-mix(in srgb, var(--neg) 8%, transparent); animation: arr-in 140ms var(--ease-out); }
+@keyframes arr-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .arr-frame, .arr-refused { animation: none; transition: none; }
+}
+
+/* --- a seam's read-out (SeamLayer.tsx, with labels): both sides' new sizes on the line -- */
+.dash-seam-readout {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 11px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.14), 0 10px 28px rgba(0, 0, 0, 0.45);
+  color: var(--muted);
+  font: 500 11.5px/1.2 var(--font-text);
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+html[data-theme='light'] .dash-seam-readout { background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 10px 28px rgba(0, 0, 0, 0.12); }
+.dash-seam-readout__side { display: flex; align-items: center; gap: 10px; }
+.dash-seam-readout__side b { margin-left: 3px; color: var(--text); font-family: var(--font-num); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dash-seam-readout > i { padding: 2px 6px; border-radius: 6px; background: rgb(var(--ink) / 0.07); font-style: normal; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }

@@ -1,6 +1,7 @@
 /**
- * Moves for the layout editor's drag versions (versions/store.ts: swap, split). Pure: grid units in, placements out;
- * Dashboard.tsx turns the pointer into a target panel and a zone, previews the plan in the live grid and commits it.
+ * Moves for the layout editor (Dock): a panel dropped on a side of another takes that half, on its middle the two
+ * trade places (owner 2026-11-26: "keep split"). Pure: grid units in, placements out; Dashboard.tsx turns the pointer
+ * into a target panel and a zone, dock/ArrangeOverlay.tsx draws the plan over the page, and a release commits it.
  *
  * Both keep the page tiled - every cell that was covered stays covered - so nothing has to be pushed down out of the
  * way and nothing leaves the screen: a swap trades two rectangles; a split hands the moved panel's rectangle to its
@@ -160,15 +161,4 @@ export function splitMove(items: readonly ArrangeBox[], id: string, target: stri
   }
   const placements = [...closed.map((b) => (b.i === target ? cut : place(b))), box];
   return { ok: true, plan: { placements, box, kind: 'split', zone } };
-}
-
-/** The edges of `box` that line up with another panel's edge: x lines (columns) and y lines (rows). */
-export function alignedEdges(items: readonly { i: string; x: number; y: number; w: number; h: number }[], box: { i: string; x: number; y: number; w: number; h: number }): { xs: number[]; ys: number[] } {
-  const others = items.filter((b) => b.i !== box.i);
-  const xLines = new Set(others.flatMap((b) => [b.x, b.x + b.w]));
-  const yLines = new Set(others.flatMap((b) => [b.y, b.y + b.h]));
-  return {
-    xs: [box.x, box.x + box.w].filter((v) => xLines.has(v)),
-    ys: [box.y, box.y + box.h].filter((v) => yLines.has(v)),
-  };
 }

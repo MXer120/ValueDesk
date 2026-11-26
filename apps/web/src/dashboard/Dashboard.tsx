@@ -13,9 +13,9 @@
  * `gridConfig` / `dragConfig` / `resizeConfig`. The v1 API still exists under
  * 'react-grid-layout/legacy', but we use the current one.
  */
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useLatched } from '../components/motion';
-import { GridLayout, verticalCompactor, type Layout, type LayoutItem, type ResizeHandleAxis } from 'react-grid-layout';
+import { GridLayout, verticalCompactor, type Layout, type LayoutItem } from 'react-grid-layout';
 import { createScaledStrategy } from 'react-grid-layout/core';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -34,7 +34,7 @@ import {
 import { ResetDialog } from './ResetDialog';
 import { publishTerminals, registerTerminals, snapshotOf, takeLayoutsAsk } from './terminals';
 import { SeamLayer } from './SeamLayer';
-import { alignedEdges, splitMove, swapMove, zoneAt, type ArrangeBox, type MoveResult, type Zone } from './arrange';
+import { splitMove, zoneAt, type ArrangeBox, type MoveResult, type Zone } from './arrange';
 import type { SeamBox } from './seams';
 import { TRADE_PRESETS } from './presets';
 import { faceFor } from './widgetCatalog';
@@ -44,8 +44,7 @@ import { describeElement, type ElementInfo } from '../feedback/element';
 import { openFeedback } from '../feedback/FeedbackButton';
 import { EditDock } from './dock/EditDock';
 import type { EditBaseProps, EditStage, PreviewGesture } from './dock/types';
-import { DevArrangeOverlay } from './versions/dev';
-import { useDragVersion } from './versions/store';
+import { ArrangeOverlay } from './dock/ArrangeOverlay';
 
 /**
  * Floor for the derived grid. Without one, a short window (or a browser chrome
@@ -590,16 +589,12 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
   /** A panel dragged off the page: released there, it is removed. */
   const [leaving, setLeaving] = useState<string | null>(null);
 
-  /* How a panel is dragged and resized while arranging (versions/store.ts; localhost only, a build answers
-     'original'). swap and split move a panel themselves (below) and resize on the lines between panels (SeamLayer);
-     flow keeps the grid's own drag, with every edge to resize and a size read-out. A phone's arrangement is fixed. */
-  const dragChoice = useDragVersion();
-  const dragV = editing && (bp === 'lg' || bp === 'md') ? dragChoice : 'original';
-  const tiles = arrange && !trash && (dragV === 'swap' || dragV === 'split');
-  /** swap / split: the panel being moved, the panel under the pointer, the side of it (split) and what a release does. */
+  /* Arranging on a wide screen (lg, md), a panel is moved by its head and dropped on a side of another panel to take
+     that half, or on its middle to trade places (arrange.ts; owner 2026-11-26: "keep split"); panels are resized on the
+     lines between them (SeamLayer). The grid's own drag and corner are off then. A phone's arrangement is fixed. */
+  const tiles = arrange && !trash && (bp === 'lg' || bp === 'md');
+  /** The panel being moved, the panel under the pointer, the side of it, and what a release would do. */
   const [move, setMove] = useState<{ id: string; name: string; target: string | null; zone: Zone | null; result: MoveResult | null } | null>(null);
-  /** flow: the panel's place as the grid would drop it, while dragged or resized. */
-  const [flowBox, setFlowBox] = useState<{ i: string; x: number; y: number; w: number; h: number; resizing: boolean; live: readonly LayoutItem[] } | null>(null);
   const liveRef = useRef({
     saved, layout, bp, metrics, rowHeight, hiddenSet, panels, persist, context,
   });
@@ -782,21 +777,33 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, scrollRef]);
 
-  /* swap / split: a panel moved by its head. The grid's own drag is off (dragConfig); the pointer picks the panel it is
-     over on the layout as it was when the drag began - so the preview, drawn in the live grid, never moves the target
-     out from under it - and, in split, the side of that panel. Release commits the plan (Undo puts it back); off the
-     page, onto the dock, the panel is removed, as with the grid's own drag. Esc drops the move. */
+  /* A panel moved by its head (tiles). The grid's own drag is off (dragConfig). Nothing on the page moves until the
+     release (owner 2026-11-26: "nothing should happen until released, only preview appears"): the pointer picks the
+     panel it is over and the side of it, and ArrangeOverlay draws what a release would do over the page. Release
+     commits the plan (Undo puts it back); off the page, onto the dock, the panel is removed. Esc drops the move.
+
+     The head keeps the pointer (pointer capture), so a release outside the window or over another control still
+     ends the move; a move seen with no button held, a lost capture or a window that loses focus end it too - a panel
+     never stays stuck to the pointer. */
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !tiles) return;
-    const mode = dragV;
     type Live = {
       id: string; name: string; sx: number; sy: number; moved: boolean; base: ArrangeBox[];
       key: string; off: boolean; target: string | null; result: MoveResult | null;
     };
     let m: Live | null = null;
+    let held: { el: Element; id: number } | null = null;
+    const letGo = () => {
+      const h = held;
+      held = null;
+      if (h && h.el.hasPointerCapture?.(h.id)) {
+        try { h.el.releasePointerCapture(h.id); } catch { /* already released */ }
+      }
+    };
     const clear = () => {
       m = null;
+      letGo();
       setMove(null);
       setGhost(null);
       setOverDelete(false);
@@ -808,12 +815,22 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
       const id = head.closest('[data-panel]')?.getAttribute('data-panel');
       if (!id) return;
       e.preventDefault();
+      clear();
+      try {
+        head.setPointerCapture(e.pointerId);
+        held = { el: head, id: e.pointerId };
+      } catch { /* a pointer the page cannot hold: the window's listeners still see it */ }
       const base = dropItems().map((d) => ({ ...d, growW: d.growW !== false, growH: d.growH !== false }));
       m = { id, name: panelName(id), sx: e.clientX, sy: e.clientY, moved: false, base, key: '', off: false, target: null, result: null };
     };
     const onMove = (e: PointerEvent) => {
       const cur = m;
       if (!cur) return;
+      // The button is up but no release arrived (it happened where this page could not see it): end the move.
+      if (e.pointerType === 'mouse' && (e.buttons & 1) === 0) {
+        up();
+        return;
+      }
       if (!cur.moved && Math.hypot(e.clientX - cur.sx, e.clientY - cur.sy) < DRAG_COMMIT_PX) return;
       cur.moved = true;
       const off = !overCanvas(e.clientX, e.clientY);
@@ -832,10 +849,10 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
         const a = cur.base.find((b) => b.i === cur.id);
         if (t && a) {
           target = t.i;
-          zone = mode === 'split' ? zoneAt((at.x - t.x) / t.w, (at.y - t.y) / t.h) : 'center';
+          zone = zoneAt((at.x - t.x) / t.w, (at.y - t.y) / t.h);
           const colPx = (grid.offsetWidth - margin[0] * (cols - 1)) / cols + margin[0];
           const tall = a.h * (live.rowHeight + margin[1]) >= a.w * colPx;
-          result = mode === 'split' ? splitMove(cur.base, cur.id, t.i, zone, cols, tall) : swapMove(cur.base, cur.id, t.i);
+          result = splitMove(cur.base, cur.id, t.i, zone, cols, tall);
         }
       }
       cur.target = target;
@@ -865,22 +882,29 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
       e.stopImmediatePropagation();
       clear();
     };
+    const lost = (e: PointerEvent) => {
+      if (held && e.pointerId === held.id) up();
+    };
     el.addEventListener('pointerdown', down, true);
+    el.addEventListener('lostpointercapture', lost, true);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', clear);
     window.addEventListener('keydown', key, true);
+    window.addEventListener('blur', clear);
     return () => {
       el.removeEventListener('pointerdown', down, true);
+      el.removeEventListener('lostpointercapture', lost, true);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', clear);
       window.removeEventListener('keydown', key, true);
-      setMove(null);
+      window.removeEventListener('blur', clear);
+      clear();
     };
     // The handlers read everything live through liveRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tiles, dragV, scrollRef]);
+  }, [tiles, scrollRef]);
 
   useEffect(() => {
     if (arrange) return;
@@ -948,34 +972,16 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
     const pt = pointOf(e);
     if (!pt) return;
     const off = !overCanvas(pt.x, pt.y);
-    if (off) setFlowBox(null);
-    else showFlow(_p, false, _l);
     setLeaving((v) => (off ? item.i : v === item.i ? null : v));
     setOverDelete((v) => (v === off ? v : off));
     setGhost(off ? { name: `Remove ${panelName(item.i)}`, x: pt.x, y: pt.y } : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing, panelName]);
-  /* flow: the place the grid would drop a dragged or resized panel, for the size read-out and the guide lines. */
-  const flowRef = useRef(false);
-  flowRef.current = dragV === 'flow';
-  const showFlow = (p: LayoutItem | null, resizing: boolean, live: readonly LayoutItem[]) => {
-    if (!flowRef.current || !p) return;
-    setFlowBox((v) => (v && v.i === p.i && v.x === p.x && v.y === p.y && v.w === p.w && v.h === p.h && v.resizing === resizing ? v : { i: p.i, x: p.x, y: p.y, w: p.w, h: p.h, resizing, live }));
-  };
-  const onGridResize = useCallback((l: Layout, _o: LayoutItem | null, item: LayoutItem | null, p: LayoutItem | null) => {
-    showFlow(p ?? item, true, l);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  // A resize in edit mode is an edit like any other: Undo puts it back.
+  // A resize in edit mode (a phone's, or the grid's own outside edit mode) is an edit like any other: Undo puts it back.
   const onGridResizeStart = useCallback(() => {
     if (editing) snapshotUndo();
   }, [editing, snapshotUndo]);
-  const onGridResizeStop = useCallback(() => {
-    setFlowBox(null);
-    markDirty();
-  }, [markDirty]);
   const onGridDragStop = useCallback((_l: Layout, _o: LayoutItem | null, item: LayoutItem | null, _p: LayoutItem | null, e: Event) => {
-    setFlowBox(null);
     setLeaving(null);
     setOverDelete(false);
     setGhost(null);
@@ -1057,32 +1063,15 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
   /* The grid as drawn: during a palette drag, the plan's panes and a placeholder
      where the new widget lands. */
   const gridLayout = useMemo<Layout>(() => {
-    // flow: every edge a panel may grow on resizes it (resolve.ts gives the corner, or one edge for a strip).
-    const flowHandles = (item: LayoutItem): LayoutItem => {
-      const hs = item.resizeHandles ?? ['se'];
-      if (!hs.length) return item;
-      const handles: ResizeHandleAxis[] = hs.includes('se') ? ['e', 'w', 's', 'se', 'sw'] : hs.includes('e') ? ['e', 'w'] : [...hs];
-      return { ...item, resizeHandles: handles };
-    };
-    const base = dragV === 'flow' ? layout.map(flowHandles) : layout;
-    // swap / split: the move a release would make, drawn in the live grid while the pointer is on it.
-    const plan = move?.result?.ok ? move.result.plan : null;
-    if (plan) {
-      const to = new Map(plan.placements.map((p) => [p.i, p]));
-      return base.map((item) => {
-        const p = to.get(item.i);
-        return p ? { ...item, x: p.x, y: p.y, w: p.w, h: p.h } : item;
-      });
-    }
-    if (!drop) return base;
+    if (!drop) return layout;
     const at = new Map(drop.plan.placements.map((p) => [p.i, p]));
-    const items = base.map((item) => {
+    const items = layout.map((item) => {
       const p = at.get(item.i);
       return p ? { ...item, x: p.x, y: p.y, w: p.w, h: p.h } : item;
     });
     const b = drop.plan.box;
     return [...items, { i: DROP_KEY, x: b.x, y: b.y, w: b.w, h: b.h, isDraggable: false, isResizable: false }];
-  }, [layout, drop, move, dragV]);
+  }, [layout, drop]);
 
   const gridConfig = useMemo(
     () => ({
@@ -1176,7 +1165,7 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
   useEffect(() => () => { if (swapTimer.current !== null) window.clearTimeout(swapTimer.current); }, []);
 
   return (
-    <div className={`dash${locked && !arrange ? ' is-locked' : ''}${arrange ? ' is-arrange' : ''}${arrange && trash ? ' is-trash' : ''}${overPage && ghost ? ' is-drop' : ''}${swap ? ' is-switching' : ''}${seaming ? ' is-seaming' : ''}${editing ? ` ed-${editorV}` : ''}${dragV !== 'original' ? ` drag-${dragV}` : ''}${move ? ' is-moving' : ''}${className ? ` ${className}` : ''}`}>
+    <div className={`dash${locked && !arrange ? ' is-locked' : ''}${arrange ? ' is-arrange' : ''}${arrange && trash ? ' is-trash' : ''}${overPage && ghost ? ' is-drop' : ''}${swap ? ' is-switching' : ''}${seaming ? ' is-seaming' : ''}${editing ? ` ed-${editorV}` : ''}${tiles ? ' is-tiles' : ''}${move ? ' is-moving' : ''}${className ? ` ${className}` : ''}`}>
       {/* The hover-revealed "Lock layout"/"Reset layout" text strip that used
           to live here is gone, not renamed - LayoutMenu.tsx now carries both
           actions (plus panel visibility and, when the caller wants one, a
@@ -1209,8 +1198,7 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
             onDrag={onGridDrag}
             onDragStop={onGridDragStop}
             onResizeStart={onGridResizeStart}
-            onResize={onGridResize}
-            onResizeStop={onGridResizeStop}
+            onResizeStop={markDirty}
             compactor={verticalCompactor}
             positionStrategy={arrange ? scaled : undefined}
           >
@@ -1291,18 +1279,14 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
             labels={tiles ? panelName : undefined}
           />
         )}
-        {/* The drag versions' marks (localhost only): where a move lands, why it cannot, the size and the lines it meets. */}
-        {box.width > 0 && arrange && dragV !== 'original' && DevArrangeOverlay && (
-          <Suspense fallback={null}>
-            <DevArrangeOverlay
-              mode={dragV}
-              grid={{ cols: metrics.cols, width: box.width, rowHeight, margin: metrics.margin, padding: metrics.containerPadding }}
-              items={layout}
-              move={move}
-              flow={flowBox}
-              nameOf={panelName}
-            />
-          </Suspense>
+        {/* While a panel is moved: what a release would do, over the page that stays as it is. */}
+        {box.width > 0 && tiles && (
+          <ArrangeOverlay
+            grid={{ cols: metrics.cols, width: box.width, rowHeight, margin: metrics.margin, padding: metrics.containerPadding }}
+            items={layout}
+            move={move}
+            nameOf={panelName}
+          />
         )}
       </div>
 
