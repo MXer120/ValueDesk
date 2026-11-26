@@ -93,7 +93,6 @@ button.pfv-legend__row:hover { background: rgb(var(--ink) / 0.045); }
 .pfv-coins__t { display: flex; flex: 1; flex-direction: column; min-width: 0; font-size: 13.5px; font-weight: 500; }
 .pfv-coins__t small { font: 400 12px var(--font-num); color: var(--tf-muted); }
 .pfv-coins b { font: 500 13.5px var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pfv-coins li.pfv-coins__more { justify-content: center; min-height: 36px; font-size: 12px; color: var(--tf-muted); }
 
 /* --- chart ------------------------------------------------------------------------------------------------ */
 .pfv-chart { position: relative; height: var(--pfv-chart-h, 300px); min-width: 0; }
@@ -247,9 +246,6 @@ html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv3-offers__ic)
 .pfv3-band__bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 8px; }
 .pfv3-band__body { display: flex; flex-direction: column; height: 480px; padding: 0; overflow: hidden; }
 
-.pfv3-offers button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 150ms var(--tf-ease); }
-.pfv3-offers button:hover:not(:disabled) { background: rgb(var(--ink) / 0.04); }
-.pfv3-offers button:disabled { cursor: default; }
 .pfv3-offers__ic { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: rgb(var(--ink) / 0.06); }
 .pfv3-offers__t { display: flex; flex-direction: column; min-width: 0; }
 .pfv3-offers__t b { font-size: 13.5px; }
@@ -257,8 +253,8 @@ html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv3-offers__ic)
 /* ============================================================================================================
  * 4 WALLET: a card, four keys, accounts that open in place.
  * ========================================================================================================== */
-.pfv3 .bots-col { max-width: 1180px; gap: 14px; }
-.pfv3-split { display: grid; grid-template-columns: 400px minmax(0, 1fr); align-items: start; gap: 14px; }
+.pfv3 .bots-col { max-width: 1480px; gap: 14px; }
+.pfv3-split { display: grid; grid-template-columns: 420px minmax(0, 1fr); align-items: start; gap: 14px; }
 .pfv3-left, .pfv3-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .pfv3-card {
   /* A card is dark in both themes (the referral page's .rf-dark does the same). */
@@ -285,25 +281,11 @@ html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv3-offers__ic)
 .pfv3-accounts .tf-shellhead { padding-left: 4px; }
 .pfv3-accounts .pfv-legend > li + li { border-top: 1px solid var(--pfv-hair); }
 .pfv3-accounts .pfv-legend__row { padding: 14px 16px; border-radius: 0; }
-.pfv3-accounts .pfv-legend > li.is-open > .pfv-legend__row { background: rgb(var(--ink) / 0.03); }
-.pfv3-in { display: flex; flex-direction: column; gap: 14px; padding: 4px 16px 16px; background: rgb(var(--ink) / 0.03); animation: pfv-open 240ms var(--tf-ease) both; }
-/* A fund opened inside its account: the name on its own line, then value, PnL and the way out. */
-.pfv3-in .pfv-hold li { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; padding: 10px 0; }
-.pfv3-in .pfv-hold__n { grid-column: 1 / -1; }
-.pfv3-in .pfv-hold__f { align-items: flex-start; }
-.pfv3-in .pfv-hold__f.is-hide-s { display: none; }
-.pfv3-in__figs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.pfv3-in__figs .pfv-fig__v { font-size: 15px; }
-.pfv3-in__more { align-self: flex-start; }
-@keyframes pfv-open { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .pfv3-offers { margin: 0; padding: 0; list-style: none; }
 .pfv3-offers li + li { border-top: 1px solid var(--pfv-hair); }
-.pfv3-offers button { padding: 14px 16px; }
 .pfv3-offers__ic { width: 40px; height: 40px; border-radius: 12px; }
 .pfv3-offers__t b { font-size: 14px; }
 .pfv3-offers__t small { white-space: normal; }
-.pfv3-offers__r { display: flex; align-items: center; gap: 12px; }
-.pfv3-offers__cta { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
 .pfv3-range { padding: 0 6px 8px; }
 .pfv3-band { margin-top: 4px; }
 .pfv3-back { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
@@ -340,7 +322,6 @@ html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv3-offers__ic)
   .pfv3-card .pfv-id__a { white-space: nowrap; }
   .pfv3-card { padding: 18px 18px 20px; border-radius: 24px; }
   .pfv3-card__v { font-size: 36px; line-height: 42px; }
-      .pfv3-offers__r .pfv3-offers__cta { display: none; }
   .pfv-wealth__fig, .pfv-wealth__chart { padding: 14px; }
   .pfv-wfig__v { font-size: 28px; line-height: 34px; }
   .pfv-hold li { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; padding: 12px; }
@@ -365,7 +346,6 @@ html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv3-offers__ic)
 @media (max-width: 420px) {
   .pfv-acts { grid-template-columns: 1fr 1fr; }
   .pfv3-card__v { font-size: 34px; line-height: 40px; }
-  .pfv3-in__figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -374,7 +354,7 @@ html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv3-offers__ic)
 
 /* ============================================================================================================
  * WALLET, round 2 (owner 2026-11-26): the card's value line and share, the Original's chart, the notes, the lists,
- * and the two other arrangements (Stack, Banner; Wallet.tsx).
+ * and (round 3, the same day) the drawers, the fund tiles and the earn buttons.
  * ========================================================================================================== */
 .pfv3-card__tr { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .pfv3-card .share-btn { color: var(--tf-muted); }
@@ -435,45 +415,105 @@ html[data-theme='light'] .pfv-allocnote { background: color-mix(in srgb, #3f6fd1
 .pfv-botlist__f b { font: 500 13.5px var(--font-num); font-variant-numeric: tabular-nums; }
 
 /* Wealth with nothing held: the funds on offer, right there. */
-.pfv-hold__none { display: flex; flex-direction: column; gap: 10px; }
 
-/* --- Stack: one column, a wallet app's, on every screen ------------------------------------------------------- */
-.pfv3.is-stack .bots-col { max-width: 640px; }
-.pfv3-stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.pfv3.is-stack .pfv3-card { padding: 22px 24px 24px; }
-.pfv3.is-stack .pfv3-card__v { font-size: 44px; line-height: 50px; }
-
-/* --- Banner: the card and the chart across the top, the accounts as four tiles ------------------------------- */
-.pfv3.is-banner .bots-col { max-width: 1320px; }
-.pfv3-hero { display: grid; grid-template-columns: 420px minmax(0, 1fr); align-items: stretch; gap: 14px; }
-.pfv3-hero__card { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.pfv3-hero > .pfv3-chart { display: flex; }
-.pfv3-hero > .pfv3-chart > .pf-card { flex: 1; }
-.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li + li { border-top: 0; border-left: 1px solid var(--pfv-hair); }
-/* An open account keeps its tile in the row; what it holds opens under all four. */
-.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li.is-open { display: contents; }
-.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li.is-open > .pfv-legend__row { background: rgb(var(--ink) / 0.03); }
-.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li + li.is-open > .pfv-legend__row { box-shadow: inset 1px 0 0 var(--pfv-hair); }
-.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li.is-open > .pfv3-in { grid-column: 1 / -1; grid-row: 2; border-top: 1px solid var(--pfv-hair); }
-.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li.is-open + li { border-left: 1px solid var(--pfv-hair); }
-.pfv3-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 14px; }
-.pfv3-pair > :only-child { grid-column: 1 / -1; }
-
-@media (max-width: 1040px) {
-  .pfv3-hero { grid-template-columns: minmax(0, 1fr); }
-  .pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li:nth-child(3) { border-left: 0; }
-  .pfv3-pair { grid-template-columns: minmax(0, 1fr); }
-}
 @media (max-width: 760px) {
   .pfv-botlist button { grid-template-columns: auto minmax(0, 1fr) auto; row-gap: 8px; }
   .pfv-botlist button > .tf-pill { grid-column: 3; grid-row: 1; }
   .pfv-botlist__f { grid-row: 2; align-items: flex-start; }
   .pfv-botlist__f:nth-of-type(1) { grid-column: 2; }
   .pfv-botlist button > svg { display: none; }
-  .pfv3.is-stack .pfv3-card__v { font-size: 36px; line-height: 42px; }
   .pfv3-move { width: 104px; height: auto; }
-  .pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid { grid-template-columns: minmax(0, 1fr); }
-  .pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li + li { border-left: 0; border-top: 1px solid var(--pfv-hair); }
+}
+
+/* --- the accounts' drawers (round 3): one surface with the row when open, sliding open and shut ------------------ */
+.pfv3-accounts .pfv-legend > li { transition: background-color 280ms var(--tf-ease); }
+.pfv3-accounts .pfv-legend > li.is-open { background: rgb(var(--ink) / 0.03); }
+.pfv3-accounts .pfv-legend > li.is-open > button.pfv-legend__row:hover { background: rgb(var(--ink) / 0.02); }
+.pfv-drawer { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 340ms cubic-bezier(0.22, 0.8, 0.24, 1); }
+.pfv-drawer.is-open { grid-template-rows: 1fr; }
+.pfv-drawer__clip { min-height: 0; overflow: hidden; }
+.pfv-drawer__clip > * { opacity: 0; translate: 0 -8px; transition: opacity 160ms var(--tf-ease), translate 340ms cubic-bezier(0.22, 0.8, 0.24, 1); }
+/* Opening is an animation (it runs on a drawer's first opening too, when its rows have only just mounted); shutting is
+   the transition above. */
+.pfv-drawer.is-open .pfv-drawer__clip > * { opacity: 1; translate: 0 0; animation: pfv-drawer-in 300ms cubic-bezier(0.22, 0.8, 0.24, 1) 50ms both; }
+@keyframes pfv-drawer-in { from { opacity: 0; translate: 0 -8px; } to { opacity: 1; translate: 0 0; } }
+.pfv3-in { display: flex; flex-direction: column; gap: 12px; padding: 0 16px 16px; }
+/* Nothing in an account (no positions, no coins): one quiet line in a soft box, not loose text. */
+.pfv3-in > .pfv-quiet { padding: 12px; border-radius: 10px; background: rgb(var(--ink) / 0.03); text-align: center; }
+
+/* Perps' three figures as one strip. */
+.pfv3-in__stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 12px 0; border-radius: 12px; background: rgb(var(--ink) / 0.045); }
+.pfv3-in__stats > .pfv-fig { gap: 2px; padding: 0 14px; }
+.pfv3-in__stats > .pfv-fig + .pfv-fig { box-shadow: inset 1px 0 0 var(--pfv-hair); }
+.pfv3-in__stats .pfv-fig__k { font-size: 12px; }
+.pfv3-in__stats .pfv-fig__v { font-size: 15px; line-height: 20px; }
+.pfv3-in .pfv-expo__list { gap: 10px; }
+
+/* A drawer's rows: coin, name and amount, value (and PnL) on the right. */
+.pfv3-in .pfv-coins li { gap: 12px; min-height: 48px; padding: 4px 2px; }
+.pfv3-in .pfv-coins__t { gap: 1px; font-size: 14px; }
+.pfv3-in .pfv-coins__t small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pfv3-in .pfv-coins b { font-size: 14px; }
+.pfv-coins__chain { box-shadow: 0 0 0 2px var(--pfv-ground-2); }
+.pfv-coins__v { display: flex; flex: none; flex-direction: column; align-items: flex-end; gap: 1px; }
+.pfv-coins__v small { font: 400 12px var(--font-num); font-variant-numeric: tabular-nums; color: var(--tf-muted); }
+.pfv-coins__v small.pos { color: var(--tf-pos); }
+.pfv-coins__v small.neg { color: var(--tf-neg); }
+
+/* "View all": the way to the table that has every row. */
+.pfv-all {
+  display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 36px; padding: 0 12px; border: 0; border-radius: 10px;
+  background: rgb(var(--ink) / 0.05); color: var(--tf-fg); font: 500 12.5px var(--font-text); cursor: pointer; transition: background-color 150ms var(--tf-ease);
+}
+.pfv-all:hover { background: rgb(var(--ink) / 0.09); }
+.pfv-all:active { background: rgb(var(--ink) / 0.12); }
+.pfv-all svg { color: var(--tf-muted); transition: transform 200ms var(--tf-ease); }
+.pfv-all:hover svg { color: var(--tf-fg); }
+.pfv-all.is-down svg { transform: rotate(90deg); }
+.pfv-all.is-up svg { transform: rotate(-90deg); }
+
+/* --- nothing in Wealth: a few funds as tiles (round 3) ----------------------------------------------------------- */
+.pfv-picks { display: flex; flex-direction: column; gap: 14px; }
+.pfv-picks__head { display: flex; align-items: center; gap: 12px; padding: 2px 2px 0; }
+.pfv-picks__ic { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: color-mix(in srgb, var(--pfv-wealth) 16%, transparent); color: var(--pfv-wealth); }
+.pfv-picks__t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pfv-picks__t b { font-size: 14px; font-weight: 600; line-height: 20px; }
+.pfv-picks__t small { font-size: 12.5px; line-height: 17px; color: var(--tf-muted); }
+.pfv-picks__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.pfv-picks.is-4 .pfv-picks__grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pfv-pick {
+  display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 14px; border-radius: 14px;
+  background: rgb(var(--ink) / 0.035); box-shadow: inset 0 0 0 1px var(--pfv-hair); transition: background-color 150ms var(--tf-ease), box-shadow 150ms var(--tf-ease);
+}
+.pfv-pick:hover { background: rgb(var(--ink) / 0.055); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.14); }
+.pfv-pick.is-skel { height: 188px; }
+.pfv-pick__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pfv-pick__top .tf-tag { white-space: nowrap; }
+.pfv-pick__name { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pfv-pick__name b { overflow: hidden; font-size: 14px; font-weight: 600; line-height: 19px; text-overflow: ellipsis; white-space: nowrap; }
+.pfv-pick__name small { font-size: 12px; line-height: 16px; color: var(--tf-muted); text-wrap: pretty; }
+.pfv-pick__fig { display: flex; flex-direction: column; margin-top: auto; }
+.pfv-pick__fig b { font: 500 22px/28px var(--font-num); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.pfv-pick__fig small { font-size: 11.5px; color: var(--tf-muted); }
+.pfv-pick__act { display: flex; }
+.pfv-pick__act > :is(.tf-btn, .tf-pill) { flex: 1; justify-content: center; }
+html[data-theme='light'] .pfv-pick img { background: #17181a; border-radius: 50%; }
+
+/* --- earn and automate: each way in a real button (round 3) ------------------------------------------------------ */
+.pfv3-offers li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 14px 16px; }
+.pfv3-offers__r { display: flex; align-items: center; gap: 16px; }
+.pfv3-offers__cta.tf-btn { min-width: 118px; justify-content: center; }
+
+@media (max-width: 760px) {
+  .pfv-picks.is-4 .pfv-picks__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pfv3-offers li { grid-template-columns: auto minmax(0, 1fr); row-gap: 10px; }
+  .pfv3-offers__r { grid-column: 2; justify-content: space-between; }
+  .pfv3-offers__r .pfv-apy { align-items: flex-start; }
+  .pfv3-offers__r > .tf-btn:only-child { margin-left: auto; }
+}
+@media (max-width: 420px) {
+  .pfv3-in { padding: 0 12px 14px; }
+  .pfv3-in__stats > .pfv-fig { padding: 0 10px; }
+  .pfv-pick { padding: 12px; }
+  .pfv-pick__fig b { font-size: 19px; line-height: 24px; }
 }

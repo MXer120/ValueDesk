@@ -136,22 +136,26 @@ export function AllocBar({ parts, size = 'md' }: { parts: Part[]; size?: 'sm' | 
   );
 }
 
-export function AllocLegend({ d, onPick, open, layout = 'rows', evmOpen, children }: {
+/**
+ * The four accounts as rows. With `drawer`, a row opens a drawer under it with what that account holds: it slides open
+ * and shut (owner 2026-11-26: "smooth when expanding retracting"). A drawer's content mounts on its first opening and
+ * stays, so it can slide shut with its rows still in it; a shut drawer is inert.
+ */
+export function AllocLegend({ d, onPick, open, drawer }: {
   d: PfData;
   onPick?: (k: Bucket) => void;
-  /** The bucket shown open (a wallet's drill-down). */
+  /** The account shown open. */
   open?: Bucket | null;
-  layout?: 'rows' | 'grid';
-  evmOpen?: boolean;
-  /** Rendered under the open row. */
-  children?: ReactNode;
+  drawer?: (k: Bucket) => ReactNode;
 }) {
   const m = useMasks();
+  const [seen, setSeen] = useState<ReadonlySet<Bucket>>(() => new Set(open ? [open] : []));
+  if (open && !seen.has(open)) setSeen(new Set([...seen, open]));
   const value = (p: Part) => (p.usd === null ? (p.key === 'evm' && d.evmLoading ? <Skeleton className="pfv-skel-num" /> : DASH) : m.funds(fmtUsd(p.usd)));
   return (
-    <ul className={cx('pfv-legend', `is-${layout}`)}>
+    <ul className="pfv-legend">
       {d.parts.map((p) => {
-        const isOpen = open === p.key || (p.key === 'evm' && evmOpen);
+        const isOpen = open === p.key;
         const body = (
           <>
             <i className={`pfv-dot is-${p.key}`} aria-hidden="true" />
@@ -168,8 +172,14 @@ export function AllocLegend({ d, onPick, open, layout = 'rows', evmOpen, childre
         );
         return (
           <li key={p.key} className={cx(isOpen && 'is-open')}>
-            {onPick ? <button type="button" className="pfv-legend__row" aria-expanded={open !== undefined || p.key === 'evm' ? !!isOpen : undefined} onClick={() => onPick(p.key)}>{body}</button> : <div className="pfv-legend__row">{body}</div>}
-            {isOpen && children}
+            {onPick
+              ? <button type="button" className="pfv-legend__row" aria-expanded={drawer ? isOpen : undefined} aria-controls={drawer ? `pfv-drawer-${p.key}` : undefined} onClick={() => onPick(p.key)}>{body}</button>
+              : <div className="pfv-legend__row">{body}</div>}
+            {drawer && (
+              <div id={`pfv-drawer-${p.key}`} className={cx('pfv-drawer', isOpen && 'is-open')} {...(isOpen ? {} : { inert: '' })}>
+                <div className="pfv-drawer__clip">{seen.has(p.key) && drawer(p.key)}</div>
+              </div>
+            )}
           </li>
         );
       })}
@@ -177,39 +187,58 @@ export function AllocLegend({ d, onPick, open, layout = 'rows', evmOpen, childre
   );
 }
 
-export function EvmList({ d }: { d: PfData }) {
-  const m = useMasks();
-  if (d.evmRows.length === 0) return <p className="pfv-quiet">{d.evmLoading ? 'Reading your wallet…' : 'Nothing on ValueChain or the other EVM chains.'}</p>;
+/** The way to everything a short list leaves out (owner 2026-11-26: "limit how many rows are visible ... go to element"). */
+export function ViewAll({ label, onClick, dir = 'right' }: { label: string; onClick: () => void; dir?: 'right' | 'down' | 'up' }) {
   return (
-    <ul className="pfv-coins">
-      {d.evmRows.map((h) => (
-        <li key={`${h.chain}:${h.symbol}`}>
-          <span className="pfv-coins__ic"><CoinIcon coin={h.symbol} size={20} /><CoinIcon chain={h.chain} size={11} className="pfv-coins__chain" /></span>
-          <span className="pfv-coins__t">{h.symbol}<small>{h.chainLabel}</small></span>
-          <b>{m.funds(fmtUsd(h.usd))}</b>
-        </li>
-      ))}
-    </ul>
+    <button type="button" className={cx('pfv-all', `is-${dir}`)} onClick={onClick}>
+      <span>{label}</span><Icon name="arrowRight" size={14} />
+    </button>
   );
 }
 
-export function SpotList({ d, limit }: { d: PfData; limit?: number }) {
+/** The wallet's coins on the EVM chains. No table of its own below, so the rows past `limit` open in place. */
+export function EvmList({ d, limit }: { d: PfData; limit?: number }) {
+  const m = useMasks();
+  const [all, setAll] = useState(false);
+  if (d.evmRows.length === 0) return <p className="pfv-quiet">{d.evmLoading ? 'Reading your wallet…' : 'Nothing on ValueChain or the other EVM chains.'}</p>;
+  const cut = limit !== undefined && d.evmRows.length > limit;
+  const rows = cut && !all ? d.evmRows.slice(0, limit) : d.evmRows;
+  return (
+    <>
+      <ul className="pfv-coins">
+        {rows.map((h) => (
+          <li key={`${h.chain}:${h.symbol}`}>
+            <span className="pfv-coins__ic"><CoinIcon coin={h.symbol} size={24} /><CoinIcon chain={h.chain} size={12} className="pfv-coins__chain" /></span>
+            <span className="pfv-coins__t">{h.symbol}<small>{h.chainLabel}</small></span>
+            <b>{m.funds(fmtUsd(h.usd))}</b>
+          </li>
+        ))}
+      </ul>
+      {cut && <ViewAll label={all ? 'Show fewer' : `Show all ${d.evmRows.length}`} dir={all ? 'up' : 'down'} onClick={() => setAll(!all)} />}
+    </>
+  );
+}
+
+/** The coins in Spot, the largest first; past `limit`, one way to the Spot table with all of them. */
+export function SpotList({ d, limit, onAll }: { d: PfData; limit?: number; onAll?: () => void }) {
   const m = useMasks();
   if (!d.c.address) return null;
   if (!d.spotCoins) return <div className="pfv-skels">{[0, 1].map((i) => <Skeleton key={i} className="pfv-skel-row" />)}</div>;
   if (d.spotCoins.length === 0) return <p className="pfv-quiet">No coins in Spot.</p>;
   const rows = limit ? d.spotCoins.slice(0, limit) : d.spotCoins;
   return (
-    <ul className="pfv-coins">
-      {rows.map((x) => (
-        <li key={x.coin}>
-          <span className="pfv-coins__ic"><CoinIcon coin={x.coin} size={20} /></span>
-          <span className="pfv-coins__t">{x.coin.replace(/^v(?=[A-Z])/, '')}<small>{m.funds(fmt(x.amount, x.amount >= 1000 ? 2 : 4))}</small></span>
-          <b>{m.funds(x.usd === null ? DASH : fmtUsd(x.usd))}</b>
-        </li>
-      ))}
-      {limit && d.spotCoins.length > limit && <li className="pfv-coins__more">{d.spotCoins.length - limit} more in the Spot tab below</li>}
-    </ul>
+    <>
+      <ul className="pfv-coins">
+        {rows.map((x) => (
+          <li key={x.coin}>
+            <span className="pfv-coins__ic"><CoinIcon coin={x.coin} size={24} /></span>
+            <span className="pfv-coins__t">{x.coin.replace(/^v(?=[A-Z])/, '')}<small>{m.funds(fmt(x.amount, x.amount >= 1000 ? 2 : 4))}</small></span>
+            <b>{m.funds(x.usd === null ? DASH : fmtUsd(x.usd))}</b>
+          </li>
+        ))}
+      </ul>
+      {onAll && limit && d.spotCoins.length > limit && <ViewAll label={`View all ${d.spotCoins.length} coins`} onClick={onAll} />}
+    </>
   );
 }
 
@@ -343,7 +372,7 @@ export function MarginMeter({ h }: { h: Health }) {
 }
 
 /** Open positions by market: notional, side and share of the book (the top few). */
-export function Exposure({ c, limit = 4 }: { c: PortfolioContext; limit?: number }) {
+export function Exposure({ c, limit = 4, onAll }: { c: PortfolioContext; limit?: number; onAll?: () => void }) {
   const m = useMasks();
   const ex = c.model.exposure;
   if (!c.address) return null;
@@ -368,7 +397,7 @@ export function Exposure({ c, limit = 4 }: { c: PortfolioContext; limit?: number
           </li>
         ))}
       </ul>
-      {ex.byMarket.length > limit && <p className="pfv-quiet">{ex.byMarket.length - limit} more in the Perps tab below</p>}
+      {onAll && ex.byMarket.length > limit && <ViewAll label={`View all ${ex.byMarket.length} positions`} onClick={onAll} />}
     </div>
   );
 }
@@ -541,11 +570,12 @@ const SECTION_TABS: Array<SegOption<Section>> = [
   { value: 'perps', label: 'Perps' }, { value: 'spot', label: 'Spot' }, { value: 'wealth', label: 'Wealth' }, { value: 'copy', label: 'Copy trading' }, { value: 'bots', label: 'Bots' },
 ];
 
-/** The trade page's account tables, untouched, for one engine. */
-export function Band({ c, engine }: { c: PortfolioContext; engine: 'perps' | 'spot' }) {
+/** The trade page's account tables, untouched, for one engine. `select` switches to one of its tabs (a "View all"). */
+export function Band({ c, engine, select }: { c: PortfolioContext; engine: 'perps' | 'spot'; select?: { key: string; n: number } | null }) {
   return (
     <div className="dash pf-band pfv-band__tables" key={engine}>
       <AccountTabs
+        select={select}
         engine={engine}
         address={c.address}
         unlocked={c.unlocked}

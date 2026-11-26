@@ -1,23 +1,21 @@
 /**
- * The portfolio as a wallet (localhost only), in three arrangements (owner 2026-11-26: "give me 2 other versions of
- * 4wallet, remove 2 & 3"). Every arrangement draws the same parts:
+ * The portfolio as a wallet (localhost only; the owner kept this one of the three on 2026-11-26: "Wallet, but less
+ * margin on right and left"). It draws:
  *
  * - the card: total value, today, how the value moved over 7 days (a line from 0, green above it and red below), where
  *   the money is, and a share button;
  * - the four keys (Deposit, Withdraw, Transfer, Swap);
- * - the accounts, each opened in place to what it holds;
+ * - the accounts, each opening a drawer with what it holds: a few rows, then "View all" to the table below that has
+ *   all of them (owner: "limit how many rows are visible, otherwise when clicking to view everything go to element");
  * - the value / PnL / calendar chart as today's page draws it (owner: "use the chart from original");
  * - earn and automate, trading, fees, margin;
  * - every table, by account (copies and bots as lists of their own).
  *
- *   Wallet  two columns: the card and the accounts on the left, the chart, earn and trading on the right.
- *   Stack   one column, as a wallet app on a phone, on every screen.
- *   Banner  the card and the chart side by side across the top, the accounts as four tiles under them.
- *
+ * Two columns: the card and the accounts on the left, the chart, earn and trading on the right; one column on a phone.
  * Wealth is a view of its own, opened from its account and left with Back.
  */
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { Button, Icon, Panel, Shell, ShellHeader, StatusPill } from '../../bots/kit/kit';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Button, Panel, Shell, ShellHeader, StatusPill } from '../../bots/kit/kit';
 import { PortfolioMargin } from '../../bots/Allocation';
 import { BrandMark } from '../../BrandMark';
 import type { Period } from '../../Portfolio';
@@ -38,31 +36,33 @@ import { Holdings, WealthArea } from './WealthArea';
 import type { PortfolioContext } from '../../Portfolio';
 
 type View = 'home' | 'wealth';
-export type WalletLayout = 'wallet' | 'stack' | 'banner';
+/** How many rows an account's drawer shows before "View all". */
+const ROWS = 4;
 
-/** What one account holds, opened in place under its row. */
-function Inside({ k, d, c, onWealth, onOpenMarket, provider }: { k: Bucket; d: PfData; c: PortfolioContext; onWealth: () => void } & Pick<VersionProps, 'onOpenMarket' | 'provider'>) {
+/** What one account holds, in the drawer under its row: a few rows, then the way to all of them. */
+function Inside({ k, d, c, onWealth, onAll, onOpenMarket, provider }: {
+  k: Bucket; d: PfData; c: PortfolioContext; onWealth: () => void; onAll: (s: Section, tab?: string) => void;
+} & Pick<VersionProps, 'onOpenMarket' | 'provider'>) {
   const m = useMasks();
   const h = health(c);
   if (k === 'perps') {
     return (
       <div className="pfv3-in">
-        <div className="pfv3-in__figs">
+        <div className="pfv3-in__stats">
           <Fig k="Available" v={m.funds(h.available === null ? DASH : fmtUsd(h.available))} />
           <Fig k="Withdrawable" v={m.funds(h.withdrawable === null ? DASH : fmtUsd(h.withdrawable))} />
           <Fig k="Unrealized" v={m.pnl(signedUsd(h.unrealized))} cls={tone(h.unrealized)} />
         </div>
         <MarginMeter h={h} />
-        <Exposure c={c} limit={4} />
+        <Exposure c={c} limit={ROWS - 1} onAll={() => onAll('perps', 'positions')} />
       </div>
     );
   }
-  if (k === 'spot') return <div className="pfv3-in"><SpotList d={d} limit={6} /></div>;
-  if (k === 'evm') return <div className="pfv3-in"><EvmList d={d} /></div>;
+  if (k === 'spot') return <div className="pfv3-in"><SpotList d={d} limit={ROWS} onAll={() => onAll('spot', 'balances')} /></div>;
+  if (k === 'evm') return <div className="pfv3-in"><EvmList d={d} limit={ROWS} /></div>;
   return (
     <div className="pfv3-in">
-      <Holdings w={d.w} address={c.address} provider={provider} onOpenMarket={onOpenMarket} onDone={c.onChanged} readOnly={c.readOnly} showFunds />
-      <Button variant="secondary" className="pfv3-in__more" onClick={onWealth}>Open Wealth <Icon name="arrowRight" size={14} /></Button>
+      <Holdings w={d.w} address={c.address} provider={provider} onOpenMarket={onOpenMarket} onDone={c.onChanged} readOnly={c.readOnly} compact limit={ROWS - 1} picks={2} onAll={onWealth} />
     </div>
   );
 }
@@ -135,13 +135,21 @@ function Card({ c, d }: { c: PortfolioContext; d: PfData }) {
   );
 }
 
-function Wallet({ c, provider, onOpenMarket, onOpenTab, layout }: VersionProps & { layout: WalletLayout }) {
+export function WalletVersion({ c, provider, onOpenMarket, onOpenTab }: VersionProps) {
   const d = usePfData(c);
   const [view, setView] = useState<View>('home');
   const [open, setOpen] = useStored<Bucket | null>('vs.pfv3.open', 'perps');
   const [engine, setEngine] = useStored<'perps' | 'spot'>('vs.pfv.sum.engine', 'perps');
   const [sumRange, setSumRange] = useStored<Period>('vs.pfv.sum.range', '7D');
   const [section, setSection] = useStored<Section>('vs.pfv.section', 'perps');
+  // A "View all" picks the band's account and one of its tables (positions, balances), then brings the band into view.
+  const [select, setSelect] = useState<{ key: string; n: number } | null>(null);
+  const bandRef = useRef<HTMLElement>(null);
+  const viewAll = useCallback((s: Section, tab?: string) => {
+    setSection(s);
+    setSelect(tab ? (p) => ({ key: tab, n: (p?.n ?? 0) + 1 }) : null);
+    requestAnimationFrame(() => bandRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }, [setSection]);
   const [swap, setSwap] = useState(false);
   const [copies, setCopies] = useState(false);
   const toTop = () => document.querySelector('.appcontent')?.scrollTo({ top: 0, behavior: 'smooth' });
@@ -150,7 +158,7 @@ function Wallet({ c, provider, onOpenMarket, onOpenTab, layout }: VersionProps &
 
   if (view === 'wealth') {
     return (
-      <div className={`tf bots-page pfv pfv3 is-${layout}`}>
+      <div className="tf bots-page pfv pfv3">
         <div className="bots-col pfv3-col is-wealth">
           <header className="pfv3-back">
             <Button variant="quiet" icon="arrowLeft" onClick={() => { setView('home'); toTop(); }}>Portfolio</Button>
@@ -170,9 +178,12 @@ function Wallet({ c, provider, onOpenMarket, onOpenTab, layout }: VersionProps &
     <Shell className="pfv3-accounts">
       <ShellHeader title="Accounts" subtitle="Each dollar counted once" />
       <Panel className="pfv-pad0">
-        <AllocLegend d={d} open={open} layout={layout === 'banner' ? 'grid' : 'rows'} onPick={(k) => setOpen(open === k ? null : k)}>
-          {open && <Inside k={open} d={d} c={c} onWealth={goWealth} onOpenMarket={onOpenMarket} provider={provider} />}
-        </AllocLegend>
+        <AllocLegend
+          d={d}
+          open={open}
+          onPick={(k) => setOpen(open === k ? null : k)}
+          drawer={(k) => <Inside k={k} d={d} c={c} onWealth={goWealth} onAll={viewAll} onOpenMarket={onOpenMarket} provider={provider} />}
+        />
       </Panel>
     </Shell>
   );
@@ -187,14 +198,16 @@ function Wallet({ c, provider, onOpenMarket, onOpenTab, layout }: VersionProps &
     <Shell className="pfv3-earn">
       <ShellHeader title="Earn and automate" />
       <Panel className="pfv-pad0">
+        {/* Each way in is a real button (owner 2026-11-26: "the see vault, find traders etc ... buttons arent styled good"). */}
         <ul className="pfv3-offers">
           {offers.map((o) => (
             <li key={o.key}>
-              <button type="button" onClick={o.onClick ?? undefined} disabled={!o.onClick}>
-                <span className="pfv3-offers__ic" aria-hidden="true">{o.icon}</span>
-                <span className="pfv3-offers__t"><b>{o.title}</b><small>{o.mine ? <>You have {o.mine}</> : o.line}</small></span>
-                <span className="pfv3-offers__r">{o.pill ?? <ApyFig apy={o.apy} />}{o.cta && <span className="pfv3-offers__cta">{o.cta}</span>}</span>
-              </button>
+              <span className="pfv3-offers__ic" aria-hidden="true">{o.icon}</span>
+              <span className="pfv3-offers__t"><b>{o.title}</b><small>{o.mine ? <>You have {o.mine}</> : o.line}</small></span>
+              <span className="pfv3-offers__r">
+                {o.pill ?? <ApyFig apy={o.apy} />}
+                {o.cta && o.onClick && <Button variant="secondary" className="pfv3-offers__cta" onClick={o.onClick}>{o.cta}</Button>}
+              </span>
             </li>
           ))}
         </ul>
@@ -209,61 +222,32 @@ function Wallet({ c, provider, onOpenMarket, onOpenTab, layout }: VersionProps &
     </Shell>
   );
   const band = (
-    <Shell className="pfv3-band">
+    <Shell className="pfv3-band" ref={bandRef}>
       <div className="pfv3-band__bar">
-        <SectionTabs value={section} onChange={setSection} />
+        <SectionTabs value={section} onChange={(s) => { setSelect(null); setSection(s); }} />
         {(section === 'copy' || section === 'bots') && <AllocationNote />}
       </div>
       <Panel className="pfv3-band__body">
-        {section === 'perps' || section === 'spot' ? <Band c={c} engine={section} />
-          : section === 'wealth' ? <div className="pfv-scroll pfv-pad"><Holdings w={d.w} address={c.address} provider={provider} onOpenMarket={onOpenMarket} onDone={c.onChanged} readOnly={c.readOnly} showFunds /></div>
+        {section === 'perps' || section === 'spot' ? <Band c={c} engine={section} select={select} />
+          : section === 'wealth' ? <div className="pfv-scroll pfv-pad"><Holdings w={d.w} address={c.address} provider={provider} onOpenMarket={onOpenMarket} onDone={c.onChanged} readOnly={c.readOnly} picks={4} onAll={goWealth} /></div>
           : section === 'copy' ? <div className="pfv-scroll pfv-pad"><CopiesPanel onOpenTab={onOpenTab} /></div>
           : <div className="pfv-scroll pfv-pad"><BotsPanel c={c} provider={provider} botsOpen={d.botsOpen} onOpenTab={onOpenTab} /></div>}
       </Panel>
     </Shell>
   );
 
-  let body: ReactNode;
-  if (layout === 'stack') {
-    body = (
-      <div className="pfv3-stack">
-        {card}{keys}{chart}{accounts}{earn}{trading}{band}{fees}{margin}
-      </div>
-    );
-  } else if (layout === 'banner') {
-    body = (
-      <>
-        <div className="pfv3-hero">
-          <div className="pfv3-hero__card">{card}{keys}</div>
-          {chart}
-        </div>
-        {accounts}
-        <div className="pfv3-pair">{earn}{trading}</div>
-        {band}
-        <div className="pfv3-pair">{fees}{margin}</div>
-      </>
-    );
-  } else {
-    body = (
-      <>
+  return (
+    <div className="tf bots-page pfv pfv3">
+      <div className="bots-col pfv3-col">
         <div className="pfv3-split">
           <div className="pfv3-left">{card}{keys}{accounts}{fees}{margin}</div>
           <div className="pfv3-right">{chart}{earn}{trading}</div>
         </div>
         {band}
-      </>
-    );
-  }
-
-  return (
-    <div className={`tf bots-page pfv pfv3 is-${layout}`}>
-      <div className="bots-col pfv3-col">{body}</div>
+      </div>
       <SwapSheet open={swap} onClose={() => setSwap(false)} address={c.address} unlocked={c.unlocked} onChanged={c.onChanged} />
       <ManageCopies open={copies} onClose={() => setCopies(false)} />
     </div>
   );
 }
 
-export function WalletTwoColumns(p: VersionProps) { return <Wallet {...p} layout="wallet" />; }
-export function WalletStack(p: VersionProps) { return <Wallet {...p} layout="stack" />; }
-export function WalletBanner(p: VersionProps) { return <Wallet {...p} layout="banner" />; }

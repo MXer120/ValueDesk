@@ -5,7 +5,7 @@
  * own live returns. A missing figure is a dash. Invest and Redeem open the same sheet as today (WealthSheet.tsx).
  */
 import { useMemo, useState, type ReactNode } from 'react';
-import { Button, EmptyState, Panel, Segmented, Shell, ShellHeader, Skeleton, StatusPill, Tabs, type SegOption } from '../../bots/kit/kit';
+import { Button, EmptyState, Icon, Panel, Segmented, Shell, ShellHeader, Skeleton, StatusPill, Tabs, type SegOption } from '../../bots/kit/kit';
 import { ReadFailed } from '../../AccountHistory';
 import { CoinIcon } from '../../CoinIcon';
 import { EquityCurve, type CurveWindow } from '../parts';
@@ -20,7 +20,7 @@ import { useLedger, useTradingStatuses, type WealthState } from '../useWealth';
 import { WealthSheet, type WealthSheetTarget } from '../WealthSheet';
 import type { Eip1193Provider } from '../../../wallet';
 import { requestConnect } from '../../account/actions';
-import { Fig, signedUsd, tone, useMasks } from './blocks';
+import { Fig, ViewAll, signedUsd, tone, useMasks } from './blocks';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
 
@@ -30,6 +30,10 @@ const pctNode = (raw: string | undefined): ReactNode => {
   const v = Number(raw);
   if (!Number.isFinite(v)) return DASH;
   return <span className={tone(v)}>{v > 0 ? '+' : v < 0 ? MINUS : ''}{fmtFixed(Math.abs(v), 2)}%</span>;
+};
+const rateNode = (raw: string | undefined): string => {
+  const v = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(v) ? `${fmtFixed(v, 2)}%` : DASH;
 };
 const dayTime = (at: string | number | undefined): string => {
   if (at === undefined) return DASH;
@@ -123,22 +127,32 @@ export function WealthChart({ address }: { address: string | null }) {
   );
 }
 
-function Act({ a, f, name, side, onOpenMarket, setTarget, readOnly }: {
+function Act({ a, f, name, side, onOpenMarket, setTarget, readOnly, link = 'quiet' }: {
   a: FundAction | null; f: WealthFund | null; name: string; side: 'buy' | 'sell'; readOnly?: boolean;
+  /** How the sodex.com link looks: quiet in a table row, a button on a fund tile. */
+  link?: 'quiet' | 'secondary';
   onOpenMarket: (symbol: string, engine: 'spot') => void; setTarget: (t: WealthSheetTarget) => void;
 }) {
   if (!a || !f) return null;
   if (a.kind === 'trade') return <Button variant="secondary" onClick={() => onOpenMarket(a.symbol, 'spot')}>Trade</Button>;
   if (a.kind === 'batch' || a.kind === 'rfq') return <Button variant="secondary" disabled={readOnly} onClick={() => setTarget({ fund: f, name, action: a, side })}>{side === 'buy' ? 'Invest' : 'Redeem'}</Button>;
-  if (a.kind === 'external') return <a className="tf-btn is-quiet is-sm" href={sodexFundUrl(f.fundId)} target="_blank" rel="noopener noreferrer">On SoDEX</a>;
+  if (a.kind === 'external') return <a className={`tf-btn is-${link} is-sm`} href={sodexFundUrl(f.fundId)} target="_blank" rel="noopener noreferrer">On SoDEX</a>;
   return <StatusPill size="sm" title={a.nextAt ? `Next open ${dayTime(a.nextAt)}` : undefined}>{a.why}</StatusPill>;
 }
 
 /**
- * What the wallet holds in Wealth. `showFunds`: with nothing held, the funds on offer are listed right here (owner
- * 2026-11-26: "no see your funds button, show list on portfolio too"), not behind a button.
+ * What the wallet holds in Wealth.
+ *
+ * - `picks`: with nothing held, a few funds to start with, as tiles (owner 2026-11-26: "needs to be better styled ...
+ *   not a list just 2-4 highlighted ones"), and the way to all of them (`onAll`).
+ * - `compact`: the short rows an account's drawer shows (name, value, PnL), at most `limit`, then `onAll`.
  */
-export function Holdings({ w, address, provider, onOpenMarket, onDone, readOnly, showFunds }: Omit<WealthProps, 'value' | 'slp' | 'refreshToken'> & { showFunds?: boolean }) {
+export function Holdings({ w, address, provider, onOpenMarket, onDone, readOnly, picks, compact, limit, onAll }: Omit<WealthProps, 'value' | 'slp' | 'refreshToken'> & {
+  picks?: 2 | 4;
+  compact?: boolean;
+  limit?: number;
+  onAll?: () => void;
+}) {
   const m = useMasks();
   const statuses = useTradingStatuses(w.holdings ? w.holdings.map((h) => h.fund).filter((f): f is WealthFund => !!f) : null);
   const [target, setTarget] = useState<WealthSheetTarget | null>(null);
@@ -146,12 +160,30 @@ export function Holdings({ w, address, provider, onOpenMarket, onDone, readOnly,
   if (w.error && !w.holdings) return <ReadFailed what="Wealth holdings" error={w.error} onRetry={w.refresh} />;
   if (!w.holdings) return <div className="pfv-skels">{[0, 1, 2].map((i) => <Skeleton key={i} className="pfv-skel-row" />)}</div>;
   if (w.holdings.length === 0) {
-    if (!showFunds) return <EmptyState compact icon="coins" title="No Wealth holdings" description="Funds you hold or have requested show here." />;
+    if (!picks) return <EmptyState compact icon="coins" title="No Wealth holdings" description="Funds you hold or have requested show here." />;
+    return <FundPicks w={w} address={address} provider={provider} onOpenMarket={onOpenMarket} onDone={onDone} readOnly={readOnly} count={picks} onAll={onAll} />;
+  }
+  if (compact) {
+    const rows = limit ? w.holdings.slice(0, limit) : w.holdings;
     return (
-      <div className="pfv-hold__none">
-        <p className="pfv-quiet">No Wealth holdings yet. These funds are open to you:</p>
-        <FundShelfList w={w} address={address} provider={provider} onOpenMarket={onOpenMarket} onDone={onDone} readOnly={readOnly} />
-      </div>
+      <>
+        <ul className="pfv-coins">
+          {rows.map((h) => {
+            const pnl = h.pnl?.priced ? num(h.pnl.unrealizedPnl) + num(h.pnl.realizedPnl) : null;
+            return (
+              <li key={h.fundId}>
+                <span className="pfv-coins__ic"><CoinIcon coin={fundIcon(h.coin)} size={24} /></span>
+                <span className="pfv-coins__t">{h.name}<small>{m.funds(fmt(h.shares, 4))} {h.coin}{held(h).length ? ` · ${held(h).join(', ')}` : ''}</small></span>
+                <span className="pfv-coins__v">
+                  <b>{m.funds(h.marketValue === null ? DASH : fmtUsd(h.marketValue))}</b>
+                  <small className={tone(pnl)}>{m.pnl(pnl === null ? DASH : signedUsd(pnl))}</small>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        {onAll && <ViewAll label={w.holdings.length > rows.length ? `View all ${w.holdings.length} in Wealth` : 'Open Wealth'} onClick={onAll} />}
+      </>
     );
   }
   return (
@@ -309,6 +341,67 @@ export function FundShelfList({ w, address, provider, onOpenMarket, onDone, read
           })}
         </ul>
       )}
+      <WealthSheet target={target} onClose={() => setTarget(null)} address={address} provider={provider} onDone={onDone} />
+    </div>
+  );
+}
+
+/**
+ * The funds shown first to a wallet with nothing in Wealth: SoDEX's two Stable Earn funds, then its two broadest index
+ * ETFs. A yield fund shows its 7-day APY, an ETF its 1-year return (a week's move annualised says nothing on an ETF);
+ * both are SoDEX's own published figures.
+ */
+const PICKS = ['Morpho-Earn', 'vBOXX', 'vVOO', 'vQQQ'] as const;
+const PICK_LINE: Readonly<Record<string, string>> = {
+  'Morpho-Earn': 'Variable yield on USDC, through a Morpho vault.',
+  vBOXX: 'Treasury-bill yield, on-chain, through BOXX.',
+};
+
+export function FundPicks({ w, address, provider, onOpenMarket, onDone, readOnly, count, onAll }: Omit<WealthProps, 'value' | 'slp' | 'refreshToken'> & { count: 2 | 4; onAll?: () => void }) {
+  const funds = useMemo(
+    () => PICKS.map((id) => w.funds?.find((f) => f.fundId === id)).filter((f): f is WealthFund => !!f).slice(0, count),
+    [w.funds, count],
+  );
+  const statuses = useTradingStatuses(funds.length ? funds : null);
+  const [target, setTarget] = useState<WealthSheetTarget | null>(null);
+  return (
+    <div className={cx('pfv-picks', `is-${count}`)}>
+      <div className="pfv-picks__head">
+        <span className="pfv-picks__ic" aria-hidden="true"><Icon name="coins" size={18} /></span>
+        <span className="pfv-picks__t">
+          <b>Nothing in Wealth yet</b>
+          <small>A few of SoDEX's funds to start with.</small>
+        </span>
+      </div>
+      {w.funds === null
+        ? <div className="pfv-picks__grid">{Array.from({ length: count }, (_, i) => <Skeleton key={i} className="pfv-pick is-skel" />)}</div>
+        : (
+          <ul className="pfv-picks__grid">
+            {funds.map((f) => {
+              const label = fundLabel(f);
+              const q = w.quotes.get(f.fundId);
+              const action = fundAction(f, statuses.get(f.fundId) ?? null);
+              return (
+                <li key={f.fundId} className="pfv-pick">
+                  <span className="pfv-pick__top">
+                    <CoinIcon coin={fundIcon(q?.symbol ?? f.share.coin)} size={30} />
+                    <span className="tf-tag">{label.shelf}</span>
+                  </span>
+                  <span className="pfv-pick__name">
+                    <b>{label.name}</b>
+                    {PICK_LINE[f.fundId] && <small>{PICK_LINE[f.fundId]}</small>}
+                  </span>
+                  <span className="pfv-pick__fig">
+                    <b>{label.yield ? rateNode(q?.apy7d) : pctNode(q?.roi1Y)}</b>
+                    <small>{label.yield ? '7-day APY' : '1-year return'}</small>
+                  </span>
+                  <span className="pfv-pick__act"><Act a={action} f={f} name={label.name} side="buy" onOpenMarket={onOpenMarket} setTarget={setTarget} readOnly={readOnly} link="secondary" /></span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      {onAll && <ViewAll label="See all funds" onClick={onAll} />}
       <WealthSheet target={target} onClose={() => setTarget(null)} address={address} provider={provider} onDone={onDone} />
     </div>
   );
