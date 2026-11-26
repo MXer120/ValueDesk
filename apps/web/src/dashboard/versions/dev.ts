@@ -39,6 +39,3 @@ export const DevVersionSwitch = part('VersionSwitch');
 export const DevPhoneDeck = part('PhoneDeck');
 export const DevPhonePulse = part('PhonePulse');
 export const DevRangeBar = part('RangeBar');
-export const DevEditDock = part('EditDock');
-export const DevEditStudio = part('EditStudio');
-export const DevEditBoard = part('EditBoard');

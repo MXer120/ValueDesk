@@ -13,7 +13,7 @@
  * `gridConfig` / `dragConfig` / `resizeConfig`. The v1 API still exists under
  * 'react-grid-layout/legacy', but we use the current one.
  */
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useLatched } from '../components/motion';
 import { GridLayout, verticalCompactor, type Layout, type LayoutItem } from 'react-grid-layout';
 import { createScaledStrategy } from 'react-grid-layout/core';
@@ -42,12 +42,6 @@ import { Sketch } from './sketches';
 import type { DashboardConfig, PanelDefinition } from './types';
 import { describeElement, type ElementInfo } from '../feedback/element';
 import { openFeedback } from '../feedback/FeedbackButton';
-import { DevEditBoard, DevEditDock, DevEditStudio } from './versions/dev';
-import { useEditorVersion } from './versions/store';
-import type { EditBaseProps, EditStage } from './versions/editors/types';
-
-/** The original editor's page: 0.64 of its size (editMode.css). */
-const ORIGINAL_EDIT_SCALE = 0.64;
 
 /**
  * Floor for the derived grid. Without one, a short window (or a browser chrome
@@ -442,19 +436,6 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
   const previewing = holding || sticky;
   const arrange = editing && !previewing;
 
-  /* The editor's version on localhost (versions/store.ts): the trade page only, and the original in a build. Every
-     version edits through the same actions below; it only draws them differently and puts the page elsewhere. */
-  const editorChoice = useEditorVersion();
-  const editorV = config.id === 'trade' ? editorChoice : 'original';
-  const VersionEditor = editorV === 'dock' ? DevEditDock : editorV === 'studio' ? DevEditStudio : editorV === 'board' ? DevEditBoard : null;
-  const [stage, setStage] = useState<EditStage>({ scale: 1, x: 0, y: 0 });
-  const onStage = useCallback((s: EditStage) => setStage((p) => (p.scale === s.scale && p.x === s.x && p.y === s.y ? p : s)), []);
-  const [selected, setSelected] = useState<string | null>(null);
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
-  const editScale = VersionEditor ? stage.scale : ORIGINAL_EDIT_SCALE;
-  const scaled = useMemo(() => (editScale === 1 ? undefined : createScaledStrategy(editScale)), [editScale]);
-
   /* Edit mode's right rail (Widgets / Layouts), and every slot as it was when edit mode opened:
      what Done changed goes into the layout history (storage.ts rememberEdits). */
   const [editRail, setEditRail] = useState<'widgets' | 'layouts'>('widgets');
@@ -562,23 +543,10 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
     if (!(shell instanceof HTMLElement)) return;
     shell.classList.toggle('is-dash-edit', editing);
     shell.classList.toggle('is-dash-preview', editing && previewing);
-    // A version's editor places the page itself (editors.css reads these).
-    const v = editing && VersionEditor ? editorV : null;
-    shell.classList.toggle('is-edit-v', v !== null);
-    if (v) {
-      shell.dataset.editV = v;
-      shell.style.setProperty('--ed-scale', String(stage.scale));
-      shell.style.setProperty('--ed-x', `${stage.x}px`);
-      shell.style.setProperty('--ed-y', `${stage.y}px`);
-    }
     return () => {
-      shell.classList.remove('is-dash-edit', 'is-dash-preview', 'is-edit-v');
-      delete shell.dataset.editV;
-      shell.style.removeProperty('--ed-scale');
-      shell.style.removeProperty('--ed-x');
-      shell.style.removeProperty('--ed-y');
+      shell.classList.remove('is-dash-edit', 'is-dash-preview');
     };
-  }, [editing, previewing, scrollRef, VersionEditor, editorV, stage]);
+  }, [editing, previewing, scrollRef]);
 
 
   /* A widget dragged in from the palette. While it is over the page the grid shows
@@ -635,19 +603,6 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
     live.persist({ ...live.saved, ...last.before });
     setUndoTip(stack.length ? (t) => ({ text: 'Undone', n: (t?.n ?? 0) + 1 }) : null);
   }, []);
-
-  /** A panel's new size in columns and rows (an editor version's inspector), inside its own limits and the grid. */
-  const resizePanel = useCallback((id: string, w: number, h: number) => {
-    const live = liveRef.current;
-    const item = live.layout.find((l) => l.i === id);
-    if (!item) return;
-    const cols = live.metrics.cols;
-    const nw = Math.max(item.minW ?? 1, Math.min(Math.round(w), item.maxW ?? cols, cols - item.x));
-    const nh = Math.max(item.minH ?? 1, Math.min(Math.round(h), item.maxH ?? Infinity));
-    if (nw === item.w && nh === item.h) return;
-    const placements = upsertPlacement(toPlacements(live.layout), { i: id, x: item.x, y: item.y, w: nw, h: nh });
-    commitEdit({ ...live.saved, layouts: { ...live.saved.layouts, [live.bp]: placements } }, `Resized ${panelName(id)}`);
-  }, [commitEdit, panelName]);
 
   /** The new panel's size and limits at this breakpoint (its designed placement, else a default). */
   const addSpec = (id: string) => {
@@ -786,38 +741,7 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
     if (editing) return;
     undoRef.current = [];
     setUndoTip(null);
-    setSelected(null);
   }, [editing]);
-  // A removed panel cannot stay picked.
-  useEffect(() => {
-    if (selected && hiddenSet.has(selected)) setSelected(null);
-  }, [selected, hiddenSet]);
-
-  /* An editor version: a press on a panel picks it (Studio's inspector, Dock's ring), on bare grid clears it; Delete
-     removes the picked one. The press still starts the grid's own drag: nothing is prevented. */
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !arrange || !VersionEditor || trash) return;
-    const down = (e: PointerEvent) => {
-      if (!(e.target instanceof Element) || e.target.closest('.ed-ov__x, .react-resizable-handle')) return;
-      setSelected(e.target.closest('[data-panel]')?.getAttribute('data-panel') ?? null);
-    };
-    const key = (e: KeyboardEvent) => {
-      const a = document.activeElement;
-      const typing = a instanceof HTMLElement && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || a.isContentEditable);
-      const id = selectedRef.current;
-      if (typing || !id || (e.key !== 'Delete' && e.key !== 'Backspace')) return;
-      e.preventDefault();
-      setSelected(null);
-      removePanel(id);
-    };
-    el.addEventListener('pointerdown', down, true);
-    document.addEventListener('keydown', key);
-    return () => {
-      el.removeEventListener('pointerdown', down, true);
-      document.removeEventListener('keydown', key);
-    };
-  }, [arrange, VersionEditor, trash, scrollRef, removePanel]);
   useEffect(() => {
     if (!undoTip) return;
     const t = window.setTimeout(() => setUndoTip(null), 6000);
@@ -965,7 +889,6 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
   );
 
   const hasSaved = Object.keys(saved.layouts).length > 0 || activeBlank;
-  const layoutById = useMemo(() => new Map(layout.map((item) => [item.i, item])), [layout]);
 
   /* The seams between panels (SeamLayer.tsx): each side's resize ability is the
      grid item's own (`resizeHandles`), so a strip that only grows sideways never
@@ -1023,7 +946,7 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
   useEffect(() => () => { if (swapTimer.current !== null) window.clearTimeout(swapTimer.current); }, []);
 
   return (
-    <div className={`dash${locked && !arrange ? ' is-locked' : ''}${arrange ? ' is-arrange' : ''}${arrange && trash ? ' is-trash' : ''}${overPage && ghost ? ' is-drop' : ''}${swap ? ' is-switching' : ''}${seaming ? ' is-seaming' : ''}${editing && VersionEditor ? ` ed-${editorV}` : ''}${className ? ` ${className}` : ''}`}>
+    <div className={`dash${locked && !arrange ? ' is-locked' : ''}${arrange ? ' is-arrange' : ''}${arrange && trash ? ' is-trash' : ''}${overPage && ghost ? ' is-drop' : ''}${swap ? ' is-switching' : ''}${seaming ? ' is-seaming' : ''}${className ? ` ${className}` : ''}`}>
       {/* The hover-revealed "Lock layout"/"Reset layout" text strip that used
           to live here is gone, not renamed - LayoutMenu.tsx now carries both
           actions (plus panel visibility and, when the caller wants one, a
@@ -1057,7 +980,7 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
             onDragStop={onGridDragStop}
             onResizeStop={markDirty}
             compactor={verticalCompactor}
-            positionStrategy={arrange ? scaled : undefined}
+            positionStrategy={arrange ? createScaledStrategy(0.64) : undefined}
           >
             {visible.map((panel) => {
               const name = typeof panel.title === 'function' ? panel.title(context) : panel.title;
@@ -1083,28 +1006,11 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
                     swap?.has(panel.id) ? 'is-entering' : '',
                     leaving === panel.id ? 'is-leaving' : '',
                     drop?.plan.target?.split && drop.plan.target.i === panel.id ? 'is-split' : '',
-                    VersionEditor && arrange && selected === panel.id ? 'is-picked' : '',
                   ].filter(Boolean).join(' ')}
                   role="group"
                   aria-label={name}
                   data-panel={panel.id}
                 >
-                  {/* An editor version's head on each panel while arranging (editors.css): its name and size, a
-                      grip to move it by, and its own remove. */}
-                  {VersionEditor && arrange && (() => {
-                    const at = layoutById.get(panel.id);
-                    const label = faceFor(panel.id)?.name ?? name;
-                    return (
-                      <div className="ed-ov dash-panel__handle">
-                        <svg className="ed-ov__grip" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><g fill="currentColor"><circle cx="4" cy="3" r="1" /><circle cx="8" cy="3" r="1" /><circle cx="4" cy="6" r="1" /><circle cx="8" cy="6" r="1" /><circle cx="4" cy="9" r="1" /><circle cx="8" cy="9" r="1" /></g></svg>
-                        <span className="ed-ov__name">{label}</span>
-                        {at && <span className="ed-ov__size">{at.w} × {at.h}</span>}
-                        <button type="button" className="ed-ov__x dash-nodrag" aria-label={`Remove ${label}`} title={`Remove ${label}`} onClick={() => removePanel(panel.id)}>
-                          <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
-                        </button>
-                      </div>
-                    );
-                  })()}
                   <PanelChrome scroll={panel.scroll} pad={panel.pad}>
                     {/* Per panel, so one bad API response cannot blank the
                         terminal - the same rule the standalone pages follow. */}
@@ -1153,169 +1059,142 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
         />
       )}
 
-      {editing && saved.slots && saved.slots.length > 0 && (() => {
-        const editProps: EditBaseProps = {
-            rail: editRail,
-            onRail: setEditRail,
-            history: (saved.history ?? []).map((h) => ({
-              id: h.id,
-              title: h.slot.name ?? 'Layout',
-              blurb: historyLabel(h.why, h.at),
-              active: false,
-              blocks: slotBlocks(eligible, config.layouts[bp], h.slot, bp, metrics.cols, rowHeight, metrics.margin),
-            })),
-            onRestore: (entryId) => change((prev) => restoreFromHistory(prev, entryId)),
-            onSetOff: (id, off) => change((prev) => setSlotOff(prev, id, off)),
-            thumbs: (saved.slots ?? []).map((slot) => ({
-              id: slot.id,
-              name: slotName(saved, slot),
-              off: slot.off === true,
-              active: slot.id === saved.activeSlot,
-              blocks: slot.id === saved.activeSlot
-                ? layout.map(({ i, x, y, w, h }) => ({ i, x, y, w, h }))
-                : slotBlocks(eligible, config.layouts[bp], slot, bp, metrics.cols, rowHeight, metrics.margin),
-            })),
-            cols: metrics.cols,
-            widgets: eligible.map((p) => ({
-              id: p.id,
-              name: faceFor(p.id)?.name ?? (typeof p.title === 'function' ? p.title(context) : p.title),
-              blurb: faceFor(p.id)?.blurb,
-              present: !hiddenSet.has(p.id),
-            })),
-            quiet: previewing,
-            sticky: sticky,
-            overDelete: overDelete,
-            ghost: ghost,
-            trash: trash,
-            onTrash: setTrash,
-            undoTip: undoTip,
-            onUndo: undo,
-            onWidgetAdd: addBelow,
-            onSwitch: (id) => {
-              setSaved((prev) => {
-                const next = activateSlot(prev, id);
-                if (next === prev) return prev;
-                saveDashboard(config, next);
-                return next;
-              });
-            },
-            onAddSlot: () => {
-              setSaved((prev) => {
-                const next = addEmptySlot(prev);
-                saveDashboard(config, next);
-                return next;
-              });
-            },
-            onDeleteSlot: (id) => {
-              setSaved((prev) => {
-                const next = removeSlot(prev, id);
-                saveDashboard(config, next);
-                return next;
-              });
-            },
-            presets: config.id === 'trade' ? TRADE_PRESETS.map((preset) => ({
-              id: preset.id,
-              title: preset.title,
-              blurb: preset.blurb,
-              active: preset.id === 'default'
-                ? !(saved.layouts.lg?.length) && !activeBlank
-                : !!preset.layouts.lg && JSON.stringify(saved.layouts.lg ?? []) === JSON.stringify(preset.layouts.lg),
-              blocks: (preset.layouts.lg ?? config.layouts.lg).map(({ i, x, y, w, h }) => ({ i, x, y, w, h })),
-            })) : [],
-            onApplyPreset: (id) => {
-              const preset = TRADE_PRESETS.find((p) => p.id === id);
-              if (!preset) return;
-              setSaved((before) => {
-                // The layout it replaces stays restorable (edit mode's Layouts tab).
-                const prev = remember(before, before.activeSlot, 'preset');
-                const layouts = preset.layouts;
-                const placed = new Set((layouts.lg ?? []).map((item) => item.i));
-                const shown = panels.filter((p) => p.defaultHidden && placed.has(p.id)).map((p) => p.id);
-                const slots = prev.slots?.map((s) => (
-                  s.id === prev.activeSlot ? { ...s, blank: false, layouts, hidden: [], shown } : s
-                ));
-                const next = mirrorIntoActiveSlot({ ...prev, layouts, hidden: [], shown, slots });
-                saveDashboard(config, next);
-                return next;
-              });
-            },
-            onDone: endEdit,
-            onFill: () => {
-              const grid = scrollRef.current?.querySelector('.dash-grid');
-              if (!(grid instanceof HTMLElement)) return;
-              const rect = grid.getBoundingClientRect();
-              // The original's palette, and whatever a version's editor marks as over the page.
-              const obstacles = [...document.querySelectorAll('.dash-edit-palette, [data-edit-obstacle]')].flatMap((el) => {
-                if (!(el instanceof HTMLElement)) return [];
-                const box = el.getBoundingClientRect();
-                if (box.width < 2 || box.height < 2) return [];
-                return [{ left: box.left, right: box.right }];
-              });
-              const span = clearColumnSpan(
-                metrics.cols,
-                { layoutWidth: grid.offsetWidth, visualLeft: rect.left, visualWidth: rect.width },
-                obstacles,
-                metrics.margin[0],
-                metrics.containerPadding[0],
-              );
-              if (span.end <= span.start) return;
-              const filled = fillGaps(layout.map((item) => {
-                const handles = item.resizeHandles ?? ['se'];
-                const resizable = item.isResizable !== false;
-                return {
-                  i: item.i,
-                  x: item.x,
-                  y: item.y,
-                  w: item.w,
-                  h: item.h,
-                  minW: item.minW,
-                  minH: item.minH,
-                  maxW: item.maxW,
-                  maxH: item.maxH,
-                  growW: resizable && handles.some((handle) => handle.includes('e') || handle.includes('w')),
-                  growH: resizable && handles.some((handle) => handle.includes('n') || handle.includes('s')),
-                  fixed: item.static === true,
-                };
-              }), span);
-              const placements = filled.map(({ i, x, y, w, h }) => ({ i, x, y, w, h }));
-              setSaved((prev) => {
-                if (samePlacements(prev.layouts[bp], placements)) return prev;
-                const updated = mirrorIntoActiveSlot({ ...prev, layouts: { ...prev.layouts, [bp]: placements } });
-                saveDashboard(config, updated);
-                return updated;
-              });
-            },
-            onPreview: onPreview,
-            onWidgetPointerDown: startDrag,
-        };
-        if (!VersionEditor) return <EditMode {...editProps} />;
-        const slot = saved.slots.find((s) => s.id === saved.activeSlot);
-        return (
-          <Suspense fallback={null}>
-            <VersionEditor
-              {...editProps}
-              bp={bp}
-              phone={bp === 'sm' || bp === 'xs'}
-              pagePanels={layout.map((item) => {
-                const p = panels.find((x) => x.id === item.i);
-                return {
-                  id: item.i, x: item.x, y: item.y, w: item.w, h: item.h,
-                  minW: item.minW, minH: item.minH, maxW: item.maxW, maxH: item.maxH,
-                  name: faceFor(item.i)?.name ?? (p ? (typeof p.title === 'function' ? p.title(context) : p.title) : item.i),
-                  blurb: faceFor(item.i)?.blurb,
-                };
-              })}
-              rows={metrics.fitRows ?? layout.reduce((m, it) => Math.max(m, it.y + it.h), 0)}
-              layoutName={slot ? slotName(saved, slot) : 'Layout'}
-              selected={selected}
-              onSelect={setSelected}
-              onRemove={removePanel}
-              onResize={resizePanel}
-              onStage={onStage}
-            />
-          </Suspense>
-        );
-      })()}
+      {editing && saved.slots && saved.slots.length > 0 && (
+        <EditMode
+          rail={editRail}
+          onRail={setEditRail}
+          history={(saved.history ?? []).map((h) => ({
+            id: h.id,
+            title: h.slot.name ?? 'Layout',
+            blurb: historyLabel(h.why, h.at),
+            active: false,
+            blocks: slotBlocks(eligible, config.layouts[bp], h.slot, bp, metrics.cols, rowHeight, metrics.margin),
+          }))}
+          onRestore={(entryId) => change((prev) => restoreFromHistory(prev, entryId))}
+          onSetOff={(id, off) => change((prev) => setSlotOff(prev, id, off))}
+          thumbs={(saved.slots ?? []).map((slot) => ({
+            id: slot.id,
+            name: slotName(saved, slot),
+            off: slot.off === true,
+            active: slot.id === saved.activeSlot,
+            blocks: slot.id === saved.activeSlot
+              ? layout.map(({ i, x, y, w, h }) => ({ i, x, y, w, h }))
+              : slotBlocks(eligible, config.layouts[bp], slot, bp, metrics.cols, rowHeight, metrics.margin),
+          }))}
+          cols={metrics.cols}
+          widgets={eligible.map((p) => ({
+            id: p.id,
+            name: faceFor(p.id)?.name ?? (typeof p.title === 'function' ? p.title(context) : p.title),
+            blurb: faceFor(p.id)?.blurb,
+            present: !hiddenSet.has(p.id),
+          }))}
+          quiet={previewing}
+          sticky={sticky}
+          overDelete={overDelete}
+          ghost={ghost}
+          trash={trash}
+          onTrash={setTrash}
+          undoTip={undoTip}
+          onUndo={undo}
+          onWidgetAdd={addBelow}
+          onSwitch={(id) => {
+            setSaved((prev) => {
+              const next = activateSlot(prev, id);
+              if (next === prev) return prev;
+              saveDashboard(config, next);
+              return next;
+            });
+          }}
+          onAddSlot={() => {
+            setSaved((prev) => {
+              const next = addEmptySlot(prev);
+              saveDashboard(config, next);
+              return next;
+            });
+          }}
+          onDeleteSlot={(id) => {
+            setSaved((prev) => {
+              const next = removeSlot(prev, id);
+              saveDashboard(config, next);
+              return next;
+            });
+          }}
+          presets={config.id === 'trade' ? TRADE_PRESETS.map((preset) => ({
+            id: preset.id,
+            title: preset.title,
+            blurb: preset.blurb,
+            active: preset.id === 'default'
+              ? !(saved.layouts.lg?.length) && !activeBlank
+              : !!preset.layouts.lg && JSON.stringify(saved.layouts.lg ?? []) === JSON.stringify(preset.layouts.lg),
+            blocks: (preset.layouts.lg ?? config.layouts.lg).map(({ i, x, y, w, h }) => ({ i, x, y, w, h })),
+          })) : []}
+          onApplyPreset={(id) => {
+            const preset = TRADE_PRESETS.find((p) => p.id === id);
+            if (!preset) return;
+            setSaved((before) => {
+              // The layout it replaces stays restorable (edit mode's Layouts tab).
+              const prev = remember(before, before.activeSlot, 'preset');
+              const layouts = preset.layouts;
+              const placed = new Set((layouts.lg ?? []).map((item) => item.i));
+              const shown = panels.filter((p) => p.defaultHidden && placed.has(p.id)).map((p) => p.id);
+              const slots = prev.slots?.map((s) => (
+                s.id === prev.activeSlot ? { ...s, blank: false, layouts, hidden: [], shown } : s
+              ));
+              const next = mirrorIntoActiveSlot({ ...prev, layouts, hidden: [], shown, slots });
+              saveDashboard(config, next);
+              return next;
+            });
+          }}
+          onDone={endEdit}
+          onFill={() => {
+            const grid = scrollRef.current?.querySelector('.dash-grid');
+            if (!(grid instanceof HTMLElement)) return;
+            const rect = grid.getBoundingClientRect();
+            const obstacles = ['.dash-edit-palette'].flatMap((sel) => {
+              const el = document.querySelector(sel);
+              if (!(el instanceof HTMLElement)) return [];
+              const box = el.getBoundingClientRect();
+              if (box.width < 2 || box.height < 2) return [];
+              return [{ left: box.left, right: box.right }];
+            });
+            const span = clearColumnSpan(
+              metrics.cols,
+              { layoutWidth: grid.offsetWidth, visualLeft: rect.left, visualWidth: rect.width },
+              obstacles,
+              metrics.margin[0],
+              metrics.containerPadding[0],
+            );
+            if (span.end <= span.start) return;
+            const filled = fillGaps(layout.map((item) => {
+              const handles = item.resizeHandles ?? ['se'];
+              const resizable = item.isResizable !== false;
+              return {
+                i: item.i,
+                x: item.x,
+                y: item.y,
+                w: item.w,
+                h: item.h,
+                minW: item.minW,
+                minH: item.minH,
+                maxW: item.maxW,
+                maxH: item.maxH,
+                growW: resizable && handles.some((handle) => handle.includes('e') || handle.includes('w')),
+                growH: resizable && handles.some((handle) => handle.includes('n') || handle.includes('s')),
+                fixed: item.static === true,
+              };
+            }), span);
+            const placements = filled.map(({ i, x, y, w, h }) => ({ i, x, y, w, h }));
+            setSaved((prev) => {
+              if (samePlacements(prev.layouts[bp], placements)) return prev;
+              const updated = mirrorIntoActiveSlot({ ...prev, layouts: { ...prev.layouts, [bp]: placements } });
+              saveDashboard(config, updated);
+              return updated;
+            });
+          }}
+          onPreview={onPreview}
+          onWidgetPointerDown={startDrag}
+        />
+      )}
     </div>
   );
 }

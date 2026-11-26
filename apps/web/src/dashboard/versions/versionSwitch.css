@@ -42,7 +42,6 @@
 .tvswitch__set button b { font-family: var(--font-num); font-weight: 600; }
 .tvswitch__set button:hover { color: #f4f4f2; }
 .tvswitch__set button.is-on { background: #f4f4f2; color: #0a0a0a; }
-.tvswitch__rule { width: 1px; height: 18px; background: rgb(255 255 255 / 0.14); }
 button.tvswitch__fold {
   display: grid;
   place-items: center;
