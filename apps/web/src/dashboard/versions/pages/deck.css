@@ -363,18 +363,230 @@ html[data-tv='deck'] .tv-deck .mkt-header--info .mkt-stat-l { font-size: 10.5px;
 html[data-tv='deck'] .tv-deck .mkt-header--info .mkt-stat-v { font-size: 13px; font-weight: 500; }
 
 /* The book: the mid price large, in the display face. */
-html[data-tv='deck'] .tv-deck .mkt-mid-last { font-family: var(--font-display); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+html[data-tv='deck'] .tv-deck .mkt-mid-last { font-family: var(--font-display); font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
 html[data-tv='deck'] .tv-deck .mkt-booktable td { font-size: 12.5px; }
 
-/* The ticket: Long / Short a big pill, the fields in the display face, the send a full pill. */
-html[data-tv='deck'] .tv-deck .panel.oe,
-html[data-tv='deck'] .tv-deck .dash-panel__body > .panel.oe { gap: 12px; padding: 16px; }
-html[data-tv='deck'] .tv-deck .oe-dir.oe-dir--tabs { border-radius: 18px; padding: 5px; }
-html[data-tv='deck'] .tv-deck .oe-dir--tabs .oe-dir__btn { height: 44px; border-radius: 14px; font-size: 15px; }
-html[data-tv='deck'] .tv-deck .oe-inputrow { height: 52px; border-radius: 16px; }
-html[data-tv='deck'] .tv-deck .oe-input { height: 50px; line-height: 50px; font-family: var(--font-display); font-size: 19px; font-weight: 600; }
-html[data-tv='deck'] .tv-deck .oe-side__btn { height: 52px; border-radius: 999px; font-size: 15.5px; font-weight: 600; }
-html[data-tv='deck'] .tv-deck .oe-out { border-radius: 16px; }
+/* The ticket on a phone (PhoneDeck.tsx) keeps the second pass's sizes: its own rules above fit it to a 230px column. */
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-dir.oe-dir--tabs { border-radius: 18px; padding: 5px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-inputrow { border-radius: 16px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-side__btn { height: 52px; border-radius: 999px; font-size: 15.5px; font-weight: 600; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-out { border-radius: 16px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-inputrow:not(.oe-pctbox) .oe-input { font-family: var(--font-display); font-weight: 600; }
 
 /* Positions and history: roomier rows. */
 html[data-tv='deck'] .tv-deck .acct-table td { height: 44px; }
+
+/* ============================================================================
+ * DECK, third pass - the ticket (owner 2026-11-26: "order submission is simple
+ * but looks too simple rn, with the sizing of some stuff").
+ *
+ * The same few steps, on one scale and finished: controls 36-56px on 10-14px
+ * radii, figures 13-18px, labels 11px. Every field names itself over its value,
+ * the way the leverage and margin tiles already did, and keeps its unit and its
+ * shortcut (MID, MAX) on the right at the value's height. The size line marks
+ * its quarters. The flags sit under a rule, then the send, then what the order
+ * costs, all in view: the ticket has the whole left column (pageConfig.ts). The
+ * card takes its side's colour faintly at the top, so Long and Short read at a
+ * glance.
+ * ========================================================================= */
+html[data-tv='deck'] .tv-deck [data-panel='exec'] {
+  --dk-tile: rgb(var(--ink) / 0.045);
+  --dk-tile-hi: rgb(var(--ink) / 0.075);
+  --dk-line: rgb(var(--ink) / 0.08);
+}
+html[data-tv='deck'][data-theme='light'] .tv-deck [data-panel='exec'] {
+  --dk-tile: rgb(0 0 0 / 0.04);
+  --dk-tile-hi: rgb(0 0 0 / 0.065);
+  --dk-line: rgb(0 0 0 / 0.08);
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .panel.oe {
+  gap: 10px;
+  padding: 14px 14px 16px;
+  background: radial-gradient(130% 26% at 50% 0%, color-mix(in srgb, var(--oe-tint) 11%, transparent), transparent 75%);
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-body { gap: 10px; }
+
+/* Long / Short: a 44px toggle, the chosen half solid in its side's colour. */
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-dir.oe-dir--tabs { gap: 4px; padding: 4px; border-radius: 14px; background: var(--dk-tile); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-dir--tabs .oe-dir__btn { height: 36px; border-radius: 10px; font-size: 14px; }
+
+/* Leverage and margin: two 48px tiles, the name over the value, a chevron for the menu each opens. */
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .panel.oe .oe-mode__btn {
+  height: 48px;
+  min-height: 48px;
+  padding: 0 28px 0 12px;
+  border-radius: 12px;
+  background: var(--dk-tile);
+  font-size: 14.5px;
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .panel.oe .oe-mode__btn:hover:not(:disabled) { background: var(--dk-tile-hi); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .panel.oe .oe-mode__btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  width: 6px;
+  height: 6px;
+  margin-top: -5px;
+  border-right: 1.5px solid var(--dk-label);
+  border-bottom: 1.5px solid var(--dk-label);
+  transform: rotate(45deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .panel.oe .oe-mode__btn[aria-expanded='true']::after { margin-top: -2px; transform: rotate(225deg); }
+
+/* The order type: a 36px segmented pill. */
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-tabs { padding: 3px; border-radius: 12px; background: var(--dk-tile); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-tab { height: 30px; border-radius: 9px; font-size: 12.5px; }
+
+/* What you have and hold: two rows in an outlined tile, the figures in the numbers face. */
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-facts { gap: 0; margin: 0; padding: 3px 12px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--dk-line); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-facts__row { align-items: center; min-height: 26px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-facts__row + .oe-facts__row { box-shadow: inset 0 1px 0 var(--dk-line); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-facts__row dt { color: var(--dk-label); font-size: 12px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-facts__row dd { font-family: var(--font-num); font-size: 12.5px; }
+
+/* Price and size: 56px tiles, the field's name small at the top, the figure under it in the display face; unit and
+   shortcut on the right on the figure's line. */
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow {
+  position: relative;
+  align-items: flex-end;
+  height: 56px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--dk-tile);
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: background-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow:hover { background: var(--dk-tile-hi); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow:focus-within { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--oe-tint) 70%, transparent); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow.is-bad { box-shadow: inset 0 0 0 1.5px var(--neg); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow .oe-inlabel {
+  position: absolute;
+  top: 9px;
+  left: 0;
+  padding-left: 13px;
+  color: var(--dk-label);
+  font-size: 11px;
+  line-height: 14px;
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow .oe-input {
+  order: 1;
+  height: 46px;
+  min-width: 0;
+  padding: 14px 6px 0 13px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.01em;
+  text-align: left;
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow .oe-chip {
+  order: 2;
+  align-self: flex-end;
+  height: 20px;
+  margin: 0 6px 6px 0;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(var(--ink) / 0.08);
+  color: var(--dk-label);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: 0.04em;
+}
+html[data-tv='deck'][data-theme='light'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow .oe-chip { background: rgb(0 0 0 / 0.06); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow .oe-chip:hover:not(:disabled) { color: var(--text); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow .oe-suffix,
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow .oe-unitswap {
+  order: 3;
+  align-self: flex-end;
+  height: 32px;
+  margin: 0;
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow .oe-suffix { padding: 0 13px 0 2px; color: var(--dk-label); font-size: 12.5px; font-weight: 500; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow .oe-unitswap { padding: 0 9px 0 2px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-field > .oe-inputrow .oe-unitlabel { font-size: 12.5px; font-weight: 600; }
+
+/* The size line: a 4px track filled in the side's colour, the quarters marked and named, a round thumb. */
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider { grid-template-columns: minmax(0, 1fr) 60px; gap: 12px; padding-bottom: 12px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__rail::before { top: 8px; height: 4px; border-radius: 999px; background: var(--dk-tile-hi); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__fill { top: 8px; height: 4px; border-radius: 999px; background: var(--oe-tint); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__notch {
+  display: block;
+  top: 6px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border: 0;
+  background: color-mix(in srgb, var(--text) 22%, var(--dk-card));
+  box-shadow: 0 0 0 2px var(--dk-card);
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__notch.is-past { background: var(--oe-tint); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__notch::after {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--dk-label);
+  font-family: var(--font-num);
+  font-size: 9.5px;
+  line-height: 12px;
+  white-space: nowrap;
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__notch:nth-of-type(1)::after { content: '0'; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__notch:nth-of-type(2)::after { content: '25'; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__notch:nth-of-type(3)::after { content: '50'; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__notch:nth-of-type(4)::after { content: '75'; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__notch:nth-of-type(5)::after { content: '100'; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__input::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 3px solid var(--oe-tint);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider__input::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 3px solid var(--oe-tint);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider .oe-pctbox { height: 34px; border-radius: 10px; background: var(--dk-tile); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider .oe-pctbox .oe-input { height: 34px; padding: 0 2px 0 8px; font-family: var(--font-num); font-size: 13px; font-weight: 500; line-height: 34px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-slider .oe-pctbox .oe-suffix { padding: 0 9px 0 0; font-size: 11.5px; }
+
+/* The flags under a rule: the order above it, what changes how it behaves below. */
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-opts { padding: 12px 2px 0; box-shadow: inset 0 1px 0 var(--dk-line); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-exits__head { padding-left: 2px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-switch { font-size: 12.5px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-compact { font-size: 12px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-select { height: 26px; border-radius: 8px; }
+
+/* The send right under the flags, what it costs right under the send; any free height stays at the card's foot. */
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-side { padding-top: 4px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-side__btn {
+  height: 48px;
+  border-radius: 14px;
+  font-size: 14.5px;
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2), 0 10px 24px -12px color-mix(in srgb, var(--oe-tint) 75%, transparent);
+}
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-side__btn.is-buy { background: linear-gradient(180deg, rgb(255 255 255 / 0.14), rgb(255 255 255 / 0) 60%), var(--pos); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-side__btn.is-sell { background: linear-gradient(180deg, rgb(255 255 255 / 0.14), rgb(255 255 255 / 0) 60%), var(--neg); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-side__btn:disabled { box-shadow: none; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-out { margin: 0; padding: 6px 12px; border-radius: 12px; background: none; box-shadow: inset 0 0 0 1px var(--dk-line); }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-out__row { padding-block: 3px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-out__k { font-size: 11.5px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-out__v { font-family: var(--font-num); font-size: 12.5px; }
+/* Slippage on one line: the estimate and the cap side by side, a size down, so the row keeps the receipt's rhythm. */
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-sliprow { gap: 8px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-sliplink { white-space: nowrap; font-size: 11.5px; }
+html[data-tv='deck'] .tv-deck [data-panel='exec'] .oe-sliplink .oe-out__sep { padding: 0 3px; }

@@ -5,7 +5,6 @@
  */
 import '../../components/bots/kit/kit.css';
 import './versionSwitch.css';
-import './pages/slate.css';
 import './pages/deck.css';
 import './pages/pulse.css';
 import './editors/editors.css';

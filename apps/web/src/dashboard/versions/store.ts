@@ -10,14 +10,13 @@
  */
 import { useSyncExternalStore } from 'react';
 
-export type PageVersion = 'original' | 'slate' | 'deck' | 'pulse';
+export type PageVersion = 'original' | 'deck' | 'pulse';
 export type EditorVersion = 'original' | 'dock';
 
 export const PAGE_VERSIONS: ReadonlyArray<{ id: PageVersion; name: string; line: string }> = [
   { id: 'original', name: 'Original', line: 'Today\'s trade page' },
-  { id: 'slate', name: 'Slate', line: 'The terminal: black and square, monospaced figures, the book a tall ladder' },
-  { id: 'deck', name: 'Deck', line: 'The cards: ticket first, big figures, cards 12px apart; phone: book and ticket side by side' },
-  { id: 'pulse', name: 'Pulse', line: 'The focus: the chart takes the page, ticket and book in a rail; phone: sticky Long / Short' },
+  { id: 'deck', name: 'Deck', line: 'The cards: the ticket down the whole left column, each field named over its value; phone: book and ticket side by side' },
+  { id: 'pulse', name: 'Pulse', line: 'The focus: the chart on the page, ticket and book in one rail card; phone: sticky Long / Short' },
 ];
 
 export const EDITOR_VERSIONS: ReadonlyArray<{ id: EditorVersion; name: string; line: string }> = [

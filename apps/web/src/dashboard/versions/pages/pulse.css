@@ -346,13 +346,21 @@ html[data-tv='pulse'] .oe-slider .oe-pctbox:focus-within { box-shadow: inset 0 0
 html.pls-sheet-open .tvswitch { display: none; }
 
 /* ============================================================================
- * PULSE, second pass - the focus (owner 2026-11-26: "Rework trade page more, and
- * more uniquely"). The chart takes the page - 37 of 48 columns and most of the
- * height (pageConfig.ts PULSE_LG) - on a dark backdrop with no card around it,
- * under a large price in the display face. The ticket and a short book stand in
- * a narrow rail on the right, lifted off the backdrop; positions and the account
- * lie in a low, quiet drawer under the chart. Wide screens only: the phone keeps
- * its own screen (PhonePulse.tsx).
+ * PULSE, the focus (owner 2026-11-26: "Rework trade page more, and more
+ * uniquely"; then "4 chart is unique keep but rest is bad").
+ *
+ * What you read sits on the page; what you do sits in one card. The chart, the
+ * coin strip, positions and the account lie straight on a dark backdrop with no
+ * card around them, divided by hairlines. The ticket and the book are a single
+ * rail card on the right (the lg grid has no gap between rows, pageConfig.ts),
+ * the ticket on top, the book under a seam. Inside the rail every field is a
+ * line, not a box: its name left, its figure right in the display face, a rule
+ * under it that takes the side's colour while you type. The chosen side is a
+ * tint, not a fill: the one solid colour in the rail is the send.
+ *
+ * The rail and the drawer need the lg grid, which starts at 1,200px of grid:
+ * 76px less than the window beside this app's icon rail, so 1,276px. Narrower
+ * wide screens (md) keep quiet cards; the phone its own screen (PhonePulse.tsx).
  * ========================================================================= */
 @media (min-width: 994px) {
   html[data-tv='pulse'] body,
@@ -368,33 +376,170 @@ html.pls-sheet-open .tvswitch { display: none; }
   html[data-tv='pulse'] .tv-pulse .mkt-header--info .mkt-price-v.down { font-family: var(--font-display); font-size: 36px; font-weight: 600; line-height: 40px; }
   html[data-tv='pulse'] .tv-pulse .kc-toolbar { background: transparent; }
 
-  /* The rail: the ticket and the book lifted off the backdrop, a soft edge of light. */
+  /* md (no rail): the ticket and the book as quiet cards. */
   html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='exec'],
   html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] {
     border-radius: 18px;
     background: linear-gradient(180deg, rgb(var(--ink) / 0.055), rgb(var(--ink) / 0.025));
-    box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.07), inset 0 1px 0 rgb(var(--ink) / 0.08), 0 24px 50px -30px rgb(0 0 0 / 0.85);
+    box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.07);
   }
   html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='exec'],
-  html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='book'] {
-    background: #fff;
-    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.06), 0 18px 40px -26px rgb(0 0 0 / 0.25);
+  html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='book'] { background: #fff; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.07); }
+  html[data-tv='pulse'] .tv-pulse .mkt-mid-last { font-family: var(--font-display); font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  html[data-tv='pulse'] .oe-side__btn { border-radius: 999px; }
+}
+
+@media (min-width: 1276px) {
+  html[data-tv='pulse'] .tv-pulse {
+    --pl-rail: #0f0f11;
+    --pl-rail-top: #151517;
+    --pl-edge: rgb(var(--ink) / 0.075);
+    --pl-seam: rgb(var(--ink) / 0.07);
+    --pl-rule: rgb(var(--ink) / 0.1);
   }
-  html[data-tv='pulse'] .tv-pulse .mkt-mid-last { font-family: var(--font-display); font-size: 20px; font-weight: 600; }
-  /* The rail's book is short: compact rows (the book measures them and fits more levels) under a lower tab bar. */
-  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] .dash-tabs__bar { height: 36px; }
+  html[data-tv='pulse'][data-theme='light'] .tv-pulse {
+    --pl-rail: #ffffff;
+    --pl-rail-top: #ffffff;
+    --pl-edge: rgb(0 0 0 / 0.08);
+    --pl-seam: rgb(0 0 0 / 0.07);
+    --pl-rule: rgb(0 0 0 / 0.1);
+  }
+
+  /* --- the coin strip: coins as words on the page, the chosen one lit ------- */
+  html[data-tv='pulse'] .tv-pulse .mkt-favs { gap: 2px; }
+  html[data-tv='pulse'] .tv-pulse .mkt-favchip { box-shadow: none; }
+  html[data-tv='pulse'] .tv-pulse .mkt-favchip:not(.is-active) .mkt-favchip__t { opacity: 0.62; }
+  html[data-tv='pulse'] .tv-pulse .mkt-favchip:hover .mkt-favchip__t { opacity: 1; }
+  html[data-tv='pulse'] .tv-pulse .mkt-favchip.is-active { background: rgb(var(--ink) / 0.07); }
+  html[data-tv='pulse'] .tv-pulse .mkt-favs__add { box-shadow: inset 0 0 0 1px var(--pl-edge); }
+
+  /* --- the drawer: positions and the account on the page, under one rule ---- */
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='chart'] { box-shadow: inset 0 -1px 0 var(--pl-edge); }
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='positions'],
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='account'] { border-radius: 0; background: transparent; box-shadow: none; }
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='account'] { box-shadow: inset 1px 0 0 var(--pl-edge); }
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='positions'] .dash-tabs__bar,
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='account'] .dash-tabs__bar { height: 46px; padding: 4px 6px 0 0; }
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='account'] .dash-tabs__bar,
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='account'] .dash-heading { padding-left: 16px; }
+  html[data-tv='pulse'] .tv-pulse .acct-table th { font-size: 11.5px; }
+  html[data-tv='pulse'] .tv-pulse .acct-table tbody tr { box-shadow: inset 0 -1px 0 rgb(var(--ink) / 0.045); }
+
+  /* --- the rail: the ticket over the book, one card ------------------------- */
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='exec'],
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] { border: 1px solid var(--pl-edge); box-shadow: none; }
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='exec'] {
+    border-bottom-color: var(--pl-seam);
+    border-radius: 20px 20px 0 0;
+    background: linear-gradient(180deg, var(--pl-rail-top), var(--pl-rail) 160px);
+  }
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] {
+    border-top: 0;
+    border-radius: 0 0 20px 20px;
+    background: var(--pl-rail);
+  }
+  html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='exec'],
+  html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='book'] { box-shadow: none; }
+
+  /* The book: a slim tab bar, compact rows (the book measures them and fits more levels), the mid in the display face. */
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] .dash-tabs__bar { height: 38px; padding: 4px 10px 0; }
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] .dash-tab { height: 26px; padding: 0 10px; font-size: 12.5px; }
+  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] .mkt-booktable th { font-size: 11px; }
   html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book'] .mkt-booktable tbody td { height: 17px; padding-top: 0; padding-bottom: 0; font-size: 11.5px; line-height: 17px; }
 
-  /* The drawer: positions and the account, quiet, under the chart. */
-  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='positions'],
-  html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='account'] {
-    border-radius: 16px;
-    background: rgb(var(--ink) / 0.025);
-    box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.05);
+  /* --- the ticket: lines, not boxes ----------------------------------------- */
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .panel.oe { --oe-inset: 16px; gap: 10px; padding: 14px 16px 16px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-body { gap: 10px; }
+  /* Long / Short: the chosen side tinted in its colour; the solid colour is kept for the send. */
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-dir.oe-dir--tabs { gap: 6px; margin: 0; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-dir--tabs .oe-dir__btn {
+    height: 38px;
+    border-radius: 12px;
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--pl-edge);
+    color: var(--pl-label);
+    font-size: 14px;
+    font-weight: 600;
+    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
   }
-  html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='positions'],
-  html[data-tv='pulse'][data-theme='light'] .tv-pulse .dash-panel[data-panel='account'] { background: rgb(255 255 255 / 0.6); }
-
-  /* The send: a full pill. */
-  html[data-tv='pulse'] .oe-side__btn { border-radius: 999px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-dir--tabs .oe-dir__btn:hover:not(.is-on) { color: var(--text); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-dir--tabs .oe-dir__btn.is-on.is-buy { background: color-mix(in srgb, var(--pos) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 55%, transparent); color: var(--pos); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-dir--tabs .oe-dir__btn.is-on.is-sell { background: color-mix(in srgb, var(--neg) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--neg) 55%, transparent); color: var(--neg); }
+  html[data-tv='pulse'][data-theme='light'] .tv-pulse [data-panel='exec'] .oe-dir--tabs .oe-dir__btn.is-on.is-buy { color: color-mix(in srgb, var(--pos), #000 25%); }
+  html[data-tv='pulse'][data-theme='light'] .tv-pulse [data-panel='exec'] .oe-dir--tabs .oe-dir__btn.is-on.is-sell { color: color-mix(in srgb, var(--neg), #000 15%); }
+  /* Leverage and margin: two small pills; the order type: words over a rule, the chosen one underlined. */
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .panel.oe .oe-mode__btn { height: 30px; min-height: 30px; font-size: 12.5px; font-weight: 600; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-tabs { gap: 16px; padding: 0; margin-inline: 0; box-shadow: inset 0 -1px 0 var(--pl-rule); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-tab { flex: none; height: 32px; padding: 0; border-radius: 0; background: none; font-size: 13px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-tab.is-on { background: none; color: var(--text); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-tab::after {
+    display: block;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    margin: 0;
+    border-radius: 2px;
+    background: var(--text);
+  }
+  /* The two account facts: label left, figure right in the numbers face. */
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-facts { gap: 4px; margin: 2px 0 0; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-facts__row dt { color: var(--pl-label); font-size: 12px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-facts__row dd { font-family: var(--font-num); font-size: 12.5px; }
+  /* Fields: a line each - name left, figure right in the display face, the rule under it lit while you type. */
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-field > .oe-inputrow {
+    height: 44px;
+    border-radius: 0;
+    box-shadow: inset 0 -1px 0 var(--pl-rule);
+    transition: box-shadow var(--dur-fast) var(--ease-out);
+  }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-field > .oe-inputrow:hover { box-shadow: inset 0 -1px 0 rgb(var(--ink) / 0.24); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-field > .oe-inputrow:focus-within { box-shadow: inset 0 -2px 0 var(--oe-tint); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-field > .oe-inputrow.is-bad { box-shadow: inset 0 -2px 0 var(--neg); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-field > .oe-inputrow .oe-inlabel { padding-left: 0; font-size: 13px; line-height: 42px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-field > .oe-inputrow .oe-input {
+    height: 42px;
+    padding-right: 8px;
+    line-height: 42px;
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-field > .oe-inputrow .oe-suffix { padding: 0 2px 0 0; color: var(--pl-label); font-size: 12.5px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-field > .oe-inputrow .oe-unitlabel { color: var(--pl-label); font-size: 12.5px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-field > .oe-inputrow .oe-chip {
+    height: 20px;
+    margin: 0 0 0 8px;
+    padding: 0 7px;
+    border: 0;
+    border-radius: 999px;
+    background: rgb(var(--ink) / 0.07);
+    color: var(--pl-label);
+    font-size: 10px;
+    font-weight: 600;
+  }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-field > .oe-inputrow .oe-chip:hover:not(:disabled) { color: var(--text); }
+  /* The size line: a hairline track, the side's colour up to a round thumb. */
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-slider { grid-template-columns: minmax(0, 1fr) 58px; gap: 14px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-slider__rail::before { top: 9px; height: 2px; border-radius: 2px; background: var(--pl-rule); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-slider__fill { top: 9px; height: 2px; border-radius: 2px; background: var(--oe-tint); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-slider__notch { display: block; top: 7px; width: 6px; height: 6px; margin-left: -3px; border: 0; background: var(--pl-rule); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-slider__notch.is-past { background: var(--oe-tint); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-slider__input::-webkit-slider-thumb { width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 4px color-mix(in srgb, var(--oe-tint) 22%, transparent); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-slider__input::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--text); box-shadow: 0 0 0 4px color-mix(in srgb, var(--oe-tint) 22%, transparent); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-slider .oe-pctbox { height: 30px; border-radius: 999px; background: rgb(var(--ink) / 0.06); box-shadow: none; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-slider .oe-pctbox .oe-input { height: 30px; line-height: 30px; font-family: var(--font-num); font-size: 12.5px; }
+  /* The flags, the send, and what the order costs under a seam. */
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-switch { font-size: 12.5px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-side { margin-top: 2px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-side__btn {
+    height: 44px;
+    font-size: 14.5px;
+    font-weight: 600;
+    box-shadow: 0 10px 28px -12px color-mix(in srgb, var(--oe-tint) 65%, transparent);
+  }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-side__btn:disabled { box-shadow: none; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-out { padding-top: 10px; border-top: 1px solid var(--pl-seam); }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-out__k { font-size: 11.5px; }
+  html[data-tv='pulse'] .tv-pulse [data-panel='exec'] .oe-out__v { font-family: var(--font-num); font-size: 12.5px; }
 }

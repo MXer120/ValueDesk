@@ -32,7 +32,6 @@ const EXEMPT = new Set([
   // a version's own class or state (`html[data-tv]`, `.tv-*`, `.ed-*`, `.is-edit-v`, `.pdk`, `.pls-*`, `.tvswitch`), so their late
   // place in the cascade can only ever reach what a version draws.
   'dashboard/versions/versionSwitch.css',
-  'dashboard/versions/pages/slate.css',
   'dashboard/versions/pages/deck.css',
   'dashboard/versions/pages/pulse.css',
   'dashboard/versions/editors/editors.css',
