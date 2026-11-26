@@ -63,7 +63,9 @@ export function Season({ address, provider, sample }: { address: string | null; 
 
 /* --------------------------------------------------------------------------------------- the ladder ----- */
 
-function Ladder({ v }: { v: PointsView }) {
+/** `figures` false: the page shows the balance, tier and rank already (Stage's tier card), so the ladder leads with the
+ * season's weeks left instead of repeating them. */
+export function Ladder({ v, figures = true }: { v: PointsView; figures?: boolean }) {
   const prog = tierProgress(v.mine ? v.total : null);
   const weeksLeft = v.week ? RULES.seasonWeeks - v.week.weekNo + 1 : null;
   const need = prog?.nxt && v.pace ? Math.ceil(prog.left / v.pace) : null;
@@ -71,7 +73,12 @@ function Ladder({ v }: { v: PointsView }) {
   return (
     <section className={`spn-ladder${v.mine ? ' is-mine' : ''}`} aria-label="Tiers">
       <div className="spn-ladder__top">
-        {v.mine ? (
+        {!figures ? (
+          <div className="spn-ladder__me">
+            <span className="spn-ladder__k">{v.mine ? 'Your place on SoDEX’s tiers' : 'SoDEX’s tiers, by SoPoints held'}</span>
+            {v.week && <span>Week {v.week.weekNo} of {RULES.seasonWeeks} · {weeksLeft} {weeksLeft === 1 ? 'week' : 'weeks'} left in {RULES.season}</span>}
+          </div>
+        ) : v.mine ? (
           v.total === null ? <Skeleton className="spx-skel-md" /> : (
             <div className="spn-ladder__me">
               <TierName tier={v.tier} className="is-lead" />
@@ -83,7 +90,9 @@ function Ladder({ v }: { v: PointsView }) {
         {prog?.nxt && (
           <div className="spn-ladder__goal">
             <span><b className="sx-num">{pts(prog.left)}</b> to <TierName tier={prog.nxt.name} /></span>
-            <small>{need !== null && weeksLeft !== null ? (need <= weeksLeft ? `≈ ${need} ${need === 1 ? 'week' : 'weeks'} at your last 4 weeks’ pace · ${weeksLeft} left in the season` : `Not this season at your last 4 weeks’ pace · ${weeksLeft} weeks left`) : `${weeksLeft ?? DASH} weeks left in the season`}</small>
+            <small>{need !== null && weeksLeft !== null
+              ? (need <= weeksLeft ? `≈ ${need} ${need === 1 ? 'week' : 'weeks'} at your last 4 weeks’ pace${figures ? ` · ${weeksLeft} left in the season` : ''}` : `Not this season at your last 4 weeks’ pace${figures ? ` · ${weeksLeft} weeks left` : ''}`)
+              : figures ? `${weeksLeft ?? DASH} weeks left in the season` : 'No pace yet: no scored week'}</small>
           </div>
         )}
       </div>
@@ -256,7 +265,7 @@ function Detail({ c, v }: { c: Cell; v: PointsView }) {
 const CW = 600;
 const CH = 220;
 
-function Climb({ weeks }: { weeks: readonly AnyWeek[] }) {
+export function Climb({ weeks }: { weeks: readonly AnyWeek[] }) {
   const id = useId();
   const phone = usePhone();
   const [at, setAt] = useState<number | null>(null);

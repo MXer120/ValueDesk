@@ -9,7 +9,7 @@
  */
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { usePointsContext, type PointsContext } from '../../../Points';
-import { TIERS, type BoostConfig, type WeekInfo } from '../../../../points';
+import { TIERS, fetchVenueDaily, type BoostConfig, type DailyPoint, type WeekInfo } from '../../../../points';
 import { SODEX_POINTS_SIGNIN_LIVE } from '../../../../sodexProgrammes';
 import type { Eip1193Provider } from '../../../../wallet';
 import { warmWalletModal } from '../../../../walletconnect';
@@ -49,11 +49,29 @@ export interface PointsView {
   pace: number | null;
 }
 
+/**
+ * With the Sample on: the venue's own daily volume and open interest (SoDEX's public series, the same reads a sign-in
+ * makes), so the platform's side of the cost-per-point chart is real while the wallet's side is the sample's.
+ */
+function useSampleVenue(on: boolean): { vol: DailyPoint[]; oi: DailyPoint[] } | null {
+  const [d, setD] = useState<{ vol: DailyPoint[]; oi: DailyPoint[] } | null>(null);
+  useEffect(() => {
+    if (!on || d) return;
+    let live = true;
+    void Promise.allSettled([fetchVenueDaily('volume', 150), fetchVenueDaily('open-interest', 150)]).then(([a, b]) => {
+      if (live) setD({ vol: a.status === 'fulfilled' ? a.value : [], oi: b.status === 'fulfilled' ? b.value : [] });
+    });
+    return () => { live = false; };
+  }, [on, d]);
+  return d;
+}
+
 export function usePointsView(address: string | null, provider: Eip1193Provider | null, sample: boolean): PointsView {
   const c = usePointsContext(address, provider);
   const real = SODEX_POINTS_SIGNIN_LIVE && c.tokenPresent && !!address;
   const v2 = useSoPointsV2(address, real && !sample);
-  const demo = useMemo(() => (sample ? samplePoints(c.week, c.boost) : null), [sample, c.week, c.boost]);
+  const venue = useSampleVenue(sample);
+  const demo = useMemo(() => (sample ? { ...samplePoints(c.week, c.boost), venueDaily: venue?.vol ?? [], venueOiDaily: venue?.oi ?? [] } : null), [sample, c.week, c.boost, venue]);
   const s = demo ?? v2;
   const mine = sample || real;
   return useMemo(() => {
@@ -330,16 +348,27 @@ export function SquadTracks({ v }: { v: PointsView }) {
 
 /* -------------------------------------------------------------------------------- week bars ----- */
 
-export type BarMetric = 'points' | 'rank';
+/** Points stacked; mix = each week's own, invited and squad parts as shares of it (Original's "Points mix by week");
+ * invited = the points from invitees alone (Original's "Referral points by week"); rank with 1 at the top. */
+export type BarMetric = 'points' | 'mix' | 'invited' | 'rank';
 
-/** Every scored week as a column: own, from invitees and the squad's boost stacked; or the week's rank (1 at the top). */
+const shareOf = (part: number, w: AnyWeek) => {
+  const t = w.split.own + w.split.referral + w.split.boost;
+  return t > 0 ? `${Math.round((part / t) * 100)}%` : DASH;
+};
+
+/** Every scored week as a column: own, from invitees and the squad's boost stacked (or their shares); the invited part
+ * alone; or the week's rank (1 at the top). */
 export function WeekBars({ weeks, metric = 'points', height = 220 }: { weeks: readonly AnyWeek[]; metric?: BarMetric; height?: number }) {
   const [at, setAt] = useState<number | null>(null);
   const ws = metric === 'rank' ? weeks.filter((w) => w.split.week.rank > 0) : weeks;
-  if (!ws.length) return <div className="rfc is-empty spx-bars" style={{ minHeight: height }}><p>{metric === 'rank' ? 'No ranked week yet.' : 'Your weeks draw here from the first scored one.'}</p></div>;
-  const top = metric === 'rank' ? Math.max(10, ...ws.map((w) => w.split.week.rank)) : Math.max(1, ...ws.map((w) => w.split.week.points));
+  const none = metric === 'invited' && !ws.some((w) => w.split.referral > 0);
+  if (!ws.length || none) return <div className="rfc is-empty spx-bars" style={{ minHeight: height }}><p>{metric === 'rank' ? 'No ranked week yet.' : none ? 'No points from invitees yet.' : 'Your weeks draw here from the first scored one.'}</p></div>;
+  const val = (w: AnyWeek) => (metric === 'invited' ? w.split.referral : w.split.week.points);
+  const top = metric === 'rank' ? Math.max(10, ...ws.map((w) => w.split.week.rank)) : Math.max(1, ...ws.map(val));
   const decades = Math.ceil(Math.log10(top));
-  const h = (w: AnyWeek) => (metric === 'rank' ? Math.max(0.04, 1 - Math.log10(Math.max(1, w.split.week.rank)) / Math.max(1, decades)) : w.split.week.points / top);
+  const h = (w: AnyWeek) => (metric === 'rank' ? Math.max(0.04, 1 - Math.log10(Math.max(1, w.split.week.rank)) / Math.max(1, decades))
+    : metric === 'mix' ? (w.split.week.points > 0 ? 1 : 0) : val(w) / top);
   const every = Math.ceil(ws.length / 9);
   const read = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -353,7 +382,7 @@ export function WeekBars({ weeks, metric = 'points', height = 220 }: { weeks: re
         {ws.map((x, i) => (
           <span key={x.key} className={`${at === i ? 'is-on' : ''}${i === l1 && l1 > 0 ? ' is-l1' : ''}`}>
             <span style={{ height: `${Math.max(1.5, h(x) * 100)}%` }}>
-              {metric === 'rank' ? <i className="is-own" style={{ flexGrow: 1 }} /> : (<>
+              {metric === 'rank' ? <i className="is-own" style={{ flexGrow: 1 }} /> : metric === 'invited' ? <i className="is-referral" style={{ flexGrow: 1 }} /> : (<>
                 {x.split.boost > 0 && <i className="is-boost" style={{ flexGrow: x.split.boost }} />}
                 {x.split.referral > 0 && <i className="is-referral" style={{ flexGrow: x.split.referral }} />}
                 {x.split.own > 0 && <i className="is-own" style={{ flexGrow: x.split.own }} />}
@@ -366,10 +395,13 @@ export function WeekBars({ weeks, metric = 'points', height = 220 }: { weeks: re
       {w && at !== null && (
         <span className="rfc__tip" style={{ left: `clamp(90px, ${(100 / ws.length) * (at + 0.5)}%, calc(100% - 90px))` }}>
           <small>{w.name}</small>
-          {metric === 'rank' ? <span><i style={{ color: 'var(--rf-points)' }} />Rank<b>#{pts(w.split.week.rank)}</b></span> : (<>
-            <span className="is-own"><i />Own<b>{pts(w.split.own)}</b></span>
+          {metric === 'rank' ? <span><i style={{ color: 'var(--rf-points)' }} />Rank<b>#{pts(w.split.week.rank)}</b></span> : metric === 'invited' ? (<>
             <span className="is-referral"><i />From invitees<b>{pts(w.split.referral)}</b></span>
-            {w.season === 'L1' && <span className="is-boost"><i />Squad {plusPct(w.split.week.totalBonusPct ?? 0)}<b>{pts(w.split.boost)}</b></span>}
+            <span><i style={{ opacity: 0 }} />Week<b>{pts(w.split.week.points)}</b></span>
+          </>) : (<>
+            <span className="is-own"><i />Own<b>{metric === 'mix' ? shareOf(w.split.own, w) : pts(w.split.own)}</b></span>
+            <span className="is-referral"><i />From invitees<b>{metric === 'mix' ? shareOf(w.split.referral, w) : pts(w.split.referral)}</b></span>
+            {w.season === 'L1' && <span className="is-boost"><i />Squad {plusPct(w.split.week.totalBonusPct ?? 0)}<b>{metric === 'mix' ? shareOf(w.split.boost, w) : pts(w.split.boost)}</b></span>}
             <span><i style={{ opacity: 0 }} />Week<b>{pts(w.split.week.points)}</b></span>
           </>)}
         </span>
@@ -381,7 +413,8 @@ export function WeekBars({ weeks, metric = 'points', height = 220 }: { weeks: re
 
 export function BarsLegend({ metric = 'points' }: { metric?: BarMetric }) {
   if (metric === 'rank') return <ul className="spx-legend"><li><i className="is-own" />Rank, #1 at the top</li></ul>;
-  return <ul className="spx-legend"><li><i className="is-own" />Own</li><li><i className="is-referral" />From invitees</li><li><i className="is-boost" />Squad boost</li></ul>;
+  if (metric === 'invited') return <ul className="spx-legend"><li><i className="is-referral" />From invitees, before the squad's boost</li></ul>;
+  return <ul className="spx-legend"><li><i className="is-own" />Own</li><li><i className="is-referral" />From invitees</li><li><i className="is-boost" />Squad boost</li>{metric === 'mix' && <li>Each week's share</li>}</ul>;
 }
 
 /* -------------------------------------------------------------------------------- week table ----- */

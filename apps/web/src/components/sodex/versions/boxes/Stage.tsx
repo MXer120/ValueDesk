@@ -5,7 +5,7 @@
  * tier's reward range with where the latest opens landed, and the opens themselves.
  */
 import { useId, useState } from 'react';
-import { bpsToPct, mergeLadder, type LotteryMeta, type LotteryRules } from '../../../../blindBox';
+import { bpsToPct, mergeLadder, type LotteryRules } from '../../../../blindBox';
 import { SODEX_SITE } from '../../../../sodexProgrammes';
 import { Skeleton } from '../../../bots/kit/kit';
 import { BoxArt } from '../../BoxArt';
@@ -24,7 +24,7 @@ export function BoxStage({ address, sample }: { address: string | null; sample: 
     <div className="tf bots-page rf-page sx sx-boxes">
       <div className="bots-col">
         {d.meta.error && !d.meta.data ? <ReadError what="The programme's rules" error={d.meta.error} retry={d.meta.retry} />
-          : <Stage rules={rules} meta={d.meta.data} />}
+          : <Stage rules={rules} />}
         <div className="sxb-desk">
           <div className="sxb-desk__mine">
             <BoxesCard w={d.wallet} />
@@ -43,7 +43,7 @@ export function BoxStage({ address, sample }: { address: string | null; sample: 
   );
 }
 
-function Stage({ rules, meta }: { rules: LotteryRules | null; meta: LotteryMeta | null }) {
+function Stage({ rules }: { rules: LotteryRules | null }) {
   const [how, setHow] = useState(false);
   const [toggled, setToggled] = useState(false);
   const id = useId();
@@ -94,7 +94,6 @@ function Stage({ rules, meta }: { rules: LotteryRules | null; meta: LotteryMeta 
           </ul>
         </div>
       </div>
-      {meta && <span className="sxb-stage__note">{rules?.newcomerMaxUAtBound != null ? `Invites count for a friend whose own volume is under ${usd(rules.newcomerMaxUAtBound)} when they bind.` : ''}</span>}
     </section>
   );
 }

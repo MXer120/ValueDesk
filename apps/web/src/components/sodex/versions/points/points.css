@@ -159,10 +159,30 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
 .spx-how__tiers li { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 12px; border-radius: 9px; font-size: 13.5px; color: var(--tf-muted); }
 .spx-how__tiers li.is-on { background: rgb(255 255 255 / 0.07); color: var(--tf-fg); }
 .spx-how__tiers .sx-num { font-size: 13px; }
-/* the bar under the stage: the week, then the multipliers */
-.rf-page .spx-pays { grid-template-columns: minmax(0, 3fr) minmax(0, 4.2fr); }
-.spx-pays .is-you ul { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: row; }
+/* SoDEX's own two cards on the stage (owner 2026-11-26: "the original sopoints cards designs"), at Original's widths.
+   The season card keeps its layout and colours; on the dark stage its panel is a lift of the stage, in both themes. */
+.spx-st__front.spx-st__cards { grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 16px; align-items: stretch; min-height: 0; padding: 22px 36px 30px; }
+.spx-st__front.spx-st__cards.is-out { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 36px; }
+.spx-st__cards .spx-st__t { justify-content: center; padding: 0; }
+.spx-st__cards .spm-card { min-height: 0; }
+.spx-st .spm-season { --dim: rgba(244, 244, 242, 0.42); background: rgb(255 255 255 / 0.045); box-shadow: none; outline-color: rgb(255 255 255 / 0.1); }
+/* the bar under the stage: the multipliers (the week's pool and times are on the season card) */
+.rf-page .spx-pays { grid-template-columns: minmax(0, 1fr); }
 .spx-pays li b { white-space: nowrap; }
+/* Original's analytics, in Original's cards: the band carries Original's page classes (pf sdx) so its cards, switches
+   and charts get Original's own rules (sodex.css .sdx .pf-card, .pf.sdx .pfx-slide); only the page box is undone. */
+.spx-cards.sdx { display: flex; flex-direction: column; justify-content: flex-start; gap: 16px; margin-top: 44px; padding: 0; }
+.spx-cards__row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+.spx-cards .spn-climb { margin-top: 4px; }
+/* One colour per part on the whole page: Stage's (own blue, from invitees green, squad boost faint blue) on Original's
+   charts too, which draw own in the accent, referrals in a faint accent and the squad in green. */
+.spx-cards :is(.spm-legend, .spm-tt__row, .spc-mix li) i.is-own, .spx-cards .spc__stack i.is-own, .spx-cards .spc__dot.is-own { background: var(--rf-points); }
+.spx-cards :is(.spc__line, .spc-mix__arc).is-own { stroke: var(--rf-points); }
+.spx-cards :is(.spm-legend, .spm-tt__row, .spc-mix li) i.is-ref, .spx-cards .spc__stack i.is-ref { background: var(--pos); }
+.spx-cards .spc-mix__arc.is-ref { stroke: var(--pos); }
+.spx-cards :is(.spm-legend, .spm-tt__row, .spc-mix li) i.is-boost, .spx-cards .spc__stack i.is-boost { background: color-mix(in srgb, var(--rf-points) 42%, transparent); }
+.spx-cards .spc-mix__arc.is-boost { stroke: color-mix(in srgb, var(--rf-points) 42%, transparent); }
+.spx-cards + .spx-duo { margin-top: 44px; }
 
 /* the desk */
 .spx-desk { display: grid; grid-template-columns: 340px minmax(0, 1fr) minmax(0, 0.92fr); gap: 44px; margin-top: 36px; align-items: start; }
@@ -175,6 +195,7 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
 .spx-cc__empty { position: relative; max-width: 250px; font-size: 14px; line-height: 20px; color: var(--tf-muted); }
 .spx-panel { display: flex; flex-direction: column; min-width: 0; }
 .spx-panel .rf-cal { margin-top: 14px; }
+.spx-panel .rf-earn__bar { flex-wrap: wrap; gap: 8px; }
 .spx-earn { display: flex; flex-direction: column; min-width: 0; }
 .spx-earn__h { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; }
 .rf-page .spx-earn__h h3 { margin: 0; font: 600 18px/24px var(--font-display); letter-spacing: -0.02em; }
@@ -205,6 +226,8 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
 }
 @media (max-width: 1000px) {
   .spx-desk, .spx-duo { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .spx-st__front.spx-st__cards, .spx-st__front.spx-st__cards.is-out, .spx-cards__row { grid-template-columns: minmax(0, 1fr); }
+  .spx-st__front.spx-st__cards.is-out { gap: 22px; }
   .spx-col1 { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 24px; align-items: start; }
   .spx-st__body { display: block; }
   .spx-st__front, .spx-st__steps { transition: none; }
@@ -219,6 +242,9 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
   .spx-st__k .rf-howbtn { margin-left: auto; padding: 0 11px; }
   .spx-st__snap { order: 3; width: 100%; margin-left: 0; justify-content: space-between; padding: 10px 14px; border-radius: 14px; background: rgb(255 255 255 / 0.06); }
   .spx-st__front { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .spx-st__front.spx-st__cards { padding: 14px 14px 18px; gap: 12px; }
+  .spx-st__cards .spx-st__t { padding: 6px 4px 0; }
+  .spx-cards.sdx { margin-top: 32px; }
   .spx-st__art { grid-row: 1; margin: -6px 0 -18px; }
   .spx-st__art .spx-coins { width: 190px; }
   .spx-st__t { padding: 4px 18px 22px; }

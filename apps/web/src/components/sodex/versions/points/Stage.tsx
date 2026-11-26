@@ -1,20 +1,28 @@
 /**
  * SoPoints, version "Stage" (localhost only, owner 2026-11-26). The Referrals page's own layout carried over: a dark
- * stage with the wallet's balance and tier on SoDEX's coin (signed out: this week's 900,000 and the one sign-in),
- * "How it works" swapping three steps into its place, and the bar under it with the week and every multiplier. Under the
- * stage, one ground: SoDEX's own tier card and the figures, the weeks as bars or a calendar, and what earns more, ranked.
+ * stage, "How it works" swapping three steps into its place, and the multipliers in the bar under it.
+ *
+ * Owner 2026-11-26: "Stage as a base, i need the original sopoints cards designs. I also want the hero element from
+ * season implemented, points over season. Generally all analytics from original should be displayed somehow." So the
+ * stage carries SoDEX's own two cards exactly as Original draws them (SoPointsMine: the tier card, and the season card
+ * with the invite code and link); under it Season's tier ladder (the wallet's place, its pace, the weeks left); then the
+ * desk (this week so far, the weeks as bars or a calendar, what earns more); then Original's analytics in Original's
+ * cards: points over the season, where the points come from, and the cost per point against the venue's.
  */
 import { useId, useMemo, useState, type CSSProperties } from 'react';
 import type { Eip1193Provider } from '../../../../wallet';
 import { WE_GET, YOU_GET } from '../../../../onboarding/referralRules';
 import { TIERS } from '../../../../points';
-import { Icon, IconTile, ProgressBar, Segmented, Skeleton, Slider } from '../../../bots/kit/kit';
+import { Icon, IconTile, Segmented, Skeleton, Slider } from '../../../bots/kit/kit';
+import { Card } from '../../../portfolio/parts';
 import { HeatGrid } from '../../../referrals/CreditCalendar';
 import { pointsGrid } from '../../../referrals/calendar';
-import { SODEX_POOL_SHOWN, TIER_STYLE } from '../../SoPointsMine';
+import { SODEX_POOL_SHOWN, SeasonCard, SoPointsCard, TIER_STYLE } from '../../SoPointsMine';
+import { DifficultyChart, PointsMix } from '../../pointsCharts';
+import { Climb, Ladder } from './Season';
 import {
-  BarsLegend, BoostedMarkets, Clock, DASH, EstPill, SignInButton, SquadLadder, SquadTracks, TierCoins, TierName, WeekBars, WeekPill, WeeksTable,
-  STEPS, bandOf, boostedOf, coefText, levers, logScale, money, plusPct, pts, ptsEst, scoreOf, tierProgress, usePointsView, useSignIn, weekday,
+  BarsLegend, BoostedMarkets, Clock, DASH, EstPill, SignInButton, SquadLadder, SquadTracks, TierName, WeekBars, WeekPill, WeeksTable,
+  STEPS, bandOf, boostedOf, coefText, levers, logScale, money, plusPct, pts, ptsEst, scoreOf, tierProgress, useSignIn, usePointsView, weekday,
   type BarMetric, type Plan, type PointsView,
 } from './shared';
 
@@ -25,6 +33,7 @@ export function Stage({ address, provider, sample }: { address: string | null; p
   const [how, setHow] = useState(false);
   const [toggled, setToggled] = useState(false);
   const glow = v.mine ? TIER_STYLE[v.tier]!.border : '#00b481';
+  const share = boostedShare(v);
   return (
     <div className="tf bots-page rf-page sx spx">
       <div className="bots-col">
@@ -36,23 +45,28 @@ export function Stage({ address, provider, sample }: { address: string | null; p
             <button type="button" className="rf-howbtn" aria-expanded={how} aria-controls={id} onClick={() => { setHow(!how); setToggled(true); }}>
               {how ? 'Close' : 'How it works'}<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={how ? 'm4.5 4.5 7 7m0-7-7 7' : 'm4 6 4 4 4-4'} /></svg>
             </button>
-            <span className="spx-st__snap"><span>Next snapshot</span><Clock to={week ? week.nextWeekStartTime * 1000 : null} /></span>
           </div>
           <div className="spx-st__body">
-            <div className="spx-st__front" aria-hidden={how} {...(how ? { inert: '' } : {})}>
-              <div className="spx-st__t">{v.mine ? <Balance v={v} /> : <Pool v={v} />}</div>
-              <div className="spx-st__art"><TierCoins tier={v.mine && v.total !== null ? v.tier : null} next={v.mine ? v.next?.name ?? null : null} /></div>
+            {/* SoDEX's own cards, as Original draws them; the season card carries the pool, the snapshot clock and the invite code. */}
+            <div className={`spx-st__front spx-st__cards${v.mine ? '' : ' is-out'}`} aria-hidden={how} {...(how ? { inert: '' } : {})}>
+              {v.mine ? <SoPointsCard s={v.s} /> : <SignInFront v={v} />}
+              <SeasonCard week={week} address={address} settled={c.publicSettled} />
             </div>
             <div className="spx-st__steps" id={id} aria-hidden={!how} {...(how ? {} : { inert: '' })}><How v={v} /></div>
           </div>
-          <Pays v={v} />
+          <Multipliers v={v} />
         </section>
+
+        {/* Season's hero: the tier ladder with the wallet's place, its pace and the season's weeks left. */}
+        <Ladder v={v} figures={false} />
 
         <div className="spx-desk">
           {v.mine ? <MineCol v={v} /> : <PublicCol v={v} />}
           <section className="spx-panel" aria-label={v.mine ? 'Your weeks' : 'What a week earns'}>{v.mine ? <WeeksPanel v={v} /> : <WeekEstimate />}</section>
           <EarnMore v={v} />
         </div>
+
+        {v.mine && <Analytics v={v} />}
 
         <div className="spx-duo">
           <section className="sx-sec spx-box" aria-label="Squad boost">
@@ -61,7 +75,15 @@ export function Stage({ address, provider, sample }: { address: string | null; p
             {c.boost && <p className="spx-note">$1 traded by a squad is 1 energy, counted over the last {c.boost.windowRounds} weeks.</p>}
           </section>
           <section className="sx-sec spx-box" aria-label="Boosted markets">
-            <header className="sx-sec__h"><div><h2>Boosted markets</h2><p>{c.weights ? `Count ${coefText(boostedOf(c).coef)} until ${new Date(c.weights.round.end_ts_ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}.` : 'This round’s markets.'}</p></div></header>
+            <header className="sx-sec__h">
+              <div>
+                <h2>Boosted markets</h2>
+                <p>
+                  {c.weights ? `Count ${coefText(boostedOf(c).coef)} until ${new Date(c.weights.round.end_ts_ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}.` : 'This round’s markets.'}
+                  {share && ` ${share.pct}% of your futures volume in ${share.week} was on boosted markets.`}
+                </p>
+              </div>
+            </header>
             <BoostedMarkets c={c} />
           </section>
         </div>
@@ -77,36 +99,23 @@ export function Stage({ address, provider, sample }: { address: string | null; p
   );
 }
 
-/* --------------------------------------------------------------------------------------- the stage ----- */
-
-function Balance({ v }: { v: PointsView }) {
-  const prog = tierProgress(v.total);
-  const sum = v.s.summary;
-  const last = v.last;
-  if (v.total === null) return v.s.loading ? <div className="spx-st__wait"><Skeleton className="spx-skel-xl" /><Skeleton className="spx-skel-md" /></div> : <p className="spx-st__line">{v.s.error ?? 'SoDEX did not answer.'}</p>;
-  return (
-    <>
-      <TierName tier={v.tier} className="is-lead" />
-      <div className="spx-st__total"><b>{pts(v.total)}</b><span>SoPoints</span></div>
-      <p className="spx-st__line">
-        {sum?.rank ? <>Rank <b>#{pts(sum.rank)}</b>{sum.totalUser ? ` of ${pts(sum.totalUser)}` : ''}</> : null}
-        {last && last.split.week.points > 0 && <><i aria-hidden="true" />{last.split.week.weekName} <b className="is-pos">+{pts(last.split.week.points)}</b></>}
-      </p>
-      {prog?.nxt ? (
-        <div className="spx-st__next">
-          <div><span><b>{pts(prog.left)}</b> to <TierName tier={prog.nxt.name} /></span><span className="sx-num">{pts(prog.nxt.at)}</span></div>
-          <ProgressBar value={prog.share} max={1} size="sm" color={TIER_STYLE[v.tier]!.chip} label={`Progress to ${prog.nxt.name}`} valueText={`${pts(v.total)} of ${pts(prog.nxt.at)}`} />
-        </div>
-      ) : <p className="spx-st__line">Top tier reached.</p>}
-    </>
-  );
+/** The share of the last scored Layer 1 week's futures volume that SoDEX weighted as boosted (its weight details). */
+function boostedShare(v: PointsView): { pct: number; week: string } | null {
+  if (!v.mine) return null;
+  const w = [...v.scored].reverse().find((x) => x.season === 'L1')?.split.week;
+  if (!w || !(w.futuresVolume > 0)) return null;
+  const raw = (w.futuresVolumeWeightDetails ?? []).reduce((t, d) => t + (Number(d.rawVolumeU) || 0), 0);
+  return { pct: Math.round((raw / w.futuresVolume) * 100), week: w.weekName };
 }
 
-function Pool({ v }: { v: PointsView }) {
+/* --------------------------------------------------------------------------------------- the stage ----- */
+
+/** Signed out, beside the season card: what a sign-in shows, and the one button. */
+function SignInFront({ v }: { v: PointsView }) {
   const a = useSignIn(v.c);
   return (
-    <>
-      <h2>{pts(SODEX_POOL_SHOWN)} SoPoints<br />split this week.</h2>
+    <div className="spx-st__t">
+      <h2>Your tier, your rank and every week.</h2>
       <div className="rf-bar is-big">
         <div className="rf-bar__in">
           <span className={`rf-linktext is-empty${a.connect && !v.c.address ? ' is-connect' : ''}`}>{v.c.address ? 'Sign SoDEX’s message once to see yours' : 'Connect a wallet to see yours'}</span>
@@ -114,7 +123,7 @@ function Pool({ v }: { v: PointsView }) {
         </div>
       </div>
       <p className="spx-st__fine">{a.error ? <span className="neg" role="alert">{a.error}</span> : 'Free: no transaction, no gas, no funds move.'}</p>
-    </>
+    </div>
   );
 }
 
@@ -157,26 +166,18 @@ function How({ v }: { v: PointsView }) {
   );
 }
 
-function Pays({ v }: { v: PointsView }) {
-  const { c, week } = v;
+/** The bar under the stage: what multiplies points. The week's pool and times are on the season card above it. */
+function Multipliers({ v }: { v: PointsView }) {
+  const { c } = v;
   const b = boostedOf(c);
-  const src = WE_GET[0]!.source.url;
   return (
-    <div className="rf-pays spx-pays">
-      <div className="rf-pays__g is-you">
-        <h3>This week</h3>
-        <ul>
-          <li><b>{pts(SODEX_POOL_SHOWN)}</b><span>SoPoints split</span></li>
-          <li><b>{week ? weekday(week.nextWeekStartTime) : DASH}</b><span>Snapshot, your time</span></li>
-          <li><b>{week ? weekday(week.distributionTime) : DASH}</b><span>Points land</span></li>
-        </ul>
-      </div>
+    <div className="rf-pays spx-pays is-one">
       <div className="rf-pays__g">
         <h3>Multipliers</h3>
         <ul>
           <li><b>{c.boost ? plusPct(c.boost.maxTotalBonusPct) : DASH}</b><span>Squad boost, at most</span></li>
           <li><b>{b.rows.length ? coefText(b.coef) : DASH}</b><span>{b.rows.length} boosted markets</span></li>
-          <li><b>25%</b><a href={src} target="_blank" rel="noopener noreferrer" title={WE_GET[0]!.line}><img src="/logos/brand/sodex.svg" width="15" height="15" alt="SoDEX" />Of invitees’ points</a></li>
+          <li><b>25%</b><a href={WE_GET[0]!.source.url} target="_blank" rel="noopener noreferrer" title={WE_GET[0]!.line}><img src="/logos/brand/sodex.svg" width="15" height="15" alt="SoDEX" />Of invitees’ points</a></li>
           <li><b>+5%</b><a href={YOU_GET[0]!.source.url} target="_blank" rel="noopener noreferrer" title={YOU_GET[0]!.line}><img src="/logos/brand/sodex.svg" width="15" height="15" alt="SoDEX" />For the invitee</a></li>
         </ul>
       </div>
@@ -191,6 +192,7 @@ function MineCol({ v }: { v: PointsView }) {
   const traded = [...v.scored].reverse().find((w) => w.split.dollarsPerPoint !== null) ?? null;
   const s1 = v.s.s1.reduce((t, w) => t + (w.pointsStatus === 'CONFIRMED' ? w.points : 0), 0);
   const live = v.live;
+  const hold = live ? (live.wealthTvl ?? 0) + (live.vaultHolding ?? 0) : 0;
   return (
     <div className="spx-col1">
       {/* The week in progress, SoDEX's own figures so far; its points are not estimated (Original veils that "Coming soon"). */}
@@ -201,7 +203,7 @@ function MineCol({ v }: { v: PointsView }) {
           <div><dt>Volume</dt><dd>{live ? money((live.futuresVolume || 0) + (live.spotVolume || 0)) : DASH}</dd></div>
           <div><dt>Open interest</dt><dd>{live?.oi ? money(live.oi) : DASH}</dd></div>
         </dl>
-        <div><span>{live ? `Squad ${plusPct(live.totalBonusPct ?? 0)}${(live.wealthTvl ?? 0) + (live.vaultHolding ?? 0) >= 1 ? ` · holding ${money((live.wealthTvl ?? 0) + (live.vaultHolding ?? 0))}` : ''}` : v.s.loading ? 'Reading…' : DASH}</span><span>{live?.weekName ?? DASH}</span></div>
+        <div><span>{live ? `Squad ${plusPct(live.totalBonusPct ?? 0)} · ${hold >= 1 ? `holding ${money(hold)}` : 'no holdings'}` : v.s.loading ? 'Reading…' : DASH}</span><span>{live?.weekName ?? DASH}</span></div>
       </section>
       <dl className="rf-kv">
         <div><dt>{last ? `${last.split.week.weekName}, last scored` : 'Last scored week'}</dt><dd className="pos">{last ? `+${pts(last.split.week.points)}` : DASH}</dd></div>
@@ -254,16 +256,16 @@ function WeeksPanel({ v }: { v: PointsView }) {
   return (
     <>
       <div className="rf-earn__bar">
-        <Segmented<BarMetric> label="Show" value={metric} onChange={setMetric} options={[{ value: 'points', label: 'Points' }, { value: 'rank', label: 'Rank' }]} />
+        <Segmented<BarMetric> label="Show" value={metric} onChange={setMetric} options={[{ value: 'points', label: 'Points' }, { value: 'mix', label: 'Mix' }, { value: 'invited', label: 'Invited' }, { value: 'rank', label: 'Rank' }]} />
         {metric === 'points' && <Segmented<Show> label="As" value={show} onChange={setShow} options={[{ value: 'chart', label: 'Chart' }, { value: 'calendar', label: 'Calendar' }]} />}
       </div>
       <div className="rf-earn__figs">
         <div className="is-points" title="Every week SoDEX scored, both seasons (Closed Alpha not included)"><span><i />Scored weeks</span>{v.s.loading && !v.scored.length ? <Skeleton className="rf-skel-big" /> : <b>{pts(all)}</b>}</div>
         <div className="is-referral"><span><i />From invitees</span>{v.s.loading && !v.scored.length ? <Skeleton className="rf-skel-big" /> : <b>{pts(invited)}</b>}</div>
       </div>
-      {metric === 'rank' ? <><BarsLegend metric="rank" /><WeekBars weeks={v.scored} metric="rank" /></>
-        : show === 'chart' ? <><BarsLegend /><WeekBars weeks={v.scored} /></>
-        : <HeatGrid caption="SoPoints by week" step="week" grid={(cols, offset) => pointsGrid(v.all, cols, offset)} />}
+      {metric === 'points' && show === 'calendar'
+        ? <HeatGrid caption="SoPoints by week" step="week" grid={(cols, offset) => pointsGrid(v.all, cols, offset)} />
+        : <><BarsLegend metric={metric} /><WeekBars weeks={v.scored} metric={metric} /></>}
     </>
   );
 }
@@ -318,7 +320,31 @@ function EarnMore({ v }: { v: PointsView }) {
           </li>
         ))}
       </ul>
+      {/* Original's "Steady beats big" (soPointsV2 earnTips), the same fit. */}
+      <p className="spx-note">Steady beats big: twice the volume earned about 1.6× the points in the weeks we measured, so trading every week earns more than the same volume in one.</p>
       <a className="spx-earn__go" href="/trade">Trade on ValueDesk<Icon name="arrowRight" size={14} /></a>
     </section>
+  );
+}
+
+/* ------------------------------------------------------------------------- Original's analytics ----- */
+
+/**
+ * The analytics only Original had, in Original's own cards: points over the season (Season's chart, tier lines behind),
+ * where the points come from (pointsCharts PointsMix) and the cost per point against the venue's (DifficultyChart).
+ * With the Sample on, the cost chart reads no trade history: the wallet's side is the sample's, the venue's side SoDEX's.
+ */
+function Analytics({ v }: { v: PointsView }) {
+  const pool = v.week?.weekPoolPoints ?? null;
+  return (
+    <div className="pf sdx spx-cards">
+      <div className="spx-cards__row">
+        <Card title="Points over the season" action={<span className="pf-unit">{v.scored.length} scored weeks</span>}>
+          <Climb weeks={v.scored} />
+        </Card>
+        <PointsMix s={v.s} />
+      </div>
+      <DifficultyChart s={v.s} pool={pool} address={v.sample ? null : v.c.address} />
+    </div>
   );
 }

@@ -145,8 +145,6 @@
 .sxb-stage.is-how .sxb-stage__front { opacity: 0; visibility: hidden; transform: scale(0.98); }
 .sxb-stage:not(.is-how) .sxb-stage__front { transition-delay: 0.08s, 0.08s, 0s; }
 .sxb-stage.is-how .sxb-stage__light { opacity: 0.4; }
-.sxb-stage__note { display: block; padding: 0 36px 16px; font-size: 12.5px; color: var(--tf-faint); }
-.sxb-stage__note:empty { display: none; }
 .rf-page .rf-pays.sxb-pays { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .rf-pays.sxb-pays .is-you ul { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
@@ -402,7 +400,6 @@
   .sxb-how { grid-template-columns: minmax(0, 1fr); }
   .sxb-how > li, .sxb-how > li:first-child { padding: 0; border-left: 0; }
   .sxb-how > li + li { padding-top: 18px; border-top: 1px solid rgb(255 255 255 / 0.1); }
-  .sxb-stage__note { padding: 0 18px 14px; }
   .rf-pays.sxb-pays .is-you ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sxb-range__row, .sxb-range__axis, .sxb-range.is-compact .sxb-range__row, .sxb-range.is-compact .sxb-range__axis { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
   .sxb-range__row { padding: 10px 0; }
