@@ -163,7 +163,8 @@ html[data-theme='light'] .rf-pass > svg { stroke: #fafafa; }
 .rf-cal__say b { margin-left: auto; font: 500 15px var(--font-num); color: var(--tf-fg); }
 
 /* ---------------------------------------------------------------------------------------------- 2 gift ----- */
-.rf-g__light { position: absolute; inset: 0; background: radial-gradient(46% 78% at 77% 46%, rgba(0, 180, 129, 0.5), transparent 70%), radial-gradient(50% 70% at 12% 0%, rgba(68, 1, 84, 0.45), transparent 70%); }
+/* The green light behind the present; no purple in the top left (owner 2026-11-26: "purple isnt our color"). */
+.rf-g__light { position: absolute; inset: 0; background: radial-gradient(46% 78% at 77% 46%, rgba(0, 180, 129, 0.5), transparent 70%); }
 .rf-g__ribs { position: absolute; inset: 0; z-index: 1; background: repeating-linear-gradient(90deg, rgb(255 255 255 / 0.055) 0 1px, transparent 1px 22px, rgb(0 0 0 / 0.16) 34px 44px); mask-image: linear-gradient(90deg, transparent 34%, #000 60%); }
 .rf-g > :not(.rf-g__light):not(.rf-g__ribs) { position: relative; z-index: 2; }
 .rf-g__t { display: flex; flex-direction: column; padding: 28px 0 28px 36px; }

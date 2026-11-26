@@ -36,7 +36,10 @@ export interface Appearance {
   pageGlow2Alpha: number;
 }
 
-/** The home page's ink and heat (owner 2026-11-25; before: the owner's settings of 2026-10-26). */
+/**
+ * The home page's ink (owner 2026-11-25; before: the owner's settings of 2026-10-26). The page's light in the top left is
+ * ValueDesk's green and faint (owner 2026-11-26: "purple isnt our color and its too much"; it was #440154 at 20%).
+ */
 export const APPEARANCE_DEFAULT: Appearance = {
   tint: '#101012',
   tintAlpha: 78,
@@ -51,8 +54,8 @@ export const APPEARANCE_DEFAULT: Appearance = {
   trade: true,
   panelAlpha: 62,
   panelBlur: 25,
-  pageGlow: '#440154',
-  pageGlowAlpha: 20,
+  pageGlow: '#00b481',
+  pageGlowAlpha: 6,
   pageGlow2: '#3b528b',
   pageGlow2Alpha: 20,
 };
@@ -75,8 +78,8 @@ const LIGHT_GLASS: Appearance = {
   trade: true,
   panelAlpha: 58,
   panelBlur: 30,
-  pageGlow: '#ddcfe6',
-  pageGlowAlpha: 60,
+  pageGlow: '#d4ebe1',
+  pageGlowAlpha: 50,
   pageGlow2: '#cdd7ec',
   pageGlow2Alpha: 55,
 };
@@ -85,12 +88,18 @@ const LIGHT_GLASS: Appearance = {
 const KEY = 'vs.appearance.2';
 const listeners = new Set<() => void>();
 
+/** The page light's old default: a browser that kept it (any saved setting stores every value) follows the new one;
+ * a light someone picked themself stays. */
+const RETIRED_PAGE_GLOW = '#440154';
+
 function load(): Appearance {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Partial<Appearance> | null;
     if (!raw || typeof raw !== 'object') return APPEARANCE_DEFAULT;
     const out = { ...APPEARANCE_DEFAULT };
+    const retired = typeof raw.pageGlow === 'string' && raw.pageGlow.toLowerCase() === RETIRED_PAGE_GLOW;
     for (const k of Object.keys(APPEARANCE_DEFAULT) as Array<keyof Appearance>) {
+      if (retired && (k === 'pageGlow' || k === 'pageGlowAlpha')) continue;
       if (typeof raw[k] === typeof APPEARANCE_DEFAULT[k]) (out as Record<string, unknown>)[k] = raw[k];
     }
     return out;
