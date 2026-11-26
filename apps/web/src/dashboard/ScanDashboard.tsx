@@ -17,7 +17,7 @@
  * never yours, and the order and transfer controls key off exactly that flag.
  * There is no path from this page to a signed request.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Dashboard } from './Dashboard';
 import { PORTFOLIO_DASHBOARD } from './layout';
 import {
@@ -74,7 +74,54 @@ export interface ScanContext extends PortfolioContext {
   scanError: string | null;
 }
 
+/*
+ * VERSIONS, LOCALHOST ONLY (owner 2026-11-26: "localhost only with multiple versions and the switch ... completely
+ * redesign the scan page ... Do not delete the original keep it in the switch"). A pill at the foot of the page picks
+ * the version (kept in this browser); the new ones are components/scan/versions/, loaded only on localhost. A build
+ * has neither the pill nor their code (`DEV` is false there, so the import below is dropped) and shows the original.
+ */
+const DEV = import.meta.env.DEV;
+const VERSION_KEY = 'vs.dev.scan.version';
+const ScanVersions = DEV ? lazy(() => import('../components/scan/versions/ScanVersions')) : null;
+// The pill's own look, also while the original is on screen (the versions' stylesheet comes with their chunk).
+if (DEV) void import('../components/scan/versions/switch.css');
+const VERSION_NAMES = ['Original', 'Profile', 'Venues', 'Desk'] as const;
+
+function storedVersion(): number {
+  if (!DEV) return 0;
+  try {
+    const n = Number(localStorage.getItem(VERSION_KEY));
+    return Number.isInteger(n) && n >= 0 && n < VERSION_NAMES.length ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function ScanDashboard(props: Omit<PortfolioProps, 'address'> & { address: string | null }) {
+  const [version, setVersion] = useState(storedVersion);
+  if (!DEV || !ScanVersions) return <ScanOriginal {...props} />;
+  const choose = (n: number) => {
+    setVersion(n);
+    try { localStorage.setItem(VERSION_KEY, String(n)); } catch { /* this tab only */ }
+  };
+  return (
+    <>
+      {version === 0 ? <ScanOriginal {...props} /> : (
+        <Suspense fallback={null}><ScanVersions version={version} props={props} /></Suspense>
+      )}
+      <nav className="rf-switch sx-switch" aria-label="Scan page versions" data-no-i18n="">
+        {VERSION_NAMES.map((name, i) => (
+          <button key={name} type="button" aria-pressed={version === i} className={version === i ? 'is-on' : ''} onClick={() => choose(i)}>
+            <b>{i === 0 ? 'O' : i}</b><span>{name}</span>
+          </button>
+        ))}
+      </nav>
+    </>
+  );
+}
+
+/** The page as it is live: unchanged, the switch's first entry. */
+function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string | null }) {
   const connected = props.address;
 
   /*
