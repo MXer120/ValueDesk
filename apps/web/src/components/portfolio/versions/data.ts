@@ -15,7 +15,7 @@ import { pnlAt, sliceCurve, useVolume7d, type PortfolioContext } from '../../Por
 import type { CurveWindow } from '../parts';
 import { asRate, use24h, useSummary } from '../PortfolioPage';
 import { useWealth, type WealthState } from '../useWealth';
-import type { PortfolioSummary } from '../summary';
+import { summarize, type PortfolioSummary } from '../summary';
 import { api } from '../../../api';
 import { useAccountResource } from '../../../accountFeeds';
 import { useAsync } from '../../../hooks';
@@ -99,9 +99,15 @@ function useRankedCount(enabled: boolean): number | null {
   return Number.isFinite(t) && t > 0 ? t : null;
 }
 
+/** Nothing known: what the page shows with no wallet. */
+const NONE = summarize({ perps: null, spot: null, evm: null, wealth: null, venueTotal: null });
+
 export function usePfData(c: PortfolioContext): PfData {
   const w = useWealth(c.address, c.refreshToken);
-  const { summary: s, evmRows, evmLoading } = useSummary(c, w);
+  const { summary, evmRows, evmLoading } = useSummary(c, w);
+  // The shared account feed keeps its last read when the address goes away (a wallet disconnected, or the switch's
+  // view of another wallet ended): with no wallet nothing is known, whatever the feed still holds.
+  const s = c.address ? summary : NONE;
   const vol7d = useVolume7d(c.address);
   const h24 = use24h(c);
   const botsOpen = useBotsAccess(c.address);

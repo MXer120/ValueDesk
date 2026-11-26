@@ -112,7 +112,7 @@ export default function V3Wallet({ c, provider, onOpenMarket, onOpenTab }: Versi
               </div>
               <AllocBar parts={d.parts} size="sm" />
             </section>
-            <MoneyKeys c={c} onSwap={() => setSwap(true)} />
+            <div className="pfv3-keys"><MoneyKeys c={c} onSwap={() => setSwap(true)} /></div>
 
             {/* The accounts, opened in place */}
             <Shell className="pfv3-accounts">
@@ -123,6 +123,12 @@ export default function V3Wallet({ c, provider, onOpenMarket, onOpenTab }: Versi
                 </AllocLegend>
               </Panel>
             </Shell>
+
+            <Shell className="pfv3-fees">
+              <ShellHeader title="Fees" />
+              <Panel className="pfv-pad"><FeeRates c={c} fees={d.fees} /></Panel>
+            </Shell>
+            {!c.readOnly && <div className="pfv3-margin"><PortfolioMargin address={c.address} provider={provider} /></div>}
           </div>
 
           <div className="pfv3-right">
@@ -149,7 +155,7 @@ export default function V3Wallet({ c, provider, onOpenMarket, onOpenTab }: Versi
             </Shell>
 
             {/* What the money can do */}
-            <Shell>
+            <Shell className="pfv3-earn">
               <ShellHeader title="Earn and automate" />
               <Panel className="pfv-pad0">
                 <ul className="pfv3-offers">
@@ -167,17 +173,12 @@ export default function V3Wallet({ c, provider, onOpenMarket, onOpenTab }: Versi
             </Shell>
 
             {/* What trading did */}
-            <Shell>
+            <Shell className="pfv3-trading">
               <ShellHeader title="Trading" aside={<EngineSwitch value={engine} onChange={setEngine} />} />
               <div className="pfv3-range"><RangeSwitch value={sumRange} onChange={setSumRange} /></div>
               <Panel className="pfv-pad"><TradeSummary c={c} engine={engine} range={sumRange} /></Panel>
             </Shell>
 
-            <Shell>
-              <ShellHeader title="Fees" />
-              <Panel className="pfv-pad"><FeeRates c={c} fees={d.fees} /></Panel>
-            </Shell>
-            {!c.readOnly && <PortfolioMargin address={c.address} provider={provider} />}
           </div>
         </div>
 

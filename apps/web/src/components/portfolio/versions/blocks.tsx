@@ -27,7 +27,6 @@ import { applyForBeta } from '../../../beta/access';
 import { copyRows, getLiveCopy, subscribeLiveCopy } from '../../../copy/live';
 import { lazyChunk } from '../../../lazyPage';
 import type { ChartPoint } from '../../../performance';
-import type { WealthState } from '../useWealth';
 import type { Bucket, PfData, Part } from './data';
 
 const CopiesDialog = lazyChunk(() => import('../../copy/CopiesDialog'));
@@ -92,7 +91,7 @@ export function MoneyKeys({ c, onSwap }: { c: PortfolioContext; onSwap: () => vo
       <span className="pfv-key__t">{label}</span>
     </button>
   );
-  if (!c.address) return <div className="pfv-keys">{key('Connect', <Icon name="wallet" size={18} />, requestConnect, false, true)}</div>;
+  if (!c.address) return <Button variant="primary" size="md" icon="wallet" className="pfv-keys__connect" onClick={requestConnect}>Connect wallet</Button>;
   return (
     <div className="pfv-keys">
       {key('Deposit', <Arrow dir="down" />, requestDeposit, false, true)}
@@ -301,7 +300,8 @@ export interface Health {
 
 /** SoDEX's own account state, decoded by Portfolio.tsx; nothing is computed here but sums and one ratio. */
 export function health(c: PortfolioContext): Health {
-  const a = c.model.account;
+  // No wallet, nothing known (the shared feed can still hold the last wallet's read).
+  const a = c.address ? c.model.account : null;
   const inUse = a ? a.crossMargin + a.isolatedMargin + a.orderMargin : null;
   return {
     available: a ? a.availableMargin : null,
@@ -309,13 +309,13 @@ export function health(c: PortfolioContext): Health {
     inUse,
     usedShare: a && inUse !== null && a.accountValue > 0 ? Math.min(1, inUse / a.accountValue) : null,
     ratio: a ? a.maintenanceRatio : null,
-    unrealized: c.model.unrealized,
-    positions: c.model.positions.length,
-    orders: c.model.orders?.count ?? 0,
-    ordersUsd: c.model.orders ? c.model.orders.notional : null,
-    leverage: c.model.exposure?.grossLeverage ?? null,
-    long: c.model.exposure?.long ?? null,
-    short: c.model.exposure?.short ?? null,
+    unrealized: a ? c.model.unrealized : null,
+    positions: a ? c.model.positions.length : 0,
+    orders: a ? c.model.orders?.count ?? 0 : 0,
+    ordersUsd: a && c.model.orders ? c.model.orders.notional : null,
+    leverage: a ? c.model.exposure?.grossLeverage ?? null : null,
+    long: a ? c.model.exposure?.long ?? null : null,
+    short: a ? c.model.exposure?.short ?? null : null,
   };
 }
 

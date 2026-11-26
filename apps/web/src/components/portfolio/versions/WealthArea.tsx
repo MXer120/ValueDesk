@@ -312,15 +312,15 @@ export function WealthArea(p: WealthProps & { head?: ReactNode }) {
         <Panel className="pfv-wealth__chart"><WealthChart address={p.address} /></Panel>
       </Shell>
       <Shell>
-        <ShellHeader icon="coins" title="Your funds" subtitle="Wherever the shares sit: Spot, Perps margin or your wallet" />
+        <ShellHeader icon="coins" title="Your funds" subtitle="Wherever the shares sit" />
         <Panel className="pfv-pad0"><Holdings {...p} /></Panel>
       </Shell>
       <Shell>
-        <ShellHeader icon="clock" title="Requests" subtitle="Subscriptions and redemptions SoDEX has not settled yet, and everything before" />
+        <ShellHeader icon="clock" title="Requests" subtitle="What SoDEX has not settled yet, and before" />
         <Panel className="pfv-pad0"><Ledger w={p.w} address={p.address} refreshToken={p.refreshToken} /></Panel>
       </Shell>
       <Shell>
-        <ShellHeader icon="layers" title="All funds" subtitle="SoDEX's live returns. Yield products show their 7-day APY." />
+        <ShellHeader icon="layers" title="All funds" subtitle="SoDEX's live returns" />
         <Panel className="pfv-pad0"><FundShelfList {...p} /></Panel>
       </Shell>
     </div>
