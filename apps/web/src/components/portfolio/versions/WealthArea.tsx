@@ -134,14 +134,26 @@ function Act({ a, f, name, side, onOpenMarket, setTarget, readOnly }: {
   return <StatusPill size="sm" title={a.nextAt ? `Next open ${dayTime(a.nextAt)}` : undefined}>{a.why}</StatusPill>;
 }
 
-export function Holdings({ w, address, provider, onOpenMarket, onDone, readOnly, onSeeFunds }: Omit<WealthProps, 'value' | 'slp' | 'refreshToken'> & { onSeeFunds?: () => void }) {
+/**
+ * What the wallet holds in Wealth. `showFunds`: with nothing held, the funds on offer are listed right here (owner
+ * 2026-11-26: "no see your funds button, show list on portfolio too"), not behind a button.
+ */
+export function Holdings({ w, address, provider, onOpenMarket, onDone, readOnly, showFunds }: Omit<WealthProps, 'value' | 'slp' | 'refreshToken'> & { showFunds?: boolean }) {
   const m = useMasks();
   const statuses = useTradingStatuses(w.holdings ? w.holdings.map((h) => h.fund).filter((f): f is WealthFund => !!f) : null);
   const [target, setTarget] = useState<WealthSheetTarget | null>(null);
   if (!address) return <EmptyState compact icon="wallet" title="No wallet connected" description="Funds you hold show here." actions={<Button variant="secondary" onClick={requestConnect}>Connect</Button>} />;
   if (w.error && !w.holdings) return <ReadFailed what="Wealth holdings" error={w.error} onRetry={w.refresh} />;
   if (!w.holdings) return <div className="pfv-skels">{[0, 1, 2].map((i) => <Skeleton key={i} className="pfv-skel-row" />)}</div>;
-  if (w.holdings.length === 0) return <EmptyState compact icon="coins" title="No Wealth holdings" description="Funds you hold or have requested show here." actions={onSeeFunds && <Button variant="secondary" onClick={onSeeFunds}>See the funds</Button>} />;
+  if (w.holdings.length === 0) {
+    if (!showFunds) return <EmptyState compact icon="coins" title="No Wealth holdings" description="Funds you hold or have requested show here." />;
+    return (
+      <div className="pfv-hold__none">
+        <p className="pfv-quiet">No Wealth holdings yet. These funds are open to you:</p>
+        <FundShelfList w={w} address={address} provider={provider} onOpenMarket={onOpenMarket} onDone={onDone} readOnly={readOnly} />
+      </div>
+    );
+  }
   return (
     <>
       <ul className="pfv-hold">

@@ -1549,3 +1549,19 @@ button.oe-select[aria-expanded='true'] {
 .oe-pop__lockcta:hover { background: color-mix(in srgb, var(--text) 10%, var(--bg-elevated)); }
 .oe-pop__lockcta:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .oe-pop__lockcta .dv-devtag { margin: 0; }
+
+/* An order that would use margin copy trading and bots set aside (bots/ReserveWarning.tsx): a warning above the
+   button, which stays pressable. */
+.oe-reserve {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 32%, transparent);
+  color: var(--text); font-size: var(--fs-xs); line-height: 1.4;
+  animation: oe-reserve-in 160ms var(--ease-out, ease-out);
+}
+.oe-reserve__ic { flex: none; margin-top: 1px; color: var(--warn); }
+.oe-reserve__t { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.oe-reserve__t b { color: var(--warn); font-weight: 600; }
+.oe-reserve__t span { color: var(--muted); }
+@keyframes oe-reserve-in { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .oe-reserve { animation: none; } }

@@ -223,7 +223,7 @@ button.pfv-legend__row:hover { background: rgb(var(--ink) / 0.045); }
 .pfv-shelf__bar { padding: 12px 16px 4px; }
 .pfv a.tf-btn { text-decoration: none; }
 /* SoDEX's marks and some fund logos are white: on the light theme they sit on a dark disc (as on today's page). */
-html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv1-offer__ic, .pfv2-offers__ic, .pfv3-offers__ic) img { background: #17181a; border-radius: 50%; }
+html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv3-offers__ic) img { background: #17181a; border-radius: 50%; }
 
 /* --- the switch (localhost only) -------------------------------------------------------------------------- */
 .pfv-switch { position: fixed; bottom: 18px; left: 50%; z-index: 60; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: calc(100vw - 24px); transform: translateX(-50%); }
@@ -244,125 +244,16 @@ html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv1-offer__ic, 
 .pfv-switch__watch input::placeholder { color: #8a8a87; font-family: var(--font-text); }
 .pfv-switch__watch button { border-radius: 12px; }
 
-/* ============================================================================================================
- * 2 OVERVIEW: one calm column on the home page's ground. Few boxes: two large grounds and the tiles.
- * ========================================================================================================== */
-.pfv1 .bots-col { max-width: 1240px; gap: 16px; }
-.pfv1-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 4px 4px 0; }
-.pfv1-head__t { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.pfv1-head h1 { font-size: 30px; font-weight: 600; line-height: 36px; }
-.pfv1-pages { align-self: flex-start; }
-.pfv1-h2 { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 15px; font-weight: 600; line-height: 20px; }
+.pfv3-band__bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 8px; }
+.pfv3-band__body { display: flex; flex-direction: column; height: 480px; padding: 0; overflow: hidden; }
 
-.pfv1-hero { display: grid; grid-template-columns: 380px minmax(0, 1fr); overflow: hidden; border-radius: 24px; background: var(--pfv-ground); box-shadow: inset 0 0 0 1px var(--pfv-hair); }
-.pfv1-total { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 26px 24px 20px 28px; border-right: 1px solid var(--pfv-hair); }
-.pfv1-k { font-size: 13px; color: var(--tf-muted); }
-.pfv1-big { margin-top: -10px; font: 500 44px/50px var(--font-num); letter-spacing: -0.025em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.pfv1-today { display: flex; margin-top: -4px; }
-.pfv1-kv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 2px 0 4px; padding: 12px 0; border-top: 1px solid var(--pfv-hair); border-bottom: 1px solid var(--pfv-hair); }
-.pfv1-kv dt { font-size: 12.5px; color: var(--tf-muted); }
-.pfv1-kv dd { margin: 2px 0 0; font: 500 16px/22px var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pfv1-total .pfv-legend { margin: -4px -8px 0; }
-.pfv1-evm { padding: 0 8px 6px 30px; }
-.pfv1-rule { margin-top: auto; font-size: 12px; color: var(--tf-faint); }
-.pfv1-chart { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 24px 28px 20px; --pfv-chart-h: 340px; }
-.pfv1-chart__head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.pfv1-chart__note { margin-top: -2px; font-size: 12px; color: var(--tf-faint); }
-
-.pfv1-facts { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 0.85fr); border-radius: 24px; background: var(--pfv-ground); box-shadow: inset 0 0 0 1px var(--pfv-hair); }
-.pfv1-facts > div { min-width: 0; padding: 22px 24px; }
-.pfv1-facts > div + div { border-left: 1px solid var(--pfv-hair); }
-.pfv1-figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; margin-bottom: 18px; }
-.pfv1-ranks { display: flex; flex-direction: column; gap: 16px; }
-
-.pfv1-two { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 12px; }
-.pfv1-two > .tf-shell { height: 100%; }
-.pfv1-two .tf-panel { flex: 1; }
-
-.pfv1-offers { margin-top: 8px; }
-.pfv1-offers .pfv1-h2 { padding: 0 4px; }
-.pfv1-offers__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.pfv1-offer {
-  --tint: var(--pfv-wealth);
-  display: flex; flex-direction: column; gap: 4px; min-width: 0; min-height: 176px; padding: 18px; border: 0; border-radius: 20px;
-  background: radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--tint) 13%, transparent), transparent 60%), var(--pfv-ground);
-  box-shadow: inset 0 0 0 1px var(--pfv-hair); color: inherit; font: inherit; text-align: left; cursor: pointer;
-  transition: box-shadow 200ms var(--tf-ease), transform 200ms var(--tf-ease);
-}
-.pfv1-offer.is-earn { --tint: var(--pfv-perps); }
-.pfv1-offer.is-cash { --tint: var(--pfv-evm); }
-.pfv1-offer.is-copy { --tint: var(--pfv-wealth); }
-.pfv1-offer.is-bots { --tint: var(--pfv-spot); }
-.pfv1-offer:hover:not(:disabled) { box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.18); transform: translateY(-2px); }
-.pfv1-offer:disabled { cursor: default; }
-.pfv1-offer__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
-.pfv1-offer__ic { display: grid; flex: none; place-items: center; width: 42px; height: 42px; border-radius: 14px; background: color-mix(in srgb, var(--tint) 16%, rgb(var(--ink) / 0.04)); color: var(--tf-fg); }
-.pfv1-offer__t { font-size: 15px; font-weight: 600; }
-.pfv1-offer__l { flex: 1; font-size: 12.5px; line-height: 18px; color: var(--tf-muted); }
-.pfv1-offer__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 12.5px; }
-.pfv1-offer__mine { min-width: 0; color: var(--tf-muted); }
-.pfv1-offer__mine :is(b, span) { font-family: var(--font-num); }
-.pfv1-offer__cta { font-weight: 500; white-space: nowrap; }
-.pfv1-offer__cta span { display: inline-block; transition: transform 200ms var(--tf-ease); }
-.pfv1-offer:hover .pfv1-offer__cta span { transform: translateX(3px); }
-
-.pfv1-accounts { scroll-margin-top: 12px; }
-.pfv1-accounts__bar, .pfv2-band__bar, .pfv3-band__bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 8px; }
-.pfv1-accounts__body, .pfv2-band__body, .pfv3-band__body { display: flex; flex-direction: column; height: 480px; padding: 0; overflow: hidden; }
-
-/* ============================================================================================================
- * 3 DESK: the trade page's language. Dense, full width, one strip of live figures, a rail.
- * ========================================================================================================== */
-.pfv2.bots-page { padding-top: 16px; padding-right: 16px; padding-left: 16px; }
-.pfv2 .bots-col { max-width: 1680px; gap: 10px; }
-.pfv2-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 2px 2px 4px; }
-.pfv2-head__t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; min-width: 0; }
-.pfv2-head h1 { font-size: 20px; font-weight: 600; line-height: 26px; }
-.pfv2-head__acts { margin-left: auto; }
-
-.pfv2-strip { display: grid; grid-template-columns: minmax(0, 1.35fr) repeat(7, minmax(0, 1fr)); border: 1px solid var(--panel-line); border-radius: var(--radius-card); background: var(--bg-panel); }
-/* In the glass look the strip is the same pane as the kit's shells (botsPages.css). */
-html[data-glass] .pfv2-strip { position: relative; isolation: isolate; background: transparent; border-color: rgb(var(--ink) / 0.07); }
-html[data-glass] .pfv2-strip::before {
-  content: ''; position: absolute; inset: -1px; z-index: -1; border-radius: inherit; pointer-events: none;
-  background: radial-gradient(90% 60% at 20% 0%, color-mix(in srgb, var(--stg-glow) var(--stg-glow-a), transparent), transparent 70%), color-mix(in srgb, var(--stg-tint) var(--pn-a), transparent);
-  -webkit-backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
-  backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
-}
-.pfv2-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 12px 14px; }
-.pfv2-cell + .pfv2-cell { border-left: 1px solid var(--pfv-hair); }
-.pfv2-cell__k { overflow: hidden; font-size: 11.5px; color: var(--tf-muted); text-overflow: ellipsis; white-space: nowrap; }
-.pfv2-cell__v { overflow: hidden; font: 500 16px/22px var(--font-num); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
-.pfv2-cell__v.is-lead { font-size: 22px; line-height: 26px; letter-spacing: -0.01em; }
-.pfv2-cell__s { overflow: hidden; font-size: 11.5px; color: var(--tf-muted); text-overflow: ellipsis; white-space: nowrap; }
-.pfv2-cell__s span { font-family: var(--font-num); }
-.pfv2-cell .tf-bar { margin-top: 3px; }
-
-.pfv2-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; align-items: stretch; gap: 10px; }
-.pfv2-rail { align-self: start; }
-.pfv2-main, .pfv2-rail { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.pfv2-chart__head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 4px 6px 10px; }
-.pfv2-chart__head > .pfv-cfig { flex: 1; }
-.pfv2-chart__body { padding: 12px 14px; --pfv-chart-h: 300px; }
-.pfv2-band { flex: 1 0 auto; scroll-margin-top: 12px; }
-/* The tables reach down to the rail's foot: no empty corner beside a long rail. */
-.pfv2 .pfv2-band__body { flex: 1 0 auto; height: auto; min-height: 560px; }
-.pfv2-rail .tf-shellhead { padding-bottom: 8px; }
-.pfv2-rail__range { padding: 0 6px 8px; }
-.pfv2-rail .pfv-legend { margin: 4px -8px 0; }
-.pfv2-rail .pfv-legend__t small { display: none; }
-.pfv2-evm { padding: 0 8px 4px 30px; }
-.pfv2-offers { margin: 0; padding: 0; list-style: none; }
-.pfv2-offers li + li { border-top: 1px solid var(--pfv-hair); }
-.pfv2-offers button, .pfv3-offers button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 150ms var(--tf-ease); }
-.pfv2-offers button:hover:not(:disabled), .pfv3-offers button:hover:not(:disabled) { background: rgb(var(--ink) / 0.04); }
-.pfv2-offers button:disabled, .pfv3-offers button:disabled { cursor: default; }
-.pfv2-offers__ic, .pfv3-offers__ic { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: rgb(var(--ink) / 0.06); }
-.pfv2-offers__t, .pfv3-offers__t { display: flex; flex-direction: column; min-width: 0; }
-.pfv2-offers__t b, .pfv3-offers__t b { font-size: 13.5px; }
-.pfv2-offers__t small, .pfv3-offers__t small { overflow: hidden; font-size: 12px; color: var(--tf-muted); text-overflow: ellipsis; white-space: nowrap; }
-.pfv2-offers .pfv-apy b { font-size: 15px; line-height: 20px; }
-
+.pfv3-offers button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 150ms var(--tf-ease); }
+.pfv3-offers button:hover:not(:disabled) { background: rgb(var(--ink) / 0.04); }
+.pfv3-offers button:disabled { cursor: default; }
+.pfv3-offers__ic { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: rgb(var(--ink) / 0.06); }
+.pfv3-offers__t { display: flex; flex-direction: column; min-width: 0; }
+.pfv3-offers__t b { font-size: 13.5px; }
+.pfv3-offers__t small { overflow: hidden; font-size: 12px; color: var(--tf-muted); text-overflow: ellipsis; white-space: nowrap; }
 /* ============================================================================================================
  * 4 WALLET: a card, four keys, accounts that open in place.
  * ========================================================================================================== */
@@ -374,10 +265,8 @@ html[data-glass] .pfv2-strip::before {
   --ink: 255 255 255; --text: #f4f4f2; --muted: #a8a8a5; --brand-ink: #f4f4f4; --tf-fg: #f4f4f2; --tf-muted: rgba(244, 244, 242, 0.66); --tf-faint: rgba(244, 244, 242, 0.42); --tf-pos: #35d6a4; --tf-neg: #ff6b5e; --pos: #35d6a4; --neg: #ff6b5e;
   --pfv-perps: #3987e5; --pfv-spot: #d55181; --pfv-wealth: #9085e9; --pfv-evm: #199e70; --pfv-hair: rgb(255 255 255 / 0.1);
   position: relative; isolation: isolate; display: flex; flex-direction: column; gap: 8px; overflow: hidden; padding: 20px 22px 22px; border-radius: 26px; color: var(--tf-fg);
-  /* No purple glow (owner 2026-11-26): dark metal, as the referral page's card. */
-  background:
-    repeating-linear-gradient(90deg, rgb(255 255 255 / 0.025) 0 1px, transparent 1px 22px),
-    linear-gradient(150deg, #2a2b2e 0%, #141416 42%, #0b0b0c 72%, #1d1e20 100%);
+  /* No purple glow, no stripes (owner 2026-11-26): plain dark metal, as the referral page's card. */
+  background: linear-gradient(150deg, #2a2b2e 0%, #141416 42%, #0b0b0c 72%, #1d1e20 100%);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14), inset 0 0 0 1px rgb(255 255 255 / 0.1), 0 28px 60px -30px rgb(0 0 0 / 0.75);
 }
 .pfv3-card__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 18px; }
@@ -407,12 +296,6 @@ html[data-glass] .pfv2-strip::before {
 .pfv3-in__figs .pfv-fig__v { font-size: 15px; }
 .pfv3-in__more { align-self: flex-start; }
 @keyframes pfv-open { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-.pfv3-perf__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 6px 12px 10px; }
-.pfv3-perf__head h2 { font-size: 15px; font-weight: 600; line-height: 20px; }
-.pfv3-perf .pfv-chart { --pfv-chart-h: 300px; }
-.pfv3-perf__fig { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.pfv3-perf__fig:empty { display: none; }
-.pfv3-perf__stand { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--pfv-hair); }
 .pfv3-offers { margin: 0; padding: 0; list-style: none; }
 .pfv3-offers li + li { border-top: 1px solid var(--pfv-hair); }
 .pfv3-offers button { padding: 14px 16px; }
@@ -423,29 +306,11 @@ html[data-glass] .pfv2-strip::before {
 .pfv3-offers__cta { font-size: 12.5px; font-weight: 500; white-space: nowrap; }
 .pfv3-range { padding: 0 6px 8px; }
 .pfv3-band { margin-top: 4px; }
-.pfv3-foot { padding: 4px 0 0; font-size: 12px; color: var(--tf-faint); text-align: center; }
 .pfv3-back { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
 .pfv3-back h1 { font-size: 24px; font-weight: 600; line-height: 30px; }
 
 /* --- narrower ----------------------------------------------------------------------------------------------- */
-@media (max-width: 1280px) {
-  .pfv2-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .pfv2-cell:nth-child(5) { border-left: 0; }
-  .pfv2-cell:nth-child(n + 5) { border-top: 1px solid var(--pfv-hair); }
-}
-@media (max-width: 1180px) {
-  .pfv1-offers__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pfv1-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pfv1-facts__rank { grid-column: 1 / -1; border-left: 0 !important; border-top: 1px solid var(--pfv-hair); }
-  .pfv1-ranks { flex-direction: row; flex-wrap: wrap; gap: 16px 32px; }
-  .pfv2-grid { grid-template-columns: minmax(0, 1fr) 320px; }
-}
 @media (max-width: 1040px) {
-  .pfv1-hero { grid-template-columns: minmax(0, 1fr); }
-  .pfv1-total { border-right: 0; border-bottom: 1px solid var(--pfv-hair); }
-  .pfv1-two { grid-template-columns: minmax(0, 1fr); }
-  .pfv2-grid { grid-template-columns: minmax(0, 1fr); }
-  .pfv2-rail { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .pfv3-split { grid-template-columns: minmax(0, 1fr); }
   .pfv3-left { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
   .pfv3-left > .pfv3-accounts { grid-column: 2; grid-row: 1 / span 2; }
@@ -461,54 +326,21 @@ html[data-glass] .pfv2-strip::before {
   .pfv-switch__bar button:not(.is-watch) span { display: none; }
   .pfv-switch__watch { flex-wrap: wrap; justify-content: center; border-radius: 16px; }
   .pfv-switch__watch input { flex: 1 0 100%; width: auto; max-width: none; }
-  .pfv1-head { align-items: flex-start; }
-  .pfv1-head h1 { font-size: 26px; line-height: 32px; }
   .pfv-acts { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1fr 1.2fr; }
   .pfv-acts .tf-btn { min-width: 0; padding: 0 8px; }
   .pfv-acts .tf-btn:only-child { grid-column: 1 / -1; }
-  .pfv1-pages { align-self: stretch; }
-  .pfv1-pages .tf-seg__opt { flex: 1; justify-content: center; }
-  .pfv1-hero, .pfv1-facts { border-radius: 20px; }
-  .pfv1-total { padding: 20px 18px 16px; }
-  .pfv1-big { font-size: 38px; line-height: 44px; }
-  .pfv1-chart { padding: 18px 16px 16px; --pfv-chart-h: 260px; }
-  .pfv1-chart__head .pfv-ctl { width: 100%; }
-  .pfv1-facts { grid-template-columns: minmax(0, 1fr); }
-  .pfv1-facts > div { padding: 18px; }
-  .pfv1-facts > div + div { border-left: 0; border-top: 1px solid var(--pfv-hair); }
-  .pfv1-offers__grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  /* A tile becomes a row: the icon, the words, the yield; what you have and the way in under the words. */
-  .pfv1-offer { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; grid-template-areas: "ic t f" "ic l l" "ic foot foot"; column-gap: 14px; row-gap: 2px; min-height: 0; padding: 14px 16px; border-radius: 18px; }
-  .pfv1-offer__top { display: contents; }
-  .pfv1-offer__ic { grid-area: ic; }
-  .pfv1-offer__top > :not(.pfv1-offer__ic) { grid-area: f; align-self: start; }
-  .pfv1-offer__t { grid-area: t; align-self: center; }
-  .pfv1-offer__l { grid-area: l; }
-  .pfv1-offer__foot { grid-area: foot; margin-top: 6px; }
-  .pfv1-accounts__body, .pfv2 .pfv2-band__body, .pfv3-band__body { height: 440px; min-height: 0; }
-  .pfv2-head__acts { margin-left: 0; }
-  .pfv2-head > .tf-tabs { order: 3; }
-  .pfv2-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pfv2-cell { border-top: 1px solid var(--pfv-hair); }
-  .pfv2-cell + .pfv2-cell { border-left: 0; }
-  .pfv2-cell:first-child { grid-column: 1 / -1; border-top: 0; }
-  .pfv2-cell:nth-child(odd):not(:first-child) { border-left: 1px solid var(--pfv-hair); }
-  .pfv2-chart__head > .pfv-cfig { order: 3; flex-basis: 100%; }
-  .pfv2-chart__body { padding: 10px; --pfv-chart-h: 260px; }
-  .pfv2-rail { display: flex; }
+  .pfv3-band__body { height: 440px; min-height: 0; }
   /* One column in reading order: the halves give their pieces to the column, which orders them. */
   .pfv3-split { display: flex; flex-direction: column; align-items: stretch; }
   .pfv3-left, .pfv3-right { display: contents; }
-  .pfv3-card { order: 1; } .pfv3-keys { order: 2; } .pfv3-accounts { order: 3; } .pfv3-perf { order: 4; } .pfv3-earn { order: 5; }
+  .pfv3-card { order: 1; } .pfv3-keys { order: 2; } .pfv3-accounts { order: 3; } .pfv3-chart { order: 4; } .pfv3-earn { order: 5; }
   .pfv3-trading { order: 6; } .pfv3-fees { order: 7; } .pfv3-margin { order: 8; }
   .pfv3-card__top { margin-bottom: 14px; }
   .pfv3-card .pfv-id__n { display: none; }
   .pfv3-card .pfv-id__a { white-space: nowrap; }
   .pfv3-card { padding: 18px 18px 20px; border-radius: 24px; }
   .pfv3-card__v { font-size: 36px; line-height: 42px; }
-  .pfv3-perf .pfv-chart { --pfv-chart-h: 260px; }
-  .pfv3-perf__stand { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pfv3-offers__r .pfv3-offers__cta { display: none; }
+      .pfv3-offers__r .pfv3-offers__cta { display: none; }
   .pfv-wealth__fig, .pfv-wealth__chart { padding: 14px; }
   .pfv-wfig__v { font-size: 28px; line-height: 34px; }
   .pfv-hold li { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; padding: 12px; }
@@ -532,11 +364,116 @@ html[data-glass] .pfv2-strip::before {
 }
 @media (max-width: 420px) {
   .pfv-acts { grid-template-columns: 1fr 1fr; }
-  .pfv1-big, .pfv3-card__v { font-size: 34px; line-height: 40px; }
+  .pfv3-card__v { font-size: 34px; line-height: 40px; }
   .pfv3-in__figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pfv *, .pfv *::before, .pfv *::after { animation: none !important; transition: none !important; }
-  .pfv1-offer:hover:not(:disabled) { transform: none; }
+  }
+
+/* ============================================================================================================
+ * WALLET, round 2 (owner 2026-11-26): the card's value line and share, the Original's chart, the notes, the lists,
+ * and the two other arrangements (Stack, Banner; Wallet.tsx).
+ * ========================================================================================================== */
+.pfv3-card__tr { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.pfv3-card .share-btn { color: var(--tf-muted); }
+.pfv3-card .share-btn:hover { background: rgb(255 255 255 / 0.1); color: #f4f4f2; }
+.pfv3-card__spark { gap: 10px; }
+.pfv3-card__sparkt { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; white-space: nowrap; }
+.pfv3-card__sparkt b { font: 600 13px/16px var(--font-num); font-variant-numeric: tabular-nums; }
+.pfv3-card__sparkt small { font-size: 11px; color: var(--tf-muted); }
+/* The value line from 0: green above, red below, a faint line at 0. */
+.pfv3-move { display: block; overflow: visible; }
+.pfv3-move__zero { stroke: rgb(255 255 255 / 0.22); stroke-width: 1; stroke-dasharray: 2 3; }
+.pfv3-move__line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.pfv3-move__line.is-pos { stroke: var(--pos); }
+.pfv3-move__line.is-neg { stroke: var(--neg); }
+.pfv3-move__fill.is-pos { fill: color-mix(in srgb, var(--pos) 16%, transparent); }
+.pfv3-move__fill.is-neg { fill: color-mix(in srgb, var(--neg) 16%, transparent); }
+.pfv3-move__dot.is-pos { fill: var(--pos); }
+.pfv3-move__dot.is-neg { fill: var(--neg); }
+
+/* The Original's chart card, as it is, in the wallet's column: inside the Original's wrapper, without its page padding. */
+.pfv3-chart { min-width: 0; }
+.pfv .pfv3-chart.pf.pfx { display: block; padding: 0; gap: 0; }
+.pfv3-chart > .pf-card { height: auto; margin: 0; }
+
+/* "Allocation: No balance of its own": a blue note with an info mark, not a figure. */
+.pfv-allocnote {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 8px; border-radius: 999px;
+  background: color-mix(in srgb, #5b8def 14%, transparent); color: #86a9f5; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: help;
+}
+html[data-theme='light'] .pfv-allocnote { background: color-mix(in srgb, #3f6fd1 10%, transparent); color: #2f58b0; }
+.pfv-allocnote svg { flex: none; }
+
+/* Nothing yet (no copies, no bots): one centred block with its one action. */
+.pfv-empty { display: grid; place-items: center; min-height: 100%; padding: 28px 16px; text-align: center; }
+.pfv-empty .tf-empty { max-width: 440px; margin: 0 auto; }
+.pfv-scroll:has(> .pfv-empty) { display: grid; }
+
+/* The copies' figures and their actions, centred in the tab. */
+.pfv-copies { display: flex; flex-direction: column; gap: 18px; }
+.pfv-copies .pfv-row-acts { justify-content: center; }
+
+/* The bots, as a list. */
+.pfv-bots { display: flex; flex-direction: column; gap: 14px; }
+.pfv-bots .pfv-row-acts { justify-content: center; }
+.pfv-botlist { margin: 0; padding: 0; list-style: none; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--pfv-hair); overflow: hidden; }
+.pfv-botlist li + li { border-top: 1px solid var(--pfv-hair); }
+.pfv-botlist button {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto 110px 110px auto; align-items: center; gap: 14px; width: 100%;
+  padding: 12px 14px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 150ms var(--tf-ease);
+}
+.pfv-botlist button:hover { background: rgb(var(--ink) / 0.04); }
+.pfv-botlist button > svg { color: var(--tf-faint); }
+.pfv-botlist__t { display: flex; flex-direction: column; min-width: 0; }
+.pfv-botlist__t b { overflow: hidden; font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
+.pfv-botlist__t small { font-size: 12px; color: var(--tf-muted); }
+.pfv-botlist__f { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.pfv-botlist__f small { font-size: 11px; color: var(--tf-muted); }
+.pfv-botlist__f b { font: 500 13.5px var(--font-num); font-variant-numeric: tabular-nums; }
+
+/* Wealth with nothing held: the funds on offer, right there. */
+.pfv-hold__none { display: flex; flex-direction: column; gap: 10px; }
+
+/* --- Stack: one column, a wallet app's, on every screen ------------------------------------------------------- */
+.pfv3.is-stack .bots-col { max-width: 640px; }
+.pfv3-stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.pfv3.is-stack .pfv3-card { padding: 22px 24px 24px; }
+.pfv3.is-stack .pfv3-card__v { font-size: 44px; line-height: 50px; }
+
+/* --- Banner: the card and the chart across the top, the accounts as four tiles ------------------------------- */
+.pfv3.is-banner .bots-col { max-width: 1320px; }
+.pfv3-hero { display: grid; grid-template-columns: 420px minmax(0, 1fr); align-items: stretch; gap: 14px; }
+.pfv3-hero__card { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.pfv3-hero > .pfv3-chart { display: flex; }
+.pfv3-hero > .pfv3-chart > .pf-card { flex: 1; }
+.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li + li { border-top: 0; border-left: 1px solid var(--pfv-hair); }
+/* An open account keeps its tile in the row; what it holds opens under all four. */
+.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li.is-open { display: contents; }
+.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li.is-open > .pfv-legend__row { background: rgb(var(--ink) / 0.03); }
+.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li + li.is-open > .pfv-legend__row { box-shadow: inset 1px 0 0 var(--pfv-hair); }
+.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li.is-open > .pfv3-in { grid-column: 1 / -1; grid-row: 2; border-top: 1px solid var(--pfv-hair); }
+.pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li.is-open + li { border-left: 1px solid var(--pfv-hair); }
+.pfv3-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 14px; }
+.pfv3-pair > :only-child { grid-column: 1 / -1; }
+
+@media (max-width: 1040px) {
+  .pfv3-hero { grid-template-columns: minmax(0, 1fr); }
+  .pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li:nth-child(3) { border-left: 0; }
+  .pfv3-pair { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .pfv-botlist button { grid-template-columns: auto minmax(0, 1fr) auto; row-gap: 8px; }
+  .pfv-botlist button > .tf-pill { grid-column: 3; grid-row: 1; }
+  .pfv-botlist__f { grid-row: 2; align-items: flex-start; }
+  .pfv-botlist__f:nth-of-type(1) { grid-column: 2; }
+  .pfv-botlist button > svg { display: none; }
+  .pfv3.is-stack .pfv3-card__v { font-size: 36px; line-height: 42px; }
+  .pfv3-move { width: 104px; height: auto; }
+  .pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid { grid-template-columns: minmax(0, 1fr); }
+  .pfv3.is-banner .pfv3-accounts .pfv-legend.is-grid > li + li { border-left: 0; border-top: 1px solid var(--pfv-hair); }
 }

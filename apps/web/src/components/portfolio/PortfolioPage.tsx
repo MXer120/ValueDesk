@@ -214,7 +214,8 @@ function ValueCard({ c, s, today, vol, evmRows, evmLoading, onSection }: {
 
 export type ChartView = 'value' | 'pnl' | 'calendar';
 
-function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }) {
+/** The value / PnL / calendar chart with its timeframe and share (the portfolio versions use it as it is). */
+export function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }) {
   const [view, setView] = useStored<ChartView>('vs.pf.chart.view', 'value');
   const [range, setRange] = useStored<Period>('vs.pf.chart.range', '7D');
   const win = view === 'calendar' ? null : curveFor(c, h24, range, view === 'value' ? (p) => p.accountValue : (p) => pnlAt('pnl-total', p));

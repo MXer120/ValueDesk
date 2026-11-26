@@ -104,7 +104,7 @@ export function useAllocation(ctx: BotsCtx): Allocation {
  * The margin the account's open positions hold now, in all and per market: SoDEX's perps state (im + cm, and each
  * position at its leverage). Read from the shared account feed (the order ticket's), every 20 s.
  */
-function usePositionsMargin(address: string | null): PositionsMargin {
+export function usePositionsMargin(address: string | null): PositionsMargin {
   const acct = useAccountResource(address ? `state:perps:${address}` : null, () => api.state('perps', address!), 20_000);
   const st = (acct.data as { state?: Record<string, unknown> } | null)?.state;
   return useMemo(() => positionsMarginOf(st), [st]);

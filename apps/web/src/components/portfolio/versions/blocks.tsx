@@ -4,14 +4,16 @@
  * (AccountTabs, as on the trade page), the equity curve and PnL calendar (Portfolio.tsx), FeeSchedule, the swap and
  * Wealth sheets. Each version arranges them in its own way and gives them its own look in versions.css.
  */
-import { Suspense, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { Button, EmptyState, Icon, ProgressBar, Segmented, SegmentedBar, Skeleton, StatusPill, Tabs, type IconName, type SegOption } from '../../bots/kit/kit';
+import { Suspense, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Button, EmptyState, Icon, ProgressBar, Segmented, SegmentedBar, Skeleton, StatusPill, Tabs, type SegOption } from '../../bots/kit/kit';
 import { AccountTabs } from '../../AccountTabs';
 import { ReadFailed } from '../../AccountHistory';
 import { CoinIcon } from '../../CoinIcon';
 import { FeeSchedule } from '../../FeeSchedule';
 import { ShareButton } from '../../share/host';
-import { BotIcon } from '../../bots/BotIcon';
+import { BotAvatar, BotIcon } from '../../bots/BotIcon';
+import { StatePill } from '../../bots/BotsPage';
+import { botName, botState, fmtPnl } from '../../bots/botWords';
 import { IconCopyTrade } from '../../palette/icons';
 import { SodexMark } from '../../funds/ui';
 import { CrossFadeCal, fmtSigned, pnlAt, type Period, type PortfolioContext } from '../../Portfolio';
@@ -25,7 +27,11 @@ import { fmtRate, type VenueFeeRate } from '../../../fees';
 import { Private, useMask } from '../../../privacy';
 import { SOON_TABS, type Tab } from '../../../router';
 import { applyForBeta } from '../../../beta/access';
-import { copyRows, getLiveCopy, subscribeLiveCopy } from '../../../copy/live';
+import { copyRows, getLiveCopy, readiness, subscribeLiveCopy, useLiveCopy } from '../../../copy/live';
+import { useBots } from '../../../bots/useBots';
+import { STRATEGY_INFO, strategyOf } from '../../../bots/presets';
+import { goBots } from '../../../bots/routes';
+import type { Eip1193Provider } from '../../../wallet';
 import { lazyChunk } from '../../../lazyPage';
 import type { ChartPoint } from '../../../performance';
 import type { Bucket, PfData, Part } from './data';
@@ -388,7 +394,10 @@ export function TradeSummary({ c, engine, range, layout = 'grid' }: { c: Portfol
   const t = w?.trades ?? null;
   const f = w?.funding ?? null;
   const wait = (state: 'reading' | 'incomplete' | 'final' | undefined) => (state === 'incomplete' ? <StatusPill size="sm" tone="warning">Incomplete</StatusPill> : <Skeleton className="pfv-skel-num" />);
-  const lines = [coverLine(`${engine} trades`, w?.tradesCover ?? null), engine === 'perps' ? coverLine('funding', w?.fundingCover ?? null) : null].filter((l): l is string => l !== null);
+  // While a walk is still reading, the figures say so themselves (a placeholder); only a window that cannot be shown in
+  // full gets a line (owner 2026-11-26: no "Reading your perps trades from SoDEX." on the page).
+  const note = (what: string, cover: Parameters<typeof coverLine>[1]) => (cover?.state === 'reading' ? null : coverLine(what, cover));
+  const lines = [note(`${engine} trades`, w?.tradesCover ?? null), engine === 'perps' ? note('funding', w?.fundingCover ?? null) : null].filter((l): l is string => l !== null);
   return (
     <div className={cx('pfv-sum', `is-${layout}`)}>
       <div className="pfv-sum__cell">
@@ -554,19 +563,22 @@ export function SectionTabs({ value, onChange }: { value: Section; onChange: (s:
   return <Tabs tabs={SECTION_TABS} value={value} onChange={onChange} label="Accounts" className="pfv-sectabs" />;
 }
 
-/** Copies and bots are activity, not places money is: their own short panel, with no balance. */
-export function ActivityNote({ icon, title, line, children }: { icon: IconName; title: string; line: string; children?: ReactNode }) {
-  return (
-    <div className="pfv-actnote">
-      <EmptyState compact icon={icon} title={title} description={line} actions={children} />
-    </div>
-  );
-}
-
 export function CopiesPanel({ onOpenTab }: { onOpenTab: (t: Tab) => void }) {
   const copies = useCopies();
   const m = useMasks();
   const [manage, setManage] = useState(false);
+  if (copies.all === 0) {
+    return (
+      <div className="pfv-empty">
+        <EmptyState
+          icon="layers"
+          title="No copies yet"
+          description="Mirror a trader's positions from your own Perps account, at the size you set."
+          actions={<Button variant="primary" icon="search" onClick={() => onOpenTab('copy')}>Find traders to copy</Button>}
+        />
+      </div>
+    );
+  }
   return (
     <div className="pfv-copies">
       <div className="pfv-copies__figs">
@@ -574,25 +586,77 @@ export function CopiesPanel({ onOpenTab }: { onOpenTab: (t: Tab) => void }) {
         <Fig k="Allocated" v={copies.live ? m.funds(fmtUsd(copies.allocated, 0)) : DASH} sub="A size limit, not money set aside" />
         <Fig k="Copy PnL" v={copies.live ? m.pnl(signedUsd(copies.pnl)) : DASH} cls={copies.live ? tone(copies.pnl) : undefined} sub="Each copy's own books" />
       </div>
-      <p className="pfv-quiet">Copies trade from your Perps account, so their positions are in Perps and none of this adds to Total Value.</p>
       <div className="pfv-row-acts">
-        {copies.all > 0 && <Button variant="secondary" onClick={() => setManage(true)}>Manage copies</Button>}
-        <Button variant={copies.all > 0 ? 'quiet' : 'secondary'} onClick={() => onOpenTab('copy')}>Find traders to copy</Button>
+        <Button variant="secondary" onClick={() => setManage(true)}>Manage copies</Button>
+        <Button variant="quiet" icon="search" onClick={() => onOpenTab('copy')}>Find traders to copy</Button>
       </div>
       <ManageCopies open={manage} onClose={() => setManage(false)} />
     </div>
   );
 }
 
-export function BotsPanel({ botsOpen, onOpenTab }: { botsOpen: boolean; onOpenTab: (t: Tab) => void }) {
+/**
+ * The wallet's bots as a list, each with its state, volume and net PnL as the Bots page counts them (useBots, the
+ * executor's own read; owner 2026-11-26: "show list on portfolio too, same for bots"). A row opens that bot. With no
+ * bot, or before bots are open to this wallet, a centred empty state with the one action.
+ */
+export function BotsPanel({ c, provider, botsOpen, onOpenTab }: { c: PortfolioContext; provider: Eip1193Provider | null; botsOpen: boolean; onOpenTab: (t: Tab) => void }) {
+  const m = useMasks();
+  const owner = c.readOnly ? null : c.address;
+  const live = useLiveCopy(owner, provider);
+  const signedIn = owner !== null && readiness(live, 'hosted').connected;
+  const { bots, loading } = useBots(owner, signedIn);
+  const shown = useMemo(() => [...bots].sort((a, b) => (b.algo.startedAt ?? b.algo.createdAt) - (a.algo.startedAt ?? a.algo.createdAt)), [bots]);
+  const empty = (title: string, line: string, action: ReactNode) => (
+    <div className="pfv-empty"><EmptyState icon="robot" title={title} description={line} actions={action} /></div>
+  );
+  if (!botsOpen) return empty('Bots are in beta', 'Market-making and grid strategies that run around the clock from your own accounts.', <Button variant="primary" onClick={applyForBeta}>Get access</Button>);
+  if (signedIn && loading && !bots.length) return <div className="pfv-skels">{[0, 1, 2].map((i) => <Skeleton key={i} className="pfv-skel-row" />)}</div>;
+  if (!shown.length) {
+    return empty(
+      'No bots yet',
+      signedIn || !owner ? 'Market-making and grid strategies that run around the clock from your own accounts.' : 'Sign in on the Bots page to see your bots here.',
+      <Button variant="primary" icon="robot" onClick={() => onOpenTab('bots')}>Open bots</Button>,
+    );
+  }
   return (
-    <ActivityNote
-      icon="robot"
-      title={botsOpen ? 'Your bots run from the Bots page' : 'Bots are in beta'}
-      line="Bots trade from your own Perps and Spot accounts, so what they hold is counted there. Their volume, cost and PnL are on the Bots page."
-    >
-      {botsOpen ? <Button variant="secondary" onClick={() => onOpenTab('bots')}>Open bots</Button> : <Button variant="secondary" onClick={applyForBeta}>Get access</Button>}
-    </ActivityNote>
+    <div className="pfv-bots">
+      <ul className="pfv-botlist">
+        {shown.map((v) => {
+          const st = strategyOf(v.algo.spec) ?? 'maker';
+          const b = v.bot;
+          return (
+            <li key={v.algo.id}>
+              <button type="button" onClick={() => goBots({ page: 'bot', id: v.algo.id })}>
+                <BotAvatar symbol={v.algo.spec.symbol} strategy={st} size={30} />
+                <span className="pfv-botlist__t">
+                  <b>{botName(v)}</b>
+                  <small>{STRATEGY_INFO[st].name} · {v.algo.spec.paper ? 'practice' : 'real orders'}</small>
+                </span>
+                <StatePill s={botState(v)} size="sm" />
+                <span className="pfv-botlist__f"><small>Volume</small><b>{m.funds(b ? fmtUsd(b.volume, 0) : DASH)}</b></span>
+                <span className="pfv-botlist__f"><small>Net PnL</small><b className={b ? tone(b.netPnl) : undefined}>{m.pnl(fmtPnl(b?.netPnl))}</b></span>
+                <Icon name="arrowRight" size={14} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="pfv-row-acts"><Button variant="secondary" onClick={() => onOpenTab('bots')}>Open bots</Button></div>
+    </div>
+  );
+}
+
+const InfoIcon = () => (
+  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="M8 7.2v3.6M8 5.1v.01" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+);
+
+/** Copies and bots hold nothing of their own: what they trade is counted in Perps and Spot. A blue note, not a figure. */
+export function AllocationNote() {
+  return (
+    <span className="pfv-allocnote" title="Copies and bots trade from your Perps and Spot accounts, so what they hold is counted there.">
+      <InfoIcon />Allocation: No balance of its own
+    </span>
   );
 }
 

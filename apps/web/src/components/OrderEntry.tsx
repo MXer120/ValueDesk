@@ -88,6 +88,8 @@ import './OrderEntry.css';
 
 /** The algo half of the ticket (TWAP, VWAP, ... - components/algo): loaded the first time Algo is picked. */
 const AlgoTicket = lazyChunk(() => import('./algo/AlgoTicket'));
+/* The warning for an order that would use margin copies and bots set aside (bots/ReserveWarning.tsx): its own chunk. */
+const ReserveWarning = lazyChunk(() => import('./bots/ReserveWarning'));
 
 interface Props {
   engine: Engine;
@@ -2464,6 +2466,11 @@ export function OrderEntry({
         {/* Guardrails sit ABOVE the two buttons they guard. The size bound
             is the amount field's own border and the line under it. */}
         {unlisted && <p className="status err">{notListed(symbol)}</p>}
+        {/* A perps order that opens a position and needs more margin than is free takes it from what copy trading and
+            bots set aside: said here, never blocked (owner 2026-11-26: "a warning, BUT no hard stop"). */}
+        {engine === 'perps' && opening && connectedAddress && sizedByAmount && liveNotional > 0 && lev > 0 && (
+          <Suspense fallback={null}><ReserveWarning address={connectedAddress} need={liveNotional / lev} /></Suspense>
+        )}
         {accountMismatch && (
           <p className="status err">
             Trading disabled: viewing{' '}

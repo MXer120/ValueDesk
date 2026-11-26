@@ -4,9 +4,12 @@
  * the original keep it in the switch."
  *
  *   1 Original   today's page, untouched
- *   2 Overview   one calm column: where the money is, how it did, what it costs, then the accounts
- *   3 Desk       a trader's desk: every live figure in one strip, chart and account tables side by side with the risk rail
- *   4 Wallet     a wallet: the balance card and its four keys, accounts you open in place, earn and performance
+ *   2 Wallet     the balance card and its four keys, accounts you open in place; the chart, earn and trading beside them
+ *   3 Stack      the same wallet in one column, as a wallet app on a phone, on every screen
+ *   4 Banner     the card and the chart side by side across the top, the accounts as four tiles under them
+ *
+ * Overview and Desk were removed on the owner's word (2026-11-26: "give me 2 other versions of 4wallet, remove 2 & 3");
+ * Stack and Banner are the two other wallets (Wallet.tsx).
  *
  * The pill at the foot picks one (kept in localStorage, like the referral page's). "View a wallet" shows any other
  * wallet's portfolio read-only (devWatch.ts), so a version can be judged with real figures.
@@ -25,9 +28,9 @@ export type VersionProps = { c: PortfolioContext } & PortfolioPageLinks;
 
 const VERSIONS: ReadonlyArray<{ key: string; name: string; C: ComponentType<VersionProps> | null }> = [
   { key: 'original', name: 'Original', C: null },
-  { key: 'overview', name: 'Overview', C: lazy(() => import('./V1Overview')) },
-  { key: 'desk', name: 'Desk', C: lazy(() => import('./V2Desk')) },
-  { key: 'wallet', name: 'Wallet', C: lazy(() => import('./V3Wallet')) },
+  { key: 'wallet', name: 'Wallet', C: lazy(() => import('./Wallet').then((m) => ({ default: m.WalletTwoColumns }))) },
+  { key: 'stack', name: 'Stack', C: lazy(() => import('./Wallet').then((m) => ({ default: m.WalletStack }))) },
+  { key: 'banner', name: 'Banner', C: lazy(() => import('./Wallet').then((m) => ({ default: m.WalletBanner }))) },
 ];
 const KEY = 'vs.dev.pf.version';
 /** The owner's own test wallet (e2e/live/units.test.ts), offered as a one-press example. */
