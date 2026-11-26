@@ -1,0 +1,36 @@
+/*
+ * The SoPoints and Blind Box versions (localhost only, owner 2026-11-26). They stand on the Referrals page's ground
+ * (referrals.css, `.rf-page`: one ground, hairlines, a dark stage, the kit's controls) and add only what is theirs under
+ * `.sx`. No coloured edge on any card: a kind or a state is a pill, a dot or an icon.
+ */
+
+/* The switch: the Referrals pill with a second group (Sample). */
+.rf-switch.sx-switch { align-items: center; max-width: calc(100vw - 16px); overflow-x: auto; scrollbar-width: none; }
+.rf-switch.sx-switch::-webkit-scrollbar { display: none; }
+.sx-switch__sep { flex: none; align-self: stretch; width: 1px; margin: 6px 3px; background: rgb(255 255 255 / 0.16); }
+.rf-switch.sx-switch button:disabled { opacity: 0.38; cursor: not-allowed; }
+.rf-switch.sx-switch button:focus-visible { outline: 2px solid #5cf0c0; outline-offset: 1px; }
+@media (max-width: 720px) {
+  .rf-switch.sx-switch button { height: 30px; padding: 0 10px; font-size: 12px; }
+}
+
+/* Under Original: room for the switch, so it never covers the page's last line (Original itself is unchanged). */
+.sx-switch-room { height: 72px; }
+@media (max-width: 720px) { .sx-switch-room { height: 140px; } }
+
+/* The frame every version shares. */
+.sx { --sx-gap: 36px; }
+.sx .bots-col { max-width: 1240px; }
+.sx .sx-sec { margin-top: var(--sx-gap); min-width: 0; }
+.sx .sx-sec__h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; min-height: 36px; margin-bottom: 14px; }
+.sx .sx-sec__h h2 { margin: 0; font-size: 20px; line-height: 26px; }
+.sx .sx-sec__h p { margin: 2px 0 0; font-size: 13.5px; color: var(--tf-muted); }
+.sx-num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+/* SoDEX's mark is white: on the light ground it sits on a dark chip wherever it stands in for a coin (as on Original). */
+html[data-theme='light'] .sx .coin-ic[src*='sodex' i] { border-radius: 50%; background: #141414; }
+.sx-muted { color: var(--tf-muted); }
+.sx-faint { color: var(--tf-faint); }
+@media (max-width: 720px) {
+  .sx { --sx-gap: 28px; }
+  .sx .sx-sec__h h2 { font-size: 18px; line-height: 24px; }
+}
