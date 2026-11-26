@@ -986,6 +986,10 @@ button.coh-map__head {
 .coh-price__lineg { opacity: 0; transition: opacity var(--dur-med) var(--ease-out); }
 .coh-price__candles.is-on,
 .coh-price__lineg.is-on { opacity: 1; }
+/* A new range: the candles fade in where they stand (the line morphs, PriceChart.tsx). */
+.coh-price__candles.is-on { animation: coh-candles-in 320ms var(--ease-out) both; }
+@keyframes coh-candles-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .coh-price__candles.is-on { animation: none; } }
 .coh-candle line { stroke-width: 1; }
 .coh-candle.pos line { stroke: var(--pos); }
 .coh-candle.neg line { stroke: var(--neg); }

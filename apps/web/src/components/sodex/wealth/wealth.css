@@ -41,7 +41,9 @@ html[data-theme='light'] .wv { --wv-surface: rgb(255 255 255 / 0.75); --wv-raise
 .wv-chan__t { font-weight: 400; opacity: 0.85; }
 .wv-chan__t::before { content: '·'; margin: 0 4px 0 1px; }
 
-.wv-chart { position: relative; width: 100%; min-width: 0; touch-action: pan-y; user-select: none; color: var(--tf-fg); }
+.wv-chart { position: relative; width: 100%; min-width: 0; touch-action: pan-y; user-select: none; color: var(--tf-fg); transition: color 320ms cubic-bezier(0.16, 1, 0.3, 1); }
+/* The axis labels; while a switch morphs, the old set fades out in one of these as the new one fades in. */
+.wv-chart__decor { position: absolute; inset: 0; pointer-events: none; }
 .wv-chart.is-up { color: var(--tf-pos); }
 .wv-chart.is-down { color: var(--tf-neg); }
 .wv-chart.is-ink { color: var(--tf-fg); }

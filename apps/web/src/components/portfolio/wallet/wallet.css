@@ -1,6 +1,6 @@
 /*
- * The portfolio versions (localhost only, DevVersions.tsx). Built on the Bots kit (.tf, kit.css) and the bot pages'
- * column (.bots-page, .bots-col), so the app's glass look and both themes apply as on those pages. No card has a
+ * The Portfolio page (Wallet.tsx; on localhost the switch at its foot, DevVersions.tsx). Built on the Bots kit
+ * (.tf, kit.css) and the bot pages' column (.bots-page, .bots-col), so the app's glass look and both themes apply as on those pages. No card has a
  * coloured edge on one side: kind and state are dots, pills and icons.
  *
  * The four buckets' colours were checked as one set with the dataviz palette validator (adjacent pairs, colour-blind
@@ -19,6 +19,8 @@ html[data-theme='light'] .pfv {
   --pfv-ground-2: #fff;
 }
 .pfv.bots-page { padding-bottom: 112px; }
+/* The page's name, for screen readers and the page outline (the nav already shows it). */
+.pfv-h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .pfv .pos { color: var(--tf-pos); }
 .pfv .neg { color: var(--tf-neg); }
 .pfv h1, .pfv h2 { font-family: var(--font-display); letter-spacing: -0.02em; }
@@ -254,7 +256,15 @@ html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv3-offers__ic)
  * 4 WALLET: a card, four keys, accounts that open in place.
  * ========================================================================================================== */
 .pfv3 .bots-col { max-width: 1480px; gap: 14px; }
-.pfv3-split { display: grid; grid-template-columns: 420px minmax(0, 1fr); align-items: start; gap: 14px; }
+.pfv3-split { display: grid; grid-template-columns: 420px minmax(0, 1fr); align-items: stretch; gap: 14px; }
+/* The right column fills to the left one's height through its chart, so nothing under them starts out of line. */
+.pfv .pfv3-right > .pfv3-chart.pf.pfx { display: flex; flex: 1 1 auto; flex-direction: column; align-items: stretch; max-width: none; margin: 0; }
+.pfv3-right > .pfv3-chart > .pf-card { flex: 1 1 auto; width: 100%; min-height: 320px; }
+.pfv3-left > .pfv3-accounts { align-self: stretch; }
+/* Fees beside Trading: one row, the left column's width, same top, same height. */
+.pfv3-pair { display: grid; grid-template-columns: 420px minmax(0, 1fr); align-items: stretch; gap: 14px; }
+.pfv3-pair > .tf-shell { display: flex; flex-direction: column; }
+.pfv3-pair > .tf-shell > .tf-panel { flex: 1 1 auto; }
 .pfv3-left, .pfv3-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .pfv3-card {
   /* A card is dark in both themes (the referral page's .rf-dark does the same). */
@@ -294,6 +304,7 @@ html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv3-offers__ic)
 /* --- narrower ----------------------------------------------------------------------------------------------- */
 @media (max-width: 1040px) {
   .pfv3-split { grid-template-columns: minmax(0, 1fr); }
+  .pfv3-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .pfv3-left { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
   .pfv3-left > .pfv3-accounts { grid-column: 2; grid-row: 1 / span 2; }
   .pfv-wealth__top { grid-template-columns: minmax(0, 1fr); }
@@ -316,7 +327,8 @@ html[data-theme='light'] .pfv :is(.pfv-hold__n, .pfv-funds__n, .pfv3-offers__ic)
   .pfv3-split { display: flex; flex-direction: column; align-items: stretch; }
   .pfv3-left, .pfv3-right { display: contents; }
   .pfv3-card { order: 1; } .pfv3-keys { order: 2; } .pfv3-accounts { order: 3; } .pfv3-chart { order: 4; } .pfv3-earn { order: 5; }
-  .pfv3-trading { order: 6; } .pfv3-fees { order: 7; } .pfv3-margin { order: 8; }
+  .pfv3-pair { grid-template-columns: minmax(0, 1fr); }
+  .pfv3-pair > .pfv3-trading { order: -1; }
   .pfv3-card__top { margin-bottom: 14px; }
   .pfv3-card .pfv-id__n { display: none; }
   .pfv3-card .pfv-id__a { white-space: nowrap; }

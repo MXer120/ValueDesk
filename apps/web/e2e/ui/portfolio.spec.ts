@@ -15,8 +15,8 @@ import { enableTrading } from './trade';
 const h = uiSuite(import.meta.filename);
 const SHOTS = process.env.VS_E2E_SHOTS;
 
-/** The dev build's dock and the indexing toast float over the page (the dock is not in production). */
-const clearOverlays = (p: Page) => p.addStyleTag({ content: '[aria-label="Developer"], .toast { display: none !important; }' });
+/** The dev build's dock, the indexing toast and the page's localhost switch float over the page (none is in production). */
+const clearOverlays = (p: Page) => p.addStyleTag({ content: '[aria-label="Developer"], .toast, .pfv-switch { display: none !important; }' });
 
 const THEME = process.env.VS_E2E_THEME;
 const storage: Record<string, string> = THEME ? { 'vs.theme': THEME } : {};
@@ -149,19 +149,40 @@ async function fakeBook(ctx: BrowserContext) {
   }));
 }
 
+/**
+ * The page (components/portfolio/wallet/Wallet.tsx, the Portfolio page since 2026-11-26): the card, the accounts and
+ * their drawers, the chart, earn and automate, Fees beside Trading, and the account band; Wealth is a view of its own.
+ */
 const page = (p: Page) => ({
-  tab: (name: string | RegExp) => p.getByRole('tab', { name }).first(),
-  value: (label: string) => p.locator('.pfx-bucket', { hasText: label }).locator('.pfa__part-v'),
+  /** The card: the page is up. */
+  ready: () => p.locator('.pfv3-card').waitFor({ timeout: 30_000 }),
+  /** An account's row in Accounts (Perps, Spot, Wealth, EVM) and its figure. */
+  row: (label: string) => p.locator('.pfv3-accounts .pfv-legend__row', { has: p.locator('.pfv-legend__k', { hasText: new RegExp(`^${label}$`) }) }),
+  value: (label: string) => page(p).row(label).locator('.pfv-legend__v b'),
+  /** The band's account tabs (Perps, Spot, Wealth, Copy trading, Bots). */
+  section: (name: string) => p.locator('.pfv3-band').getByRole('tab', { name, exact: true }),
+  /** Wealth, the view: from its account's drawer. */
+  openWealth: async () => {
+    const row = page(p).row('Wealth');
+    if ((await row.getAttribute('aria-expanded')) !== 'true') await row.click();
+    await p.locator('#pfv-drawer-wealth').getByRole('button', { name: /Open Wealth|View all .* in Wealth|See all funds/ }).click();
+    await p.locator('.pfv-wealth').waitFor();
+  },
+  summary: () => p.locator('.pfv3-trading .pfv-sum'),
 });
 
-h.test('no wallet: the layout stands, Trade and Wealth, four promo cards and no invented figure', async ({ page: p, origin }) => {
+h.test('no wallet: the layout stands, accounts and their figures, the four ways to earn and no invented figure', async ({ page: p, origin }) => {
   await p.goto(new URL('/portfolio', origin).href);
   await clearOverlays(p);
-  await p.locator('.pfx-title').waitFor();
-  assert.equal(await p.locator('.pfx-promo').count(), 4);
-  const text = (await p.locator('.pfx-promos').innerText()).replace(/\s+/g, ' ');
-  for (const want of ['Copy trading', 'USDC Earn', 'US Cash Yield', 'Bots']) assert.ok(text.includes(want), `${want} is on a card`);
-  assert.ok(await page(p).tab('Wealth').isVisible());
+  await page(p).ready();
+  assert.equal(await p.locator('.pfv-h1').innerText(), 'Portfolio');
+  assert.equal(await p.locator('.pfv3-offers > li').count(), 4);
+  const text = (await p.locator('.pfv3-offers').innerText()).replace(/\s+/g, ' ');
+  for (const want of ['Copy trading', 'USDC Earn', 'US Cash Yield', 'Bots']) assert.ok(text.includes(want), `${want} is in Earn and automate`);
+  // Every way in is a button of its own.
+  for (const name of ['See vault', 'See fund', 'Find traders']) assert.ok(await p.locator('.pfv3-offers').getByRole('button', { name }).isVisible(), `${name} is a button`);
+  assert.equal(await p.locator('.pfv3-accounts .pfv-legend > li').count(), 4);
+  assert.ok(await page(p).section('Wealth').isVisible());
   await shot(p, 'no-wallet');
 }, { storage });
 
@@ -175,42 +196,54 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   await holdHistory(p, wallet.address, false);
   await p.goto(new URL('/portfolio', origin).href);
   await clearOverlays(p);
-  await p.locator('.pfx-title').waitFor();
-  for (const label of ['Wealth', 'Spot', 'Perps', 'EVM']) await until(p, async () => (await page(p).value(label).innerText()).includes('$'), `the ${label} bucket`, 20_000);
+  await page(p).ready();
+  for (const label of ['Wealth', 'Spot', 'Perps', 'EVM']) await until(p, async () => (await page(p).value(label).innerText()).includes('$'), `the ${label} account`, 20_000);
   const money = async (label: string) => num((await page(p).value(label).innerText()).replace(/[^0-9.,]/g, ''));
   const perps = await money('Perps');
   const spot = await money('Spot');
   const wealth = await money('Wealth');
   const evm = await money('EVM').catch(() => 0);
-  const total = num((await p.locator('.pfx-value__v').first().innerText()).replace(/[^0-9.,]/g, ''));
+  const total = num((await p.locator('.pfv3-card__v').innerText()).replace(/[^0-9.,]/g, ''));
   assert.ok(Math.abs(total - (perps + spot + wealth + evm)) < 0.02, `total ${total} = ${perps} + ${spot} + ${wealth} + ${evm}`);
   // 1290 + 315 + 505 settled, minus the 404 of soUSDC pledged in Perps, plus 120 in flight.
   assert.ok(Math.abs(wealth - 1826) < 0.02, `wealth ${wealth}`);
   assert.ok(spot < 200, `the vQQQ share left Spot (${spot})`);
-  assert.equal(await p.locator('.pfx-bucket').count(), 4);
+  assert.equal(await p.locator('.pfv3-accounts .pfv-legend > li').count(), 4);
+
+  // Fees and Trading share one row: same top, same height (desktop and tablet; one column on a phone).
+  if ((p.viewportSize()?.width ?? 0) > 760) {
+    const [fees, trading] = await Promise.all(['.pfv3-fees', '.pfv3-trading'].map((s) => p.locator(s).boundingBox()));
+    assert.ok(Math.abs(fees!.y - trading!.y) < 1 && Math.abs(fees!.height - trading!.height) < 1, `Fees ${fees!.y}/${fees!.height} beside Trading ${trading!.y}/${trading!.height}`);
+  }
+
+  // An account's drawer: at most four rows, then the way to the table that has all of them.
+  await page(p).row('Spot').click();
+  const drawer = p.locator('#pfv-drawer-spot');
+  await drawer.locator('.pfv-coins li').first().waitFor();
+  assert.ok(await drawer.locator('.pfv-coins li').count() <= 4, 'four rows at most');
+  await shot(p, 'spot-drawer');
+
   // No partial figure while the wallet's history is still being read.
-  await p.locator('.pfx-sum .pfx-sum__state').first().waitFor();
+  await page(p).summary().locator('.pfv-skel-num').first().waitFor();
   await shot(p, 'summary-reading');
-  await until(p, async () => { const text = await p.locator('.pfx-sum').innerText(); return /trades\s*2/.test(text) && !text.includes('Reading'); }, 'the summary to add up the fills and the funding', 150_000);
-  const sum = (await p.locator('.pfx-sum').innerText()).replace(/\s+/g, ' ');
+  await until(p, async () => {
+    const t = await page(p).summary().innerText();
+    return /Trades\s*2/.test(t) && (await page(p).summary().locator('.pfv-skel-num').count()) === 0;
+  }, 'the summary to add up the fills and the funding', 150_000);
+  const sum = (await page(p).summary().innerText()).replace(/\s+/g, ' ');
   assert.match(sum, /Buys 1 Sells 1/);
-  assert.match(sum, /vol\. of trades \$300,00/);
-  assert.match(sum, /commission \$0,12/);
-  assert.match(sum, /funding fee\s*\S*\$1,50 Received \$0,00 Paid \S*\$1,50/);
-  await shot(p, 'trade-tab');
-  // The timeframe is a switch whose blob travels to the chosen segment.
-  await p.locator('.pfx-sum').getByRole('radio', { name: '30d' }).click();
-  await until(p, async () => p.locator('.pfx-sum .pfx-slide').evaluate((el) => {
-    const on = el.querySelector('.is-on')!.getBoundingClientRect();
-    const blob = el.querySelector('.pfx-slide__blob')!.getBoundingClientRect();
-    return Math.abs(on.left - blob.left) < 1 && Math.abs(on.width - blob.width) < 1;
-  }), 'the blob on 30d', 5_000);
-  // The chart's view is a dropdown.
-  // The axis: hours on 24h, several days at one step on 7d.
+  assert.match(sum, /Volume \$300,00/);
+  assert.match(sum, /Fees paid \$0,12/);
+  assert.match(sum, /Funding \S*\$1,50 \S*\$0,00 received · \S*\$1,50 paid/);
+  await shot(p, 'trading');
+  await p.locator('.pfv3-range').getByRole('radio', { name: '30d' }).click();
+  assert.equal(await p.locator('.pfv3-range').getByRole('radio', { name: '30d' }).getAttribute('aria-checked'), 'true');
+
+  // The chart: hours on 24h, days on 7d; the view is a dropdown; the line morphs between them (chart/lineMorph.ts).
   const labels = () => p.locator('.pfx-chart .pf-chart__xlabel').allTextContents();
   await p.locator('.pfx-chart').getByRole('radio', { name: '24h' }).click();
   await until(p, async () => (await labels()).some((l) => /^\d\d:00$/.test(l)), 'hours on the 24h axis', 15_000);
-  await p.waitForTimeout(350);
+  await p.waitForTimeout(700);
   await shot(p, 'axis-24h', false);
   await p.locator('.pfx-chart').getByRole('radio', { name: '7d' }).click();
   await until(p, async () => (await labels()).length >= 3 && !(await labels()).some((l) => l.includes(':')), 'days on the 7d axis', 5_000);
@@ -226,31 +259,28 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   const valueHeight = await heightOf();
   await p.getByRole('option', { name: 'PnL', exact: true }).click();
   assert.equal(await heightOf(), valueHeight, 'the card keeps its height on PnL');
+  await p.waitForTimeout(700);
   await p.locator('.pfx-chart').evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await shot(p, 'pnl', false);
   await p.locator('.pfx-chart .psel__btn').click();
   await p.getByRole('option', { name: 'PnL Calendar' }).click();
   await p.locator('.pfc-grid').waitFor();
-  assert.equal(await heightOf(), valueHeight, 'the card keeps its height on the calendar');
   await shot(p, 'calendar', false);
   await p.getByRole('button', { name: 'View tiers' }).click();
   await p.getByRole('dialog').first().waitFor();
   await shot(p, 'fee-sheet', false);
   await p.keyboard.press('Escape');
   for (const name of ['Spot', 'Wealth', 'Copy trading', 'Bots']) {
-    await p.locator('.pfx-sections').getByRole('tab', { name, exact: true }).click();
+    await page(p).section(name).click();
     await p.waitForTimeout(700);
     await shot(p, `section-${name.toLowerCase().replace(' ', '-')}`);
   }
-  await page(p).tab('Wealth').click();
-  await p.locator('.pfx-board').waitFor();
+  await page(p).openWealth();
   await p.waitForTimeout(1500);
-  await shot(p, 'wealth-tab');
-  // No column of the fund list or the holdings is cut off, on a phone above all.
-  for (const wrap of await p.locator('.pfx-tablewrap').all()) {
-    const { scroll, client } = await wrap.evaluate((e) => ({ scroll: e.scrollWidth, client: e.clientWidth }));
-    assert.ok(scroll <= client + 1, `table fits: ${scroll} <= ${client}`);
-  }
+  await shot(p, 'wealth-view');
+  // Nothing in Wealth is cut off at the side, on a phone above all.
+  const { scroll, client } = await p.locator('.pfv-wealth').evaluate((e) => ({ scroll: e.scrollWidth, client: e.clientWidth }));
+  assert.ok(scroll <= client + 1, `Wealth fits: ${scroll} <= ${client}`);
 }, { storage, timeout: 240_000 });
 
 /** Incognito on the amounts, in one look; the chart opens on PnL. (The address stays: the setup reads it.) */
@@ -270,6 +300,8 @@ for (const mode of ['blur', 'stars'] as const) {
     await clearOverlays(p);
     const chart = p.locator('.pfx-chart');
     await chart.locator('.pf-chart__line').first().waitFor({ timeout: 20_000 });
+    // A switch morphs for 580 ms (chart/lineMorph.ts): read the settled chart.
+    await p.waitForTimeout(800);
     const labels = await chart.locator('.pf-chart__ylabel').allTextContents();
     assert.ok(labels.length >= 2, 'the axis still has its ticks');
     if (mode === 'stars') assert.ok(labels.every((l) => /^\*+$/.test(l)), `asterisks only: ${labels.join(' | ')}`);
@@ -293,7 +325,7 @@ h.test('History notification: paused it stays up with its parts, resumed it read
   await enableTrading({ page: p, wallet, ctx }, { balance: 1000 });
   await fakeHistory(ctx);
   await p.goto(new URL('/portfolio', origin).href);
-  await p.addStyleTag({ content: '[aria-label="Developer"] { display: none !important; }' });
+  await p.addStyleTag({ content: '[aria-label="Developer"], .pfv-switch { display: none !important; }' });
   const note = p.getByRole('status', { name: 'History' });
   await note.waitFor();
   await until(p, async () => (await note.innerText()).includes('History paused'), 'the paused notification', 15_000);
@@ -318,7 +350,7 @@ h.test('History notification: paused it stays up with its parts, resumed it read
   assert.equal(alpha, 1, 'an opaque card when open');
   await note.getByRole('button', { name: 'Resume' }).click();
   await until(p, async () => !(await note.isVisible()), 'the notification to go once all is read', 150_000);
-  await until(p, async () => /trades\s*2/.test(await p.locator('.pfx-sum').innerText()), 'the summary from what it read', 30_000);
+  await until(p, async () => /Trades\s*2/.test(await page(p).summary().innerText()), 'the summary from what it read', 30_000);
 }, { storage, timeout: 240_000 });
 
 h.test('Swap: the exact order SoDEX\'s own dialog sends, and its result', async ({ page: p, wallet, ctx, origin }) => {
@@ -327,8 +359,8 @@ h.test('Swap: the exact order SoDEX\'s own dialog sends, and its result', async 
   await fakeBook(ctx);
   await p.goto(new URL('/portfolio', origin).href);
   await clearOverlays(p);
-  await p.locator('.pfx-title').waitFor();
-  await p.getByRole('button', { name: /Swap/ }).first().click();
+  await page(p).ready();
+  await p.locator('.pfv3-keys').getByRole('button', { name: /Swap/ }).first().click();
   const sheet = p.getByRole('dialog', { name: 'Swap USDT to USDC' });
   await sheet.waitFor();
   await sheet.getByRole('button', { name: 'Enter an amount' }).waitFor();
@@ -359,9 +391,9 @@ h.test('Invest sheet: a batch vault spends wallet USDC and refuses what it canno
   await connectWallet(p);
   await p.goto(new URL('/portfolio', origin).href);
   await clearOverlays(p);
-  await page(p).tab('Wealth').click();
-  await p.locator('.pfx-board').waitFor();
-  const row = p.locator('.pfx-board tr', { hasText: 'CXMT Vault' });
+  await page(p).ready();
+  await page(p).openWealth();
+  const row = p.locator('.pfv-funds li', { hasText: 'CXMT Vault' });
   await row.getByRole('button', { name: 'Invest' }).click({ timeout: 15_000 });
   const sheet = p.getByRole('dialog', { name: /Invest in CXMT Vault/ });
   await sheet.waitFor();

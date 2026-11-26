@@ -1,8 +1,8 @@
 /**
- * The pieces the portfolio versions are built from (localhost only). Every control is the app's own: the Bots kit
+ * The pieces the Portfolio page (Wallet.tsx) is built from. Every control is the app's own: the Bots kit
  * (Segmented, Tabs, Button, StatusPill, SegmentedBar, ProgressBar, Skeleton, EmptyState, Sparkline), the account band
  * (AccountTabs, as on the trade page), the equity curve and PnL calendar (Portfolio.tsx), FeeSchedule, the swap and
- * Wealth sheets. Each version arranges them in its own way and gives them its own look in versions.css.
+ * Wealth sheets. Wallet.tsx arranges them and wallet.css gives them their look.
  */
 import { Suspense, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Button, EmptyState, Icon, ProgressBar, Segmented, SegmentedBar, Skeleton, StatusPill, Tabs, type SegOption } from '../../bots/kit/kit';

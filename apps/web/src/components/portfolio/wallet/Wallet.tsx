@@ -1,31 +1,31 @@
 /**
- * The portfolio as a wallet (localhost only; the owner kept this one of the three on 2026-11-26: "Wallet, but less
- * margin on right and left"). It draws:
+ * The Portfolio page (owner 2026-11-26: "promote portfolio page so its the new original"; it was the Wallet version
+ * on the localhost switch, the one he kept). It draws:
  *
  * - the card: total value, today, how the value moved over 7 days (a line from 0, green above it and red below), where
  *   the money is, and a share button;
  * - the four keys (Deposit, Withdraw, Transfer, Swap);
  * - the accounts, each opening a drawer with what it holds: a few rows, then "View all" to the table below that has
  *   all of them (owner: "limit how many rows are visible, otherwise when clicking to view everything go to element");
- * - the value / PnL / calendar chart as today's page draws it (owner: "use the chart from original");
+ * - the value / PnL / calendar chart (ChartCard, PortfolioPage.tsx);
  * - earn and automate, trading, fees, margin;
  * - every table, by account (copies and bots as lists of their own).
  *
  * Two columns: the card and the accounts on the left, the chart, earn and trading on the right; one column on a phone.
- * Wealth is a view of its own, opened from its account and left with Back.
+ * Wealth is a view of its own, opened from its account and left with Back. On localhost the page before this one is
+ * still a click away (DevVersions.tsx, "Previous").
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Panel, Shell, ShellHeader, StatusPill } from '../../bots/kit/kit';
 import { PortfolioMargin } from '../../bots/Allocation';
 import { BrandMark } from '../../BrandMark';
 import type { Period } from '../../Portfolio';
-import { ChartCard, curveFor } from '../PortfolioPage';
+import { ChartCard, curveFor, type PortfolioPageLinks } from '../PortfolioPage';
 import { SwapSheet } from '../SwapSheet';
 import { DASH, fmtUsd } from '../../../format';
 import { useStored } from '../../../hooks';
 import { useTilt } from '../../../tilt';
 import { Private } from '../../../privacy';
-import type { VersionProps } from './DevVersions';
 import { usePfData, type Bucket, type PfData } from './data';
 import {
   AllocBar, AllocLegend, AllocationNote, ApyFig, Band, EngineSwitch, EvmList, Exposure, FeeRates, Fig, Identity, ManageCopies, MarginMeter,
@@ -34,6 +34,12 @@ import {
 } from './blocks';
 import { Holdings, WealthArea } from './WealthArea';
 import type { PortfolioContext } from '../../Portfolio';
+import '../../bots/kit/kit.css';
+import '../../bots/botsPages.css';
+import '../../vip.css';
+import './wallet.css';
+
+export type WalletProps = { c: PortfolioContext } & PortfolioPageLinks;
 
 type View = 'home' | 'wealth';
 /** How many rows an account's drawer shows before "View all". */
@@ -42,7 +48,7 @@ const ROWS = 4;
 /** What one account holds, in the drawer under its row: a few rows, then the way to all of them. */
 function Inside({ k, d, c, onWealth, onAll, onOpenMarket, provider }: {
   k: Bucket; d: PfData; c: PortfolioContext; onWealth: () => void; onAll: (s: Section, tab?: string) => void;
-} & Pick<VersionProps, 'onOpenMarket' | 'provider'>) {
+} & Pick<WalletProps, 'onOpenMarket' | 'provider'>) {
   const m = useMasks();
   const h = health(c);
   if (k === 'perps') {
@@ -135,7 +141,7 @@ function Card({ c, d }: { c: PortfolioContext; d: PfData }) {
   );
 }
 
-export function WalletVersion({ c, provider, onOpenMarket, onOpenTab }: VersionProps) {
+export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab }: WalletProps) {
   const d = usePfData(c);
   const [view, setView] = useState<View>('home');
   const [open, setOpen] = useStored<Bucket | null>('vs.pfv3.open', 'perps');
@@ -155,6 +161,14 @@ export function WalletVersion({ c, provider, onOpenMarket, onOpenTab }: VersionP
   const toTop = () => document.querySelector('.appcontent')?.scrollTo({ top: 0, behavior: 'smooth' });
   const goWealth = useCallback(() => { setView('wealth'); toTop(); }, []);
   const offers = useOffers(d, goWealth, onOpenTab, () => setCopies(true));
+
+  // `?tab=` deep-links a table of the account band (AccountTabs, e.g. the transfer drawer's "View full history"):
+  // show the band on its account and bring it into view.
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('tab')) return;
+    if (section !== 'perps' && section !== 'spot') setSection('perps');
+    requestAnimationFrame(() => bandRef.current?.scrollIntoView({ block: 'start' }));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (view === 'wealth') {
     return (
@@ -238,11 +252,16 @@ export function WalletVersion({ c, provider, onOpenMarket, onOpenTab }: VersionP
 
   return (
     <div className="tf bots-page pfv pfv3">
+      <h1 className="pfv-h1">Portfolio</h1>
       <div className="bots-col pfv3-col">
+        {/* The two columns end together (the chart takes up the difference); Fees and Trading then share one row, same
+            top and height (owner 2026-11-26: "a slight misalignment between fees and trading"). */}
         <div className="pfv3-split">
-          <div className="pfv3-left">{card}{keys}{accounts}{fees}{margin}</div>
-          <div className="pfv3-right">{chart}{earn}{trading}</div>
+          <div className="pfv3-left">{card}{keys}{accounts}</div>
+          <div className="pfv3-right">{chart}{earn}</div>
         </div>
+        <div className="pfv3-pair">{fees}{trading}</div>
+        {margin}
         {band}
       </div>
       <SwapSheet open={swap} onClose={() => setSwap(false)} address={c.address} unlocked={c.unlocked} onChanged={c.onChanged} />

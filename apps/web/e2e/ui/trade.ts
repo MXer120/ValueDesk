@@ -40,7 +40,9 @@ export async function enableTrading(env: Pick<TestEnv, 'page' | 'ctx' | 'wallet'
   await fee.getByRole('button', { name: 'Approve', exact: true }).click();
   await until(page, async () => /^(Long|Short|Buy|Sell)$/.test(((await btn.textContent()) ?? '').trim()), 'trading to be enabled', 30_000);
   const signed = wallet.since(mark).map((r) => [r.kind ?? r.method, r.outcome]);
-  assert.deepEqual(signed.filter(([k]) => k !== 'site-terms'), [['builder', 'signed'], ['trading-key', 'signed']], `the builder fee, then the trading key (wallet: ${JSON.stringify(signed)})`);
+  // The terms dialog signs ValueDesk's terms and the copy and bot terms in one signature (copy/terms.ts signAllTerms,
+  // since ad24e9a6), which the wallet sees as the copy terms' request: either is the terms, not trading.
+  assert.deepEqual(signed.filter(([k]) => k !== 'site-terms' && k !== 'copy-terms'), [['builder', 'signed'], ['trading-key', 'signed']], `the builder fee, then the trading key (wallet: ${JSON.stringify(signed)})`);
   assert.equal(sx.keys.length, 1, 'one trading key registered');
   return sx;
 }

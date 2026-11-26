@@ -590,9 +590,9 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
 
 // --- the page ---------------------------------------------------------------------------
 
-/** Today's page. On localhost (import.meta.env.DEV) a switch at the foot of the page also offers the redesigns in
- *  versions/ (owner 2026-11-26: "multiple versions and the switch ... keep the original in the switch"). A build has
- *  neither the switch nor the versions: the dynamic import below is dropped with its branch, and this page is all it shows. */
+/** The page before the wallet (wallet/Wallet.tsx took its place on 2026-11-26). Shown only on localhost, as "Previous"
+ *  in the switch (wallet/DevVersions.tsx); a build does not reach it. Its parts (ChartCard, curveFor, useSummary...)
+ *  are the wallet's too. */
 export function PortfolioOriginal({ c, provider, onOpenMarket, onOpenTab }: { c: PortfolioContext } & PortfolioPageLinks) {
   const w = useWealth(c.address, c.refreshToken);
   const botsOpen = useBotsAccess(c.address);
@@ -665,9 +665,3 @@ export function PortfolioOriginal({ c, provider, onOpenMarket, onOpenTab }: { c:
   );
 }
 
-const DevVersions = import.meta.env.DEV ? lazy(() => import('./versions/DevVersions')) : null;
-
-export function PortfolioPage(props: { c: PortfolioContext } & PortfolioPageLinks) {
-  if (!DevVersions) return <PortfolioOriginal {...props} />;
-  return <Suspense fallback={null}><DevVersions {...props} Original={PortfolioOriginal} /></Suspense>;
-}

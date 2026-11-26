@@ -1,32 +1,28 @@
 /**
- * LOCALHOST ONLY. PortfolioPage.tsx loads this file only when import.meta.env.DEV is true, so a build has neither the
- * switch nor the versions. Owner 2026-11-26: "localhost only with multiple versions and the switch ... Do not delete
- * the original keep it in the switch."
+ * LOCALHOST ONLY. Page.tsx loads this file only when import.meta.env.DEV is true, so a build has neither the switch nor
+ * the previous page.
  *
- *   1 Original   today's page, untouched
- *   2 Wallet     the balance card and its four keys, accounts you open in place; the chart, earn and trading beside them
+ *   1 Portfolio  the page (the wallet, wallet/Wallet.tsx), as a build shows it
+ *   2 Previous   the page before it (PortfolioPage.tsx PortfolioOriginal), kept on localhost until the owner says
  *
- * Overview and Desk were removed on the owner's word (2026-11-26: "remove 2 & 3"); of the three wallets (Wallet, Stack,
- * Banner) the owner kept Wallet the same day.
+ * History: Overview and Desk, then Stack and Banner, were removed on the owner's word (2026-11-26); he kept Wallet and
+ * made it the page the same day ("promote portfolio page so its the new original").
  *
- * The pill at the foot picks one (kept in localStorage, like the referral page's). "View a wallet" shows any other
- * wallet's portfolio read-only (devWatch.ts), so a version can be judged with real figures.
+ * The pill at the foot picks one (kept in localStorage). "View a wallet" shows any other wallet's portfolio read-only
+ * (devWatch.ts), so the page can be judged with real figures.
  */
-import { lazy, Suspense, useState, useTransition, type ComponentType } from 'react';
+import { useState, useTransition, type ComponentType } from 'react';
 import type { PortfolioContext } from '../../Portfolio';
-import type { PortfolioPageLinks } from '../PortfolioPage';
+import { PortfolioOriginal, type PortfolioPageLinks } from '../PortfolioPage';
+import { PortfolioWallet } from './Wallet';
 import { isAddress, setDevWatch, useDevWatch } from '../devWatch';
 import { shortAddr } from './blocks';
-import '../../bots/kit/kit.css';
-import '../../bots/botsPages.css';
-import '../../vip.css';
-import './versions.css';
 
 export type VersionProps = { c: PortfolioContext } & PortfolioPageLinks;
 
-const VERSIONS: ReadonlyArray<{ key: string; name: string; C: ComponentType<VersionProps> | null }> = [
-  { key: 'original', name: 'Original', C: null },
-  { key: 'wallet', name: 'Wallet', C: lazy(() => import('./Wallet').then((m) => ({ default: m.WalletVersion }))) },
+const VERSIONS: ReadonlyArray<{ key: string; name: string; C: ComponentType<VersionProps> }> = [
+  { key: 'portfolio', name: 'Portfolio', C: PortfolioWallet },
+  { key: 'previous', name: 'Previous', C: PortfolioOriginal },
 ];
 const KEY = 'vs.dev.pf.version';
 /** The owner's own test wallet (e2e/live/units.test.ts), offered as a one-press example. */
@@ -42,7 +38,7 @@ function stored(): number {
   }
 }
 
-export default function DevVersions({ Original, ...props }: VersionProps & { Original: ComponentType<VersionProps> }) {
+export default function DevVersions(props: VersionProps) {
   const [pick, setPick] = useState(stored);
   // The page on screen stays until the next version has loaded.
   const [, startTransition] = useTransition();
@@ -58,7 +54,7 @@ export default function DevVersions({ Original, ...props }: VersionProps & { Ori
   const ok = isAddress(draft);
   return (
     <>
-      {V ? <Suspense fallback={null}><V key={pick} {...props} /></Suspense> : <Original {...props} />}
+      <V key={pick} {...props} />
       <div className="pfv-switch" data-no-i18n="">
         {editing && (
           <form
@@ -71,7 +67,7 @@ export default function DevVersions({ Original, ...props }: VersionProps & { Ori
             <button type="button" onClick={() => setEditing(false)} aria-label="Close">×</button>
           </form>
         )}
-        <nav className="pfv-switch__bar" aria-label="Portfolio page versions">
+        <nav className="pfv-switch__bar" aria-label="Portfolio page, this one or the previous">
           {VERSIONS.map((x, i) => (
             <button key={x.key} type="button" aria-pressed={pick === i} className={pick === i ? 'is-on' : ''} onClick={() => choose(i)}>
               <b>{i + 1}</b><span>{x.name}</span>

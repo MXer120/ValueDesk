@@ -15,6 +15,8 @@ import { sodexFundUrl, type JoinedHolding, type WealthEntry, type WealthPlan } f
 import { useLedger, type WealthState } from '../../portfolio/useWealth';
 import type { WealthSheetTarget } from '../../portfolio/WealthSheet';
 import { SodexMark } from '../../funds/ui';
+import { pathOf, sampleLine, samplesFor, type LineShape } from '../../../chart/lineMorph';
+import { useLineMorph } from '../../../chart/useLineMorph';
 import {
   HIST_RANGES, KIND, channelOf, dayOnly, dayTime, expectedDelivery, hasHistory, heldIn, holding24h, holdingPnl, isMoving, leftShort,
   marketState, pctText, seriesChange, statusTone, statusWord, usdCompact, usePriceHistory, val, whenMs,
@@ -144,6 +146,23 @@ export function PriceChart({ points, height = 240, tone = 'sign', fmtY = (v: num
   const first = points[0]?.v ?? 0;
   const last = points[n - 1]?.v ?? 0;
   const cls = tone === 'neutral' ? 'is-ink' : last >= first ? 'is-up' : 'is-down';
+  // Another range, Value to PnL: the line reshapes into the new one and the labels cross-fade, as the trade chart
+  // switches (chart/lineMorph.ts; owner 2026-11-26). A new point or a resize redraws at once.
+  const target: LineShape | null = g ? { pts: sampleLine(points.map((q) => [g.X(q.t), g.Y(q.v)] as const), samplesFor(g.pw), false), base: g.Y(first) } : null;
+  const decor = g ? (
+    <>
+      {g.ticks.map((v, i) => <span key={i} className="wv-chart__y" style={{ top: g.Y(v) - 9 }}>{mask(fmtY(v, g.dp))}</span>)}
+      {g.xs.map((i, k) => (
+        <span key={`x${i}`} className={`wv-chart__xl${k === 0 ? ' is-first' : k === g.xs.length - 1 ? ' is-last' : ''}`} style={{ left: g.X(points[i]!.t), width: 0 }}>
+          <i>{dayOnly(points[i]!.t)}</i>
+        </span>
+      ))}
+    </>
+  ) : null;
+  const morph = useLineMorph(target, `${points[0]?.t ?? ''}|${label}|${tone}`, decor);
+  const frame = morph.frame;
+  const fLine = frame ? pathOf(frame.pts) : null;
+  const fEnd = frame ? frame.pts[frame.pts.length - 1]! : null;
   const move = (clientX: number) => {
     const el = box.current;
     if (!el || !g) return;
@@ -156,7 +175,7 @@ export function PriceChart({ points, height = 240, tone = 'sign', fmtY = (v: num
     }
     setAt(best);
   };
-  const p = at === null ? null : points[at];
+  const p = at === null || frame || at >= n ? null : points[at];
   return (
     <div
       ref={box}
@@ -178,18 +197,14 @@ export function PriceChart({ points, height = 240, tone = 'sign', fmtY = (v: num
                 <stop offset="1" stopColor="currentColor" stopOpacity="0" />
               </linearGradient>
             </defs>
-            <line className="wv-chart__base" x1={0} x2={g.pw} y1={g.Y(first)} y2={g.Y(first)} />
-            <path d={g.area} fill={`url(#${gid})`} />
-            <path d={g.line} className="wv-chart__line" />
+            <line className="wv-chart__base" x1={0} x2={g.pw} y1={frame ? frame.base : g.Y(first)} y2={frame ? frame.base : g.Y(first)} />
+            <path d={fLine ? `${fLine}L${g.pw.toFixed(1)},${(TOP + g.ph).toFixed(1)}L0,${(TOP + g.ph).toFixed(1)}Z` : g.area} fill={`url(#${gid})`} />
+            <path d={fLine ?? g.line} className="wv-chart__line" />
             {p && <line className="wv-chart__x" x1={g.X(p.t)} x2={g.X(p.t)} y1={TOP} y2={TOP + g.ph} />}
-            <circle className="wv-chart__dot" cx={g.X(p ? p.t : points[n - 1]!.t)} cy={g.Y(p ? p.v : last)} r={3.5} />
+            <circle className="wv-chart__dot" cx={fEnd ? fEnd[0] : g.X(p ? p.t : points[n - 1]!.t)} cy={fEnd ? fEnd[1] : g.Y(p ? p.v : last)} r={3.5} />
           </svg>
-          {g.ticks.map((v, i) => <span key={i} className="wv-chart__y" style={{ top: g.Y(v) - 9 }}>{mask(fmtY(v, g.dp))}</span>)}
-          {g.xs.map((i, k) => (
-            <span key={i} className={`wv-chart__xl${k === 0 ? ' is-first' : k === g.xs.length - 1 ? ' is-last' : ''}`} style={{ left: g.X(points[i]!.t), width: 0 }}>
-              <i>{dayOnly(points[i]!.t)}</i>
-            </span>
-          ))}
+          {morph.prev && <span className="wv-chart__decor" style={{ opacity: 1 - morph.e }} aria-hidden="true">{morph.prev}</span>}
+          <span className="wv-chart__decor" style={morph.prev ? { opacity: morph.e } : undefined}>{decor}</span>
           {p && (
             <span className={`wv-chart__tip${g.X(p.t) > g.pw / 2 ? ' is-left' : ''}`} style={{ left: g.X(p.t) }}>
               <small>{new Date(p.t).toLocaleDateString(undefined, { dateStyle: 'medium' })}</small>

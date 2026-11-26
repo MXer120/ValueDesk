@@ -1,5 +1,5 @@
 /**
- * The Wealth part of the portfolio versions (localhost only): everything today's Wealth tab shows (WealthTab.tsx), in
+ * The Wealth part of the Portfolio page: everything today's Wealth tab shows (WealthTab.tsx), in
  * the kit's look. What the wallet holds and how it did (SoDEX's /wealth/users/{a}/pnl), its value over time
  * (/pnl-history), requests in progress, history and recurring buys (the ledger), and every fund on offer with SoDEX's
  * own live returns. A missing figure is a dash. Invest and Redeem open the same sheet as today (WealthSheet.tsx).

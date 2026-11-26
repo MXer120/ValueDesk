@@ -27,7 +27,8 @@ import {
   usePortfolioContext,
   type PortfolioProps,
 } from '../components/Portfolio';
-import { PortfolioPage, type PortfolioPageLinks } from '../components/portfolio/PortfolioPage';
+import type { PortfolioPageLinks } from '../components/portfolio/PortfolioPage';
+import { PortfolioPage } from '../components/portfolio/Page';
 import { useDevWatch } from '../components/portfolio/devWatch';
 
 export function PortfolioDashboard({ provider, onOpenMarket, onOpenTab, ...props }: PortfolioProps & PortfolioPageLinks) {
