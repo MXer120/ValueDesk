@@ -9,6 +9,8 @@ import './pages/slate.css';
 import './pages/deck.css';
 import './pages/pulse.css';
 import './editors/editors.css';
+import './editors/studio.css';
+import './editors/board.css';
 
 export { VersionSwitch } from './VersionSwitch';
 export { PhoneDeck } from './pages/PhoneDeck';
