@@ -409,8 +409,8 @@ function AppShell({ onGate }: { onGate: (g: GateProps) => void }) {
     openUrl(`/scan?find=${encodeURIComponent(addr)}`);
   }, [openUrl]);
   /* Copy setup for one trader. The Copy page reads ?address=&venue= on mount and on popstate. */
-  const openCopy = useCallback((addr: string, venue: Venue) => {
-    openUrl(`/copy?address=${encodeURIComponent(addr)}&venue=${venue}`);
+  const openCopy = useCallback((addr: string, venue: Venue, direction?: 'copy' | 'counter') => {
+    openUrl(`/copy?address=${encodeURIComponent(addr)}&venue=${venue}${direction === 'counter' ? '&direction=counter' : ''}`);
   }, [openUrl]);
   const openSymbol = useCallback((sym: string) => {
     setEngine('perps');

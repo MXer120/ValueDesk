@@ -18,7 +18,7 @@
  * list. Those cells stay a dash, or the venue mark, until a row actually
  * carries the figure. Nothing here is invented.
  */
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useAsync } from '../../hooks';
 import { asOfText } from '../../asOf';
 import { mayReadAhead, peekAnswer, peekJson, readingAhead, revalidating } from '../../serverFetch';
@@ -319,12 +319,30 @@ function useOtherWindows(view: LbView, minTrades: 0 | 2, ready: boolean): void {
 export interface LeaderboardPageProps {
   address: string | null;
   onScan: (address: string, venue?: Venue) => void;
-  onOpenCopy: (address: string, venue: Venue) => void;
+  /** The copy setup for this trader; `direction` 'counter' opens it on the other side. */
+  onOpenCopy: (address: string, venue: Venue, direction?: 'copy' | 'counter') => void;
   /** A widget on another page (the terminal): its view is not read from or written to that page's URL. */
   embedded?: boolean;
 }
 
-export function LeaderboardPage({ address, onScan, embedded = false }: LeaderboardPageProps) {
+/*
+ * On localhost the page comes in versions behind a switch (versions/index.tsx, owner 2026-11-26). A build never loads
+ * them: `import.meta.env.DEV` is false there, so the import below is dropped and the page is the Original.
+ */
+const Versions = import.meta.env.DEV ? lazy(() => import('./versions').then((m) => ({ default: m.LeaderboardVersions }))) : null;
+
+export function LeaderboardPage(props: LeaderboardPageProps) {
+  if (!Versions) return <LeaderboardOriginal {...props} />;
+  const { onOpenCopy, embedded = false, ...rest } = props;
+  return (
+    <Suspense fallback={null}>
+      <Versions {...rest} embedded={embedded} onCopy={(a, v, d) => onOpenCopy(a, v, d)} original={<LeaderboardOriginal {...props} />} />
+    </Suspense>
+  );
+}
+
+/** Today's page, as it is live. */
+export function LeaderboardOriginal({ address, onScan, embedded = false }: LeaderboardPageProps) {
   const [view, setView] = useState<LbView>(() => parseView(embedded ? '' : window.location.search));
   const [statSort, setStatSort] = useState<SortKey | null>(null);
   const [board, setBoard] = useState<AssetBoard>('all');
