@@ -27,14 +27,15 @@ const EXEMPT = new Set([
   'components/landing/site/appDesk.css',
   'components/landing/v4/v4.css',
   'legal/legal.css', // loads with the legal pages; only `.legal*` selectors (see below)
-  // The trade page's versions (localhost only): imported by dashboard/versions/devVersions.tsx
+  // The trade page's and the layout editor's versions (localhost only): imported by dashboard/versions/devVersions.tsx
   // alone, which only a DEV server loads (dashboard/versions/dev.ts) - a build never emits them. Every rule is scoped to
-  // a version's own class or state (`html[data-tv]`, `.tv-*`, `.pdk`, `.pls-*`, `.tvswitch`), so their late
+  // a version's own class or state (`html[data-tv]`, `.tv-*`, `.ed-*`, `.is-edit-v`, `.pdk`, `.pls-*`, `.tvswitch`), so their late
   // place in the cascade can only ever reach what a version draws.
   'dashboard/versions/versionSwitch.css',
   'dashboard/versions/pages/slate.css',
   'dashboard/versions/pages/deck.css',
   'dashboard/versions/pages/pulse.css',
+  'dashboard/versions/editors/editors.css',
   // The other pages' versions (localhost only, merged for 5180 on 2026-11-26): each imported by a version module that
   // its page loads behind `import.meta.env.DEV` (WealthPage, PortfolioPage, BlindBoxPage, SoPointsPage, ScanDashboard,
   // LeaderboardPage), so a build never emits them. A version the owner keeps moves its sheet into cssOrder.ts.
