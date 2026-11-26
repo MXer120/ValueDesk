@@ -16,7 +16,7 @@
  */
 import { ShareButton } from '../share/host';
 import { PortfolioMargin } from '../bots/Allocation';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AccountTabs } from '../AccountTabs';
 import { ReadFailed } from '../AccountHistory';
 import { CoinIcon } from '../CoinIcon';
@@ -63,7 +63,7 @@ export interface PortfolioPageLinks {
   onOpenTab: (tab: Tab) => void;
 }
 
-const RANGES: ReadonlyArray<readonly [Period, string]> = [['24H', '24h'], ['7D', '7d'], ['14D', '14d'], ['30D', '30d'], ['ALL', 'All time']];
+export const RANGES: ReadonlyArray<readonly [Period, string]> = [['24H', '24h'], ['7D', '7d'], ['14D', '14d'], ['30D', '30d'], ['ALL', 'All time']];
 const CHART_VIEWS: ReadonlyArray<readonly [ChartView, string]> = [['value', 'Total Value'], ['pnl', 'PnL'], ['calendar', 'PnL Calendar']];
 
 // --- the numbers ------------------------------------------------------------------------
@@ -95,13 +95,13 @@ export function useSummary(c: PortfolioContext, w: WealthState): { summary: Port
 }
 
 /** SoDEX's 24-hour window (finer than the daily spine). Today's PnL and the chart's 24H read it. */
-function use24h(c: PortfolioContext): ChartPoint[] | null {
+export function use24h(c: PortfolioContext): ChartPoint[] | null {
   const id = c.venue.accountId;
   const r = useAsync(() => fetchChart(id!, '24H', 'all', c.venue.network), [id, c.venue.network], { enabled: !!id, pollMs: 300_000 });
   return r.data?.points ?? null;
 }
 
-function curveFor(c: PortfolioContext, h24: ChartPoint[] | null, range: Period, value: (p: ChartPoint) => number): CurveWindow | null {
+export function curveFor(c: PortfolioContext, h24: ChartPoint[] | null, range: Period, value: (p: ChartPoint) => number): CurveWindow | null {
   const spine = c.venue.points;
   if (!spine) return null;
   if (range !== '24H') return sliceCurve(spine, range, value);
@@ -112,7 +112,7 @@ function curveFor(c: PortfolioContext, h24: ChartPoint[] | null, range: Period, 
 }
 
 /** A curve is built as the change from its start; a balance chart reads the balance itself. */
-const atLevel = (w: CurveWindow): CurveWindow => ({ ...w, points: w.points.map((p) => ({ t: p.t, v: p.v + w.baseline })) });
+export const atLevel = (w: CurveWindow): CurveWindow => ({ ...w, points: w.points.map((p) => ({ t: p.t, v: p.v + w.baseline })) });
 
 // --- the head ---------------------------------------------------------------------------
 
@@ -212,7 +212,7 @@ function ValueCard({ c, s, today, vol, evmRows, evmLoading, onSection }: {
 
 // --- the chart --------------------------------------------------------------------------
 
-type ChartView = 'value' | 'pnl' | 'calendar';
+export type ChartView = 'value' | 'pnl' | 'calendar';
 
 function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }) {
   const [view, setView] = useStored<ChartView>('vs.pf.chart.view', 'value');
@@ -342,7 +342,7 @@ function Promos({ w, onOpenTab, onWealth, botsOpen }: { w: WealthState; onOpenTa
 
 // --- the fee strip ----------------------------------------------------------------------
 
-const asRate = (d: { feeRate?: unknown } | null): VenueFeeRate | null => {
+export const asRate = (d: { feeRate?: unknown } | null): VenueFeeRate | null => {
   const r = (d?.feeRate ?? d) as VenueFeeRate | undefined;
   return r && r.makerFeeRate !== undefined && r.takerFeeRate !== undefined ? r : null;
 };
@@ -375,7 +375,7 @@ const signedUsd = (v: number): string => `${v > 0 ? '+' : v < 0 ? MINUS : ''}${f
 const DAYS: Partial<Record<Period, number>> = { '24H': 1, '7D': 7, '14D': 14, '30D': 30 };
 
 /** A window of the wallet's own SoDEX history, re-read while its walk runs and now and then afterwards. */
-function useActivityWindow(engine: 'perps' | 'spot', address: string | null, range: Period): { window: ActivityWindow | null; error: string | null } {
+export function useActivityWindow(engine: 'perps' | 'spot', address: string | null, range: Period): { window: ActivityWindow | null; error: string | null } {
   const [window, setWindow] = useState<ActivityWindow | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -413,7 +413,7 @@ const NotFinal = ({ cover }: { cover: Cover | null }) => (
 );
 
 /** One line on what the walk is doing, or why a figure is missing. */
-function coverLine(what: string, cover: Cover | null): string | null {
+export function coverLine(what: string, cover: Cover | null): string | null {
   if (cover?.state === 'reading') {
     const back = cover.oldest === null ? '' : `, back to ${shortDate(cover.oldest)}`;
     return cover.rows === 0 ? `Reading your ${what} from SoDEX.` : `Reading your ${what} from SoDEX: ${fmt(cover.rows, 0)} so far${back}.`;
@@ -589,7 +589,10 @@ function Sections({ c, w, provider, section, setSection, onOpenMarket, onOpenTab
 
 // --- the page ---------------------------------------------------------------------------
 
-export function PortfolioPage({ c, provider, onOpenMarket, onOpenTab }: { c: PortfolioContext } & PortfolioPageLinks) {
+/** Today's page. On localhost (import.meta.env.DEV) a switch at the foot of the page also offers the redesigns in
+ *  versions/ (owner 2026-11-26: "multiple versions and the switch ... keep the original in the switch"). A build has
+ *  neither the switch nor the versions: the dynamic import below is dropped with its branch, and this page is all it shows. */
+export function PortfolioOriginal({ c, provider, onOpenMarket, onOpenTab }: { c: PortfolioContext } & PortfolioPageLinks) {
   const w = useWealth(c.address, c.refreshToken);
   const botsOpen = useBotsAccess(c.address);
   const { summary, evmRows, evmLoading } = useSummary(c, w);
@@ -661,3 +664,9 @@ export function PortfolioPage({ c, provider, onOpenMarket, onOpenTab }: { c: Por
   );
 }
 
+const DevVersions = import.meta.env.DEV ? lazy(() => import('./versions/DevVersions')) : null;
+
+export function PortfolioPage(props: { c: PortfolioContext } & PortfolioPageLinks) {
+  if (!DevVersions) return <PortfolioOriginal {...props} />;
+  return <Suspense fallback={null}><DevVersions {...props} Original={PortfolioOriginal} /></Suspense>;
+}
