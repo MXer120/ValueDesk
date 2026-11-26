@@ -1,0 +1,326 @@
+/* ============================================================================
+ * DECK - ticket first, roomy cards (localhost version, versions/store.ts).
+ *
+ * The order ticket leads the page: its column is the left one in the default
+ * design (pageConfig.ts), then the chart, then the book, the way a trade is
+ * made - decide, look, read the depth. Cards sit 6px apart on a 14px radius,
+ * solid (no glass blur, no glare: cheaper than the original). Every choice is
+ * a pill: Long / Short a solid toggle, leverage and margin two labelled tiles,
+ * the order type a segmented pill, tabs that fill rather than underline. The
+ * figures you type are set larger; what they cost sits in one inset tile.
+ *
+ * A phone shows the book and the ticket side by side under a chart that opens
+ * on a tap (PhoneDeck.tsx): price, size and send on one screen, no swiping.
+ *
+ * Every rule starts at `html[data-tv="deck"] .tv-deck` (TradeDashboard.tsx).
+ * ========================================================================= */
+
+html[data-tv='deck'] .tv-deck {
+  --dk-card: #0e0e10;
+  --dk-ring: rgb(var(--ink) / 0.065);
+  --dk-well: rgb(var(--ink) / 0.045);
+  --dk-well-hi: rgb(var(--ink) / 0.08);
+  --dk-pill: #1d1d20;
+  --dk-label: rgb(var(--ink) / 0.5);
+  --dk-r: 14px;
+  --dk-r-ctl: 10px;
+}
+html[data-tv='deck'][data-theme='light'] .tv-deck {
+  --dk-card: #ffffff;
+  --dk-ring: rgb(0 0 0 / 0.07);
+  --dk-well: rgb(0 0 0 / 0.04);
+  --dk-well-hi: rgb(0 0 0 / 0.065);
+  --dk-pill: #ffffff;
+  --dk-label: rgb(0 0 0 / 0.52);
+}
+
+/* --- the page and the cards ------------------------------------------------ */
+html[data-tv='deck'] body,
+html[data-tv='deck'][data-glass] body { background: var(--bg); }
+html[data-tv='deck'][data-theme='light'] body { background: #ececea; }
+html[data-tv='deck'] .tv-deck .dash-panel[data-panel] {
+  border: 0;
+  border-radius: var(--dk-r);
+  background: var(--dk-card);
+  box-shadow: 0 0 0 1px var(--dk-ring), 0 1px 2px rgb(0 0 0 / 0.18);
+}
+html[data-tv='deck'][data-theme='light'] .tv-deck .dash-panel[data-panel] { box-shadow: 0 0 0 1px var(--dk-ring), 0 1px 3px rgb(0 0 0 / 0.05); }
+html[data-tv='deck'] .tv-deck .dash-panel[data-panel]::before { display: none; }
+
+/* --- tabs: the chosen one filled, no rule ----------------------------------- */
+html[data-tv='deck'] .tv-deck .dash-tabs__bar {
+  align-items: center;
+  height: 48px;
+  gap: 2px;
+  padding: 0 12px 0 8px;
+  border-bottom: 0;
+}
+html[data-tv='deck'] .tv-deck .dash-tab {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  color: var(--dk-label);
+}
+html[data-tv='deck'] .tv-deck .dash-tab:hover { color: var(--text); background: var(--dk-well); }
+html[data-tv='deck'] .tv-deck .dash-tab.is-active { color: var(--text); background: var(--dk-well-hi); }
+html[data-tv='deck'] .tv-deck .dash-tab::after,
+html[data-tv='deck'] .tv-deck .dash-tabs__ink { display: none; }
+html[data-tv='deck'] .tv-deck .dash-heading { padding-left: 12px; font-size: 13.5px; font-weight: 600; }
+
+/* --- the markets strip: cards of their own, on the page ---------------------- */
+html[data-tv='deck'] .tv-deck .dash-panel[data-panel='markets'] { background: transparent; box-shadow: none; }
+html[data-tv='deck'] .tv-deck .mkt-favs { gap: 6px; }
+html[data-tv='deck'] .tv-deck .mkt-favchip { border-radius: var(--dk-r); background: var(--dk-card); box-shadow: 0 0 0 1px var(--dk-ring); }
+html[data-tv='deck'] .tv-deck .mkt-favchip:hover { background: color-mix(in srgb, var(--dk-card), var(--text) 4%); }
+html[data-tv='deck'] .tv-deck .mkt-favchip.is-active { background: color-mix(in srgb, var(--dk-card), var(--text) 6%); box-shadow: 0 0 0 1px rgb(var(--ink) / 0.22); }
+html[data-tv='deck'] .tv-deck .mkt-favchip__ic { border-radius: 50%; background: var(--dk-well); }
+html[data-tv='deck'] .tv-deck .mkt-favs__add { border-radius: var(--dk-r); }
+
+/* --- the coin row ----------------------------------------------------------- */
+html[data-tv='deck'] .tv-deck .chart-card > .mkt-header.mkt-header--info {
+  height: 60px;
+  min-height: 60px;
+  padding: 4px 14px 0 16px;
+  gap: 16px;
+}
+html[data-tv='deck'] .tv-deck .mkt-info__coin { width: 34px; height: 34px; }
+html[data-tv='deck'] .tv-deck .mkt-info__coin img { width: 34px; height: 34px; }
+html[data-tv='deck'] .tv-deck .mkt-header--info .mkt-price-v,
+html[data-tv='deck'] .tv-deck .mkt-header--info .mkt-price-v.up,
+html[data-tv='deck'] .tv-deck .mkt-header--info .mkt-price-v.down { font-size: 24px; font-weight: 500; }
+html[data-tv='deck'] .tv-deck .mkt-info__div { display: none; }
+html[data-tv='deck'] .tv-deck .mkt-header--info .mkt-stats { gap: 28px; }
+html[data-tv='deck'] .tv-deck .mkt-header--info .mkt-stat-l { color: var(--dk-label); }
+html[data-tv='deck'] .tv-deck .chart-tab { height: 30px; padding: 0 11px; border-radius: 9px; }
+html[data-tv='deck'] .tv-deck .chart-tab.is-on { background: var(--dk-well-hi); border-color: transparent; }
+
+/* --- the book: roomy rows, soft depth -------------------------------------- */
+html[data-tv='deck'] .tv-deck .mkt-book {
+  --mkt-bid-lo: color-mix(in srgb, var(--pos) 7%, transparent);
+  --mkt-bid-hi: color-mix(in srgb, var(--pos) 26%, transparent);
+  --mkt-ask-lo: color-mix(in srgb, var(--neg) 7%, transparent);
+  --mkt-ask-hi: color-mix(in srgb, var(--neg) 26%, transparent);
+}
+html[data-tv='deck'] .tv-deck .mkt-booktable th { color: var(--dk-label); font-weight: 400; }
+html[data-tv='deck'] .tv-deck .mkt-mid-last { font-size: 21px; }
+html[data-tv='deck'] .tv-deck .mkt-view { border-radius: 7px; }
+
+/* --- the ticket ------------------------------------------------------------- */
+html[data-tv='deck'] .tv-deck .oe-fx { display: none; }
+html[data-tv='deck'] .tv-deck .panel.oe,
+html[data-tv='deck'] .tv-deck .dash-panel__body > .panel.oe {
+  --oe-inset: 16px;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--dk-r);
+  background: transparent;
+}
+/* Long / Short: one solid toggle, the chosen half in its side's colour. */
+html[data-tv='deck'] .tv-deck .oe-dir.oe-dir--tabs {
+  gap: 4px;
+  padding: 4px;
+  margin: 0;
+  border: 0;
+  border-radius: 13px;
+  background: var(--dk-well);
+}
+html[data-tv='deck'] .tv-deck .oe-dir--tabs .oe-dir__btn {
+  height: 38px;
+  margin: 0;
+  border-radius: 10px;
+  box-shadow: none;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--dk-label);
+}
+html[data-tv='deck'] .tv-deck .oe-dir--tabs .oe-dir__btn.is-on.is-buy { background: var(--pos); color: #04140e; box-shadow: 0 2px 10px color-mix(in srgb, var(--pos) 30%, transparent); }
+html[data-tv='deck'] .tv-deck .oe-dir--tabs .oe-dir__btn.is-on.is-sell { background: var(--neg); color: #1a0503; box-shadow: 0 2px 10px color-mix(in srgb, var(--neg) 30%, transparent); }
+html[data-tv='deck'][data-theme='light'] .tv-deck .oe-dir--tabs .oe-dir__btn.is-on.is-buy,
+html[data-tv='deck'][data-theme='light'] .tv-deck .oe-dir--tabs .oe-dir__btn.is-on.is-sell { color: #fff; }
+/* Leverage and margin: two tiles, each named over its value. */
+html[data-tv='deck'] .tv-deck .oe-mode { gap: 8px; }
+html[data-tv='deck'] .tv-deck .panel.oe .oe-mode__btn {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  height: 46px;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--dk-r-ctl);
+  background: var(--dk-well);
+  box-shadow: none;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: left;
+}
+html[data-tv='deck'] .tv-deck .panel.oe .oe-mode__btn::before {
+  color: var(--dk-label);
+  font-family: var(--font-text);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 14px;
+}
+html[data-tv='deck'] .tv-deck .panel.oe .oe-mode__btn--lev::before { content: 'Leverage'; }
+html[data-tv='deck'] .tv-deck .panel.oe .oe-anchor + .oe-anchor .oe-mode__btn::before { content: 'Margin'; }
+html[data-tv='deck'] .tv-deck .panel.oe .oe-mode__btn:hover:not(:disabled) { filter: none; background: var(--dk-well-hi); }
+html[data-tv='deck'] .tv-deck .panel.oe .oe-mode__btn[aria-expanded='true'] { box-shadow: inset 0 0 0 1.5px var(--text); }
+/* The order type: a segmented pill. */
+html[data-tv='deck'] .tv-deck .oe-tabs {
+  gap: 2px;
+  margin-inline: 0;
+  padding: 3px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--dk-well);
+}
+html[data-tv='deck'] .tv-deck .oe-tab {
+  flex: 1 1 0;
+  justify-content: center;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--dk-label);
+}
+html[data-tv='deck'] .tv-deck .oe-tab.is-on { color: var(--text); background: var(--dk-pill); box-shadow: 0 1px 3px rgb(0 0 0 / 0.25), 0 0 0 1px var(--dk-ring); }
+html[data-tv='deck'][data-theme='light'] .tv-deck .oe-tab.is-on { box-shadow: 0 1px 3px rgb(0 0 0 / 0.08), 0 0 0 1px var(--dk-ring); }
+html[data-tv='deck'] .tv-deck .oe-tab::after { display: none; }
+/* The figures you type, larger. */
+html[data-tv='deck'] .tv-deck .oe-inputrow {
+  height: 46px;
+  border: 1px solid transparent;
+  border-radius: var(--dk-r-ctl);
+  background: var(--dk-well);
+}
+html[data-tv='deck'] .tv-deck .oe-inputrow:focus-within { border-color: rgb(var(--ink) / 0.35); background: transparent; }
+html[data-tv='deck'] .tv-deck .oe-inputrow.is-bad { border-color: var(--neg); }
+html[data-tv='deck'] .tv-deck .oe-input { height: 44px; line-height: 44px; font-size: 16px; font-weight: 500; }
+html[data-tv='deck'] .tv-deck .oe-inlabel { color: var(--dk-label); font-size: 12.5px; }
+html[data-tv='deck'] .tv-deck .oe-chip { border-radius: 6px; }
+html[data-tv='deck'] .tv-deck .oe-slider .oe-pctbox { border-radius: 8px; }
+/* Send: the side's colour, solid, a size up. */
+html[data-tv='deck'] .tv-deck .oe-side__btn {
+  height: 46px;
+  border-radius: 12px;
+  font-size: 15px;
+}
+html[data-tv='deck'] .tv-deck .oe-side__btn.is-buy { background: var(--pos); }
+html[data-tv='deck'] .tv-deck .oe-side__btn.is-sell { background: var(--neg); }
+/* What it costs: one inset tile. */
+html[data-tv='deck'] .tv-deck .oe-out {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--dk-r-ctl);
+  background: var(--dk-well);
+}
+html[data-tv='deck'] .tv-deck .oe-out__k { color: var(--dk-label); }
+
+/* --- the account band and the summary -------------------------------------- */
+html[data-tv='deck'] .tv-deck .acct-table th { color: var(--dk-label); font-weight: 400; }
+html[data-tv='deck'] .tv-deck .empty-state__cta { border-radius: 10px; }
+
+/* --- touch tiers ------------------------------------------------------------ */
+@media (max-width: 993px) {
+  html[data-tv='deck'] .tv-deck .dash-tabs__bar { height: 52px; }
+  html[data-tv='deck'] .tv-deck .dash-tab { height: 40px; }
+}
+
+/* --- a phone: the split screen (PhoneDeck.tsx) ------------------------------ */
+.pdk { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.pdk-chart { flex: none; border-bottom: 1px solid var(--dk-ring); }
+button.pdk-chart__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+}
+.pdk-chart__bar svg { color: var(--dk-label); transition: transform var(--dur-med) var(--ease-out); }
+.pdk-chart.is-open .pdk-chart__bar > svg:last-child { transform: rotate(180deg); }
+.pdk-chart__hint { margin-left: auto; color: var(--dk-label); font-size: 12px; font-weight: 400; }
+.pdk-chart__body { height: 300px; display: flex; flex-direction: column; }
+.pdk-chart__body > * { flex: 1 1 auto; min-height: 0; }
+.pdk-split { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 40fr) minmax(0, 60fr); }
+.pdk-book,
+.pdk-ticket { min-width: 0; min-height: 0; container: panel / inline-size; }
+.pdk-book { display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--dk-ring); }
+.pdk-book > * { flex: 1 1 auto; min-height: 0; }
+.pdk-ticket { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.pdk-ticket::-webkit-scrollbar { display: none; }
+
+/* The book in a 160px column: price and size (the running sum leaves), tighter type, its tabs on one line. */
+html[data-tv='deck'] .tv-deck .pdk-book .dash-tabs__bar { height: 44px; padding: 0 4px; gap: 0; }
+html[data-tv='deck'] .tv-deck .pdk-book .dash-tab { height: 32px; padding: 0 8px; font-size: 12.5px; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-book-ctl { padding-inline: 6px; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-booktable th:nth-child(3),
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-booktable td:nth-child(3) { display: none; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-booktable td,
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-booktable th { font-size: 11.5px; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-mid-last { font-size: 16px; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-mid-mark,
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-mid-spread { display: none; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-ratio { padding-inline: 6px; }
+/* The ticket in a 230px column: the same parts, a size down; each field's name rides small over its value, so the
+   figure keeps the width. Every control keeps the app's 44px touch height on a phone (PhoneTabBar.css): the field
+   chips draw as words, their hit area the full 44px. */
+html[data-tv='deck'] .tv-deck .pdk-ticket .panel.oe { --oe-inset: 10px; gap: 10px; padding: 10px 10px 14px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-body { gap: 10px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-dir--tabs .oe-dir__btn { height: 44px; font-size: 14px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .panel.oe .oe-mode__btn { height: 46px; min-height: 46px; padding: 0 10px; font-size: 14px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-tab { height: 44px; padding: 0 2px; font-size: 12px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-tab--algo { gap: 2px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-facts__row dt,
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-facts__row dd { font-size: 11.5px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-field > .oe-inputrow { position: relative; align-items: flex-end; height: 54px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-field > .oe-inputrow .oe-inlabel {
+  position: absolute;
+  top: 7px;
+  left: 0;
+  padding-left: 10px;
+  font-size: 10.5px;
+  line-height: 13px;
+}
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-field > .oe-inputrow .oe-input { height: 44px; min-width: 0; padding: 8px 4px 0 10px; line-height: 36px; font-size: 15px; text-align: left; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-field > .oe-inputrow .oe-chip {
+  order: 3;
+  align-self: stretch;
+  height: auto;
+  margin: 0;
+  padding: 0 10px 0 6px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--dk-label);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-field > .oe-inputrow .oe-unitswap { align-self: stretch; height: auto; margin: 0; padding: 0 4px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-field > .oe-inputrow .oe-suffix { align-self: flex-end; margin-bottom: 11px; padding-right: 4px; font-size: 12px; line-height: 14px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-slider { grid-template-columns: minmax(0, 1fr) 56px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-slider .oe-pctbox .oe-input { padding: 0 0 0 6px; font-size: 12.5px; text-align: right; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-opts { gap: 4px; padding-left: 0; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-switch,
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-compact { font-size: 12px; white-space: nowrap; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-select { border-radius: 8px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-side__btn { height: 48px; font-size: 14.5px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-out { padding: 6px 10px; }
+html[data-tv='deck'] .tv-deck .pdk-ticket .oe-out__row { font-size: 11px; }
+
+/* The book's own controls on one line, the column heads unbroken. */
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-book-ctl { flex-wrap: nowrap; gap: 4px; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-view { width: 30px; padding: 0; }
+html[data-tv='deck'] .tv-deck .pdk-book .mkt-booktable th { white-space: nowrap; font-size: 10.5px; }

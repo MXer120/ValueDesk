@@ -111,6 +111,12 @@ interface Props {
   onPrice: (p: string, how?: 'snap') => void;
   lastPrice?: string;
   onPlaced: () => void;
+  /**
+   * The direction chosen outside the ticket - a phone's Long / Short bar that opens it (dashboard/versions,
+   * localhost only) - applied once per new `n`. Only what the ticket shows as chosen: the order is still made,
+   * checked, confirmed and signed by this ticket's own button, as always.
+   */
+  sideRequest?: { side: 'buy' | 'sell'; n: number } | null;
 }
 
 /** 'algo': one of the algo order types (TWAP, VWAP, POV, ...), worked by the algo engine - see components/algo. */
@@ -672,7 +678,7 @@ function useMenuAnchor(
 
 export function OrderEntry({
   engine, symbol, sym, network, unlocked, showTitle = true,
-  connectedAddress, signingAddress, price, onPrice, lastPrice, onPlaced,
+  connectedAddress, signingAddress, price, onPrice, lastPrice, onPlaced, sideRequest = null,
 }: Props) {
   const [type, setType] = useState<OrdType>('limit');
   /** While the ticket cannot trade, the order button connects or enables instead. */
@@ -733,6 +739,12 @@ export function OrderEntry({
    * submit button reads back the choice.
    */
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
+  const sideAsked = sideRequest?.n;
+  useEffect(() => {
+    if (sideRequest) setSide(sideRequest.side);
+    // Once per request: `n` is what changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sideAsked]);
   /* The two account facts at the top of the ticket are the balance and the
      position - both named incognito categories, and both on screen whenever
      the trade page is. */
