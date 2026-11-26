@@ -25,11 +25,22 @@ import { Modal } from '../Modal';
 import { welcomeText } from './parts';
 import '../../onboarding/onboarding.css';
 
-/** The button: only for a connected wallet that SoDEX itself says has no referrer. */
-export function UseCodeButton({ address, provider, me }: { address: string | null; provider: Eip1193Provider | null; me: InviteMe | null }) {
-  const sc = useSodexCode(address);
-  const state = useReferral(address, sc.code);
+/**
+ * The button: only for a connected wallet that SoDEX itself says has no referrer. With sample data (localhost) always, and
+ * the dialog runs on a made-up SoDEX (owner 2026-11-26: "In sample ensure i see all features").
+ */
+export function UseCodeButton({ address, provider, me, sample = false }: { address: string | null; provider: Eip1193Provider | null; me: InviteMe | null; sample?: boolean }) {
+  const sc = useSodexCode(sample ? null : address);
+  const state = useReferral(sample ? null : address, sc.code);
   const [open, setOpen] = useState(false);
+  if (sample) {
+    return (
+      <>
+        <button type="button" className="rf-howbtn is-code" onClick={() => setOpen(true)}>Use a code</button>
+        {open && <UseCodeDialog sim address="" provider={null} me={SIM_ME} initial={OURS_CODE} locked={null} onClose={() => setOpen(false)} />}
+      </>
+    );
+  }
   // While the dialog is open it stays, whatever the state becomes: it says so itself.
   if (!address || !provider || (!open && (state !== 'none' || !sc.ready))) return null;
   return (
@@ -40,14 +51,25 @@ export function UseCodeButton({ address, provider, me }: { address: string | nul
   );
 }
 
+/* Sample data: a made-up SoDEX and ValueDesk. */
+const SIM_ME = { canJoin: true } as InviteMe;
+const SIM_CODES: Record<string, Verdict['state']> = { [OURS_CODE]: 'ok', FRIEND01: 'ok', ALPHA7: 'ok', FULLWEEK: 'ok', SAMPLE: 'own' };
+function simCheck(code: string, now = Date.now()): CodeCheck {
+  const d = new Date(now);
+  const monday = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 7);
+  return { welcome: true, vipDays: code === 'FRIEND01' ? 7 : 0, ...(code === 'FULLWEEK' ? { fullUntil: monday } : {}) };
+}
+
 type Verdict = { code: string; state: 'asking' | 'ok' | 'bad' | 'silent' | 'own' };
 /** After the typing stops, before anyone is asked. */
 const SETTLE_MS = 200;
 /** While the SoDEX tab is open: asked again this often, so the dialog turns by itself. */
 const WAIT_POLL_MS = 4_000;
 
-export function UseCodeDialog({ address, provider, me, initial, locked, onClose }: {
-  address: string; provider: Eip1193Provider; me: InviteMe | null; initial: string;
+export function UseCodeDialog({ address, provider, me, initial, locked, onClose, sim = false }: {
+  address: string; provider: Eip1193Provider | null; me: InviteMe | null; initial: string;
+  /** Sample data: nothing is asked of a wallet, SoDEX or our server. */
+  sim?: boolean;
   /** The code this wallet joined ValueDesk with: SoDEX gets the same. */
   locked: string | null;
   onClose: () => void;
@@ -67,13 +89,20 @@ export function UseCodeDialog({ address, provider, me, initial, locked, onClose 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [opened, setOpened] = useState(false);
-  useEffect(() => markOffered(address), [address]);
+  useEffect(() => { if (!sim) markOffered(address); }, [address, sim]);
+  const [simApplied, setSimApplied] = useState(false);
 
   useEffect(() => {
     if (!shaped) return;
     let off = false;
     setVerdict({ code, state: 'asking' });
     const t = window.setTimeout(() => {
+      if (sim) {
+        const state = SIM_CODES[code] ?? 'bad';
+        if (state === 'ok' && !ours) setExtra({ code, check: simCheck(code) });
+        setVerdict({ code, state });
+        return;
+      }
       const server = ours ? null : checkCode(code);
       void server?.then((c) => { if (!off && c.state === 'ok') setExtra({ code, check: c }); });
       void (async (): Promise<Verdict['state']> => {
@@ -86,12 +115,13 @@ export function UseCodeDialog({ address, provider, me, initial, locked, onClose 
       })().then((state) => { if (!off) setVerdict({ code, state }); });
     }, SETTLE_MS);
     return () => { off = true; window.clearTimeout(t); };
-  }, [address, code, shaped, ours]);
+  }, [address, code, shaped, ours, sim]);
 
   const cur = shaped && verdict.code === code ? verdict.state : null;
   const ok = cur === 'ok';
   const check = ok && extra?.code === code ? extra.check : null;
-  const sodex = useReferralKnown(address, ok ? code : OURS_CODE);
+  const real = useReferralKnown(sim ? null : address, ok ? code : OURS_CODE);
+  const sodex = sim ? (simApplied ? 'bound' : 'none') : real;
   const applied = ok && (sodex === 'bound' || sodex === 'pending');
   /** A person's code is joined on ValueDesk too, while this wallet still may. */
   const full = !!check?.fullUntil && check.fullUntil > Date.now() && !joined;
@@ -103,6 +133,12 @@ export function UseCodeDialog({ address, provider, me, initial, locked, onClose 
   // Back from the SoDEX tab, and every few seconds while it is open: asked again, so the dialog turns by itself.
   useEffect(() => {
     if (!ok || applied) return;
+    // Sample data: the wallet "confirms on SoDEX" a moment after the tab opened.
+    if (sim) {
+      if (!opened) return;
+      const t = window.setTimeout(() => setSimApplied(true), 2_500);
+      return () => window.clearTimeout(t);
+    }
     const ask = () => { if (document.visibilityState === 'visible') void loadReferral(address, code); };
     document.addEventListener('visibilitychange', ask);
     window.addEventListener('focus', ask);
@@ -112,12 +148,17 @@ export function UseCodeDialog({ address, provider, me, initial, locked, onClose 
       window.removeEventListener('focus', ask);
       window.clearInterval(t);
     };
-  }, [ok, applied, opened, address, code]);
+  }, [ok, applied, opened, address, code, sim]);
 
   const join = async () => {
     setBusy(true);
     setError(null);
     try {
+      if (sim || !provider) {
+        await new Promise((r) => setTimeout(r, 900));
+        setGot({ welcome: check?.welcome !== false, vipUntil: check?.vipDays ? Date.now() + check.vipDays * 86_400_000 : null });
+        return;
+      }
       const r = await joinInvite(provider, address, code);
       track('invite.bind', {});
       setGot({ welcome: r.welcome, vipUntil: r.vipUntil });
@@ -129,6 +170,7 @@ export function UseCodeDialog({ address, provider, me, initial, locked, onClose 
     }
   };
   const close = () => {
+    if (sim) { onClose(); return; }
     if (applied && pendingInvite()?.code === code) dropInvite();
     if (joined) void loadMe(address);
     onClose();
@@ -188,7 +230,7 @@ export function UseCodeDialog({ address, provider, me, initial, locked, onClose 
       ) : ok && sodex !== 'other' ? (
         <a
           className={`dlg-btn rf-usecode__go${waiting ? '' : ' is-go'}`} href={referralUrl(code)} target="_blank" rel="noopener noreferrer"
-          onClick={() => { setOpened(true); setError(null); }}
+          onClick={(e) => { if (sim) e.preventDefault(); setOpened(true); setError(null); }}
         >
           {waiting ? 'Open SoDEX again' : joined ? 'Apply on SoDEX' : 'Apply'}
         </a>
@@ -199,6 +241,7 @@ export function UseCodeDialog({ address, provider, me, initial, locked, onClose 
       {waiting && <p className="rf-usecode__hint"><span className="rf-usecode__spin" aria-hidden="true" />Waiting for SoDEX. Confirm with your wallet in the SoDEX tab.</p>}
       {hint && <p className="rf-usecode__hint">{hint}</p>}
       {error && <p className="rf-usecode__hint is-bad" role="alert">{error}</p>}
+      {sim && !done && <p className="rf-usecode__hint" data-no-i18n="">Sample data: try FRIEND01 (a VIP code), ALPHA7, FULLWEEK, or SAMPLE (your own).</p>}
     </Modal>
   );
 }

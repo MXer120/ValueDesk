@@ -48,7 +48,7 @@ export function sampleSodex(now = Date.now()): SodexRewards {
   });
   return {
     signedIn: true, loading: false, error: null, claimedUsd: 8.62, claimableUsd: 4.2, earnedUsd: 14.3, claims,
-    stats: { settledUsd: 12.82, pendingUsd: 1.48, totalUsd: 14.3, unlocked: true, volumeUsd: 48_000, volumeNeededUsd: 2_000, traders: 5, weekInvites: 2, weekInvitesMax: 100, nextAt: null, code: 'SAMPLE', referredBy: null },
+    stats: { settledUsd: 12.82, pendingUsd: 1.48, totalUsd: 14.3, unlocked: true, volumeUsd: 48_000, volumeNeededUsd: 2_000, traders: 5, weekInvites: 2, weekInvitesMax: 100, nextAt: null, code: 'SAMPLE', canModify: true, referredBy: null },
     traders: [
       { wallet: '0xc04f00000000000000000000000000000000071aa'.slice(0, 38) + '71aa', volumeUsd: 2_310_000, rebateUsd: 7.9, points: 640, at: now - 11 * D },
       { wallet: '0x17bb0000000000000000000000000000000000'.slice(0, 38) + '4e0d', volumeUsd: 420_400, rebateUsd: 4.1, points: 210, at: now - 6 * D },

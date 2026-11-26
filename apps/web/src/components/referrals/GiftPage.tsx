@@ -20,8 +20,9 @@ import { Icon } from '../bots/kit/kit';
 import { ClaimField } from './Claim';
 import { Gift } from './Gift';
 import { RewardsPanel, Traders } from './Rewards';
+import { OwnLinkBar } from './OwnCode';
 import { UseCodeButton } from './UseCode';
-import { LinkButton, LinkIcons, LinkText, compact, credit, day, pct, useLink, usd2, welcomeText, type RefView } from './parts';
+import { compact, credit, day, pct, useLink, usd2, welcomeText, type RefView } from './parts';
 
 const payingText = (me: InviteMe) => (me.credits.paying ? 'Paying your fees now' : me.credits.balanceUsd > 0 ? 'Collecting' : 'Nothing to spend yet');
 
@@ -115,17 +116,14 @@ export function GiftPage({ v, s, provider }: { v: RefView; s: SodexRewards; prov
           <button type="button" className="rf-howbtn" aria-expanded={how} aria-controls={id} onClick={() => { setHow(!how); setToggled(true); }}>
             {how ? 'Close' : 'How it works'}<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.600" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={how ? 'm4.500 4.500 7 7m0-7-7 7' : 'm4 6 4 4 4-4'} /></svg>
           </button>
-          {!v.sample && <UseCodeButton address={v.address} provider={provider} me={me} />}
+          <UseCodeButton address={v.address} provider={provider} me={me} sample={v.sample} />
         </div>
         {/* Both stay in the one cell, so the card keeps its height when the steps take the present's place. */}
         <div className="rf-g__body">
           <div className="rf-g__front" aria-hidden={how} {...(how ? { inert: '' } : {})}>
             <div className="rf-g__t">
               <h2>They start with 0 fees.<br />You earn <span className={gold}>{pct(rates[0])}</span> after.</h2>
-              <div className="rf-bar is-big">
-                <div className="rf-bar__in"><LinkText l={l} /><LinkButton l={l} label="Copy" /></div>
-                <LinkIcons l={l} />
-              </div>
+              <OwnLinkBar l={l} v={v} s={s} provider={provider} />
             </div>
             <div className="rf-g__art"><Gift /></div>
           </div>

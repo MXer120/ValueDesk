@@ -254,10 +254,11 @@ export class InviteService {
 
   /**
    * Days of the VIP fee a wallet joining with this code now gets: its owner is VIP (as the app shows it; not through a VIP
-   * code it joined with itself), or the code was upgraded on the dev page.
+   * code it joined with itself), or the code was upgraded on the dev page - under this name or an earlier one of the same
+   * owner (a code changed on SoDEX keeps its upgrade: owner 2026-11-26, codes may be customised once).
    */
   vipDaysOf(code: string, owner: string): number {
-    return this.store.isVipCode(code) || this.isVip(owner) ? VIP_CODE_DAYS : 0;
+    return this.store.isVipCode(code) || this.store.ownsVipCode(owner) || this.isVip(owner) ? VIP_CODE_DAYS : 0;
   }
 
   /** A joined wallet's VIP fee while it lasts (builder programs; never VIP standing, service.ts vipProgramOf). */

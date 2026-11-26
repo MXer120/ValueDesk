@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { keccak_256 } from '@noble/hashes/sha3';
-import { CLAIMED_SELECTOR, CLAIMED_TOPIC, SodexClaimError, claimAmount, claimRebates, claimedIn, claimableOf, claimedCall, fetchClaimed, floorCents, parseClaims, parseStats, parseTraders, settledPoint, timeMs, usdcLine } from './sodexRewards';
+import { CLAIMED_SELECTOR, CLAIMED_TOPIC, SodexClaimError, claimAmount, ownCodeErrorText, ownCodeInput, ownCodeMessage, ownCodeProblem, postOwnCode, claimRebates, claimedIn, claimableOf, claimedCall, fetchClaimed, floorCents, parseClaims, parseStats, parseTraders, settledPoint, timeMs, usdcLine } from './sodexRewards';
 import { SodexError, type authedPost } from '../points';
 import type { rpcCall } from '../trading/rpc';
 
@@ -19,6 +19,8 @@ const STATS = {
 test('myStats: strings and numbers alike; unlocked by volume or by stake; nothing made up where SoDEX sends nothing', () => {
   const s = parseStats(STATS);
   assert.deepEqual([s.settledUsd, s.pendingUsd, s.totalUsd, s.unlocked, s.traders, s.weekInvites, s.weekInvitesMax, s.code, s.referredBy, s.nextAt], [46.5, 4.75, 51.25, true, 12, 3, 100, 'SAMPLE', 'OTHER', 1_796_126_400_000]);
+  assert.equal(s.canModify, false);
+  assert.equal(parseStats({ ...STATS, referrerState: { stage: 'ready', data: { code: 'SAMPLE', canModify: true } } }).canModify, true);
   assert.equal(parseStats({ ...STATS, cumVlm: 1999 }).unlocked, false);
   assert.equal(parseStats({ ...STATS, cumVlm: 0, vaultNetStake: 500 }).unlocked, true);
   const none = parseStats({ cumVlm: 0, vlmThreshold: 2000, vaultNetStake: 0, vaultNetStakeThreshold: 500, referrerState: { stage: 'locked' } });
@@ -126,4 +128,22 @@ test('the last Tuesday: what is settled now has been since 12:00 UTC; never plac
   const now = tue + 30 * 3_600_000;
   const claims = [{ usd: 3.18, at: tue - 11 * 86_400_000, tx: null }, { usd: 5.44, at: tue - 4 * 86_400_000, tx: null }];
   assert.deepEqual(usdcLine(claims, [], 14.3, now, settledPoint(12.82, now)).map((p) => [p.t, Number(p.v.toFixed(2))]), [[claims[0]!.at, 3.18], [claims[1]!.at, 8.62], [tue, 12.82], [now, 14.3]]);
+});
+
+test("the own code follows SoDEX's rules: capitals, A-Z and 0-9, 4 to 18; SoDEX's own text is signed; its answers said plainly", async () => {
+  assert.equal(ownCodeInput('my-code_42!'), 'MYCODE42');
+  assert.equal(ownCodeInput('a'.repeat(30)), 'A'.repeat(18));
+  assert.deepEqual(['', 'ABC', 'ABCD', 'A'.repeat(18), 'A'.repeat(19), 'AB-CD'].map(ownCodeProblem), ['required', 'too-short', null, null, 'too-long', 'characters']);
+  // Word for word as SoDEX's page builds it (its pbe, 2026-11-26).
+  assert.equal(ownCodeMessage('0xAbC', 'NEWCODE'), [
+    'SoDEX Referral Code Creation', '', "You're creating your referral code on sodex.com/referrals.", 'This signature confirms wallet ownership and secures your request.', '',
+    'Wallet: 0xAbC', 'Referral Code: NEWCODE', '', 'No gas fee. This signature does not approve any transactions, move funds, or grant access to your assets.',
+  ].join('\n'));
+  assert.match(ownCodeErrorText(new SodexError('this referral code is already taken', -3001002)), /taken/);
+  assert.match(ownCodeErrorText(new SodexError('x', -3001004)), /once/);
+  assert.match(ownCodeErrorText(new SodexError('x', -3001005)), /your code already/);
+  const sent: unknown[] = [];
+  const post = (async (url: string, address: string, body?: unknown) => { sent.push([url, address, body]); return null; }) as typeof authedPost;
+  await postOwnCode(A.toUpperCase().replace('0X', '0x'), { wallet: '0xW', signature: '0xS' }, 'NEWCODE', post);
+  assert.deepEqual(sent, [['https://alpha-biz.sodex.dev/biz/referral/updateMyCode', A, { walletAddress: '0xW', newCode: 'NEWCODE', signature: '0xS' }]]);
 });

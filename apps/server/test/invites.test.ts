@@ -401,3 +401,14 @@ test('the SoDEX check: a new wallet SoDEX names an inviter for becomes its refer
   await svc.autoTick();
   assert.ok(!asked.includes(fresh) && !asked.includes(quiet));
 });
+
+test('a VIP code renamed on SoDEX keeps its VIP days: the upgrade follows its owner (codes may be changed once)', async () => {
+  const owner = wallet().address.toLowerCase();
+  const { s, svc } = setup({ OLDCODE1: owner, NEWCODE1: owner });
+  assert.deepEqual(await svc.check('OLDCODE1'), { valid: true, welcome: true, vipDays: 0, silent: false });
+  s.addVipCode('OLDCODE1', owner, T0);
+  assert.equal((await svc.check('OLDCODE1')).vipDays, VIP_CODE_DAYS);
+  assert.equal((await svc.check('NEWCODE1')).vipDays, VIP_CODE_DAYS, 'the new name of the same wallet');
+  const other = setup({ OTHERCO1: wallet().address.toLowerCase() });
+  assert.equal((await other.svc.check('OTHERCO1')).vipDays, 0, "another wallet's code gets nothing from it");
+});

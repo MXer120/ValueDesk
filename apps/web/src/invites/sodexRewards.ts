@@ -18,7 +18,9 @@
  * without a signature or gas. Nothing here goes through a server of ours.
  */
 import { claimWindow } from '@sign/invites/claim';
-import { authed, authedPost } from '../points';
+import { SodexError, authed, authedPost } from '../points';
+import { toChecksumAddress } from '../trading/addresses';
+import { signMessage, type Eip1193Provider } from '../wallet';
 import { VALUECHAIN_RPC, rpcCall } from '../trading/rpc';
 
 const BIZ = 'https://alpha-biz.sodex.dev';
@@ -59,11 +61,13 @@ export interface SodexStats {
   weekInvitesMax: number | null;
   nextAt: number | null;
   code: string | null;
+  /** SoDEX lets this wallet change its code (once: referrerState.data.canModify). */
+  canModify: boolean;
   referredBy: string | null;
 }
 
 export function parseStats(d: Record<string, unknown>): SodexStats {
-  const ref = (d.referrerState ?? {}) as { stage?: string; data?: { code?: string; totalReferrals?: unknown } };
+  const ref = (d.referrerState ?? {}) as { stage?: string; data?: { code?: string; totalReferrals?: unknown; canModify?: unknown } };
   const ready = ref.stage === 'ready';
   const cum = num(d.cumVlm);
   const need = num(d.vlmThreshold);
@@ -81,6 +85,7 @@ export function parseStats(d: Record<string, unknown>): SodexStats {
     weekInvitesMax: max,
     nextAt: timeMs(d.nextAvailableTime),
     code: ready && ref.data?.code ? ref.data.code : null,
+    canModify: ready && ref.data?.canModify === true,
     referredBy: ((d.referredBy ?? null) as { code?: string } | null)?.code || null,
   };
 }
@@ -293,4 +298,65 @@ export function usdcLine(claims: readonly SodexClaim[], seen: readonly SeenTotal
   // A total now below what was seen (SoDEX corrected it) is shown as it is now: earlier points come down to it.
   if (nowUsd < top) return [...out.map((p) => ({ t: p.t, v: Math.min(p.v, nowUsd) })).filter((p, i, a) => i === 0 || p.v > a[i - 1]!.v), { t: now, v: nowUsd }];
   return [...out, { t: now, v: nowUsd }];
+}
+
+/* ------------------------------------------------------------- the wallet's own code ----- */
+
+/**
+ * Changing the wallet's own code on SoDEX (owner 2026-11-26: "support users customizing their ref code on sodex side too",
+ * "needs to follow all sodex side rules, but changable only once like sodex"). Everything as SoDEX's referral page does it
+ * (its bundle, 2026-11-26): the code is typed in capitals, A-Z and 0-9, 4 to 18 of them; the wallet signs SoDEX's own text
+ * (personal_sign, no transaction); biz/referral/updateMyCode takes the wallet, the code and that signature with the SoDEX
+ * sign-in; and only while myStats says canModify - once.
+ */
+export const OWN_CODE_MIN = 4;
+export const OWN_CODE_MAX = 18;
+const OWN_CODE_RE = /^[A-Z0-9]+$/;
+/** What the field keeps of what is typed (SoDEX's aH). */
+export const ownCodeInput = (s: string): string => s.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, OWN_CODE_MAX);
+export type OwnCodeProblem = 'required' | 'too-short' | 'too-long' | 'characters';
+/** SoDEX's check (iH), before anything is signed. */
+export function ownCodeProblem(code: string): OwnCodeProblem | null {
+  if (!code) return 'required';
+  if (code.length < OWN_CODE_MIN) return 'too-short';
+  if (code.length > OWN_CODE_MAX) return 'too-long';
+  return OWN_CODE_RE.test(code) ? null : 'characters';
+}
+export const ownCodeProblemText = (p: OwnCodeProblem): string =>
+  p === 'required' ? 'Type a code.' : p === 'characters' ? 'Letters A to Z and numbers only.' : `${OWN_CODE_MIN} to ${OWN_CODE_MAX} letters and numbers.`;
+
+/** The text the wallet signs: SoDEX's own, word for word (its pbe). */
+export const ownCodeMessage = (wallet: string, code: string): string => [
+  'SoDEX Referral Code Creation',
+  '',
+  "You're creating your referral code on sodex.com/referrals.",
+  'This signature confirms wallet ownership and secures your request.',
+  '',
+  `Wallet: ${wallet}`,
+  `Referral Code: ${code}`,
+  '',
+  'No gas fee. This signature does not approve any transactions, move funds, or grant access to your assets.',
+].join('\n');
+
+/** SoDEX's answers to a change (its LH), said plainly. */
+export function ownCodeErrorText(e: SodexError): string {
+  switch (e.code) {
+    case -3001001: return 'SoDEX does not allow this code.';
+    case -3001002: return /already taken/i.test(e.message) ? 'This code is taken. Try another.' : 'SoDEX did not take this code.';
+    case -3001003: return 'SoDEX has no code for this wallet yet.';
+    case -3001004: return 'SoDEX lets you change your code once, and it was changed already.';
+    case -3001005: return 'That is your code already.';
+    default: return 'SoDEX did not change the code. Try again.';
+  }
+}
+
+/** The wallet's signature of SoDEX's text for this code. The address as a wallet app shows it (SoDEX's page sends that). */
+export async function signOwnCode(provider: Eip1193Provider, address: string, code: string): Promise<{ wallet: string; signature: string }> {
+  const wallet = toChecksumAddress(address);
+  return { wallet, signature: await signMessage(provider, address, ownCodeMessage(wallet, code)) };
+}
+
+/** The change itself, signed in to SoDEX as this wallet. Throws SodexError (ownCodeErrorText) or NeedsPointsToken. */
+export async function postOwnCode(address: string, signed: { wallet: string; signature: string }, code: string, post: typeof authedPost = authedPost): Promise<void> {
+  await post<unknown>(`${BIZ}/biz/referral/updateMyCode`, address.toLowerCase(), { walletAddress: signed.wallet, newCode: code, signature: signed.signature });
 }

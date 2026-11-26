@@ -36,6 +36,26 @@ html[data-theme='light'] .rf-page > .bots-col > :not(.rf-dark) .rf-cta { backgro
 .rf-bar.is-big .rf-linktext.is-empty { font-size: 14px; }
 .rf-bar.is-big .rf-cta { height: 42px; padding: 0 24px; border-radius: 12px; font-size: 14.5px; }
 .rf-bar.is-big .rf-icon { width: 54px; height: 54px; border-radius: 17px; }
+/* The own code, changed in place (OwnCode.tsx): the link is a button that opens the field; the field keeps the bar's shape. */
+button.rf-linktext.is-code { display: flex; align-items: center; padding: 0; border: 0; background: none; text-align: left; cursor: default; }
+button.rf-linktext.is-code.is-open { cursor: text; }
+.rf-linktext.is-code b { margin-left: -1px; padding: 2px 4px; border-radius: 6px; transition: background 0.15s; }
+.rf-linktext.is-code.is-open:hover b { background: rgb(var(--ink) / 0.1); }
+.rf-linkpen { flex: none; margin-left: 6px; color: var(--tf-muted); opacity: 0.75; transition: opacity 0.15s, color 0.15s; }
+.rf-linktext.is-code.is-open:hover .rf-linkpen { opacity: 1; color: var(--tf-fg); }
+.rf-bar.is-edit .rf-bar__in { box-shadow: inset 0 0 0 1px var(--tf-brand); }
+.rf-linkedit { display: flex; flex: 1; flex-direction: row; align-items: center; gap: 0; min-width: 0; margin: 0; font-family: var(--font-num); font-size: 14px; color: var(--tf-muted); }
+.rf-bar.is-big .rf-linkedit { font-size: 16px; }
+.rf-linkedit > span { flex: none; }
+.rf-linkedit input { flex: 1; min-width: 0; width: 100%; padding: 2px 0 2px 3px; border: 0; outline: 0; background: none; color: var(--tf-fg); font: inherit; font-weight: 600; letter-spacing: 0.04em; }
+.rf-linkedit input:focus-visible { outline: none; }
+.rf-linkedit input:disabled { opacity: 1; -webkit-text-fill-color: currentColor; }
+.rf-linkcancel { flex: none; padding: 6px 6px; border: 0; background: none; color: var(--tf-muted); font: 500 13px var(--font-text); cursor: pointer; transition: color 0.2s; }
+.rf-linkcancel:hover:not(:disabled) { color: var(--tf-fg); }
+.rf-linkcancel:disabled { opacity: 0.45; cursor: default; }
+.rf-page :is(button.rf-linktext.is-code, .rf-linkcancel):focus-visible { outline: 2px solid var(--tf-brand); outline-offset: 2px; border-radius: 6px; }
+.rf-codehint { max-width: 560px; margin: 9px 0 0 6px; color: var(--tf-muted); font-size: 12.5px; line-height: 1.45; font-variant-numeric: tabular-nums; }
+.rf-codehint.is-bad { color: var(--neg); }
 .rf-face { display: inline-grid; flex: none; place-items: center; overflow: hidden; border-radius: 50%; background: var(--rf-raise); box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.1); }
 .rf-face svg { border-radius: 3px; }
 
@@ -239,6 +259,8 @@ html[data-theme='light'] .rf-pass > svg { stroke: #fafafa; }
 
   .rf-vipnote:empty { display: none; }
   .rf-linktext:not(.is-empty) > span { display: none; }
+  .rf-linkedit > span { display: none; }
+  .rf-codehint { margin-left: 0; text-align: center; }
   .rf-switch { bottom: calc(76px + env(safe-area-inset-bottom)); }
   .rf-bar .rf-icon { display: none; }
   .rf-bar .rf-icon:last-child { display: grid; }

@@ -95,6 +95,13 @@ let rev = 0;
 function changed(): void { rev += 1; for (const l of [...listeners]) l(); }
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
 
+/** The wallet's code as SoDEX has just taken it (a change made here): shown at once, everywhere the link is. */
+export function setOwnCode(address: string, code: string): void {
+  own.set(address.toLowerCase(), { state: 'ok', code });
+  noteOwn(code);
+  changed();
+}
+
 /** The wallet's SoDEX referral code, from SoDEX (public, no login). */
 export function loadOwnCode(address: string): Promise<OwnCode> {
   const a = address.toLowerCase();
