@@ -132,6 +132,4 @@
   .lbv-stage__filters::-webkit-scrollbar { display: none; }
   .lbv-stage__filters > * { flex: none; }
   .lbv-rk__who .lbv-size { display: none; }
-  .lbv-hero__ctl .tf-seg:not(.tf-tabs) { width: 100%; }
-  .lbv-hero__ctl .tf-seg:not(.tf-tabs) .tf-seg__opt { flex: 1 1 auto; justify-content: center; padding: 0 6px; }
 }
