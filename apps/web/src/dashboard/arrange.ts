@@ -79,10 +79,12 @@ const sideOrder: Array<'left' | 'right' | 'top' | 'bottom'> = ['left', 'right', 
  * The page with `gap` (a panel's old rectangle) covered again: the panels along one of its sides grow across it.
  * A side qualifies when the panels touching it lie within its length, cover all of it, and may all grow that way
  * that far. Of the sides that qualify the one with the fewest panels wins (a whole column of one panel before two
- * stacked ones); `tall` breaks a tie towards the sides along the gap's long edge. Null when no side qualifies.
+ * stacked ones); `tall` breaks a tie towards the sides along the gap's long edge. A side with `prefer` in it (the
+ * panel a moved one is dropped beside) wins over all of that: the space goes where the panel is going. Null when no
+ * side qualifies.
  */
-export function closeGap(items: readonly ArrangeBox[], gap: { x: number; y: number; w: number; h: number }, tall: boolean): ArrangeBox[] | null {
-  let best: { n: number; order: number; out: ArrangeBox[] } | null = null;
+export function closeGap(items: readonly ArrangeBox[], gap: { x: number; y: number; w: number; h: number }, tall: boolean, prefer?: string): ArrangeBox[] | null {
+  let best: { mine: number; n: number; order: number; out: ArrangeBox[] } | null = null;
   for (const side of sideOrder) {
     const across = side === 'left' || side === 'right';
     const touching = items.filter((b) => {
@@ -113,18 +115,20 @@ export function closeGap(items: readonly ArrangeBox[], gap: { x: number; y: numb
       return { ...b, y: b.y - grow, h: b.h + grow };
     });
     const order = (tall ? across : !across) ? 0 : 1;
-    if (!best || touching.length < best.n || (touching.length === best.n && order < best.order)) best = { n: touching.length, order, out };
+    const mine = prefer !== undefined && ids.has(prefer) ? 0 : 1;
+    const better = !best || mine < best.mine || (mine === best.mine && (touching.length < best.n || (touching.length === best.n && order < best.order)));
+    if (better) best = { mine, n: touching.length, order, out };
   }
   return best?.out ?? null;
 }
 
 /**
- * The moved panel into one side of the target - the target keeps the rest - or, in the middle, a swap. The moved
- * panel's old rectangle is handed to its neighbours first (closeGap; when no side can take it, the grid's own
- * fill closes it), so a target beside it is cut at its new size.
+ * The moved panel beside the target, on one of its sides - the target keeps the rest - or, in the middle, a swap. The
+ * moved panel's old rectangle is handed to its neighbours first, to the target when it is one of them (closeGap; when
+ * no side can take it, the grid's own fill closes it), so a panel moved to the far side of its neighbour simply moves.
  *
- * The moved panel takes half the target along the cut, inside its own limits and leaving the target its minimum; a
- * panel that cannot change that way (a strip) keeps its own size there. Across the cut it takes the target's whole
+ * Along the cut the moved panel keeps its own size (owner 2026-11-26: "how can a user move an element instead of swap
+ * ... just move"), inside its limits and leaving the target its minimum. Across the cut it takes the target's whole
  * length, which it has to be able to.
  */
 export function splitMove(items: readonly ArrangeBox[], id: string, target: string, zone: Zone, cols: number, tall: boolean): MoveResult {
@@ -134,7 +138,7 @@ export function splitMove(items: readonly ArrangeBox[], id: string, target: stri
   if (!a || !t0 || a === t0) return { ok: false, why: 'target' };
   if (t0.fixed || a.fixed) return { ok: false, why: t0.fixed ? 'target' : 'moved' };
   const rest = items.filter((b) => b.i !== id);
-  const closed = closeGap(rest, a, tall)
+  const closed = closeGap(rest, a, tall, target)
     ?? (fillGaps(rest, { start: 0, end: cols }).map((f, k) => ({ ...rest[k]!, x: f.x, y: f.y, w: f.w, h: f.h })));
   const t = closed.find((b) => b.i === target)!;
   const across = zone === 'left' || zone === 'right';
@@ -143,7 +147,7 @@ export function splitMove(items: readonly ArrangeBox[], id: string, target: stri
   if (across) {
     if (!t.growW) return { ok: false, why: 'target' };
     const tMin = Math.max(1, t.minW ?? 1);
-    const want = a.growW ? Math.min(Math.max(Math.round(t.w / 2), Math.max(1, a.minW ?? 1)), a.maxW ?? Infinity) : a.w;
+    const want = a.w;
     const w = Math.min(want, t.w - tMin);
     if (w < (a.growW ? Math.max(1, a.minW ?? 1) : a.w)) return { ok: false, why: 'target' };
     if (!(t.h === a.h || (a.growH && within(t.h, a.minH, a.maxH)))) return { ok: false, why: 'moved' };
@@ -152,7 +156,7 @@ export function splitMove(items: readonly ArrangeBox[], id: string, target: stri
   } else {
     if (!t.growH) return { ok: false, why: 'target' };
     const tMin = Math.max(1, t.minH ?? 1);
-    const want = a.growH ? Math.min(Math.max(Math.round(t.h / 2), Math.max(1, a.minH ?? 1)), a.maxH ?? Infinity) : a.h;
+    const want = a.h;
     const h = Math.min(want, t.h - tMin);
     if (h < (a.growH ? Math.max(1, a.minH ?? 1) : a.h)) return { ok: false, why: 'target' };
     if (!(t.w === a.w || (a.growW && within(t.w, a.minW, a.maxW)))) return { ok: false, why: 'moved' };
@@ -161,4 +165,26 @@ export function splitMove(items: readonly ArrangeBox[], id: string, target: stri
   }
   const placements = [...closed.map((b) => (b.i === target ? cut : place(b))), box];
   return { ok: true, plan: { placements, box, kind: 'split', zone } };
+}
+
+/**
+ * A phone's stack, where every panel is the page's width, one under another: the moved panel taken out and put back
+ * above or below the target, every panel keeping its height (owner 2026-11-26: "Ensure edit mode works for mobile
+ * too"). Rows are read top to bottom and laid again from the top, so the page stays one gapless column.
+ */
+export function stackMove(items: readonly ArrangeBox[], id: string, target: string, zone: 'top' | 'bottom'): MoveResult {
+  const order = [...items].sort((p, q) => p.y - q.y || p.x - q.x);
+  const a = order.find((b) => b.i === id);
+  if (!a || id === target) return { ok: false, why: 'target' };
+  const rest = order.filter((b) => b.i !== id);
+  const at = rest.findIndex((b) => b.i === target);
+  if (at < 0) return { ok: false, why: 'target' };
+  rest.splice(zone === 'top' ? at : at + 1, 0, a);
+  let y = 0;
+  const placements = rest.map((b) => {
+    const p = { i: b.i, x: b.x, y, w: b.w, h: b.h };
+    y += b.h;
+    return p;
+  });
+  return { ok: true, plan: { placements, box: placements.find((p) => p.i === id)!, kind: 'split', zone } };
 }

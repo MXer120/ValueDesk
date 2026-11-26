@@ -66,7 +66,14 @@ html[data-theme='light'] .ed-root {
   pointer-events: none;
 }
 .dash[class*=' ed-'].is-arrange:not(.is-trash) .dash-panel::after { background: color-mix(in srgb, var(--bg) 22%, transparent); }
-.dash[class*=' ed-'].is-arrange .dash-panel.is-picked::after { box-shadow: inset 0 0 0 2px var(--text); }
+/* While a layout is edited the veil takes the clicks: a click selects the panel instead of pressing what is in it. */
+.dash[class*=' ed-'].is-arrange .dash-panel::after { pointer-events: auto; cursor: pointer; }
+/* The picked panel: a soft ring and a faint lift, not a white frame (owner 2026-11-26: "make that selection not fully
+   white"). */
+.dash[class*=' ed-'].is-arrange .dash-panel.is-picked::after {
+  background: rgb(var(--ink) / 0.05);
+  box-shadow: inset 0 0 0 1.5px rgb(var(--ink) / 0.42), inset 0 0 0 5px rgb(var(--ink) / 0.06);
+}
 .dash[class*=' ed-'].is-arrange .dash-panel > .dash-panel__grip { display: none; }
 .dash[class*=' ed-'].is-arrange .dash-grid .react-resizable-handle::after { animation: none; }
 .dash[class*=' ed-'].is-arrange .dash-grid .react-resizable-handle { z-index: 7; }
@@ -618,3 +625,10 @@ html[data-theme='light'] .dash-seam-readout { background: #fff; box-shadow: 0 0 
 .dash-seam-readout__side { display: flex; align-items: center; gap: 10px; }
 .dash-seam-readout__side b { margin-left: 3px; color: var(--text); font-family: var(--font-num); font-weight: 600; font-variant-numeric: tabular-nums; }
 .dash-seam-readout > i { padding: 2px 6px; border-radius: 6px; background: rgb(var(--ink) / 0.07); font-style: normal; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* A phone: the head moves the panel up or down the stack (responsive.css turns drag handles off there; this one is the
+   editor's own, and touch-action: none keeps the page from scrolling under the finger while it is held). */
+@media (max-width: 807px) {
+  .dash.is-tiles .dash-panel > .ed-ov.dash-panel__handle { pointer-events: auto; cursor: grab; }
+  .dash.is-tiles .dash-panel > .ed-ov .ed-ov__grip { display: block; }
+}

@@ -34,7 +34,7 @@ import {
 import { ResetDialog } from './ResetDialog';
 import { publishTerminals, registerTerminals, snapshotOf, takeLayoutsAsk } from './terminals';
 import { SeamLayer } from './SeamLayer';
-import { splitMove, zoneAt, type ArrangeBox, type MoveResult, type Zone } from './arrange';
+import { splitMove, stackMove, zoneAt, type ArrangeBox, type MoveResult, type Zone } from './arrange';
 import type { SeamBox } from './seams';
 import { TRADE_PRESETS } from './presets';
 import { faceFor } from './widgetCatalog';
@@ -589,10 +589,12 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
   /** A panel dragged off the page: released there, it is removed. */
   const [leaving, setLeaving] = useState<string | null>(null);
 
-  /* Arranging on a wide screen (lg, md), a panel is moved by its head and dropped on a side of another panel to take
-     that half, or on its middle to trade places (arrange.ts; owner 2026-11-26: "keep split"); panels are resized on the
-     lines between them (SeamLayer). The grid's own drag and corner are off then. A phone's arrangement is fixed. */
-  const tiles = arrange && !trash && (bp === 'lg' || bp === 'md');
+  /* Arranging, a panel is moved by its head (arrange.ts; owner 2026-11-26: "keep split", then "just move"): on a wide
+     screen (lg, md) dropped on a side of another panel it goes beside it at its own size, on the middle the two trade
+     places, and panels are resized on the lines between them (SeamLayer); on a phone (sm, xs), where every panel is
+     the page's width, it goes above or below another (stackMove). The grid's own drag and corner are off then. */
+  const tiles = arrange && !trash;
+  const wideTiles = tiles && (bp === 'lg' || bp === 'md');
   /** The panel being moved, the panel under the pointer, the side of it, and what a release would do. */
   const [move, setMove] = useState<{ id: string; name: string; target: string | null; zone: Zone | null; result: MoveResult | null } | null>(null);
   const liveRef = useRef({
@@ -849,10 +851,17 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
         const a = cur.base.find((b) => b.i === cur.id);
         if (t && a) {
           target = t.i;
-          zone = zoneAt((at.x - t.x) / t.w, (at.y - t.y) / t.h);
-          const colPx = (grid.offsetWidth - margin[0] * (cols - 1)) / cols + margin[0];
-          const tall = a.h * (live.rowHeight + margin[1]) >= a.w * colPx;
-          result = splitMove(cur.base, cur.id, t.i, zone, cols, tall);
+          if (live.bp === 'sm' || live.bp === 'xs') {
+            // A phone's stack: the top half of a panel puts it above, the bottom half below.
+            const side = (at.y - t.y) / t.h < 0.5 ? 'top' : 'bottom';
+            zone = side;
+            result = stackMove(cur.base, cur.id, t.i, side);
+          } else {
+            zone = zoneAt((at.x - t.x) / t.w, (at.y - t.y) / t.h);
+            const colPx = (grid.offsetWidth - margin[0] * (cols - 1)) / cols + margin[0];
+            const tall = a.h * (live.rowHeight + margin[1]) >= a.w * colPx;
+            result = splitMove(cur.base, cur.id, t.i, zone, cols, tall);
+          }
         }
       }
       cur.target = target;
@@ -929,14 +938,22 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
     if (selected && hiddenSet.has(selected)) setSelected(null);
   }, [selected, hiddenSet]);
 
-  /* Dock: a press on a panel picks it (its ring), on bare grid clears it; Delete
-     removes the picked one. The press still starts the grid's own drag: nothing is prevented. */
+  /* Dock: a click anywhere on a panel picks it (its ring), a second click on it lets it go, a click on bare grid clears
+     it (owner 2026-11-26: "when clicking anywhere within an element it should be selected or another click
+     unselected"); Delete removes the picked one. In edit mode a panel's content takes no clicks (dock.css: its veil
+     does), so a click selects instead of pressing a button inside. A press that became a move or a drag is not a click. */
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !arrange || trash) return;
-    const down = (e: PointerEvent) => {
-      if (!(e.target instanceof Element) || e.target.closest('.ed-ov__x, .react-resizable-handle')) return;
-      setSelected(e.target.closest('[data-panel]')?.getAttribute('data-panel') ?? null);
+    let from: { x: number; y: number } | null = null;
+    const down = (e: PointerEvent) => { from = { x: e.clientX, y: e.clientY }; };
+    const click = (e: MouseEvent) => {
+      const start = from;
+      from = null;
+      if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= DRAG_COMMIT_PX) return;
+      if (!(e.target instanceof Element) || e.target.closest('.ed-ov__x, .react-resizable-handle, .dash-seam')) return;
+      const id = e.target.closest('[data-panel]')?.getAttribute('data-panel') ?? null;
+      setSelected((cur) => (id !== null && cur === id ? null : id));
     };
     const key = (e: KeyboardEvent) => {
       const a = document.activeElement;
@@ -948,9 +965,11 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
       removePanel(id);
     };
     el.addEventListener('pointerdown', down, true);
+    el.addEventListener('click', click, true);
     document.addEventListener('keydown', key);
     return () => {
       el.removeEventListener('pointerdown', down, true);
+      el.removeEventListener('click', click, true);
       document.removeEventListener('keydown', key);
     };
   }, [arrange, trash, scrollRef, removePanel]);
@@ -1133,7 +1152,7 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
   }, [bp, config]);
   // Seams where panels can be resized at all: not locked, not arranging, and not on the
   // two narrow breakpoints, whose arrangement is fixed (responsive.css).
-  const seamsOn = (!locked && !editing && (bp === 'lg' || bp === 'md')) || tiles;
+  const seamsOn = (!locked && !editing && (bp === 'lg' || bp === 'md')) || wideTiles;
   // While a seam is dragged the panels follow it 1:1 (no eased transform).
   const [seaming, setSeaming] = useState(false);
 
@@ -1276,7 +1295,7 @@ export function Dashboard<C>({ config, panels, context, className, onEditing }: 
               if (on && editing) snapshotUndo();
               setSeaming(on);
             }}
-            labels={tiles ? panelName : undefined}
+            labels={wideTiles ? panelName : undefined}
           />
         )}
         {/* While a panel is moved: what a release would do, over the page that stays as it is. */}

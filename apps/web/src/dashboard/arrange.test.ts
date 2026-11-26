@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { closeGap, splitMove, swapMove, zoneAt, type ArrangeBox } from './arrange';
+import { closeGap, splitMove, stackMove, swapMove, zoneAt, type ArrangeBox } from './arrange';
 
 const box = (i: string, x: number, y: number, w: number, h: number, more: Partial<ArrangeBox> = {}): ArrangeBox => ({ i, x, y, w, h, growW: true, growH: true, minW: 4, minH: 4, ...more });
 
@@ -67,7 +67,7 @@ test('closeGap: null when no side covers the gap end to end', () => {
   assert.equal(closeGap(rest, { x: 10, y: 0, w: 10, h: 20 }, true), null);
 });
 
-test('split: the book onto the chart\'s right side - the page stays tiled, the book takes half the chart', () => {
+test('split: the book onto the chart\'s right side - the page stays tiled, the book keeps its width', () => {
   const r = splitMove(page(), 'book', 'chart', 'right', 48, true);
   assert.ok(r.ok);
   assert.ok(tiled(r.plan.placements));
@@ -99,4 +99,21 @@ test('split: a strip keeps its height when it goes over a panel', () => {
   assert.ok(r.ok);
   assert.ok(tiled(r.plan.placements));
   assert.equal(r.plan.box.h, 4);
+});
+
+test('move: the book to the right of the ticket - both keep their widths, the ticket takes the old place of the book', () => {
+  const r = splitMove(page(), 'book', 'exec', 'right', 48, true);
+  assert.ok(r.ok);
+  assert.ok(tiled(r.plan.placements));
+  const at = new Map(r.plan.placements.map((p) => [p.i, p]));
+  assert.deepEqual(at.get('exec'), { i: 'exec', x: 29, y: 4, w: 10, h: 58 });
+  assert.deepEqual(at.get('book'), { i: 'book', x: 39, y: 4, w: 9, h: 58 });
+  assert.deepEqual(at.get('chart'), { i: 'chart', x: 0, y: 4, w: 29, h: 56 });
+});
+
+test('stackMove: a phone row moved above another, every row keeping its height, no gap', () => {
+  const rows = [box('markets', 0, 0, 48, 2), box('ticker', 0, 2, 48, 3), box('book', 0, 5, 48, 24), box('positions', 0, 29, 48, 12), box('account', 0, 41, 48, 7)];
+  const r = stackMove(rows, 'account', 'book', 'top');
+  assert.ok(r.ok);
+  assert.deepEqual(r.plan.placements.map((p) => `${p.i}:${p.y}+${p.h}`), ['markets:0+2', 'ticker:2+3', 'account:5+7', 'book:12+24', 'positions:36+12']);
 });
