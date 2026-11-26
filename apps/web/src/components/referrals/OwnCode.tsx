@@ -11,7 +11,7 @@
  */
 import { useEffect, useId, useRef, useState } from 'react';
 import { setOwnCode } from '../../invites/invites';
-import { OWN_CODE_MAX, ownCodeErrorText, ownCodeInput, ownCodeProblem, ownCodeProblemText, postOwnCode, signOwnCode } from '../../invites/sodexRewards';
+import { OWN_CODE_MAX, fetchStats, ownCodeErrorText, ownCodeInput, ownCodeProblem, ownCodeProblemText, postOwnCode, signOwnCode } from '../../invites/sodexRewards';
 import type { SodexRewards } from '../../invites/useSodexRewards';
 import { NeedsPointsToken, SodexError, getPointsToken, setPointsToken } from '../../points';
 import { signInToPoints } from '../../pointsAuth';
@@ -44,6 +44,9 @@ export function OwnLinkBar({ l, v, s, provider }: { l: LinkState; v: RefView; s:
 
   useEffect(() => { setEdit(false); setError(null); setNote(null); setUsed(false); setSampleCode(null); }, [v.address, v.sample]);
   useEffect(() => { if (edit) input.current?.select(); }, [edit]);
+  // SoDEX's signed-in stats name the code SoDEX's own page shows (a code changed on another device too): ours shows it.
+  const statsCode = v.sample ? null : s.stats?.code ?? null;
+  useEffect(() => { if (v.address && statsCode && statsCode !== l.code && l.state === 'ok') setOwnCode(v.address, statsCode); }, [v.address, statsCode, l.code, l.state]);
 
   const start = () => {
     if (!code || busy) return;
@@ -76,6 +79,11 @@ export function OwnLinkBar({ l, v, s, provider }: { l: LinkState; v: RefView; s:
         setBusy('signin');
         setPointsToken(a, await signInToPoints(provider, a));
       }
+      // SoDEX's word first: a change made already (on another device, or on sodex.com) needs no second signature.
+      setBusy('save');
+      const st = await fetchStats(a).catch(() => null);
+      if (st?.code && st.code !== code) setOwnCode(a, st.code);
+      if (st && !st.canModify) { setUsed(true); setEdit(false); setNote(ONCE); s.refresh(); return; }
       setBusy('sign');
       const signed = await signOwnCode(provider, a, next);
       setBusy('save');

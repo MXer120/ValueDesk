@@ -95,11 +95,38 @@ let rev = 0;
 function changed(): void { rev += 1; for (const l of [...listeners]) l(); }
 const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
 
-/** The wallet's code as SoDEX has just taken it (a change made here): shown at once, everywhere the link is. */
+/**
+ * A code changed on SoDEX (OwnCode.tsx). SoDEX's public lookup keeps answering with the wallet's first code (2026-11-26,
+ * test wallet 0x457a: changed to VDTEST7Q4K, myStats said VDTEST7Q4K, public/referralCode still KCQRWIML with
+ * created=false; both codes lead to the wallet). So the changed one is kept here, and kept only while SoDEX says it is
+ * this wallet's (checked on every read).
+ */
+const CHANGED_KEY = (a: string) => `vd.ref.code.${a}`;
+const PROBE = '0x0000000000000000000000000000000000000001';
+
+/** The wallet's code as SoDEX has taken it (a change here, or SoDEX's signed-in stats): shown at once, everywhere. */
 export function setOwnCode(address: string, code: string): void {
-  own.set(address.toLowerCase(), { state: 'ok', code });
+  const a = address.toLowerCase();
+  own.set(a, { state: 'ok', code });
   noteOwn(code);
+  try { localStorage.setItem(CHANGED_KEY(a), code); } catch { /* private mode: this page only */ }
   changed();
+}
+
+/** The changed code kept for this wallet, while SoDEX names the wallet as its owner. */
+async function keptChange(a: string, first: string): Promise<string | null> {
+  let c: string | null = null;
+  try { c = localStorage.getItem(CHANGED_KEY(a)); } catch { return null; }
+  if (!c || c === first || !CODE_RE.test(c)) return null;
+  try {
+    const { body } = await json<{ code?: number; data?: { inviterWalletAddress?: string } }>(`${BIZ}/biz/referral/checkEligibility?walletAddress=${PROBE}&referralCode=${encodeURIComponent(c)}`);
+    if (body.code !== 0) return c; // not answered now: kept as it was
+    if (body.data?.inviterWalletAddress?.toLowerCase() === a) return c;
+    localStorage.removeItem(CHANGED_KEY(a));
+    return null;
+  } catch {
+    return c;
+  }
 }
 
 /** The wallet's SoDEX referral code, from SoDEX (public, no login). */
@@ -112,9 +139,10 @@ export function loadOwnCode(address: string): Promise<OwnCode> {
   if (!p) {
     if (!have) own.set(a, { state: 'loading' });
     p = json<{ code?: number; data?: { referralCode?: unknown } }>(`${BIZ}/biz/referral/public/referralCode?walletAddress=${a}`).then(
-      ({ status, body }) => {
+      async ({ status, body }) => {
         const c = typeof body.data?.referralCode === 'string' ? normCode(body.data.referralCode) : '';
-        const out: OwnCode = status === 200 && body.code === 0 ? (CODE_RE.test(c) ? { state: 'ok', code: c } : { state: 'none' }) : { state: 'error' };
+        const changedTo = status === 200 && body.code === 0 && CODE_RE.test(c) ? await keptChange(a, c) : null;
+        const out: OwnCode = status === 200 && body.code === 0 ? (changedTo ? { state: 'ok', code: changedTo } : CODE_RE.test(c) ? { state: 'ok', code: c } : { state: 'none' }) : { state: 'error' };
         if (out.state === 'ok') noteOwn(out.code);
         own.set(a, out);
         asked.delete(k);
