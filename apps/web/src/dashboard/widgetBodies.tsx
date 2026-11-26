@@ -62,7 +62,7 @@ export const widgetIdOf = (id: string): string => LEGACY[id] ?? id;
 
 // A wallet or a page elsewhere in the app: what App.tsx's own links do - in place (nav.ts), not a reload.
 const scanWallet = (address: string) => { goTo(`/scan?find=${encodeURIComponent(address)}`); };
-const copyTrader = (address: string, venue: string) => { goTo(`/copy?address=${encodeURIComponent(address)}&venue=${venue}`); };
+const copyTrader = (address: string, venue: string, direction?: 'copy' | 'counter') => { goTo(`/copy?address=${encodeURIComponent(address)}&venue=${venue}${direction === 'counter' ? '&direction=counter' : ''}`); };
 const openPath = (path: string) => { goTo(path); };
 
 const accountCtx = (c: TradeContext) => ({
