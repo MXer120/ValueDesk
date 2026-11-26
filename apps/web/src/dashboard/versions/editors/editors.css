@@ -1,0 +1,506 @@
+/* ============================================================================
+ * The layout editor's versions (localhost, versions/store.ts): Dock, Studio,
+ * Board. Shared first - where the page sits, the head on each panel, the parts
+ * every editor draws (thumbnails, history rows, the delete that counts down,
+ * the undo toast) - then each editor's own chrome.
+ *
+ * Roots: `.shell.is-edit-v[data-edit-v]` (the page), `.dash.ed-<name>` (the
+ * panels), `.ed-root.ed-<name>-root` (the editor's own windows, a body
+ * portal). No infinite animation anywhere: the original's shaking resize grip
+ * rests here, so an editor left open costs nothing while nobody moves.
+ * ========================================================================= */
+
+.ed-root {
+  --ed-surface: var(--bg-panel);
+  --ed-raised: var(--bg-elevated);
+  --ed-well: rgb(var(--ink) / 0.045);
+  --ed-well-hi: rgb(var(--ink) / 0.08);
+  --ed-ring: rgb(var(--ink) / 0.09);
+  --ed-label: rgb(var(--ink) / 0.52);
+  --ed-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --tf-r-ctl: 9px;
+  color: var(--text);
+  font-family: var(--font-text);
+}
+html[data-theme='light'] .ed-root {
+  --ed-surface: #ffffff;
+  --ed-raised: #ffffff;
+  --ed-shadow: 0 24px 70px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* --- the page while a version's editor is open ------------------------------- */
+.shell.is-dash-edit.is-edit-v > .app {
+  transform-origin: 0 0;
+  transform: translate(var(--ed-x, 0px), var(--ed-y, 0px)) scale(var(--ed-scale, 1));
+  border-radius: 0;
+  overflow: visible;
+  box-shadow: none;
+  transition: transform 360ms var(--ease-out);
+}
+/* The page as an object on the editor's desk: its panels framed (not .app, which also spans the navbar's band). */
+.shell.is-dash-edit.is-edit-v:not(.is-dash-preview):not([data-edit-v='dock']) .dash > .dash-scroll {
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.16), 0 30px 90px rgba(0, 0, 0, 0.45);
+}
+.shell.is-dash-edit.is-edit-v[data-edit-v='dock'] > .app,
+.shell.is-dash-edit.is-edit-v.is-dash-preview > .app { transform: none; }
+@media (max-width: 807px) {
+  .shell.is-dash-edit.is-edit-v > .app { transform: none; }
+  .shell.is-dash-edit.is-edit-v .dash > .dash-scroll { box-shadow: none; border-radius: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell.is-dash-edit.is-edit-v > .app { transition: none; }
+}
+
+/* --- each panel while arranging: a ring, its content stilled, a head on top -- */
+.dash[class*=' ed-'].is-arrange .dash-panel {
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.16);
+}
+.dash[class*=' ed-'].is-arrange .dash-panel.is-picked { box-shadow: 0 0 0 2px var(--text); }
+.dash[class*=' ed-'].is-arrange:not(.is-trash) .dash-panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg) 22%, transparent);
+  pointer-events: none;
+}
+.dash[class*=' ed-'].is-arrange .dash-panel > .dash-panel__grip { display: none; }
+.dash[class*=' ed-'].is-arrange .dash-grid .react-resizable-handle::after { animation: none; }
+.dash[class*=' ed-'].is-arrange .dash-grid .react-resizable-handle { z-index: 7; }
+.dash[class*=' ed-'].is-arrange .dash-panel { cursor: default; }
+
+/* A compact pill at the panel's top-left, so the panel's own head stays readable beside it. */
+.ed-ov {
+  position: absolute;
+  z-index: 6;
+  top: 6px;
+  left: 6px;
+  max-width: calc(100% - 12px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 3px 0 8px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.12), 0 6px 18px rgba(0, 0, 0, 0.32);
+  color: var(--text);
+  font: 500 12px/1 var(--font-text);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+html[data-theme='light'] .ed-ov { background: rgb(255 255 255 / 0.96); box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 6px 18px rgba(0, 0, 0, 0.1); }
+.ed-ov:active { cursor: grabbing; }
+.ed-ov__grip { flex: none; color: var(--dim); }
+.ed-ov__name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-ov__size { flex: none; color: var(--muted); font-family: var(--font-num); font-size: 11px; font-variant-numeric: tabular-nums; }
+button.ed-ov__x {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+button.ed-ov__x:hover { color: var(--neg); background: color-mix(in srgb, var(--neg) 14%, transparent); }
+/* A strip (the markets bar) is shorter than the head: the head sits in it, slimmer. */
+.dash-panel--strip > .ed-ov { top: 50%; height: 26px; margin-top: -13px; }
+@media (max-width: 807px) {
+  .ed-ov { cursor: default; }
+  .ed-ov__grip, .ed-ov__size { display: none; }
+  button.ed-ov__x { width: 36px; height: 30px; }
+}
+
+/* --- shared parts ------------------------------------------------------------ */
+.ed-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: 9px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--ed-ring, rgb(var(--ink) / 0.09));
+}
+.ed-thumb__b { position: absolute; overflow: hidden; border-radius: 2px; box-shadow: inset 0 0 0 1px rgb(var(--ink) / 0.14); }
+.ed-wsketch {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px var(--ed-ring);
+}
+.ed-eyebrow { margin: 14px 2px 8px; color: var(--ed-label); font-size: 12px; font-weight: 500; }
+.ed-none { margin: 18px 4px; color: var(--muted); font-size: 13px; }
+button.ed-linkbtn {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.ed-rule { flex: none; width: 1px; height: 24px; background: var(--ed-ring); }
+.ed-root kbd {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  background: none;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: inherit;
+  font: 500 10.5px/14px var(--font-text);
+  opacity: 0.75;
+}
+.ed-find { position: relative; display: flex; align-items: center; flex: 1 1 auto; min-width: 0; color: var(--ed-label); }
+.ed-find > svg { position: absolute; top: 50%; left: 11px; transform: translateY(-50%); pointer-events: none; }
+.ed-find input {
+  width: 100%;
+  height: 36px;
+  min-height: 0;
+  padding: 0 34px 0 32px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--ed-well);
+  box-shadow: inset 0 0 0 1px var(--ed-ring);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.ed-find input:focus { outline: none; box-shadow: inset 0 0 0 1.5px rgb(var(--ink) / 0.4); }
+.ed-find input::-webkit-search-cancel-button { display: none; }
+.ed-find kbd { position: absolute; right: 9px; margin: 0; pointer-events: none; }
+.ed-find input:focus ~ kbd { display: none; }
+
+.ed-hist { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.ed-hist > li {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 12px;
+}
+.ed-hist > li:hover { background: var(--ed-well); }
+.ed-hist__thumb { border-radius: 7px; }
+.ed-hist__t { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ed-hist__t b { overflow: hidden; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.ed-hist__t small { color: var(--ed-label); font-size: 12px; }
+
+.ed-confirm {
+  position: absolute;
+  z-index: 3;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--ed-raised);
+  box-shadow: 0 0 0 1px var(--ed-ring), var(--ed-shadow);
+}
+.ed-confirm p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.4; }
+.ed-confirm > div { display: flex; justify-content: flex-end; gap: 6px; }
+
+.ed-ghost {
+  position: fixed;
+  z-index: 90;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: var(--ed-raised);
+  box-shadow: 0 0 0 1px var(--ed-ring), var(--ed-shadow);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+  pointer-events: none;
+  transform: translate(12px, 14px);
+}
+.ed-ghost.is-remove { color: var(--neg); box-shadow: 0 0 0 1px var(--neg), var(--ed-shadow); }
+
+.ed-toast {
+  position: fixed;
+  z-index: 75;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 6px 6px 14px;
+  border-radius: 12px;
+  background: var(--ed-raised);
+  box-shadow: 0 0 0 1px var(--ed-ring), var(--ed-shadow);
+  font-size: 13px;
+  animation: ed-toast-in 180ms var(--ease-out) both;
+}
+@keyframes ed-toast-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes ed-pop-in { from { opacity: 0; transform: translateY(8px) scale(0.985); } }
+@media (prefers-reduced-motion: reduce) { .ed-toast, .ed-root [class*='-pop'] { animation: none !important; } }
+
+/* ============================================================================
+ * DOCK
+ * ========================================================================= */
+.ed-dk-bar {
+  position: fixed;
+  z-index: 60;
+  left: 50%;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100vw - 24px);
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--ed-raised);
+  box-shadow: 0 0 0 1px var(--ed-ring), var(--ed-shadow);
+  transform: translateX(-50%);
+}
+.ed-dk-bar .tf-btn.is-sm { height: 40px; padding: 0 14px; border-radius: 11px; font-size: 13px; }
+button.ed-dk-chip {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: center;
+  height: 40px;
+  min-height: 0;
+  padding: 0 10px 0 12px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--ed-well);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.ed-dk-chip:hover,
+button.ed-dk-chip.is-open { background: var(--ed-well-hi); }
+.ed-dk-chip__k { grid-column: 1; color: var(--ed-label); font-size: 10.5px; line-height: 12px; }
+.ed-dk-chip b { grid-column: 1; max-width: 160px; overflow: hidden; font-size: 13px; font-weight: 600; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.ed-dk-chip > svg { grid-column: 2; grid-row: 1 / span 2; color: var(--ed-label); }
+button.ed-dk-tool {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 52px;
+  height: 40px;
+  min-height: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  color: var(--ed-label);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+button.ed-dk-tool:hover { color: var(--text); background: var(--ed-well); }
+button.ed-dk-tool.is-on { color: var(--text); background: var(--ed-well-hi); }
+.ed-dk-bar.is-remove,
+.ed-dk-bar.is-trash { box-shadow: 0 0 0 1.5px var(--neg), var(--ed-shadow); }
+.ed-dk-bar__remove { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; color: var(--neg); font-size: 13px; font-weight: 500; }
+.ed-dk-bar.is-remove { background: color-mix(in srgb, var(--neg) 12%, var(--ed-raised)); }
+
+.ed-dk-scrim { position: fixed; inset: 0; z-index: 57; }
+.ed-dk-pop {
+  position: fixed;
+  z-index: 59;
+  left: 50%;
+  bottom: 84px;
+  display: flex;
+  flex-direction: column;
+  width: min(1080px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 190px));
+  border-radius: 18px;
+  background: var(--ed-surface);
+  box-shadow: 0 0 0 1px var(--ed-ring), var(--ed-shadow);
+  transform: translateX(-50%);
+  animation: ed-pop-in 200ms var(--ease-out) both;
+  transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+.ed-dk-layouts { width: min(820px, calc(100vw - 32px)); }
+.ed-dk-drawer.is-ghosting { opacity: 0; pointer-events: none; transform: translate(-50%, 18px); }
+.ed-dock-root.is-quiet .ed-dk-pop,
+.ed-dock-root.is-quiet .ed-dk-scrim { display: none; }
+.ed-dk-pop__head { display: flex; align-items: center; gap: 12px; padding: 14px 12px 10px 16px; }
+.ed-dk-pop__title { display: flex; flex-direction: column; gap: 2px; flex: none; margin-right: 8px; }
+.ed-dk-pop__title b { font-size: 15px; font-weight: 600; }
+.ed-dk-pop__title span { color: var(--ed-label); font-size: 12px; }
+.ed-dk-pop__head .ed-find { max-width: 380px; margin-left: auto; }
+.ed-dk-pop__head > .tf-btn.is-icon { margin-left: auto; }
+.ed-dk-pop__head .ed-find + .tf-btn.is-icon { margin-left: 0; }
+.ed-dk-groups { align-self: flex-start; margin: 0 16px 4px; }
+.ed-dk-pop__scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 16px 16px; scrollbar-width: thin; }
+.ed-dk-pop__foot { flex: none; margin: 0; padding: 10px 16px 12px; border-top: 1px solid var(--ed-ring); color: var(--ed-label); font-size: 12px; }
+.ed-dk-pop__foot b { color: var(--text); font-weight: 500; }
+
+.ed-dk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 10px; }
+.ed-dk-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 7px 10px;
+  border-radius: 14px;
+  background: var(--ed-well);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: background 140ms, box-shadow 140ms;
+}
+.ed-dk-card:hover:not(.is-present) { background: var(--ed-well-hi); box-shadow: inset 0 0 0 1px var(--ed-ring); }
+.ed-dk-card:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.ed-dk-card.is-present { cursor: default; }
+.ed-dk-card.is-present .ed-wsketch { opacity: 0.55; }
+.ed-dk-card__t { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0 3px; }
+.ed-dk-card__t b { overflow: hidden; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.ed-dk-card__t small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ed-label);
+  font-size: 11.5px;
+  line-height: 1.35;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.ed-dk-card__on { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 3px; font-size: 12px; }
+.ed-dk-card__add {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 140ms, transform 140ms;
+}
+.ed-dk-card:hover .ed-dk-card__add,
+.ed-dk-card:focus-visible .ed-dk-card__add { opacity: 1; transform: none; }
+
+.ed-dk-lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; padding-top: 4px; }
+.ed-dk-lcard { position: relative; display: flex; flex-direction: column; min-width: 0; }
+button.ed-dk-lcard__open,
+.ed-dk-lcard.ed-dk-lcard__open {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-height: 0;
+  padding: 7px 7px 10px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--ed-well);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.ed-dk-lcard__open:hover { background: var(--ed-well-hi); }
+.ed-dk-lcard.is-active .ed-thumb,
+.ed-dk-lcard__open.is-active .ed-thumb { box-shadow: inset 0 0 0 1px var(--ed-ring), 0 0 0 2px var(--text); }
+.ed-dk-lcard.is-off .ed-thumb { opacity: 0.55; }
+.ed-dk-lcard__t { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 0 3px; }
+.ed-dk-lcard__t b { overflow: hidden; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.ed-dk-lcard__d { padding: 0 3px; color: var(--ed-label); font-size: 11.5px; line-height: 1.35; }
+button.ed-dk-lcard__more {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ed-raised);
+  box-shadow: 0 0 0 1px var(--ed-ring);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 140ms;
+}
+.ed-dk-lcard:hover .ed-dk-lcard__more,
+button.ed-dk-lcard__more:focus-visible { opacity: 1; }
+button.ed-dk-lnew {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 150px;
+  border: 1px dashed rgb(var(--ink) / 0.2);
+  border-radius: 14px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+button.ed-dk-lnew small { color: var(--ed-label); font-size: 11.5px; font-weight: 400; }
+button.ed-dk-lnew:hover { background: var(--ed-well); border-color: rgb(var(--ink) / 0.34); }
+.ed-dk-toast { left: 50%; bottom: 84px; transform: translateX(-50%); }
+.ed-dock-root:has(.ed-dk-pop) .ed-dk-toast { bottom: calc(84px + min(560px, 100vh - 190px) + 10px); }
+
+/* Dock on a phone: the bar across the foot, the drawer and the layouts as sheets. */
+@media (max-width: 807px) {
+  .ed-dk-bar { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); justify-content: space-between; max-width: none; transform: none; }
+  .ed-dk-bar .ed-rule { display: none; }
+  button.ed-dk-chip { flex: 1 1 auto; min-width: 0; height: 44px; }
+  .ed-dk-chip b { max-width: none; }
+  button.ed-dk-tool { min-width: 44px; height: 44px; }
+  .ed-dk-bar .tf-btn.is-sm { height: 44px; padding: 0 12px; }
+  .ed-dk-pop {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: calc(100dvh - 72px);
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    border-radius: 18px 18px 0 0;
+    transform: none;
+  }
+  .ed-dk-scrim { background: rgba(8, 9, 11, 0.45); }
+  .ed-dk-pop__head { flex-wrap: wrap; }
+  .ed-dk-pop__head .ed-find { order: 3; flex: 1 1 100%; max-width: none; margin: 0; }
+  .ed-dk-pop__head > .tf-btn.is-icon,
+  .ed-dk-pop__head .ed-find + .tf-btn.is-icon { margin-left: auto; }
+  button.ed-dk-tool > span { display: none; }
+  .ed-dk-bar .tf-btn.is-sm .ed-wide { display: none; }
+  .ed-dk-groups { max-width: calc(100% - 32px); }
+  .ed-dk-grid { grid-template-columns: 1fr; gap: 6px; }
+  .ed-dk-card { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 7px; cursor: pointer; }
+  .ed-dk-card__t small { -webkit-line-clamp: 1; }
+  .ed-dk-card__on { flex-direction: column; align-items: flex-end; }
+  .ed-dk-card__add { position: static; opacity: 1; transform: none; width: 36px; height: 36px; }
+  .ed-dk-lgrid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  button.ed-dk-lcard__more { opacity: 1; }
+  .ed-dk-toast { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* Every editor on a phone: the layouts drawn at a phone's own proportions (one tall column of panels). */
+.ed-root.is-phone .ed-thumb { aspect-ratio: 9 / 16; }
+.ed-root.is-phone .ed-hist > li { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; }
+.ed-dock-root.is-phone .ed-dk-lgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ed-dock-root.is-phone .ed-dk-lcard__t { flex-direction: column; align-items: flex-start; gap: 4px; }

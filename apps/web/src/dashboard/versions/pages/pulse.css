@@ -1,0 +1,346 @@
+/* ============================================================================
+ * PULSE - chart first, quiet chrome (localhost version, versions/store.ts).
+ *
+ * The chart is not a card: it sits straight on the page, under a large price
+ * and a line that places it between its 24-hour low and high (RangeBar.tsx, the
+ * venue's own figures). Everything else is a borderless card one step off the
+ * page; tabs are chips; the ticket's Long and Short are two buttons in their own
+ * colours, the chosen one solid. Fields are outlined, not filled. No glass blur
+ * on the panels and no glare on the ticket: cheaper than the original.
+ *
+ * A phone puts the chart first and the book under it, and holds Long and Short
+ * at the foot of the screen: either opens the ticket as a sheet (PhonePulse.tsx).
+ *
+ * Every rule starts at `html[data-tv="pulse"]` and, inside the page, `.tv-pulse`.
+ * ========================================================================= */
+
+html[data-tv='pulse'] {
+  --pl-card: #0c0c0e;
+  --pl-well: rgb(var(--ink) / 0.05);
+  --pl-well-hi: rgb(var(--ink) / 0.09);
+  --pl-ring: rgb(var(--ink) / 0.12);
+  --pl-label: rgb(var(--ink) / 0.5);
+  --pl-r: 12px;
+}
+html[data-tv='pulse'][data-theme='light'] {
+  --pl-card: #ffffff;
+  --pl-well: rgb(0 0 0 / 0.04);
+  --pl-well-hi: rgb(0 0 0 / 0.07);
+  --pl-ring: rgb(0 0 0 / 0.14);
+  --pl-label: rgb(0 0 0 / 0.52);
+}
+
+/* --- the page and the cards ------------------------------------------------ */
+html[data-tv='pulse'][data-theme='light'] body { background: #ededeb; }
+html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel] {
+  border: 0;
+  border-radius: var(--pl-r);
+  background: var(--pl-card);
+  box-shadow: none;
+}
+html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel]::before { display: none; }
+/* The chart straight on the page: no card, no edge. */
+html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='chart'] { background: transparent; }
+
+/* --- tabs: chips -------------------------------------------------------------- */
+html[data-tv='pulse'] .tv-pulse .dash-tabs__bar {
+  align-items: center;
+  height: 44px;
+  gap: 4px;
+  padding: 0 10px;
+  border-bottom: 0;
+}
+html[data-tv='pulse'] .tv-pulse .dash-tab {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--pl-label);
+}
+html[data-tv='pulse'] .tv-pulse .dash-tab:hover { color: var(--text); }
+html[data-tv='pulse'] .tv-pulse .dash-tab.is-active { color: var(--text); background: var(--pl-well-hi); }
+html[data-tv='pulse'] .tv-pulse .dash-tab::after,
+html[data-tv='pulse'] .tv-pulse .dash-tabs__ink { display: none; }
+html[data-tv='pulse'] .tv-pulse .dash-heading { padding-left: 10px; font-size: 13px; }
+
+/* --- the markets strip: plain pills on the page ------------------------------ */
+html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='markets'] { background: transparent; }
+html[data-tv='pulse'] .tv-pulse .mkt-favs { gap: 6px; }
+html[data-tv='pulse'] .tv-pulse .mkt-favchip { max-height: 40px; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--pl-ring); }
+html[data-tv='pulse'] .tv-pulse .mkt-favchip:hover { background: var(--pl-well); }
+html[data-tv='pulse'] .tv-pulse .mkt-favchip.is-active { background: var(--pl-well-hi); box-shadow: inset 0 0 0 1px transparent; }
+html[data-tv='pulse'] .tv-pulse .mkt-favchip__open { gap: 8px; padding: 0 2px 0 5px; }
+html[data-tv='pulse'] .tv-pulse .mkt-favchip__ic { width: 28px; height: 28px; border-radius: 50%; background: transparent; }
+html[data-tv='pulse'] .tv-pulse .mkt-favchip__t { flex-direction: row; align-items: baseline; gap: 8px; min-width: 0; }
+html[data-tv='pulse'] .tv-pulse .mkt-favchip__t b { font-size: 13px; }
+html[data-tv='pulse'] .tv-pulse .mkt-favchip__x { width: 24px; height: 24px; margin-right: 6px; border-radius: 999px; }
+html[data-tv='pulse'] .tv-pulse .mkt-favs__add { width: 34px; height: 34px; border-radius: 999px; }
+
+/* --- the coin row, large, and the 24-hour line under it ---------------------- */
+html[data-tv='pulse'] .tv-pulse .chart-card > .mkt-header.mkt-header--info {
+  height: 58px;
+  min-height: 58px;
+  padding: 2px 4px 0 6px;
+  gap: 16px;
+}
+html[data-tv='pulse'] .tv-pulse .mkt-info__coin { width: 34px; height: 34px; }
+html[data-tv='pulse'] .tv-pulse .mkt-info__coin img { width: 34px; height: 34px; }
+html[data-tv='pulse'] .tv-pulse .mkt-header--info .mkt-price-v,
+html[data-tv='pulse'] .tv-pulse .mkt-header--info .mkt-price-v.up,
+html[data-tv='pulse'] .tv-pulse .mkt-header--info .mkt-price-v.down { font-size: 30px; font-weight: 500; line-height: 36px; letter-spacing: -0.02em; }
+html[data-tv='pulse'] .tv-pulse .mkt-info__div { display: none; }
+html[data-tv='pulse'] .tv-pulse .mkt-header--info .mkt-stats { gap: 22px; }
+html[data-tv='pulse'] .tv-pulse .mkt-header--info .mkt-stat-l { color: var(--pl-label); }
+html[data-tv='pulse'] .tv-pulse .chart-tab { height: 28px; border-radius: 999px; padding: 0 12px; }
+html[data-tv='pulse'] .tv-pulse .chart-tab.is-on { background: var(--pl-well-hi); border-color: transparent; }
+html[data-tv='pulse'] .tv-pulse .kc-toolbar { border-top: 1px solid rgb(var(--ink) / 0.06); }
+
+.pls-range {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 6px 6px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.pls-range__k { color: var(--pl-label); white-space: nowrap; }
+.pls-range__v { color: var(--text); font-family: var(--font-num); font-weight: 500; white-space: nowrap; }
+.pls-range__bar {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 60px;
+  max-width: 420px;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--neg) 55%, transparent), rgb(var(--ink) / 0.16) 50%, color-mix(in srgb, var(--pos) 55%, transparent));
+}
+.pls-range__fill { display: none; }
+.pls-range__dot {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 3px var(--bg);
+  transition: left var(--dur-med) var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) { .pls-range__dot { transition: none; } }
+
+/* --- the book --------------------------------------------------------------- */
+html[data-tv='pulse'] .tv-pulse .mkt-book {
+  --mkt-bid-lo: color-mix(in srgb, var(--pos) 4%, transparent);
+  --mkt-bid-hi: color-mix(in srgb, var(--pos) 22%, transparent);
+  --mkt-ask-lo: color-mix(in srgb, var(--neg) 4%, transparent);
+  --mkt-ask-hi: color-mix(in srgb, var(--neg) 22%, transparent);
+}
+html[data-tv='pulse'] .tv-pulse .mkt-booktable th { color: var(--pl-label); font-weight: 400; }
+html[data-tv='pulse'] .tv-pulse .mkt-mid-last { font-size: 22px; }
+html[data-tv='pulse'] .tv-pulse .mkt-view { border-radius: 999px; }
+
+/* --- the ticket: two side buttons, chips, outlined fields -------------------- */
+html[data-tv='pulse'] .oe-fx { display: none; }
+html[data-tv='pulse'] .panel.oe,
+html[data-tv='pulse'] .dash-panel__body > .panel.oe {
+  --oe-inset: 14px;
+  padding: 12px 14px 14px;
+  border-radius: var(--pl-r);
+  background: transparent;
+}
+html[data-tv='pulse'] .oe-dir.oe-dir--tabs {
+  gap: 8px;
+  padding: 0;
+  margin: 0 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+html[data-tv='pulse'] .oe-dir--tabs .oe-dir__btn {
+  height: 40px;
+  margin: 0;
+  border-radius: 11px;
+  font-size: 14px;
+  font-weight: 600;
+}
+html[data-tv='pulse'] .oe-dir--tabs .oe-dir__btn.is-buy { color: var(--pos); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 40%, transparent); }
+html[data-tv='pulse'] .oe-dir--tabs .oe-dir__btn.is-sell { color: var(--neg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--neg) 40%, transparent); }
+html[data-tv='pulse'] .oe-dir--tabs .oe-dir__btn.is-on.is-buy { background: var(--pos); color: #04140e; box-shadow: none; }
+html[data-tv='pulse'] .oe-dir--tabs .oe-dir__btn.is-on.is-sell { background: var(--neg); color: #1a0503; box-shadow: none; }
+html[data-tv='pulse'][data-theme='light'] .oe-dir--tabs .oe-dir__btn.is-on.is-buy,
+html[data-tv='pulse'][data-theme='light'] .oe-dir--tabs .oe-dir__btn.is-on.is-sell { color: #fff; }
+html[data-tv='pulse'] .panel.oe .oe-mode__btn {
+  height: 30px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--pl-well);
+  box-shadow: none;
+  font-size: 13px;
+}
+html[data-tv='pulse'] .panel.oe .oe-mode__btn:hover:not(:disabled) { filter: none; background: var(--pl-well-hi); }
+html[data-tv='pulse'] .panel.oe .oe-mode__btn[aria-expanded='true'] { box-shadow: inset 0 0 0 1px var(--text); }
+html[data-tv='pulse'] .oe-tabs { gap: 4px; margin-inline: 0; padding: 4px 0; border-bottom: 0; }
+html[data-tv='pulse'] .oe-tab {
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--pl-label);
+}
+html[data-tv='pulse'] .oe-tab.is-on { color: var(--text); background: var(--pl-well-hi); }
+html[data-tv='pulse'] .oe-tab::after { display: none; }
+html[data-tv='pulse'] .oe-inputrow:not(.oe-pctbox) {
+  height: 42px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--pl-ring);
+}
+html[data-tv='pulse'] .oe-inputrow:focus-within { box-shadow: inset 0 0 0 1.5px var(--text); }
+html[data-tv='pulse'] .oe-inputrow.is-bad { box-shadow: inset 0 0 0 1.5px var(--neg); }
+html[data-tv='pulse'] .oe-input { height: 40px; line-height: 40px; font-size: 14px; }
+html[data-tv='pulse'] .oe-inlabel { color: var(--pl-label); font-size: 12.5px; }
+html[data-tv='pulse'] .oe-chip { border-radius: 999px; }
+html[data-tv='pulse'] .oe-side__btn {
+  height: 46px;
+  border-radius: 13px;
+  font-size: 15px;
+}
+html[data-tv='pulse'] .oe-side__btn.is-buy { background: var(--pos); box-shadow: 0 6px 18px color-mix(in srgb, var(--pos) 22%, transparent); }
+html[data-tv='pulse'] .oe-side__btn.is-sell { background: var(--neg); box-shadow: 0 6px 18px color-mix(in srgb, var(--neg) 22%, transparent); }
+html[data-tv='pulse'] .oe-side__btn:disabled { box-shadow: none; }
+html[data-tv='pulse'] .oe-out__k { color: var(--pl-label); }
+
+/* --- the account band -------------------------------------------------------- */
+html[data-tv='pulse'] .tv-pulse .acct-table th { color: var(--pl-label); font-weight: 400; }
+html[data-tv='pulse'] .tv-pulse .empty-state__cta { border-radius: 999px; }
+
+@media (max-width: 993px) {
+  html[data-tv='pulse'] .tv-pulse .dash-tabs__bar { height: 52px; }
+  html[data-tv='pulse'] .tv-pulse .dash-tab { height: 40px; padding: 0 14px; }
+}
+
+/* --- a phone: chart first, the book under it (PhonePulse.tsx) ---------------- */
+.pls-phone { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.pls-phone__chart { flex: 0 0 52%; min-height: 0; display: flex; flex-direction: column; }
+.pls-phone__chart > * { flex: 1 1 auto; min-height: 0; }
+.pls-phone__book { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid rgb(var(--ink) / 0.06); }
+.pls-phone__book > * { flex: 1 1 auto; min-height: 0; }
+html[data-tv='pulse'] .tv-pulse .dash-panel[data-panel='book']:has(.pls-phone) { background: transparent; }
+html[data-tv='pulse'] .tv-pulse .pls-phone__book { border-radius: var(--pl-r); background: var(--pl-card); }
+
+/* The bar: Long and Short over the tab bar, on a fade so the page under it reads as under it. */
+.pls-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--ptabs-h, 0px);
+  z-index: 28;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 18px 12px 10px;
+  background: linear-gradient(to bottom, transparent, var(--bg) 45%);
+  pointer-events: none;
+  transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
+}
+.pls-bar.is-hidden { opacity: 0; transform: translateY(8px); }
+button.pls-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 48px;
+  min-height: 48px;
+  border: 0;
+  border-radius: 14px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.pls-bar.is-hidden .pls-bar__btn { pointer-events: none; }
+button.pls-bar__btn.is-buy { background: var(--pos); color: #04140e; }
+button.pls-bar__btn.is-sell { background: var(--neg); color: #1a0503; }
+html[data-theme='light'] button.pls-bar__btn.is-buy,
+html[data-theme='light'] button.pls-bar__btn.is-sell { color: #fff; }
+button.pls-bar__btn:active { transform: scale(0.98); }
+@media (max-width: 760px) {
+  html[data-tv='pulse'] .appcontent { padding-bottom: 76px; }
+}
+
+/* The sheet: the ticket from the bottom edge, over the tab bar, under the ticket's own menus (z 50). */
+.pls-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  background: rgba(8, 9, 11, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-sheet) var(--ease-view);
+}
+.pls-scrim.is-open { opacity: 1; pointer-events: auto; }
+.pls-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 48px - env(safe-area-inset-top, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border-radius: 18px 18px 0 0;
+  background: var(--bg-panel);
+  box-shadow: 0 -1px 0 rgb(var(--ink) / 0.08), 0 -18px 48px rgba(0, 0, 0, 0.45);
+  transform: translate3d(0, 100%, 0);
+  visibility: hidden;
+  transition: transform var(--dur-sheet) var(--ease-view), visibility 0s linear var(--dur-sheet);
+}
+.pls-sheet.is-open { transform: none; visibility: visible; transition: transform var(--dur-sheet) var(--ease-view), visibility 0s; }
+html[data-theme='light'] .pls-sheet { box-shadow: 0 -1px 0 rgb(0 0 0 / 0.08), 0 -18px 48px rgba(0, 0, 0, 0.14); }
+.pls-sheet__head {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 8px 4px 16px;
+  touch-action: none;
+}
+.pls-sheet__head .sheet-grip { display: block; }
+.pls-sheet__head b { font-size: 15px; font-weight: 600; }
+.pls-sheet__kind { color: var(--pl-label, var(--muted)); font-size: 12px; }
+button.pls-sheet__x {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+}
+.pls-sheet__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; container: panel / inline-size; }
+@media (prefers-reduced-motion: reduce) {
+  .pls-sheet, .pls-sheet.is-open, .pls-scrim, .pls-bar { transition: none; }
+}
+html[data-tv='pulse'] .oe-slider .oe-pctbox { border: 0; border-radius: 11px; box-shadow: inset 0 0 0 1px var(--pl-ring); }
+html[data-tv='pulse'] .oe-slider .oe-pctbox:focus-within { box-shadow: inset 0 0 0 1.5px var(--text); }
+
+/* The ticket in the sheet keeps the app's 44px touch height (PhoneTabBar.css); its field chips draw as words. */
+@media (max-width: 760px) {
+  html[data-tv='pulse'] .pls-sheet .oe-inputrow:not(.oe-pctbox) { height: 48px; }
+  html[data-tv='pulse'] .pls-sheet .oe-inputrow .oe-input { height: 46px; line-height: 46px; font-size: 15px; }
+  html[data-tv='pulse'] .pls-sheet .oe-inputrow .oe-chip { align-self: stretch; height: auto; margin: 0; padding: 0 10px; border: 0; border-radius: 0; background: none; color: var(--pl-label); font-size: 11px; letter-spacing: 0.04em; }
+  html[data-tv='pulse'] .pls-sheet .oe-slider .oe-pctbox { height: 44px; }
+  html[data-tv='pulse'] .pls-sheet .oe-slider .oe-pctbox .oe-input { height: 44px; line-height: 44px; }
+  html[data-tv='pulse'] .pls-sheet .oe-slider .oe-pctbox .oe-suffix { align-self: center; }
+}
+html.pls-sheet-open .tvswitch { display: none; }
