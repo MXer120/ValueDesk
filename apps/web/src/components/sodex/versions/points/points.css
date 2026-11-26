@@ -113,9 +113,6 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
 .spx-st__k { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 24px 36px 0; }
 .rf-page .spx-st__k h1 { font-size: 16px; }
 .spx-st__snap { display: inline-flex; align-items: baseline; gap: 12px; margin-left: auto; font-size: 13px; color: var(--tf-muted); }
-.spx-st__body { display: grid; }
-.spx-st__front, .spx-st__steps { grid-area: 1 / 1; min-width: 0; transition: opacity 0.3s, transform 0.45s var(--tf-spring), visibility 0s linear 0.45s; }
-.spx-st__front { display: grid; grid-template-columns: minmax(0, 1fr) 40%; min-height: 336px; }
 .spx-st__t { display: flex; flex-direction: column; justify-content: flex-end; min-width: 0; padding: 28px 0 32px 36px; }
 .rf-page .spx-st__t h2 { margin: 0 0 22px; font-size: 40px; line-height: 45px; letter-spacing: -0.035em; }
 .spx-st__t .rf-bar { max-width: 560px; }
@@ -135,44 +132,71 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
 .spx-st__next .tf-bar { background: rgb(255 255 255 / 0.1); }
 .spx-st__wait { display: flex; flex-direction: column; }
 .spx-st__art { display: grid; place-items: center; margin-top: -40px; pointer-events: none; }
-.spx-st__steps { display: flex; opacity: 0; visibility: hidden; transform: translateY(14px); }
-.spx-st.is-how .spx-st__steps { opacity: 1; visibility: visible; transform: none; transition-delay: 0s, 0.08s, 0s; }
-.spx-st.is-how .spx-st__front { opacity: 0; visibility: hidden; transform: scale(0.98); }
-.spx-st:not(.is-how) .spx-st__front { transition-delay: 0.08s, 0.08s, 0s; }
-.spx-st.is-how .spx-st__light { opacity: 0.35; }
-.spx-st .rf-steps { flex: 1; overflow: visible; border-radius: 0; background: none; box-shadow: none; }
-.spx-st .rf-steps article { padding: 20px 36px 24px; }
-.spx-st .rf-steps article + article { padding-left: 6px; }
-.spx-st .rf-steps__art { min-height: 0; padding-top: 22px; justify-content: flex-start; }
-.spx-how__mk { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.spx-how__mk li { display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 0 16px; border-radius: 14px; background: rgb(255 255 255 / 0.07); font-size: 14px; }
-.spx-how__mk b { font: 600 14px var(--font-num); color: var(--tf-pos); }
-.spx-how__mk li.is-more { background: none; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1); color: var(--tf-muted); }
-.spx-how__snap { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; font-size: 13px; color: var(--tf-muted); }
-.spx-how__snap .spx-clock { font-size: 14px; }
-.spx-how__snap .spx-clock b { font-size: 26px; font-weight: 500; letter-spacing: -0.02em; }
-.spx-st .spx-ladder { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
-.spx-st .spx-ladder li { padding: 9px 10px; border-radius: 12px; background: rgb(255 255 255 / 0.07); box-shadow: none; }
-.spx-st .spx-ladder b { font-size: 15px; line-height: 18px; }
-.spx-st .spx-ladder span { font-size: 11px; }
-.spx-how__tiers { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
-.spx-how__tiers li { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 12px; border-radius: 9px; font-size: 13.5px; color: var(--tf-muted); }
-.spx-how__tiers li.is-on { background: rgb(255 255 255 / 0.07); color: var(--tf-fg); }
-.spx-how__tiers .sx-num { font-size: 13px; }
-/* SoDEX's own two cards on the stage (owner 2026-11-26: "the original sopoints cards designs"), at Original's widths.
-   The season card keeps its layout and colours; on the dark stage its panel is a lift of the stage, in both themes. */
-.spx-st__front.spx-st__cards { grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 16px; align-items: stretch; min-height: 0; padding: 22px 36px 30px; }
-.spx-st__front.spx-st__cards.is-out { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 36px; }
+/* Three cards of one size on the stage (owner 2026-11-27: "like a card"): SoDEX's tier card and season card (owner
+   2026-11-26: "the original sopoints cards designs") and this week's live SoPoints. Signed out, the sign-in words lead. */
+.spx-st__cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; padding: 20px 36px 30px; }
+.spx-st__cards.is-out { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px 28px; }
 .spx-st__cards .spx-st__t { justify-content: center; padding: 0; }
 .spx-st__cards .spm-card { min-height: 0; }
 /* The tier card leans toward the mouse (kit.css .tf-tilt); the wrapper fills the card's grid cell. */
 .spx-tilt { display: flex; flex-direction: column; min-width: 0; }
-.spx-tilt > .spm-card { flex: 1; }
-.spx-st .spm-season { --dim: rgba(244, 244, 242, 0.42); background: #111214; box-shadow: none; outline-color: rgb(255 255 255 / 0.09); }
-/* the bar under the stage: the multipliers (the week's pool and times are on the season card); neutral, not the
-   Referrals bar's green-black (owner 2026-11-26: "greenish although theres no green") */
-.rf-page .spx-pays { grid-template-columns: minmax(0, 1fr); background: rgb(255 255 255 / 0.025); border-top-color: rgb(255 255 255 / 0.08); }
-.spx-pays li b { white-space: nowrap; }
+.spx-tilt > :is(.spm-card, .spm-season, .spx-card) { flex: 1; }
+.spx-st .spm-card { border-radius: 16px; }
+/* The season card as a card: SoDEX's figures and colours, stacked, the invite code and link as its foot. */
+.spx-st .spm-season {
+  --dim: rgba(244, 244, 242, 0.42);
+  display: flex; flex-direction: column; gap: 14px; padding: 22px 24px 18px; border-radius: 16px; outline: 0;
+  background: linear-gradient(150deg, #212225 0%, #141517 46%, #0c0c0d 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px rgb(255 255 255 / 0.08), 0 25px 50px -24px rgb(0 0 0 / 0.85);
+}
+.spx-st .spm-season__main { gap: 4px; }
+.spx-st .spm-season__live { font-size: 13px; }
+.spx-st .spm-season__pool { font-size: 50px; }
+.spx-st .spm-season__sub { font-size: 14px; }
+.spx-st .spm-season__snap { margin-top: 6px; }
+.spx-st .spm-season__when { font-size: 11.5px; line-height: 15px; }
+.spx-st .spm-season__invite { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: auto; padding: 12px 0 0; border-left: 0; border-top: 1px solid rgb(255 255 255 / 0.08); }
+.spx-st .spm-season__k { margin-bottom: 2px; font-size: 12px; }
+.spx-st .spm-season__row b { font-size: 16px; }
+.spx-st .spm-season__row b.is-link { font-size: 13px; }
+.spx-st .spm-season__row .spm-copy { width: 26px; height: 26px; }
+
+/* Live SoPoints, this week: the same card. */
+.spx-card {
+  position: relative; display: flex; flex-direction: column; min-width: 0; padding: 22px 24px 18px; border-radius: 16px; color: #f4f4f2;
+  background: linear-gradient(150deg, #212225 0%, #141517 46%, #0c0c0d 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px rgb(255 255 255 / 0.08), 0 25px 50px -24px rgb(0 0 0 / 0.85);
+}
+.spx-live__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.spx-live__on { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; color: #18b36b; white-space: nowrap; }
+.spx-live__on i { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent); }
+.spx-live__on.is-off { color: var(--tf-muted); }
+.spx-live__n { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 12px; }
+.spx-live__n b { font-size: 50px; font-weight: 800; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.spx-live__n span { font-size: 14px; color: var(--tf-muted); }
+.spx-live__band { margin-top: 8px; font-size: 12px; color: var(--tf-muted); }
+.spx-live__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 12px; border-top: 1px solid rgb(255 255 255 / 0.08); }
+.spx-live__src { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.spx-live__src > span { font-size: 12px; color: var(--tf-muted); }
+.spx-live__src ul { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
+.spx-live__src li { display: flex; flex-direction: column; }
+.spx-live__src small { font-size: 11px; color: rgba(244, 244, 242, 0.42); }
+.spx-live__src b { font-size: 13px; font-weight: 500; }
+.spx-live__adj { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: rgb(255 255 255 / 0.08); color: #f4f4f2; font: 500 12.5px var(--font-text); cursor: pointer; transition: background-color 150ms var(--tf-ease), color 150ms var(--tf-ease); }
+.spx-live__adj:hover { background: rgb(255 255 255 / 0.14); }
+.spx-live__adj.is-on { background: #f4f4f2; color: #0a0a0a; }
+.spx-live__adj:focus-visible { outline: 2px solid var(--tf-brand); outline-offset: 2px; }
+
+/* The plan's sliders under the cards: shut until Adjust, then they slide open. */
+.spx-adj { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 360ms cubic-bezier(0.22, 0.8, 0.24, 1); }
+.spx-adj.is-open { grid-template-rows: 1fr; }
+.spx-adj__clip { min-height: 0; overflow: hidden; }
+.spx-adj__in { display: flex; flex-direction: column; gap: 14px; margin: 0 36px 30px; padding: 18px 22px 14px; border-radius: 16px; background: rgb(255 255 255 / 0.04); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08); opacity: 0; translate: 0 -8px; transition: opacity 160ms var(--tf-ease), translate 360ms cubic-bezier(0.22, 0.8, 0.24, 1); }
+.spx-adj.is-open .spx-adj__in { opacity: 1; translate: 0 0; transition-delay: 60ms, 0ms; }
+.spx-adj__fields { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px 24px; }
+.spx-adj__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.spx-adj__foot p { font-size: 12px; color: var(--tf-muted); }
+.spx-st:has(.spx-adj.is-open) .spx-st__cards { padding-bottom: 16px; }
 /* Original's analytics, in Original's cards: the band carries Original's page classes (pf sdx) so its cards, switches
    and charts get Original's own rules (sodex.css .sdx .pf-card, .pf.sdx .pfx-slide); only the page box is undone. */
 .spx-cards.sdx { display: flex; flex-direction: column; justify-content: flex-start; gap: 16px; margin-top: 44px; padding: 0; }
@@ -213,40 +237,24 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
 .spx-duo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 44px; }
 .spx-duo > .sx-sec { padding-top: 24px; border-top: 1px solid var(--rf-hair); }
 
-/* the estimate */
-.spx-est { display: flex; flex-direction: column; }
-.spx-est__h { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; font: 600 18px/24px var(--font-display); letter-spacing: -0.02em; }
-.spx-est__out { display: flex; align-items: baseline; gap: 10px; margin-top: 14px; }
-.spx-est__out b { font: 500 44px/48px var(--font-num); letter-spacing: -0.03em; }
-.spx-est__out span { font-size: 14px; color: var(--tf-muted); }
-.spx-est__band { margin: 2px 0 18px; font: 13px var(--font-num); color: var(--tf-muted); }
-.spx-est__row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 12px; font-size: 13.5px; color: var(--tf-muted); }
-.spx-est__row output { font: 500 18px var(--font-num); color: var(--tf-fg); }
 
 @media (max-width: 1240px) {
   .spx-desk { grid-template-columns: 300px minmax(0, 1fr); }
   .spx-desk > .spx-earn { grid-column: 1 / -1; }
-  .rf-page .spx-pays { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 1000px) {
   .spx-desk, .spx-duo { grid-template-columns: minmax(0, 1fr); gap: 32px; }
-  .spx-st__front.spx-st__cards, .spx-st__front.spx-st__cards.is-out, .spx-cards__row { grid-template-columns: minmax(0, 1fr); }
-  .spx-st__front.spx-st__cards.is-out { gap: 22px; }
+  .spx-cards__row { grid-template-columns: minmax(0, 1fr); }
   .spx-col1 { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 24px; align-items: start; }
-  .spx-st__body { display: block; }
-  .spx-st__front, .spx-st__steps { transition: none; }
-  .spx-st.is-how .spx-st__front, .spx-st:not(.is-how) .spx-st__steps { display: none; }
-  .spx-st.is-toggled .spx-st__front, .spx-st.is-toggled .spx-st__steps { animation: rf-swap 0.42s var(--tf-spring) both; }
-  .spx-st .rf-steps { grid-template-columns: minmax(0, 1fr); }
-  .spx-st .rf-steps article, .spx-st .rf-steps article + article { padding: 18px 30px; }
 }
 @media (max-width: 720px) {
   .rf-page .spx-st { border-radius: 24px; }
   .spx-st__k { padding: 14px 18px 0; gap: 8px; }
-  .spx-st__k .rf-howbtn { margin-left: auto; padding: 0 11px; }
   .spx-st__snap { order: 3; width: 100%; margin-left: 0; justify-content: space-between; padding: 10px 14px; border-radius: 14px; background: rgb(255 255 255 / 0.06); }
-  .spx-st__front { grid-template-columns: minmax(0, 1fr); min-height: 0; }
-  .spx-st__front.spx-st__cards { padding: 14px 14px 18px; gap: 12px; }
+  .spx-st__cards, .spx-st__cards.is-out { grid-template-columns: minmax(0, 1fr); padding: 14px 14px 18px; gap: 12px; }
+  .spx-adj__in { margin: 0 14px 18px; padding: 16px; }
+  .spx-adj__fields { grid-template-columns: minmax(0, 1fr); }
+  .spx-st .spm-season__pool, .spx-live__n b { font-size: 44px; }
   .spx-st__cards .spx-st__t { padding: 6px 4px 0; }
   .spx-cards.sdx { margin-top: 32px; }
   .spx-st__art { grid-row: 1; margin: -6px 0 -18px; }
@@ -255,18 +263,11 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
   .rf-page .spx-st__t h2 { margin-bottom: 16px; font-size: 28px; line-height: 33px; text-align: center; }
   .spx-st__fine { text-align: center; }
   .spx-st__total b { font-size: 56px; }
-  .spx-st .rf-steps article, .spx-st .rf-steps article + article { padding: 18px; }
-  .spx-pays .is-you ul, .rf-page .spx-pays__g:not(.is-you) ul { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .rf-page .spx-pays .is-you li:first-child { grid-column: 1 / -1; }
-  .rf-page .spx-pays li { grid-column: auto; }
   .spx-col1 { display: flex; align-items: stretch; }
   .spx-ladder { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .spx-st .spx-ladder { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .spx-st .spx-ladder span { font-size: 10px; }
   .spx-markets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .spx-market { height: 48px; }
   .spx-weeks__bar .rf-text { min-height: 44px; }
-  .spx-est__out b { font-size: 38px; }
 }
 /* ------------------------------------------------------------------------------------------ Season ----- */
 .spn-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px 24px; padding: 4px 2px 0; }
@@ -482,3 +483,37 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
 @media (prefers-reduced-motion: reduce) {
   .spx *, .spx *::before, .spx *::after { animation: none !important; transition: none !important; }
 }
+
+/* Two cards a row, the live one under them, on a laptop; one column on a phone (above). */
+@media (max-width: 1100px) and (min-width: 721px) {
+  .spx-st__cards, .spx-st__cards.is-out { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .spx-st__cards > :last-child { grid-column: 1 / -1; }
+  .spx-adj__fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* The tier ladder, slim (owner 2026-11-27: "make the tier thing slimmer"). */
+.spn-ladder.is-slim { padding: 16px 28px 12px; border-radius: 24px; }
+.spn-ladder.is-slim .spn-ladder__top { align-items: center; margin-bottom: 36px; }
+.spn-ladder.is-slim .spn-ladder__me > .spn-ladder__k { font-size: 14px; }
+.spn-ladder.is-slim .spn-ladder__me > span { font-size: 13px; }
+.spn-ladder.is-slim .spn-ladder__goal { flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; gap: 2px 10px; font-size: 13px; }
+.spn-ladder.is-slim .spn-ladder__goal b { font-size: 15px; }
+.spn-ladder.is-slim .spn-track { height: 46px; }
+.spn-ladder.is-slim .spn-track__rail { top: 5px; height: 4px; }
+.spn-ladder.is-slim .spn-node i { width: 14px; height: 14px; border-radius: 4px; box-shadow: 0 0 0 3px var(--tf-bg), inset 0 0 0 1px rgb(255 255 255 / 0.2); }
+.spn-ladder.is-slim .spn-node:first-of-type { transform: translateX(-7px); }
+.spn-ladder.is-slim .spn-node:last-of-type { transform: translateX(calc(-100% + 7px)); }
+.spn-ladder.is-slim .spn-node b { margin-top: 7px; font-size: 12px; line-height: 15px; }
+.spn-ladder.is-slim .spn-node small { font-size: 11px; line-height: 14px; }
+.spn-ladder.is-slim .spn-pin { top: -28px; }
+.spn-ladder.is-slim .spn-pin::after { height: 11px; }
+@media (max-width: 720px) {
+  .spn-ladder.is-slim { padding: 14px 16px 10px; }
+  .spn-ladder.is-slim .spn-ladder__top { align-items: flex-start; margin-bottom: 36px; }
+  .spn-ladder.is-slim .spn-ladder__goal { justify-content: flex-start; }
+  .spn-ladder.is-slim .spn-track { height: 74px; }
+  .spn-ladder.is-slim .spn-node:nth-of-type(even) b { margin-top: 32px; }
+}
+/* The wallet's points on the rail, in its tier's colour there (Season.tsx pinColour). */
+.spn-pin b { background: var(--pin, var(--tf-fg)); color: var(--pin-ink, var(--tf-bg)); box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--pin, transparent) 60%, transparent); }
+.spn-pin::after { background: var(--pin, var(--tf-fg)); }

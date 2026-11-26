@@ -1,6 +1,7 @@
 /**
  * SoPoints, version "Stage" (localhost only, owner 2026-11-26). The Referrals page's own layout carried over: a dark
- * stage, "How it works" swapping three steps into its place, and the multipliers in the bar under it.
+ * stage with three cards in a row (owner 2026-11-27: no "How it works", no multipliers bar under it, "like a card"):
+ * SoDEX's tier card, SoDEX's season card and this week's live SoPoints, whose plan sliders open under the cards.
  *
  * Owner 2026-11-26: "Stage as a base, i need the original sopoints cards designs. I also want the hero element from
  * season implemented, points over season. Generally all analytics from original should be displayed somehow." So the
@@ -9,11 +10,9 @@
  * desk (this week so far, the weeks as bars or a calendar, what earns more); then Original's analytics in Original's
  * cards: points over the season, where the points come from, and the cost per point against the venue's.
  */
-import { useId, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Eip1193Provider } from '../../../../wallet';
 import { useTilt } from '../../../../tilt';
-import { WE_GET, YOU_GET } from '../../../../onboarding/referralRules';
-import { TIERS } from '../../../../points';
 import { Icon, IconTile, Segmented, Skeleton, Slider } from '../../../bots/kit/kit';
 import { Card } from '../../../portfolio/parts';
 import { HeatGrid } from '../../../referrals/CreditCalendar';
@@ -21,9 +20,10 @@ import { pointsGrid } from '../../../referrals/calendar';
 import { SODEX_POOL_SHOWN, SeasonCard, SoPointsCard, TIER_STYLE } from '../../SoPointsMine';
 import { DifficultyChart, PointsMix } from '../../pointsCharts';
 import { Climb, Ladder } from './Season';
+import { Field, START, planOf } from './Planner';
 import {
-  BarsLegend, BoostedMarkets, Clock, DASH, EstPill, SignInButton, SquadLadder, SquadTracks, TierName, WeekBars, WeekPill, WeeksTable,
-  STEPS, bandOf, boostedOf, coefText, levers, logScale, money, plusPct, pts, ptsEst, scoreOf, tierProgress, useSignIn, usePointsView, weekday,
+  BarsLegend, BoostedMarkets, DASH, EstPill, SignInButton, SignInPanel, SquadLadder, SquadTracks, WeekBars, WeekPill, WeeksTable,
+  SOPOINTS_MODEL, STEPS, bandOf, boostedOf, coefText, levers, logScale, money, planOwn, plusPct, pts, ptsEst, scoreOf, useSignIn, usePointsView,
   type BarMetric, type Plan, type PointsView,
 } from './shared';
 
@@ -31,34 +31,34 @@ export function Stage({ address, provider, sample }: { address: string | null; p
   const v = usePointsView(address, provider, sample);
   const { c, week } = v;
   const id = useId();
-  const [how, setHow] = useState(false);
-  const [toggled, setToggled] = useState(false);
   // The tier's own colour glows softly behind its card; signed out, a neutral light (owner 2026-11-26: no colour the stage does not show).
   const glow = v.mine ? TIER_STYLE[v.tier]!.border : '#d4d4d2';
   const share = boostedShare(v);
   // The cards lean a little toward the mouse (owner 2026-11-26), as the VIP pass does.
   const tierTilt = useTilt(6, 5, 0.5);
+  const seasonTilt = useTilt(6, 5, 0.5);
+  const live = useLivePlan(v);
+  const [adjust, setAdjust] = useState(false);
   return (
     <div className="tf bots-page rf-page sx spx">
       <div className="bots-col">
-        <section className={`rf-dark spx-st${how ? ' is-how' : ''}${toggled ? ' is-toggled' : ''}`} style={{ '--spx-glow': glow } as CSSProperties}>
+        <section className="rf-dark spx-st" style={{ '--spx-glow': glow } as CSSProperties}>
           <span className="spx-st__light" aria-hidden="true" />
           <div className="spx-st__k">
             <h1>SoPoints</h1>
             <WeekPill week={week} />
-            <button type="button" className="rf-howbtn" aria-expanded={how} aria-controls={id} onClick={() => { setHow(!how); setToggled(true); }}>
-              {how ? 'Close' : 'How it works'}<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={how ? 'm4.5 4.5 7 7m0-7-7 7' : 'm4 6 4 4 4-4'} /></svg>
-            </button>
           </div>
-          <div className="spx-st__body">
-            {/* SoDEX's own cards, as Original draws them; the season card carries the pool, the snapshot clock and the invite code. */}
-            <div className={`spx-st__front spx-st__cards${v.mine ? '' : ' is-out'}`} aria-hidden={how} {...(how ? { inert: '' } : {})}>
-              {v.mine ? <div className="spx-tilt tf-tilt" ref={tierTilt.ref} onPointerMove={tierTilt.onMove} onPointerLeave={tierTilt.onLeave}><SoPointsCard s={v.s} /></div> : <SignInFront v={v} />}
-              <SeasonCard week={week} address={address} settled={c.publicSettled} />
-            </div>
-            <div className="spx-st__steps" id={id} aria-hidden={!how} {...(how ? {} : { inert: '' })}><How v={v} /></div>
+          {/* SoDEX's own two cards, as Original draws them (the season card carries the pool, the snapshot clock and the
+              invite code), and this week's live SoPoints: three cards of one size. */}
+          <div className={`spx-st__cards${v.mine ? '' : ' is-out'}`}>
+            {v.mine ? <div className="spx-tilt tf-tilt" ref={tierTilt.ref} onPointerMove={tierTilt.onMove} onPointerLeave={tierTilt.onLeave}><SoPointsCard s={v.s} /></div> : <SignInFront v={v} />}
+            <div className="spx-tilt tf-tilt" ref={seasonTilt.ref} onPointerMove={seasonTilt.onMove} onPointerLeave={seasonTilt.onLeave}><SeasonCard week={week} address={address} settled={c.publicSettled} /></div>
+            <LiveCard v={v} live={live} adjust={adjust} onAdjust={() => setAdjust(!adjust)} controls={id} />
           </div>
-          <Multipliers v={v} />
+          {/* The plan's settings, shut until asked for (owner 2026-11-27: "Hide any sliders or settings per default"). */}
+          <div id={id} className={`spx-adj${adjust ? ' is-open' : ''}`} {...(adjust ? {} : { inert: '' })}>
+            <div className="spx-adj__clip"><PlanFields v={v} live={live} /></div>
+          </div>
         </section>
 
         {/* Season's hero: the tier ladder with the wallet's place, its pace and the season's weeks left. */}
@@ -66,7 +66,8 @@ export function Stage({ address, provider, sample }: { address: string | null; p
 
         <div className="spx-desk">
           {v.mine ? <MineCol v={v} /> : <PublicCol v={v} />}
-          <section className="spx-panel" aria-label={v.mine ? 'Your weeks' : 'What a week earns'}>{v.mine ? <WeeksPanel v={v} /> : <WeekEstimate />}</section>
+          {/* Signed out, the weeks wait for a sign-in; what a week earns is the live card's (its sliders shut, owner 2026-11-27). */}
+          <section className="spx-panel" aria-label="Your weeks">{v.mine ? <WeeksPanel v={v} /> : <SignInPanel c={c} line={c.address ? 'Your weeks, as SoDEX scored them' : undefined} />}</section>
           <EarnMore v={v} />
         </div>
 
@@ -131,59 +132,128 @@ function SignInFront({ v }: { v: PointsView }) {
   );
 }
 
-/** The three steps, each with its own real figures. */
-function How({ v }: { v: PointsView }) {
-  const { c, week } = v;
-  const b = boostedOf(c);
-  const prog = tierProgress(v.mine ? v.total : null);
+/* ------------------------------------------------------------------------ this week, live ----- */
+
+interface LivePlan {
+  plan: Plan;
+  /** The week the plan was filled from (SoDEX's name), or null once a slider moved it. */
+  from: string | null;
+  /** The wallet's last scored Layer 1 week, to fill from again. */
+  last: { key: string; name: string } | null;
+  set: (p: Partial<Plan>) => void;
+  reset: () => void;
+}
+
+/**
+ * This week's plan: the wallet's last scored Layer 1 week as SoDEX scored it (its volumes, open interest, the share on
+ * boosted markets and the squad's boost now; Planner.tsx planOf), or a $100K futures week signed out. A slider moves it.
+ */
+function useLivePlan(v: PointsView): LivePlan {
+  const lastL1 = useMemo(() => [...v.all].reverse().find((w) => w.season === 'L1' && w.split.week.pointsStatus === 'CONFIRMED') ?? null, [v.all]);
+  const [plan, setPlan] = useState<Plan>(START);
+  const [from, setFrom] = useState<string | null>(null);
+  const filled = useRef(false);
+  const fill = () => {
+    if (!lastL1) return;
+    setPlan(planOf(lastL1.split.week, v.squad?.total ?? null));
+    setFrom(lastL1.split.week.weekName);
+  };
+  useEffect(() => {
+    if (!v.mine) { filled.current = false; setFrom(null); setPlan(START); return; }
+    if (filled.current || !lastL1) return;
+    filled.current = true;
+    fill();
+  }, [v.mine, lastL1, v.squad]); // eslint-disable-line react-hooks/exhaustive-deps
+  return {
+    plan,
+    from,
+    last: lastL1 ? { key: lastL1.key, name: lastL1.split.week.weekName } : null,
+    set: (p) => { setPlan((x) => ({ ...x, ...p })); setFrom(null); },
+    reset: () => { if (lastL1) fill(); else { setPlan(START); setFrom(null); } },
+  };
+}
+
+/**
+ * Live SoPoints (owner 2026-11-27: "add the Live SoPoints thing for this week, per default values of the last week are
+ * used"): what this week earns by ValueDesk's fitted model, from the plan above, squad boost included, referral points
+ * on top. Labelled an estimate; the inputs it uses are listed, and Adjust opens their sliders under the cards.
+ */
+function LiveCard({ v, live, adjust, onAdjust, controls }: { v: PointsView; live: LivePlan; adjust: boolean; onAdjust: () => void; controls: string }) {
+  const coef = boostedOf(v.c).coef;
+  const { plan } = live;
+  const own = planOwn(plan, coef);
+  const mult = 1 + plan.squadPct / 100;
+  const tilt = useTilt(6, 5, 0.5);
+  const on = v.week?.weekStatus === 'LIVE';
+  const source = live.from ? `From your ${live.from}` : plan === START ? `From a ${money(plan.futures)} futures week` : 'From your plan';
+  const inputs = [
+    { k: 'Futures', v: money(plan.futures) },
+    ...(plan.spot > 0 ? [{ k: 'Spot', v: money(plan.spot) }] : []),
+    { k: 'Position', v: plan.oi ? money(plan.oi) : '$0' },
+    ...(coef > 1 && plan.boostedShare > 0 ? [{ k: 'Boosted', v: `${Math.round(plan.boostedShare * 100)}%` }] : []),
+    { k: 'Squad', v: plusPct(plan.squadPct) },
+  ];
   return (
-    <section className="rf-steps spx-how" aria-label="How SoPoints work">
-      <article>
-        <h2><i>1</i>Trade and hold</h2>
-        <p>Volume, open positions and holdings earn. Some markets count more.</p>
-        <div className="rf-steps__art">
-          <ul className="spx-how__mk">
-            {b.rows.slice(0, 3).map((m) => <li key={m.symbol}><span>{m.symbol.replace(/-USD$/, '')}</span><b>{coefText(Number(m.coefficient))}</b></li>)}
-            {b.rows.length > 3 && <li className="is-more"><span>{b.rows.length - 3} more boosted</span></li>}
-            {!b.rows.length && <li className="is-more"><span>{c.weights ? 'No market boosted this round' : DASH}</span></li>}
-          </ul>
+    <div className="spx-tilt tf-tilt" ref={tilt.ref} onPointerMove={tilt.onMove} onPointerLeave={tilt.onLeave}>
+      <section className="spx-card spx-live" aria-label="Live SoPoints this week">
+        <div className="spx-live__top">
+          <span className={`spx-live__on${on ? '' : ' is-off'}`}><i />Live SoPoints{v.week ? ` · ${v.week.weekName}` : ''}</span>
+          <EstPill />
         </div>
-      </article>
-      <article>
-        <h2><i>2</i>Snapshot</h2>
-        <p>Every {week ? weekday(week.nextWeekStartTime) : 'Tuesday'}: the week’s points are split. Squads multiply yours.</p>
-        <div className="rf-steps__art">
-          <div className="spx-how__snap"><Clock to={week ? week.nextWeekStartTime * 1000 : null} /><span>until {pts(SODEX_POOL_SHOWN)} are split</span></div>
-          <SquadLadder cfg={c.boost} at={v.squad ? Math.max(v.squad.joined.volume, v.squad.built.volume) : null} />
+        <div className="spx-live__n"><b className="sx-num">≈ {ptsEst(own.mid * mult)}</b><span>this week</span></div>
+        <small className="spx-live__band sx-num">Quiet week {ptsEst(own.low * mult)} · busy week {ptsEst(own.high * mult)}</small>
+        <div className="spx-live__foot">
+          <div className="spx-live__src">
+            <span>{source}</span>
+            <ul>{inputs.map((x) => <li key={x.k}><small>{x.k}</small><b className="sx-num">{x.v}</b></li>)}</ul>
+          </div>
+          <button type="button" className={`spx-live__adj${adjust ? ' is-on' : ''}`} aria-expanded={adjust} aria-controls={controls} onClick={onAdjust}>
+            <Icon name="gear" size={14} />{adjust ? 'Done' : 'Adjust'}
+          </button>
         </div>
-      </article>
-      <article>
-        <h2><i>3</i>Paid, tier up</h2>
-        <p>Every {week ? weekday(week.distributionTime) : 'Friday'} points land and lift your tier.</p>
-        <div className="rf-steps__art">
-          <ol className="spx-how__tiers">
-            {TIERS.map((t) => <li key={t.name} className={prog && v.total !== null && v.total >= t.at ? 'is-on' : undefined}><TierName tier={t.name} /><span className="sx-num">{pts(t.at)}</span></li>)}
-          </ol>
-        </div>
-      </article>
-    </section>
+      </section>
+    </div>
   );
 }
 
-/** The bar under the stage: what multiplies points. The week's pool and times are on the season card above it. */
-function Multipliers({ v }: { v: PointsView }) {
+const FUT = logScale(3, 7, true);
+const SPOT = logScale(2, 6, true);
+const HELD = logScale(2, 6, true);
+
+/** The plan's sliders (Planner's), in a row under the cards; and the way back to the week it was filled from. */
+function PlanFields({ v, live }: { v: PointsView; live: LivePlan }) {
   const { c } = v;
   const b = boostedOf(c);
+  const { plan, set } = live;
+  const maxSquad = c.boost?.maxTotalBonusPct ?? 50;
   return (
-    <div className="rf-pays spx-pays is-one">
-      <div className="rf-pays__g">
-        <h3>Multipliers</h3>
-        <ul>
-          <li><b>{c.boost ? plusPct(c.boost.maxTotalBonusPct) : DASH}</b><span>Squad boost, at most</span></li>
-          <li><b>{b.rows.length ? coefText(b.coef) : DASH}</b><span>{b.rows.length} boosted markets</span></li>
-          <li><b>25%</b><a href={WE_GET[0]!.source.url} target="_blank" rel="noopener noreferrer" title={WE_GET[0]!.line}><img src="/logos/brand/sodex.svg" width="15" height="15" alt="SoDEX" />Of invitees’ points</a></li>
-          <li><b>+5%</b><a href={YOU_GET[0]!.source.url} target="_blank" rel="noopener noreferrer" title={YOU_GET[0]!.line}><img src="/logos/brand/sodex.svg" width="15" height="15" alt="SoDEX" />For the invitee</a></li>
-        </ul>
+    <div className="spx-adj__in">
+      <div className="spx-adj__fields">
+        <Field label="Futures volume" value={plan.futures ? money(plan.futures) : '$0'}>
+          <Slider value={FUT.t(plan.futures)} min={0} max={STEPS} onChange={(t) => set({ futures: FUT.of(t) })} label={`Futures volume this week: ${money(plan.futures)}`} minLabel="$0" maxLabel="$10M" />
+        </Field>
+        <Field label="Spot volume" value={plan.spot ? money(plan.spot) : '$0'}>
+          <Slider value={SPOT.t(plan.spot)} min={0} max={STEPS} onChange={(t) => set({ spot: SPOT.of(t) })} label={`Spot volume this week: ${money(plan.spot)}`} minLabel="$0" maxLabel="$1M" />
+        </Field>
+        <Field label="Position held, on average" value={plan.oi ? money(plan.oi) : '$0'}>
+          <Slider value={HELD.t(plan.oi)} min={0} max={STEPS} onChange={(t) => set({ oi: HELD.of(t) })} label={`Average open position this week: ${money(plan.oi)}`} minLabel="$0" maxLabel="$1M" />
+        </Field>
+        {b.coef > 1 ? (
+          <Field label={`On boosted markets, ${coefText(b.coef)}`} value={`${Math.round(plan.boostedShare * 100)}%`}>
+            <Slider value={Math.round(plan.boostedShare * 100)} min={0} max={100} step={5} onChange={(x) => set({ boostedShare: x / 100 })} label="Share of the futures volume on boosted markets" minLabel="0%" maxLabel="100%" />
+          </Field>
+        ) : <Field label="Boosted markets" value={c.weights ? 'None now' : DASH}><p className="spp-none">No market counts more this round.</p></Field>}
+        <Field label={v.mine ? 'Squad boost, yours now' : 'Squad boost'} value={plusPct(plan.squadPct)}>
+          <Slider value={plan.squadPct} min={0} max={maxSquad} step={5} onChange={(x) => set({ squadPct: x })} label="Squad boost" minLabel="0%" maxLabel={plusPct(maxSquad)} />
+        </Field>
+      </div>
+      <div className="spx-adj__foot">
+        <p>ValueDesk’s fit of {SOPOINTS_MODEL.fittedOn} ({SOPOINTS_MODEL.fittedAt}); SoDEX publishes no formula. Referral points come on top.</p>
+        {(live.last || !v.mine) && (
+          <button type="button" className="rf-howbtn" onClick={live.reset} disabled={live.from !== null && live.from === live.last?.name}>
+            {live.last ? `Back to your ${live.last.name}` : 'Back to a $100K week'}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -273,31 +343,6 @@ function WeeksPanel({ v }: { v: PointsView }) {
         ? <HeatGrid caption="SoPoints by week" step="week" grid={(cols, offset) => pointsGrid(v.all, cols, offset)} />
         : <><BarsLegend metric={metric} /><WeekBars weeks={v.scored} metric={metric} /></>}
     </>
-  );
-}
-
-/* A week's futures volume and the position held, on a log scale: $1K-$10M and $0, $100-$1M. */
-const VOL = logScale(3, 7);
-const POS = logScale(2, 6, true);
-
-/** Signed out: what a week earns, by ValueDesk's fitted model, as the landing page's calculator does. */
-function WeekEstimate() {
-  const [tv, setTv] = useState(() => VOL.t(100_000));
-  const [tp, setTp] = useState(() => POS.t(1_000));
-  const futures = VOL.of(tv);
-  const oi = POS.of(tp);
-  const e = bandOf(scoreOf({ futures, oi }));
-  return (
-    <div className="spx-est">
-      <div className="spx-est__h"><span>What a week earns</span><EstPill /></div>
-      <div className="spx-est__out"><b>≈ {ptsEst(e.mid)}</b><span>own SoPoints</span></div>
-      <p className="spx-est__band">Quiet week {ptsEst(e.low)} · busy week {ptsEst(e.high)}</p>
-      <div className="spx-est__row"><span>Futures volume</span><output>{money(futures)}</output></div>
-      <Slider value={tv} min={0} max={STEPS} onChange={setTv} label={`Futures volume in a week: ${money(futures)}`} minLabel="$1K" maxLabel="$10M" />
-      <div className="spx-est__row"><span>Position held all week</span><output>{oi ? money(oi) : '$0'}</output></div>
-      <Slider value={tp} min={0} max={STEPS} onChange={setTp} label={`Average open position: ${money(oi)}`} minLabel="$0" maxLabel="$1M" />
-      <p className="spx-note">Before referrals and your squad’s boost. SoDEX publishes no formula: this is our fit of settled weeks.</p>
-    </div>
   );
 }
 

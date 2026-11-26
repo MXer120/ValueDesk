@@ -4,7 +4,7 @@
  * weeks as a grid (done, live, to come) that opens any week; under it the points over the season and this week's
  * multipliers. Signed out, the grid carries the venue's traded volume of each week (SoDEX's daily series).
  */
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState, type CSSProperties } from 'react';
 import type { Eip1193Provider } from '../../../../wallet';
 import { RULES, TIERS, fetchVenueDaily, type DailyPoint } from '../../../../points';
 import { Segmented, Skeleton, StatusPill } from '../../../bots/kit/kit';
@@ -65,13 +65,24 @@ export function Season({ address, provider, sample }: { address: string | null; 
 
 /** `figures` false: the page shows the balance, tier and rank already (Stage's tier card), so the ladder leads with the
  * season's weeks left instead of repeating them. */
+/** The rail's colour at each tier (points.css .spn-track__rail i, stop by stop, in TIERS' order). */
+const RAIL = ['113 113 122', '154 103 84', '148 163 184', '221 167 0', '129 140 248', '229 229 229'] as const;
+const RAIL_INK = ['#f4f4f2', '#f4f4f2', '#0a0a0a', '#0a0a0a', '#0a0a0a', '#0a0a0a'] as const;
+
+/** The colour the lit rail has at the wallet's tier, and ink for a label on it. */
+export function pinColour(total: number): { '--pin': string; '--pin-ink': string } {
+  let i = 0;
+  TIERS.forEach((t, k) => { if (total >= t.at) i = k; });
+  return { '--pin': `rgb(${RAIL[Math.min(i, RAIL.length - 1)]})`, '--pin-ink': RAIL_INK[Math.min(i, RAIL_INK.length - 1)]! };
+}
+
 export function Ladder({ v, figures = true }: { v: PointsView; figures?: boolean }) {
   const prog = tierProgress(v.mine ? v.total : null);
   const weeksLeft = v.week ? RULES.seasonWeeks - v.week.weekNo + 1 : null;
   const need = prog?.nxt && v.pace ? Math.ceil(prog.left / v.pace) : null;
   const at = v.mine && v.total !== null ? xOf(v.total) : null;
   return (
-    <section className={`spn-ladder${v.mine ? ' is-mine' : ''}`} aria-label="Tiers">
+    <section className={`spn-ladder${v.mine ? ' is-mine' : ''}${figures ? '' : ' is-slim'}`} aria-label="Tiers">
       <div className="spn-ladder__top">
         {!figures ? (
           <div className="spn-ladder__me">
@@ -106,7 +117,9 @@ export function Ladder({ v, figures = true }: { v: PointsView; figures?: boolean
             <small className="sx-num">{pts(t.at)}</small>
           </span>
         ))}
-        {at !== null && <span className="spn-pin" style={{ left: `${at * 100}%` }}><b className="sx-num">{pts(v.total!)}</b></span>}
+        {/* The wallet's points in its tier's colour on the lit rail (owner 2026-11-27: "the actual points instead of
+            white the progress color"). */}
+        {at !== null && <span className="spn-pin" style={{ left: `${at * 100}%`, ...pinColour(v.total!) } as CSSProperties}><b className="sx-num">{pts(v.total!)}</b></span>}
       </div>
     </section>
   );

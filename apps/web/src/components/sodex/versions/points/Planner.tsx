@@ -19,7 +19,7 @@ const SPOT = logScale(2, 6, true);
 const POS = logScale(2, 6, true);
 
 /** A week of SoDEX's as a plan: its own volumes, its open interest, the share it traded on boosted markets, its boost. */
-function planOf(w: S2Week, squadNow: number | null): Plan {
+export function planOf(w: S2Week, squadNow: number | null): Plan {
   const boosted = (w.futuresVolumeWeightDetails ?? []).reduce((t, d) => t + (Number(d.rawVolumeU) || 0), 0);
   return {
     futures: w.futuresVolume || 0,
@@ -30,7 +30,7 @@ function planOf(w: S2Week, squadNow: number | null): Plan {
   };
 }
 
-const START: Plan = { futures: 100_000, spot: 0, oi: 1_000, boostedShare: 0, squadPct: 0 };
+export const START: Plan = { futures: 100_000, spot: 0, oi: 1_000, boostedShare: 0, squadPct: 0 };
 
 export function Planner({ address, provider, sample }: { address: string | null; provider: Eip1193Provider | null; sample: boolean }) {
   const v = usePointsView(address, provider, sample);
@@ -136,7 +136,7 @@ function FromWeek({ v, from, onPick }: { v: PointsView; from: string | null; onP
   return <button type="button" className="rf-howbtn spp-from" onClick={a.go} disabled={a.busy || a.off} onPointerEnter={a.warm}>{a.connect ? 'Connect to use your weeks' : a.busy ? a.label : 'Sign in to use your weeks'}</button>;
 }
 
-function Field({ label, value, children }: { label: string; value: string; children: React.ReactNode }) {
+export function Field({ label, value, children }: { label: string; value: string; children: React.ReactNode }) {
   return (
     <div className="spp-field">
       <div className="spp-field__h"><span>{label}</span><output>{value}</output></div>
