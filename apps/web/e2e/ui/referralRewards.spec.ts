@@ -196,9 +196,12 @@ h.test('use a code: only for a wallet without a referrer; ValueDesk first; a wro
   const field = dlg.getByRole('textbox', { name: 'Referral code' });
   assert.equal(await field.inputValue(), 'VALUEDESK');
   await dlg.getByText("ValueDesk's code", { exact: true }).waitFor();
-  // ValueDesk's own code refers nobody on ValueDesk: no fee perk is promised, no signature asked.
+  // ValueDesk's own code refers nobody on ValueDesk: no fee perk is promised, no signature asked. One Apply, to SoDEX; no Close
+  // button and no fee text (owner 2026-11-26).
   assert.equal(await dlg.getByText('$0', { exact: true }).count(), 0);
-  assert.equal(await dlg.getByRole('button', { name: 'Sign', exact: true }).count(), 0);
+  assert.equal(await dlg.getByRole('button', { name: 'Apply', exact: true }).count(), 0);
+  assert.equal(await dlg.getByText('Close', { exact: true }).count(), 0, 'no Close button (the corner x stays)');
+  assert.equal(await dlg.getByText(/fee rebate/).count(), 0);
   assert.equal(await dlg.getByRole('link', { name: 'Apply', exact: true }).getAttribute('href'), 'https://sodex.com/join/VALUEDESK');
   await shot(page, 'code-valuedesk');
   for (const [code, says] of [['NOBODY12', 'SoDEX has no such code'], ['AB', '4 to 20 letters and numbers'], ['MYCODE99', 'Your own code']] as const) {
@@ -208,18 +211,21 @@ h.test('use a code: only for a wallet without a referrer; ValueDesk first; a wro
   }
   await field.fill('friend01');
   await dlg.getByText('Valid', { exact: true }).waitFor();
-  await dlg.getByText('$0', { exact: true }).waitFor();
+  // The perks show once the code is on, as what the wallet got.
+  assert.equal(await dlg.getByText('$0', { exact: true }).count(), 0);
   const mark = wallet.mark();
-  await dlg.getByRole('button', { name: 'Sign', exact: true }).click();
-  await dlg.getByText('Joined', { exact: true }).waitFor({ timeout: 20_000 });
+  await dlg.getByRole('button', { name: 'Apply', exact: true }).click();
+  await dlg.getByRole('link', { name: 'Apply on SoDEX', exact: true }).waitFor({ timeout: 20_000 });
   assert.deepEqual(wallet.since(mark).filter((r) => r.outcome === 'signed').map((r) => r.primaryType), ['InviteJoin']);
   assert.equal(w.store.joinOf(w.wallet)?.code, 'FRIEND01');
   assert.equal(await field.isDisabled(), true, 'the code is settled');
-  assert.equal(await dlg.getByRole('link', { name: 'Apply', exact: true }).getAttribute('href'), 'https://sodex.com/join/FRIEND01');
+  assert.equal(await dlg.getByRole('link', { name: 'Apply on SoDEX', exact: true }).getAttribute('href'), 'https://sodex.com/join/FRIEND01');
   // The wallet confirmed on sodex.com and came back.
   w.referrer = INVITER;
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  await page.getByRole('dialog', { name: 'Code applied' }).waitFor({ timeout: 15_000 });
+  const got = page.getByRole('dialog', { name: 'Code applied' });
+  await got.waitFor({ timeout: 15_000 });
+  for (const t of ['+5%', '$0', 'up to +25%']) await got.getByText(t, { exact: true }).waitFor();
   await shot(page, 'code-applied');
   await page.getByRole('dialog', { name: 'Code applied' }).getByRole('button', { name: 'Done', exact: true }).click();
   await button.waitFor({ state: 'hidden', timeout: 10_000 });
@@ -419,7 +425,9 @@ h.test("SoDEX's quota: a code that took its 3 joins this week says so, and no si
   await field.fill('FRIEND01');
   await dlg.getByText('Full this week', { exact: true }).waitFor({ timeout: 15_000 });
   await dlg.getByText(/took its 3 joins this week, SoDEX's limit\. It takes new ones from Monday/).waitFor();
-  assert.equal(await dlg.getByRole('button', { name: 'Sign', exact: true }).count(), 0);
+  // No signature asked: the code still counts on SoDEX.
+  assert.equal(await dlg.getByRole('button', { name: 'Apply', exact: true }).count(), 0);
+  assert.equal(await dlg.getByRole('link', { name: 'Apply', exact: true }).getAttribute('href'), 'https://sodex.com/join/FRIEND01');
   await shot(page, 'code-full');
   assert.equal(w.store.joinOf(w.wallet), null);
 }, { setup, timeout: 120_000 });
