@@ -129,10 +129,10 @@ export function TraderPeek({ target, ctx, onClose, onOpenScan }: { target: PeekT
             <small>{name}</small>
           </span>
           <span className="cpk__acts">
-            <Button variant="quiet" icon={docked ? 'window' : 'dock'} className="cpk__dock" onClick={toggle} title={docked ? 'Open as a window' : 'Dock to the right side'}>
-              {docked ? 'Window' : 'Dock'}
-            </Button>
+            {/* Scan first, then the dock as an icon alone (owner 2026-11-27: "dock & scan button need to swap place and
+                remove window & dock text"); its name is its tooltip and label. */}
             <Button variant="secondary" className="cpk__scan" onClick={() => onOpenScan(shown)} title="Open this wallet on the Scan page">Scan<Icon name="arrowRight" size={14} /></Button>
+            <IconButton icon={docked ? 'window' : 'dock'} label={docked ? 'Open as a window' : 'Dock to the right side'} className="cpk__dock" onClick={toggle} />
             <IconButton icon="x" label="Close" onClick={onClose} />
           </span>
         </header>
