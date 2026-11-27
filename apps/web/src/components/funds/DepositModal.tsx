@@ -1,13 +1,16 @@
 /**
  * Deposit - the owner's reference sheets, in this app's tokens.
  *
- *   choose    Transfer from ValueChain - "Transfer from your connected wallet."
+ *   choose    From your wallet - "From your connected wallet on ValueChain or Base."
  *             Deposit [Recommended] - "Transfer crypto from any wallet."
- *   wallet    "Transfer": the Transfer sheet's own panel (TransferModal.tsx),
- *             starting at EVM -> Spot - Spot, Perps and EVM all selectable.
- *             Out of the wallet it is sodex.com's own deposit: a token is two
- *             signatures and no gas, SOSO one transaction
- *             (trading/funds.ts:depositFromWallet).
+ *   wallet    "From your wallet": a Network picker, then
+ *             - ValueChain: the Transfer sheet's own panel (TransferModal.tsx),
+ *               starting at EVM -> Spot - Spot, Perps and EVM all selectable.
+ *               Out of the wallet it is sodex.com's own deposit: a token is two
+ *               signatures and no gas, SOSO one transaction
+ *               (trading/funds.ts:depositFromWallet).
+ *             - Base: SoDEX's bridge, no deposit address - sodex.com's "Deposit
+ *               from connected wallet" (BridgeDeposit.tsx, trading/bridgeDeposit.ts).
  *   transfer  "Deposit": token + chain, then the wallet's own verified SoDEX
  *             deposit address and QR (routes/mirror.ts) - drawn from the start
  *             but blurred under a red warning until it has been read; min and
@@ -23,7 +26,7 @@
  * ready -> Enable trading (one signature) -> move the deposit to Perps.
  */
 import { fmtDecimalString } from '../../numStyle';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Modal } from '../Modal';
 import { AutoHeight, Collapse, FadeView } from '../motion';
 import { api, type MirrorAsset } from '../../api';
@@ -32,14 +35,15 @@ import { cachedAssetConfigs, chainLabel, type CoinConfig } from '../../trading/f
 import { formatUnits, parseUnits } from '../../trading/onboard';
 import { readGateway } from '../../trading/gateway';
 import { maintenanceFor, maintenanceNote, type Maintenance } from '../../trading/relay';
-import { refreshWallet, subscribeWallet, walletRead } from '../../trading/walletBalances';
+import { refreshWallet, subscribeWallet, walletRead, type WalletRead } from '../../trading/walletBalances';
 import { toQrDataUrl } from '../../walletconnect';
 import type { Eip1193Provider } from '../../wallet';
 import { NO_ACCOUNT_TRANSFER } from '../account/useAccountExists';
 import { TransferPanel } from './TransferModal';
-import { useDepositWatch, type DepositStage, type DepositWatch } from './depositWatch';
-import { ApproveLabel, Arrow, Avatar, Chevron, CopyIcon, FxSelect, Info, Label, ONE_CONFIRM, QrIcon, Spinner, WalletMark, short, useStepLabel } from './ui';
-import { announceMoney } from './moneyNotice';
+import { BridgePanel } from './BridgeDeposit';
+import { DepositProgress, useDepositNotice } from './DepositProgress';
+import { useDepositWatch } from './depositWatch';
+import { ApproveLabel, Arrow, Avatar, Chevron, CopyIcon, FxSelect, Info, Label, QrIcon, Spinner, WalletMark, short, useStepLabel } from './ui';
 import './funds.css';
 import { NoWallet } from '../EmptyState';
 
@@ -68,6 +72,31 @@ const cutTo = (v: string | null | undefined, dp: number): string => {
   const f = (m[2] ?? '').slice(0, dp).padEnd(dp, '0');
   return dp > 0 ? `${m[1]}.${f}` : m[1]!;
 };
+
+/**
+ * The networks "From your wallet" takes: ValueChain (the Transfer panel, EVM ->
+ * Spot) and Base (SoDEX's bridge, BridgeDeposit.tsx) - sodex.com's "Deposit
+ * from connected wallet", which bridges from Base only.
+ */
+const WALLET_NETWORKS = [
+  { key: 'VALUECHAIN', label: 'ValueChain' },
+  { key: 'BASE_ETH', label: 'Base' },
+] as const;
+type WalletNetwork = (typeof WALLET_NETWORKS)[number]['key'];
+
+/** The wallet read's USDC on these chains, summed exactly. */
+function sumUsdc(w: WalletRead | null, chains: readonly string[]): string {
+  let total = 0n;
+  for (const r of w?.rows ?? []) {
+    if (r.symbol !== 'USDC' || !chains.includes(r.chain)) continue;
+    try {
+      total += parseUnits(cutTo(r.amount, 6), 6);
+    } catch {
+      /* not a number: left out */
+    }
+  }
+  return formatUnits(total, 6);
+}
 
 /** Free vUSDC in Spot, rounded DOWN to 6 decimals (null: unknown). */
 async function spotUsdc(owner: string): Promise<string | null> {
@@ -157,11 +186,12 @@ export function DepositModal({ open, onClose, address, provider, onEnable }: Pro
     };
   }, [open, owner, view]);
 
-  const vcUsdc = wallet?.rows.find((r) => r.chain === 'VALUECHAIN' && r.symbol === 'USDC');
-  /** Known once ValueChain answered (a chain with nothing on it has no row). */
-  const usdcKnown = !!vcUsdc || (!!wallet && wallet.pending === 0);
+  /** USDC the connected wallet holds on the networks "From your wallet" takes, together. */
+  const walletUsdc = sumUsdc(wallet, WALLET_NETWORKS.map((n) => n.key));
+  /** Known once the wallet read is in (a chain with nothing on it has no row). */
+  const usdcKnown = !!wallet && (wallet.pending === 0 || WALLET_NETWORKS.every((n) => wallet.rows.some((r) => r.chain === n.key)));
   const accountReady = opening && mine && trading.accountStatus === 'ready';
-  const title = accountReady ? 'Your account is ready' : view === 'wallet' ? 'Transfer' : 'Deposit';
+  const title = accountReady ? 'Your account is ready' : view === 'wallet' ? 'From your wallet' : 'Deposit';
 
   return (
     <Modal
@@ -189,11 +219,14 @@ export function DepositModal({ open, onClose, address, provider, onEnable }: Pro
                 <button type="button" className="fx-opt" onClick={() => setView('wallet')} disabled={!provider || noAccount} title={noAccount ? NO_ACCOUNT_TRANSFER : undefined}>
                   <span className="fx-opt__icon"><WalletMark /></span>
                   <span>
-                    <span className="fx-opt__t">Transfer from ValueChain</span>
-                    <span className="fx-opt__d">{noAccount ? 'Available once your first deposit has opened your account.' : 'Transfer from your connected wallet.'}</span>
+                    <span className="fx-opt__t">From your wallet</span>
+                    <span className="fx-opt__d">{noAccount ? 'Available once your first deposit has opened your account.' : 'From your connected wallet on ValueChain or Base.'}</span>
                   </span>
-                  <span className="fx-opt__r">
-                    <strong>{usdcKnown ? `${cutTo(vcUsdc?.amount ?? '0', 2)} USDC` : <Spinner />}</strong>
+                  <span className="fx-opt__r fx-opt__r--stack">
+                    <strong>{usdcKnown ? `${fmtDecimalString(cutTo(walletUsdc, 2))} USDC` : <Spinner />}</strong>
+                    <span className="fx-coins">
+                      {WALLET_NETWORKS.map((n) => <Avatar key={n.key} seed={n.key} kind="chain" size={16} />)}
+                    </span>
                   </span>
                 </button>
                 <button type="button" className="fx-opt" onClick={() => setView('transfer')}>
@@ -211,7 +244,7 @@ export function DepositModal({ open, onClose, address, provider, onEnable }: Pro
                 {!provider && !noAccount && <p className="fx-note">Reconnect your wallet to transfer from it.</p>}
               </>
             ) : view === 'wallet' ? (
-              <TransferPanel owner={owner} provider={provider} onEnable={onEnable} preset={WALLET_PRESET} />
+              <FromWallet owner={owner} provider={provider} onEnable={onEnable} configs={configs} wallet={wallet} />
             ) : (
               <TransferCrypto owner={owner} mirror={mirror} onMirror={setMirror} configs={configs} firstDeposit={noAccount} />
             )}
@@ -219,6 +252,40 @@ export function DepositModal({ open, onClose, address, provider, onEnable }: Pro
         </AutoHeight>
       )}
     </Modal>
+  );
+}
+
+// --- from the connected wallet: ValueChain or Base -------------------------------------------
+
+function FromWallet({ owner, provider, onEnable, configs, wallet }: {
+  owner: string;
+  provider: Eip1193Provider | null;
+  onEnable: () => Promise<boolean>;
+  configs: CoinConfig[] | null;
+  wallet: WalletRead | null;
+}) {
+  /** Known once that chain answered (a chain with nothing on it has no row). */
+  const usdcOn = (chain: string): string | undefined =>
+    wallet && (wallet.pending === 0 || wallet.rows.some((r) => r.chain === chain)) ? `${fmtDecimalString(cutTo(sumUsdc(wallet, [chain]), 2))} USDC` : undefined;
+  const [picked, setPicked] = useState<WalletNetwork | null>(null);
+  // Until one is picked: ValueChain, unless only Base holds USDC.
+  const net: WalletNetwork = picked
+    ?? (Number(sumUsdc(wallet, ['VALUECHAIN'])) === 0 && Number(sumUsdc(wallet, ['BASE_ETH'])) > 0 ? 'BASE_ETH' : 'VALUECHAIN');
+  return (
+    <>
+      <div>
+        <Label>Network</Label>
+        <FxSelect
+          label="Network"
+          value={net}
+          onChange={(v) => setPicked(v as WalletNetwork)}
+          options={WALLET_NETWORKS.map((n) => ({ value: n.key, label: n.label, icon: n.key, iconKind: 'chain' as const, hint: usdcOn(n.key) }))}
+        />
+      </div>
+      {net === 'VALUECHAIN'
+        ? <TransferPanel owner={owner} provider={provider} onEnable={onEnable} preset={WALLET_PRESET} />
+        : <BridgePanel owner={owner} provider={provider} configs={configs} />}
+    </>
   );
 }
 
@@ -262,18 +329,9 @@ function TransferCrypto({ owner, mirror, onMirror, configs, firstDeposit }: {
   const [infoOpen, setInfoOpen] = useState(false);
   /** token:chain pairs whose warning was read - the address is readable only after it. */
   const [acked, setAcked] = useState<ReadonlySet<string>>(() => new Set());
-  /** A deposit that arrived while this sheet was open (SoDEX's own deposit history). */
+  /** A deposit that arrived while this sheet was open (SoDEX's own deposit history), announced once when it lands. */
   const watch = useDepositWatch(owner, true);
-  // An arrived deposit is announced on the wallet button too (moneyNotice.ts), once.
-  const told = useRef<string | null>(null);
-  useEffect(() => {
-    if (!watch || (watch.stage !== 'done' && watch.stage !== 'failed') || told.current === watch.row.id) return;
-    told.current = watch.row.id;
-    // A first deposit that landed opens the account: look now, not at the watch's next turn.
-    if (watch.stage === 'done') nudgeAccountCheck(owner, true);
-    const what = `Deposit of ${watch.row.amount ?? ''} ${watch.row.coin}`.replace(/  +/g, ' ');
-    announceMoney({ kind: 'deposit', status: watch.stage === 'done' ? 'done' : 'failed', text: `${what} ${watch.stage === 'done' ? 'completed' : 'failed'}` });
-  }, [watch]);
+  useDepositNotice(owner, watch);
   /** SoDEX's maintenance for the chosen token (null: being read). */
   const [maint, setMaint] = useState<Maintenance | null>(null);
 
@@ -573,37 +631,3 @@ function AccountReady({ owner, accountId, enabled, provider, onEnable, onClose }
   );
 }
 
-/** The strip under You send -> You receive once a deposit shows up: three steps, the current one lit. */
-function DepositProgress({ w }: { w: DepositWatch }) {
-  const raw = w.row.rawStatus || w.row.status;
-  const processing = raw === 'Reporting' ? 'Reporting to SoDEX' : 'Deposit processing';
-  const steps: Array<[DepositStage, string]> = [['detected', 'Deposit detected'], ['processing', processing], ['done', 'Deposited successfully']];
-  const at = steps.findIndex(([k]) => k === w.stage);
-  const off = w.stage === 'failed' || w.stage === 'review' || w.stage === 'refunding';
-  return (
-    <div className={`fx-dprog${w.stage === 'failed' ? ' is-failed' : w.stage === 'review' ? ' is-review' : ''}`} role="status" aria-live="polite">
-      <div className="fx-dprog__what">
-        {w.row.amount ? `${fmtDecimalString(w.row.amount)} ${w.row.coin}` : w.row.coin}
-        {w.row.chain ? <small> via {chainLabel(w.row.chain)}</small> : null}
-      </div>
-      {off ? (
-        <p className={w.stage === 'failed' ? 'fx-dprog__fail' : 'fx-dprog__note'}>
-          {w.stage === 'review'
-            ? `SoDEX is holding this deposit for review (${raw}).`
-            : w.stage === 'refunding'
-              ? `SoDEX is refunding this deposit (${raw}).`
-              : `SoDEX could not credit this deposit (${raw}). See Account History for details.`}
-        </p>
-      ) : (
-        <ol className="fx-dprog__steps">
-          {steps.map(([k, label], i) => (
-            <li key={k} className={i < at ? 'is-past' : i === at ? 'is-now' : ''}>
-              <span className="fx-dprog__dot" aria-hidden="true" />
-              {label}
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
-  );
-}

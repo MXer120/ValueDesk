@@ -110,6 +110,13 @@ export interface ChainRoute {
   isNativeToken: boolean;
   deposit: { allowed: boolean; min: string | null; etaSeconds: number | null };
   withdraw: { allowed: boolean; min: string | null; fee: string | null };
+  /**
+   * SoDEX's bridge on this chain, when it has one (asset config `bridge`): the
+   * wallet hands the coin to the bridge contract itself, no deposit address -
+   * sodex.com's "Deposit from connected wallet" (Base, 2026-11-27;
+   * trading/bridgeDeposit.ts). `deposit` is SoDEX's switch for it.
+   */
+  bridge?: { address: string; deposit: boolean; min: string | null; etaSeconds: number | null } | null;
 }
 
 export interface CoinConfig {
@@ -181,6 +188,12 @@ interface RawAsset {
       allowWithdraw?: boolean;
       estimatedDepositSeconds?: number;
     };
+    bridge?: {
+      bridgeAddress?: string;
+      minDepositAmount?: string;
+      allowDeposit?: boolean;
+      estimatedDepositSeconds?: number;
+    };
   }>;
 }
 
@@ -241,6 +254,14 @@ export async function assetConfigs(): Promise<CoinConfig[]> {
           withdraw: flash
             ? { allowed: true, min: null, fee: null }
             : { allowed: !!c.custody!.allowWithdraw, min: dec(c.custody!.minWithdrawAmount), fee: dec(c.custody!.withdrawFee) },
+          bridge: c.bridge && /^0x[0-9a-fA-F]{40}$/.test(c.bridge.bridgeAddress ?? '')
+            ? {
+                address: c.bridge.bridgeAddress!,
+                deposit: !!c.bridge.allowDeposit,
+                min: dec(c.bridge.minDepositAmount),
+                etaSeconds: typeof c.bridge.estimatedDepositSeconds === 'number' ? c.bridge.estimatedDepositSeconds : null,
+              }
+            : null,
         })),
     });
   }
