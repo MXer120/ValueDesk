@@ -190,6 +190,57 @@ test('pair: stopping the main closes both legs together and ends both; stopping 
   }
 });
 
+test('pair: a leg whose other leg moved to other servers (VIP move) closes, even with On stop: keep, rather than stay open unhedged', async () => {
+  for (const moved of ['partner', 'main'] as const) {
+    const r = await rig();
+    const a = await main(r, { onStop: 'keep' });
+    const b = await partner(r, { onStop: 'keep' });
+    await step(r, b.id);
+    for (let i = 0; i < 8; i++) await step(r, a.id);
+    assert.ok(r.acct[A]!.position > 0.5 && r.acct[B]!.position < -0.5);
+    // The VIP move hands the moved wallet's leg over: ended here, its position stays in its account.
+    await r.rt.handOver(moved === 'partner' ? b.id : a.id, 'Moved to the VIP servers.');
+    const stay = moved === 'partner' ? a.id : b.id;
+    const own = moved === 'partner' ? A : B;
+    for (let i = 0; i < 10; i++) await step(r, stay);
+    assert.ok(Math.abs(r.acct[own]!.position) < 1e-9, `${moved} moved: the leg left here closed (${r.acct[own]!.position})`);
+    const x = r.rt.get(stay)!;
+    assert.equal(x.status, 'cancelled', moved);
+    assert.match(x.statusReason ?? '', /no longer on these servers/);
+    assert.equal(r.acct[A]!.rested.length + r.acct[B]!.rested.length, 0);
+  }
+});
+
+test('pair: a leg that ran paired and finds no other leg at all (arrived alone on other servers) closes; one never paired keeps waiting', async () => {
+  const r = await rig();
+  const a = await main(r);
+  const b = await partner(r);
+  await step(r, b.id);
+  for (let i = 0; i < 8; i++) await step(r, a.id);
+  await step(r, b.id);
+  assert.equal(r.rt.get(a.id)!.k.paired, true);
+  assert.equal(r.rt.get(b.id)!.k.paired, true);
+  // The main's record alone on a second runtime (what a VIP import gives it), the same account.
+  const store = new MemoryAlgoStore();
+  await store.saveAlgo(JSON.parse(JSON.stringify(r.rt.get(a.id))));
+  const sodex = { markets: async () => [MKT], follower: async () => ({ equity: 10_000, positions: {} }), fills: async () => [], get: async () => [] } as unknown as SodexClient;
+  const rt2 = new AlgoRuntime({ confirmGapMs: 0, store, sodex, network: 'mainnet', market: r.m, sinkFor: (x) => r.acct[x.owner] ?? null, margin: async (x) => { const c = r.acct[x.owner]!; return { qty: c.position, equity: c.equity, maintenance: null, liq: null, coin: c.coin }; }, log: silentLogger, autoTick: false, builderRate: () => 0.00005 });
+  await rt2.start();
+  for (let i = 0; i < 10; i++) {
+    clock += 2_000;
+    await rt2.stepNow(a.id, clock);
+    await settle();
+  }
+  assert.ok(Math.abs(r.acct[A]!.position) < 1e-9, `closed (${r.acct[A]!.position})`);
+  assert.match(rt2.get(a.id)!.statusReason ?? '', /no longer on these servers/);
+  // Never paired: it waits for its partner and sends nothing.
+  const r3 = await rig();
+  const c = await main(r3);
+  const y = await step(r3, c.id);
+  assert.equal(y.status, 'waiting');
+  assert.equal(r3.acct[A]!.placed.length, 0);
+});
+
 test('spot: the short follows the coin in the futures balance, never larger, and waits while there is none', async () => {
   const r = await rig();
   const a = await r.rt.add({ owner: A, accountId: 1, mode: 'hosted', seed: 1, spec: { kind: 'hedge', symbol: 'BTC-USD', shape: 'spot', maxLossUsd: 5_000, sizeUsd: 60_000, minLiqPct: 3, growLiqPct: 6, sliceUsd: 30_000, maxSlipBps: 20, marginUsd: 1_000 } });
