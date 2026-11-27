@@ -9,6 +9,7 @@
  *
  *   node --import tsx apps/executor/tools/live-test/hedge-pair.ts --env <.env.live>            plan only: sizes, buffers, margin, costs
  *   ... --go [--hours 24]       set up what is missing (terms, executor key, builder approval) and start the pairs
+ *   ... --only BTC[,ETH]        only these markets of RUNS (with the plan, --go)
  *   ... --status [--watch 60]   read-only: every hedge-live pair's legs, liquidation distances, last move, net, volume
  *   ... --stop                  cancel the hedge-live pairs (onStop close: both legs closed, a slice at a time)
  *
@@ -39,6 +40,8 @@ const usd = (x: number) => `$${x.toFixed(2)}`;
 const LABEL = 'hedge-live';
 const ACTIVE = new Set(['running', 'waiting', 'scheduled', 'paused']);
 const GW = 'https://mainnet-gw.sodex.dev/api/v1/perps/markets';
+/** The server's VIP answer, the one the VIP executor asks before it takes a wallet (public, says nothing of others). */
+const VIP_CHECK = 'https://www.valuedesk.so/api/vs/bots/vip';
 
 /**
  * The run (owner: 2 majors + 2 volatile, small, max leverage and 20x). BTC and ETH offer 40x; the volatile pairs
@@ -88,13 +91,36 @@ for (const t of targets) await t.start();
 const onVip = [await targets[0].followVip(), await targets[1].followVip()];
 const [A, B] = wallets.map((w) => w.address) as [string, string];
 log(`wallet A ${A} (main legs)${onVip[0] ? ' on VIP' : ''}, wallet B ${B} (partner legs)${onVip[1] ? ' on VIP' : ''}`);
-// Found 2026-11-27: A is on VIP, B on standard. With --go, the wallet still on standard moves to VIP with its own signed
-// 'vip-move' (the Savings page's move); VIP refuses a wallet that is not VIP (not listed, under the volume): then the
-// owner assigns it VIP in the admin suite, or the run cannot pair. Without --go the plan is printed either way.
+// Found 2026-11-27: A is on VIP (its Beta VIP program), B on standard. With --go, the wallet still on standard moves to
+// VIP with its own signed 'vip-move' (the Savings page's move). VIP takes only a VIP wallet (executor vipEligible:
+// listed, or the server's /api/vs/bots/vip says eligible: $1M in 14 days or a VIP program), so the server is asked
+// first: a wallet that is not VIP stops --go before anything is signed, with the one step the owner takes (a VIP
+// program on the admin suite's Fees page, signed by the builder wallet). There is no move back on request (only the VIP
+// side's daily sweep), so A cannot come down to B instead.
 const split = onVip[0] !== onVip[1];
 if (split) {
   const low = onVip[0] ? 1 : 0;
-  log(`wallet ${low ? 'B' : 'A'} runs its bots on the standard executor, the other on VIP: a pair's legs must share one executor${has('--go') ? '; moving it to VIP' : '; --go moves it to VIP first (needs it to be VIP)'}`);
+  const who = low ? 'B' : 'A';
+  const addr = wallets[low]!.address.toLowerCase();
+  const v = (await (await fetch(`${VIP_CHECK}?address=${addr}`)).json()) as Any;
+  log(`wallet ${who} runs its bots on the standard servers, wallet ${low ? 'A' : 'B'} on the VIP servers: both legs of a pair must run on the same servers, so --go moves ${who} to VIP first`);
+  if (!v.ok || !v.eligible) {
+    console.log([
+      '',
+      `  ONE STEP FOR YOU before --go: VIP would refuse wallet ${who}, because it is not a VIP wallet${v.ok ? ` ($${Math.round(v.volumeUsd ?? 0)} of $${Math.round(v.minUsd ?? 1e6).toLocaleString('en-US')} volume in 14 days, no VIP program)` : ' (the VIP check did not answer)'}.`,
+      '    1. Open dev.valuedesk.so, tab Fees, section "Start a program".',
+      `    2. Wallets: ${addr}`,
+      '    3. Products: Bots. Preset: VIP for 30 days.',
+      '    4. Press "Sign and start for 1 wallet". Your builder wallet signs a message that records the program:',
+      '       no transaction, no gas, no money moves. It also gives the wallet the VIP bot fee for 30 days; "End now" on the',
+      '       same page ends it.',
+      '    Then run --go again. Nothing else needs you: --go signs every other step itself with the keys in .env.live.',
+      '',
+    ].join('\n'));
+    if (has('--go')) { log('STOP: nothing was signed or sent'); process.exit(1); }
+  } else {
+    log(`wallet ${who} is VIP${v.promo ? ` (${v.promo.label})` : ''}, so the VIP servers take it`);
+  }
   if (has('--go')) {
     try {
       const { ms } = await targets[low]!.moveToVip();
@@ -159,7 +185,9 @@ const plan: Array<{ main: Any; partner: Any }> = [];
 let imA = 0;
 let notional = 0;
 let fees = 0;
-for (const r of RUNS) {
+const only = (arg('--only') ?? '').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+if (only.some((c) => !RUNS.some((r) => r.symbol.split('-')[0] === c))) throw new Error(`--only takes coins of the run: ${RUNS.map((r) => r.symbol.split('-')[0]).join(', ')}`);
+for (const r of RUNS.filter((x) => !only.length || only.includes(x.symbol.split('-')[0]!))) {
   const s = symbols.find((x) => x.name === r.symbol);
   if (!s || s.status !== 'TRADING') { log(`${r.symbol}: not trading on SoDEX, left out`); continue; }
   if (running.some((p) => p.main.algo.spec.symbol === r.symbol && ACTIVE.has(p.main.algo.status))) { log(`${r.symbol}: a hedge-live pair already runs, left out`); continue; }
@@ -185,6 +213,15 @@ for (const [i, a] of accounts.entries()) {
   log(`wallet ${i ? 'B' : 'A'}: equity ${usd(eq)}, open positions ${(a?.P ?? []).length}; the plan holds ${usd(notional)} notional (${eq > 0 ? (notional / eq).toFixed(1) : '-'}x the equity), initial margin ${usd(imA)}`);
 }
 log(`fees in and out at full size, both wallets: ${usd(fees)} (SoDEX's taker fee + the bot fee the executor reports; each trim and grow-back adds its own); the wallets send no transactions, so no gas`);
+console.log([
+  '',
+  '  What --go signs, by itself with the two test wallets\' keys in .env.live (no wallet app, nothing for you to sign):',
+  ...(split ? ['    - the wallet on the standard servers: its move to the VIP servers (the Savings page\'s move)'] : []),
+  `    - each wallet, if not done yet: the copy terms ${COPY_TERMS_VERSION}, a 30-day executor trading key on SoDEX, the builder fee approval`,
+  '    - then each pair\'s two legs start: the executor opens the positions with market (IOC) orders in slices',
+  '  None of these is a blockchain transaction: SoDEX takes them as signed API requests, so there is no gas.',
+  '',
+].join('\n'));
 if (!has('--go')) { log('plan only: nothing signed, nothing sent (add --go to start)'); process.exit(0); }
 
 /* ---------------------------------------------------------------- go ----- */
