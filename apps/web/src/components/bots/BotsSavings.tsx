@@ -197,9 +197,11 @@ export function BotsSavings({ ctx, view }: { ctx: BotsCtx; view: BotsView }) {
             />
           </Shell>
 
-          <SavingsReferral address={ctx.address} me={me} onOpen={openReferrals} />
-
-          <BotsVip ctx={ctx} />
+          {/* Side by side (owner 2026-11-27): referrals, compact, and VIP; one above the other on a narrow screen. */}
+          <div className="sv-duo">
+            <SavingsReferral address={ctx.address} me={me} onOpen={openReferrals} />
+            <BotsVip ctx={ctx} compact />
+          </div>
 
           <Shell className="bots-listcard">
             <ShellHeader icon="piggy" title="Every saving, per $1M" subtitle={nowPerM !== null ? `From what $1M costs your bots now to where these levers take it` : 'What each lever takes off $1M of volume'} />
