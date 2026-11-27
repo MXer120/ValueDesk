@@ -24,8 +24,9 @@ const ICON = {
 /** A phone with the share sheet (share/nativeShare.ts): Save and Share instead of Copy and X. */
 const isPhone = (): boolean => prefersNativeShare();
 
-/** `controls`: a card's own switches in place of the usual three (the SoPoints card: what leads, which period, the
- * invite code); the card then already carries what they chose. */
+/** `controls`: a card's own switches in place of the usual three, as `.share-opt` lines (label, control) in one compact
+ * block with the picture's shape (the SoPoints card: what leads, which period, the invite code); the card then already
+ * carries what they chose. */
 export function ShareCard({ card, code, onClose, controls }: { card: CardData; code: string | null; onClose: () => void; controls?: ReactNode }) {
   const [ratio, setRatio] = useState<Ratio>('wide');
   const [amounts, setAmounts] = useState(true);
@@ -120,8 +121,15 @@ export function ShareCard({ card, code, onClose, controls }: { card: CardData; c
           {url && <img className={`share-preview${ratio === 'square' ? ' is-square' : ''}`} src={url} alt={`Share card: ${card.title}`} />}
           {!url && <span className={`share-preview share-wait${ratio === 'square' ? ' is-square' : ''}`}>Drawing…</span>}
         </div>
-        <div className="dlg-label"><span>Picture</span><DlgSeg label="Picture" value={ratio} onChange={setRatio} options={[{ value: 'wide', label: 'Wide' }, { value: 'square', label: 'Square' }]} /></div>
-        {controls ?? <div className="dlg-card">
+        {/* A card's own switches: one compact block, the picture's shape its first line (SoPoints, owner 2026-11-27:
+            "make the share menu slimmer"). */}
+        {controls ? (
+          <div className="share-opts">
+            <div className="share-opt"><span>Picture</span><DlgSeg label="Picture" value={ratio} onChange={setRatio} options={[{ value: 'wide', label: 'Wide' }, { value: 'square', label: 'Square' }]} /></div>
+            {controls}
+          </div>
+        ) : <div className="dlg-label"><span>Picture</span><DlgSeg label="Picture" value={ratio} onChange={setRatio} options={[{ value: 'wide', label: 'Wide' }, { value: 'square', label: 'Square' }]} /></div>}
+        {!controls && <div className="dlg-card">
           <DlgRow title="Dollar amounts" line="Hidden shows returns in % only">
             <DlgSwitch on={amounts} onChange={setAmounts} label="Dollar amounts" onWord="Shown" offWord="Hidden" />
           </DlgRow>

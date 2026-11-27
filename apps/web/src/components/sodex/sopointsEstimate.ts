@@ -48,8 +48,9 @@ export interface EstCalib {
   referral: number;
   weeks: number;
   rows: Array<{ weekNo: number; own: number; explained: number; other: number }>;
-  /** The wallet's weekly points trend: week k+1 ahead against this week, and the scatter around it (log scale). */
-  trend?: { growth: number; sigma: number; factors: number[] };
+  /** The wallet's weekly points trend: week k+1 ahead against this week, and the range's half-width a week ahead
+   * (log scale; k weeks ahead it is spread x sqrt(k)). */
+  trend?: { growth: number; spread: number; factors: number[] };
 }
 
 export interface EstAnswer {

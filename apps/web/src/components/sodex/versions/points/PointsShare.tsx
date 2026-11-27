@@ -6,78 +6,83 @@
  * this week's estimate, and the wallet's invite code.
  */
 import { useMemo, useState } from 'react';
-import { DlgRow, DlgSeg, DlgSwitch } from '../../../dialogParts';
+import { DlgSeg, DlgSwitch } from '../../../dialogParts';
 import { ShareCard } from '../../../share/ShareCard';
 import type { CardData, CardFact } from '../../../share/card';
 import { inviteLink, useOwnCode } from '../../../../invites/invites';
 import { localize } from '../../../../numStyle';
 import type { EstBand } from '../../sopointsEstimate';
-import { money, plusPct, pts, ptsEst, topText, type PointsView } from './shared';
+import { plusPct, pts, ptsEst, topText, type PointsView } from './shared';
 
 type Lead = 'points' | 'top';
-type Period = 'total' | 'week';
+/** Total: the season so far; week: the last scored week; now: this week's estimate (owner 2026-11-27: "also a share
+ * button for this weeks estimate"). */
+export type Period = 'total' | 'week' | 'now';
 
 const short = (n: number) => (n >= 1e6 ? `${localize(String(Number((n / 1e6).toFixed(2))))}M` : n >= 1e4 ? `${localize(String(Number((n / 1e3).toFixed(1))))}K` : pts(n));
 
-/** The wallet's SoPoints card: `week` is this week's estimate (total points, the squad's boost included) when there is one. */
-export function PointsShare({ v, week, onClose }: { v: PointsView; week: Pick<EstBand, 'mid' | 'busy' | 'quiet'> | null; onClose: () => void }) {
+/** A line of the share dialog's options: its label and its control. */
+const Opt = ({ label, children }: { label: string; children: React.ReactNode }) => <div className="share-opt"><span>{label}</span>{children}</div>;
+
+/** The wallet's SoPoints card. `week` is this week's estimate (total points, the squad's boost included) when there is
+ * one; `start` the period the dialog opens on (the live card's share opens on this week). */
+export function PointsShare({ v, week, start = 'total', onClose }: { v: PointsView; week: Pick<EstBand, 'mid' | 'busy' | 'quiet'> | null; start?: Period; onClose: () => void }) {
   const own = useOwnCode(v.c.address);
   const code = own.state === 'ok' ? own.code : null;
   const [lead, setLead] = useState<Lead>('points');
-  const [period, setPeriod] = useState<Period>('total');
-  const [est, setEst] = useState(!!week);
-  const [showCode, setShowCode] = useState(!!code);
+  const [period, setPeriod] = useState<Period>(start === 'now' && !week ? 'total' : start);
+  const [showCode, setShowCode] = useState(true);
   const last = v.last;
   const sum = v.s.summary;
+  const now = period === 'now' && !!week;
+  const top = lead === 'top' && !now;
   const card: CardData = useMemo(() => {
     const total = v.total ?? 0;
     const lw = last?.split.week ?? null;
     const weekly = period === 'week' && lw;
     const rank = weekly ? lw.rank : sum?.rank ?? 0;
     const users = weekly ? lw.totalUser : sum?.totalUser ?? 0;
-    const top = topText(rank, users, weekly ? lw.rankPercentile : undefined);
-    const big = lead === 'top' && rank ? top : weekly ? `+${pts(lw.points)}` : pts(total);
-    const label = lead === 'top' && rank ? (weekly ? `${lw.weekName}, rank` : 'Rank on SoDEX') : weekly ? `${lw.weekName}, SoPoints` : 'SoPoints';
-    const sub = lead === 'top' && rank ? `#${pts(rank)}` : weekly ? pts(total) : v.tier;
-    const subRest = lead === 'top' && rank ? (users ? `of ${pts(users)}` : '') : weekly ? 'in all' : rank ? `· #${pts(rank)}` : '';
+    const topTxt = topText(rank, users, weekly ? lw.rankPercentile : undefined);
+    const lead1 = now
+      ? { label: v.week ? `${v.week.weekName}, estimated` : 'This week, estimated', big: `≈ +${ptsEst(week!.mid)}`, sub: `${ptsEst(week!.busy)} – ${ptsEst(week!.quiet)}`, subRest: 'likely range' }
+      : top && rank
+        ? { label: weekly ? `${lw.weekName}, rank` : 'Rank on SoDEX', big: topTxt, sub: `#${pts(rank)}`, subRest: users ? `of ${pts(users)}` : '' }
+        : weekly
+          ? { label: `${lw.weekName}, SoPoints`, big: `+${pts(lw.points)}`, sub: pts(total), subRest: 'in all' }
+          : { label: 'SoPoints', big: pts(total), sub: v.tier, subRest: rank ? `· #${pts(rank)}` : '' };
     const facts: CardFact[] = [
       { label: 'Tier', value: v.tier, kind: 'plain' as const },
-      lead === 'top' || weekly ? { label: 'SoPoints', value: pts(total), kind: 'stat' as const } : { label: 'Rank', value: rank ? `#${pts(rank)}` : '—', kind: 'stat' as const },
+      ...(now || top || weekly ? [{ label: 'SoPoints', value: pts(total), kind: 'stat' as const }] : [{ label: 'Rank', value: rank ? `#${pts(rank)}` : '—', kind: 'stat' as const }]),
       ...(lw && !weekly ? [{ label: lw.weekName, value: `+${pts(lw.points)}`, kind: 'stat' as const }] : []),
-      ...(est && week ? [{ label: 'This week, est.', value: `≈ +${ptsEst(week.mid)}`, kind: 'stat' as const }] : []),
       ...(v.squad?.total ? [{ label: 'Squad boost', value: plusPct(v.squad.total), kind: 'plain' as const }] : []),
     ].slice(0, 4);
     let t = 0;
-    const ys = period === 'week' ? v.scored.map((w) => w.split.week.points) : v.scored.map((w) => (t += w.split.week.points));
+    const ys = period === 'total' ? v.scored.map((w) => (t += w.split.week.points)) : v.scored.map((w) => w.split.week.points);
     const link = showCode && code ? inviteLink(code) : `${location.origin}/points`;
     return {
-      kind: 'points', label: 'SoPoints', when: v.week ? `Layer 1 · ${v.week.weekName}` : 'Layer 1 Season',
+      kind: 'points', label: now ? 'SoPoints estimate' : 'SoPoints', when: v.week ? `Layer 1 · ${v.week.weekName}` : 'Layer 1 Season',
       title: `${v.tier} tier`, pills: [], usd: null, pct: null,
-      lead: { label, big, sub, subRest, altLabel: label, altBig: big, altSub: sub, altSubRest: subRest },
-      facts, foot: 'SoPoints on SoDEX', chart: ys.length > 1 ? { type: 'pnl', ys } : null, link,
+      lead: { ...lead1, altLabel: lead1.label, altBig: lead1.big, altSub: lead1.sub, altSubRest: lead1.subRest },
+      facts, foot: now ? 'Estimated by ValueDesk, not a SoDEX figure' : 'SoPoints on SoDEX', chart: ys.length > 1 ? { type: 'pnl', ys } : null, link,
       post: () => {
-        const head = lead === 'top' && rank ? `${top} on SoDEX's SoPoints` : weekly ? `+${pts(lw.points)} SoPoints in ${lw.weekName} on SoDEX` : `${pts(total)} SoPoints on SoDEX, ${v.tier}`;
-        const e = est && week ? `, about +${ptsEst(week.mid)} more this week` : '';
-        return `${head}${e}.${showCode && code ? ` Trade with my code ${code}:` : ''}`;
+        const head = now ? `On track for about +${ptsEst(week!.mid)} SoPoints this week on SoDEX` : top && rank ? `${topTxt} on SoDEX's SoPoints` : weekly ? `+${pts(lw.points)} SoPoints in ${lw.weekName} on SoDEX` : `${pts(total)} SoPoints on SoDEX, ${v.tier}`;
+        return `${head}.${showCode && code ? ` Trade with my code ${code}:` : ''}`;
       },
       second: null, wallet: null,
     };
-  }, [v, last, sum, lead, period, est, week, showCode, code]);
+  }, [v, last, sum, period, now, top, week, showCode, code]);
   const controls = (
-    <div className="dlg-card">
-      <DlgRow title="Lead with" line={lead === 'top' ? 'Your place among everyone SoDEX ranks' : 'Your SoPoints'}>
-        <DlgSeg label="Lead with" value={lead} onChange={setLead} options={[{ value: 'points', label: 'Points' }, { value: 'top', label: 'Top %' }]} />
-      </DlgRow>
-      <DlgRow title="Period" line={period === 'week' ? (last ? `${last.split.week.weekName}, the last scored week` : 'No scored week yet') : 'The whole season so far'}>
-        <DlgSeg label="Period" value={period} onChange={setPeriod} options={[{ value: 'total', label: 'Total' }, { value: 'week', label: 'Weekly' }]} />
-      </DlgRow>
-      <DlgRow title="This week’s estimate" line={week ? `≈ +${ptsEst(week.mid)}, ValueDesk’s estimate` : 'No estimate yet'} off={!est || !week}>
-        <DlgSwitch on={est && !!week} onChange={setEst} label="This week’s estimate" onWord="Shown" offWord="Hidden" disabled={!week} />
-      </DlgRow>
-      <DlgRow title="Invite code" line={code ? `${code}: people who join with it trade in your squad` : 'You have no SoDEX invite code yet'} off={!showCode || !code}>
-        <DlgSwitch on={showCode && !!code} onChange={setShowCode} label="Invite code" onWord="Shown" offWord="Hidden" disabled={!code} />
-      </DlgRow>
-    </div>
+    <>
+      <Opt label="Show"><DlgSeg label="Show" value={top ? 'top' : 'points'} onChange={setLead} disabled={now} options={[{ value: 'points', label: 'Points' }, { value: 'top', label: 'Top %' }]} /></Opt>
+      <Opt label="Period">
+        <DlgSeg label="Period" value={period} onChange={setPeriod} options={[
+          { value: 'total', label: 'Total' },
+          ...(last ? [{ value: 'week' as const, label: 'Last week' }] : []),
+          ...(week ? [{ value: 'now' as const, label: 'This week' }] : []),
+        ]} />
+      </Opt>
+      <Opt label={code ? `Invite code ${code}` : 'Invite code'}><DlgSwitch on={showCode && !!code} onChange={setShowCode} label="Invite code" onWord="Shown" offWord="Hidden" disabled={!code} /></Opt>
+    </>
   );
   return <ShareCard card={card} code={showCode ? code : null} onClose={onClose} controls={controls} />;
 }
@@ -86,7 +91,7 @@ export function PointsShare({ v, week, onClose }: { v: PointsView; week: Pick<Es
 export function SquadShare({ v, which, name, onClose }: { v: PointsView; which: 'built' | 'joined'; name: string; onClose: () => void }) {
   const own = useOwnCode(v.c.address);
   const code = own.state === 'ok' ? own.code : null;
-  const [showCode, setShowCode] = useState(!!code);
+  const [showCode, setShowCode] = useState(true);
   const q = v.squad?.[which] ?? null;
   const windowWeeks = v.c.boost?.windowRounds ?? 4;
   const card: CardData = useMemo(() => {
@@ -109,12 +114,7 @@ export function SquadShare({ v, which, name, onClose }: { v: PointsView; which: 
     };
   }, [q, which, v.squad, v.week, windowWeeks, name, showCode, code]);
   const controls = (
-    <div className="dlg-card">
-      <DlgRow title="Invite code" line={code ? `${code}: people who join with it trade in your squad` : 'You have no SoDEX invite code yet'} off={!showCode || !code}>
-        <DlgSwitch on={showCode && !!code} onChange={setShowCode} label="Invite code" onWord="Shown" offWord="Hidden" disabled={!code} />
-      </DlgRow>
-      <DlgRow title="Energy" line={`${money(q?.volume ?? 0)} traded by the squad over the last ${windowWeeks} weeks`}>{null}</DlgRow>
-    </div>
+    <Opt label={code ? `Invite code ${code}` : 'Invite code'}><DlgSwitch on={showCode && !!code} onChange={setShowCode} label="Invite code" onWord="Shown" offWord="Hidden" disabled={!code} /></Opt>
   );
   return <ShareCard card={card} code={showCode ? code : null} onClose={onClose} controls={controls} />;
 }

@@ -346,20 +346,20 @@ export interface AheadWeek { no: number; mid: number; busy: number; quiet: numbe
 export interface Ahead { weeks: AheadWeek[] }
 
 /**
- * The projection from this week's estimate (`mid`, `busy`, `quiet`) and the wallet's trend (sopointsEstimate EstCalib
- * trend): week k after this one is this week times factors[k-1]; its range is the wider of this week's busy-to-quiet
- * and the trend's own scatter, which grows with the distance.
+ * The projection from this week's estimate (`mid`, `busy`, `quiet`, its range already the wallet's) and the wallet's
+ * trend (sopointsEstimate EstCalib trend): week k after this one is this week times factors[k-1]; its range is the
+ * wider of this week's busy-to-quiet and the wallet's own spread, which grows with the square root of the distance.
  */
-export function aheadOf(from: number, to: number, wk: { mid: number; busy: number; quiet: number }, trend?: { sigma: number; factors: number[] } | null): Ahead {
+export function aheadOf(from: number, to: number, wk: { mid: number; busy: number; quiet: number }, trend?: { spread: number; factors: number[] } | null): Ahead {
   const busyR = wk.mid > 0 ? wk.busy / wk.mid : 1;
   const quietR = wk.mid > 0 ? wk.quiet / wk.mid : 1;
-  const sigma = trend?.sigma ?? 0;
+  const spread = trend?.spread ?? 0;
   const weeks: AheadWeek[] = [];
   for (let no = from, k = 0; no <= to; no++, k++) {
     const f = k === 0 ? 1 : trend?.factors[k - 1] ?? trend?.factors.at(-1) ?? 1;
     const mid = wk.mid * f;
-    const spread = Math.exp(sigma * Math.sqrt(k + 1));
-    weeks.push({ no, mid, busy: mid * Math.min(busyR, 1 / spread), quiet: mid * Math.max(quietR, spread) });
+    const w = Math.exp(spread * Math.sqrt(k + 1));
+    weeks.push({ no, mid, busy: mid * Math.min(busyR, 1 / w), quiet: mid * Math.max(quietR, w) });
   }
   return { weeks };
 }
@@ -489,8 +489,20 @@ type TableView = 'simple' | 'detailed';
 /** What the estimate says each scored week earned beyond its activity, by week number (sopointsEstimate EstCalib rows). */
 export type OtherByWeek = ReadonlyMap<number, number> | null;
 
-const OTHER_INFO = 'From ValueDesk’s estimate: own points beyond what the week’s trading, positions and holdings explain. '
+const OTHER_INFO = 'Part of Own. From ValueDesk’s estimate: own points beyond what the week’s trading, positions and holdings explain. '
   + 'Loyalty and consistency rewards, bug reports, campaigns, or the estimate’s own error: points SoDEX does not itemise.';
+const BOOST_INFO = 'What the squad boost added: (own + invited) times the week’s squad %. Own + Invited + Squad boost = Points.';
+
+/**
+ * A week's points as whole parts that add up exactly (owner 2026-11-27: "10+ points and sometimes hundred unexplained"
+ * was the squad boost, which had no column): own and invited as SoDEX gives them, rounded, and the boost as the rest
+ * of the week's points, so SoDEX's own rounding lands in it.
+ */
+export function weekParts(r: AnyWeek): { own: number; invited: number; boost: number } {
+  const own = Math.round(r.split.own);
+  const invited = Math.round(r.split.referral);
+  return { own, invited, boost: Math.max(0, Math.round(r.split.week.points) - own - invited) };
+}
 
 /**
  * Every week, simple by default (week, rank, points coloured by that week's rank); Detailed is the full row
@@ -536,8 +548,10 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
                 <tr>
                   <th>Week</th><th className="right">Volume</th><th className="right">Open interest</th><th className="right">Holdings</th><th className="right">Rank</th>
                   {season === 'L1' && <th className="right">Squad</th>}<th className="right">Own</th>
-                  {season === 'L1' && <th className="right"><span className="spx-tbl__info" title={OTHER_INFO} tabIndex={0} aria-label={`Loyalty and other. ${OTHER_INFO}`}>Loyalty &amp; other<Icon name="info" size={12} /></span></th>}
-                  <th className="right">Invited</th><th className="right">Points</th>
+                  {season === 'L1' && <th className="right"><span className="spx-tbl__info" title={OTHER_INFO} tabIndex={0} aria-label={`Loyalty and other. ${OTHER_INFO}`}>of it loyalty &amp; other<Icon name="info" size={12} /></span></th>}
+                  <th className="right">Invited</th>
+                  {season === 'L1' && <th className="right"><span className="spx-tbl__info" title={BOOST_INFO} tabIndex={0} aria-label={`Squad boost. ${BOOST_INFO}`}>Squad boost<Icon name="info" size={12} /></span></th>}
+                  <th className="right">Points</th>
                 </tr>
               ) : <tr><th>Week</th><th className="right">Rank</th><th className="right">Place</th><th className="right">Points</th></tr>}
             </thead>
@@ -548,6 +562,7 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
                 const hold = (w.wealthTvl ?? 0) + (w.vaultHolding ?? 0);
                 const step = rankStep(w.rank, w.totalUser);
                 const o = oth(r);
+                const parts = weekParts(r);
                 const pointsCell = <td className="right num spx-tbl__pts"><span className={`spx-rk ${tbd ? '' : step?.cls ?? ''}`}>{tbd ? 'TBD' : pts(w.points)}</span></td>;
                 const weekCell = <td><span className="spx-tbl__wk"><b>{w.weekName}</b>{w.isLive && <StatusPill size="sm" tone="positive" dot>Live</StatusPill>}<small>{weekRange(w.weekStartTime)}</small></span></td>;
                 if (!detailed) {
@@ -568,9 +583,10 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
                     <td className="right num">{hold >= 1 ? money(hold) : DASH}</td>
                     <td className="right num">{w.rank ? `#${pts(w.rank)}` : DASH}</td>
                     {season === 'L1' && <td className={`right num${w.totalBonusPct ? ' pos' : ''}`}>{plusPct(w.totalBonusPct ?? 0)}</td>}
-                    <td className="right num">{tbd ? DASH : pts(r.split.own)}</td>
-                    {season === 'L1' && <td className="right num">{tbd || o === null ? DASH : o >= 1 ? <span className="spx-other">≈ {ptsEst(o)}</span> : '0'}</td>}
-                    <td className="right num">{tbd ? DASH : pts(r.split.referral)}</td>
+                    <td className="right num">{tbd ? DASH : pts(parts.own)}</td>
+                    {season === 'L1' && <td className="right num">{tbd || o === null ? DASH : o >= 1 ? <span className="spx-other">≈ {ptsEst(Math.min(o, parts.own))}</span> : '0'}</td>}
+                    <td className="right num">{tbd ? DASH : pts(parts.invited)}</td>
+                    {season === 'L1' && <td className="right num">{tbd ? DASH : parts.boost ? `+${pts(parts.boost)}` : '0'}</td>}
                     {pointsCell}
                   </tr>
                 );
@@ -581,7 +597,7 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
       )}
       <div className="spx-weeks__foot">
         <RankLegend />
-        {detailed && season === 'L1' && <small className="spx-weeks__note"><Icon name="info" size={12} />Loyalty &amp; other is an estimate: points SoDEX gave beyond what the week’s activity explains.</small>}
+        {detailed && season === 'L1' && <small className="spx-weeks__note"><Icon name="info" size={12} />Own + Invited + Squad boost = Points. Loyalty &amp; other is the part of Own the week’s activity does not explain, an estimate.</small>}
       </div>
     </div>
   );

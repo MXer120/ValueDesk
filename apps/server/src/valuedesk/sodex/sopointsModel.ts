@@ -16,12 +16,16 @@
  * `referral`. What the model cannot explain in a week is returned as that week's `other`: loyalty and consistency
  * rewards, bug reports, campaigns, or the model's own error (SoDEX's own rounding of the week's points is not counted).
  *
- * The weeks to come (owner 2026-11-27: "projection needs to be more accurate ... the trend is slowly going down, use
- * last 4 weeks or something, a combination of longterm and short term"): the wallet's points before the squad's boost,
- * on a log scale, get two weighted line fits, a short one (the last 6 weeks, half-life 3 weeks) and a long one (every
- * week from week 5, after the early-bird weeks, half-life 8 weeks). Their slopes are blended 65/35 and damped by 0.9 a
- * week ahead, so a trend slows instead of running away; `factors[k]` is week k+1 ahead against this week, `sigma` the
- * short fit's scatter (the range widens with it).
+ * The weeks to come (owner 2026-11-27: "projection needs to be more accurate ... a combination of longterm and short
+ * term"). A series (invited points, or all points before the squad's boost) gets two weighted line fits on a log scale:
+ * a short one (the last 6 weeks, half-life 3 weeks) and a long one (every week from week 5, after the early-bird weeks,
+ * half-life 8 weeks), blended 65/35 and damped by 0.9 a week ahead. Backtested 2026-11-27 on 29 wallets' Layer 1 weeks
+ * (the owner's 19 and 10 logged ones, weeks 6-11, one to four weeks ahead): the trend alone lost to last week's figure;
+ * half last week and half the trend (log scale) won, median error 24% a week ahead for invited points against 25% for
+ * last week alone and 37% for the four-week median. So: this week's invited points are that half-and-half, and the
+ * weeks after move by half the trend. The range: twice the wallet's own scatter (the short fit's, or its week-to-week
+ * changes', whichever is larger, never under 6%), widening with the square root of the weeks ahead; in the backtest it
+ * held the real week 82% of the time a week ahead and 70-76% two to four weeks ahead.
  */
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -65,9 +69,9 @@ export interface WeekIn {
 export interface Trend {
   /** Weekly growth of the points before the squad's boost (log scale), blended short and long. */
   growth: number;
-  /** Scatter of a week around the short fit (log scale). */
-  sigma: number;
-  /** Week k+1 ahead against this week. */
+  /** Half the range's width a week ahead (log scale): twice the wallet's scatter; k weeks ahead it is spread x sqrt(k). */
+  spread: number;
+  /** Week k+1 ahead against this week (half the trend). */
   factors: number[];
 }
 
@@ -179,24 +183,43 @@ const BLEND = 0.65;
 const DAMP = 0.9;
 export const MAX_AHEAD = 30;
 
-/** The trend of a wallet's weekly points before the squad's boost, for `ahead` weeks after this one. */
-export function trendOf(rows: ReadonlyArray<{ weekNo: number; pre: number }>, ahead: number): Trend {
-  const n = Math.max(0, Math.min(MAX_AHEAD, Math.trunc(ahead)));
+/** The two fits of a weekly series (log scale) and their blend: growth a week, scatter, and the level one week on. */
+function fitsOf(rows: ReadonlyArray<{ weekNo: number; v: number }>): { growth: number; sigma: number | null; change: number | null; next: number | null } {
   const last = rows.length ? rows[rows.length - 1]!.weekNo : 0;
-  const pts = (list: typeof rows, half: number) => list.map((r) => ({ x: r.weekNo, y: Math.log1p(Math.max(0, r.pre)), w: 0.5 ** ((last - r.weekNo) / half) }));
+  const pts = (list: typeof rows, half: number) => list.map((r) => ({ x: r.weekNo, y: Math.log1p(Math.max(0, r.v)), w: 0.5 ** ((last - r.weekNo) / half) }));
   const short = fitLine(pts(rows.filter((r) => r.weekNo > last - SHORT.weeks), SHORT.half));
   const longRows = rows.filter((r) => r.weekNo >= LONG.from);
   const long = fitLine(pts(longRows.length >= 3 ? longRows : rows, LONG.half));
   const g = short && long ? BLEND * short.b + (1 - BLEND) * long.b : short?.b ?? long?.b ?? 0;
   const growth = Math.max(-0.2, Math.min(0.2, g));
-  const sigma = Math.max(0.04, Math.min(0.6, short?.sigma ?? long?.sigma ?? 0.25));
+  // The level at the last scored week (the blend of both lines there), then one damped week on: this week.
+  const at = short && long ? BLEND * (short.a + short.b * last) + (1 - BLEND) * (long.a + long.b * last) : short ? short.a + short.b * last : long ? long.a + long.b * last : null;
+  // The scatter of its week-to-week changes over the last six weeks.
+  const tail = rows.slice(-7).map((r) => Math.log1p(Math.max(0, r.v)));
+  const ch = tail.slice(1).map((y, i) => y - tail[i]!);
+  const mu = ch.reduce((t, x) => t + x, 0) / Math.max(1, ch.length);
+  const change = ch.length >= 2 ? Math.sqrt(ch.reduce((t, x) => t + (x - mu) ** 2, 0) / ch.length) : null;
+  return { growth, sigma: short?.sigma ?? long?.sigma ?? null, change, next: at === null ? null : Math.max(0, Math.expm1(at + growth * DAMP)) };
+}
+
+/** Half last week, half the trend's next week, on a log scale (the backtest's best). */
+const halfAndHalf = (last: number, next: number | null): number => (next === null ? last : Math.expm1(0.5 * Math.log1p(Math.max(0, last)) + 0.5 * Math.log1p(next)));
+
+/** The trend of a wallet's weekly points before the squad's boost, for `ahead` weeks after this one. */
+export function trendOf(rows: ReadonlyArray<{ weekNo: number; pre: number }>, ahead: number): Trend {
+  const n = Math.max(0, Math.min(MAX_AHEAD, Math.trunc(ahead)));
+  const f = fitsOf(rows.map((r) => ({ weekNo: r.weekNo, v: r.pre })));
+  const growth = f.growth;
+  // Half the trend: the other half is last week's figure, which holds.
+  const step = growth / 2;
+  const spread = Math.min(1, 2 * Math.max(0.06, f.sigma ?? 0.25, f.change ?? 0));
   const factors: number[] = [];
   let damp = 0;
   for (let k = 1; k <= n; k++) {
     damp += DAMP ** k;
-    factors.push(Math.round(Math.exp(growth * damp) * 10_000) / 10_000);
+    factors.push(Math.round(Math.exp(step * damp) * 10_000) / 10_000);
   }
-  return { growth: Math.round(growth * 10_000) / 10_000, sigma: Math.round(sigma * 1000) / 1000, factors };
+  return { growth: Math.round(growth * 10_000) / 10_000, spread: Math.round(spread * 1000) / 1000, factors };
 }
 
 /** Weeks whose model part is under this many points count as quiet: what they earned is the wallet's extra. */
@@ -226,7 +249,9 @@ export function calibrate(m: ModelParams, weeks: readonly WeekIn[], ahead = 0): 
   // Shrunk toward 1: one week's ratio also carries that week's own busy-or-quiet swing.
   const raw = active.length ? median(active.map((r) => (r.own - extra) / r.explained)) : 1;
   const ratio = Math.min(2.5, Math.max(0.4, 1 + (raw - 1) * (active.length / (active.length + 2))));
-  const referral = median(rows.slice(-4).map((r) => r.referral));
+  // This week's invited points: half last week's, half the trend of the wallet's own invited points one week on.
+  const lastRef = rows.length ? rows[rows.length - 1]!.referral : 0;
+  const referral = rows.length ? halfAndHalf(lastRef, fitsOf(rows.map((r) => ({ weekNo: r.weekNo, v: r.referral }))).next) : 0;
   return {
     ratio: Math.round(ratio * 1000) / 1000,
     extra: r1(extra),

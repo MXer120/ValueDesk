@@ -8,7 +8,6 @@
  * estimate from public data (PointsEstimate.tsx) stands in for them. Every figure is the API's: the pool is the API's 1,000,000, not the
  * 900,000 in SoDEX's page text.
  */
-import { Suspense, lazy } from 'react';
 import { CoinIcon } from '../CoinIcon';
 import { Card, Group } from '../portfolio/parts';
 import { Fact, POINTS_PANELS, usePointsContext, type PointsContext } from '../Points';
@@ -42,17 +41,20 @@ const fmtEnergy = (raw: string): string => {
 
 /*
  * The page is the Stage version since 2026-11-27 (owner: "make stage version the new original"; versions/points/
- * Stage.tsx). Localhost keeps the versions behind a switch (versions/points/PointsVersions.tsx) with the page before it
- * as "Previous"; a build never loads that file (`import.meta.env.DEV` is false there, so the import is dropped).
+ * Stage.tsx), with no versions switch (owner the same day: "remove the versions switch at the bottom"). On localhost
+ * only, `localStorage['vs.dev.sopoints.sample'] = 'on'` draws it on made-up figures (versions/points/sample.ts) to check
+ * the layout; a build drops that branch.
  */
-const PointsVersions = import.meta.env.DEV ? lazy(() => import('./versions/points/PointsVersions')) : null;
+const devSample = (): boolean => {
+  if (!import.meta.env.DEV) return false;
+  try { return localStorage.getItem('vs.dev.sopoints.sample') === 'on'; } catch { return false; }
+};
 
 export function SoPointsPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
-  if (PointsVersions) return <Suspense fallback={null}><PointsVersions address={address} provider={provider} Previous={SoPointsOriginal} /></Suspense>;
-  return <Stage address={address} provider={provider} sample={false} />;
+  return <Stage address={address} provider={provider} sample={devSample()} />;
 }
 
-/** The page before Stage: "Previous" in the localhost switch, kept until the owner says it can go; no build has it. */
+/** The page before Stage, no longer shown anywhere; kept until the owner says it can go. */
 export function SoPointsOriginal({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
   const c = usePointsContext(address, provider);
   const now = useNow();

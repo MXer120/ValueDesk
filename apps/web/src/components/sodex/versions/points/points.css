@@ -643,9 +643,11 @@ html[data-theme='light'] .spx-rk.is-r0 { color: #8a5a00; text-shadow: 0 0 8px rg
 .spx-lever:hover .spx-lever__go, .spx-lever:focus-visible .spx-lever__go { opacity: 1; transform: translate(0, -50%); }
 .spx-lever:active { background: rgb(var(--ink) / 0.07); }
 .spx-lever__skel { width: 44px; height: 18px; border-radius: 6px; }
+/* A touch screen has no hover: the row itself is the link, a chevron says so (no label squeezing the words). */
 @media (hover: none) {
-  .spx-lever__go { position: static; opacity: 1; transform: none; padding: 0; background: none; color: var(--tf-muted); font-size: 12px; }
-  .spx-lever { flex-wrap: wrap; }
+  .spx-lever__go { position: static; flex: none; opacity: 1; transform: none; padding: 0; background: none; color: var(--tf-faint); font-size: 0; gap: 0; }
+  .spx-lever:hover .rf-pay, .spx-lever:focus-visible .rf-pay { opacity: 1; transform: none; }
+  .spx-lever:active { background: rgb(var(--ink) / 0.06); }
 }
 
 .spx-cards__row.is-even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -793,3 +795,27 @@ html[data-theme='light'] .spx-rk.is-r0 { color: #8a5a00; text-shadow: 0 0 8px rg
   .spq-block__end { position: absolute; top: 14px; right: 14px; margin: 0; }
   .spq-block.is-join .spq-block__h { padding-right: 0; }
 }
+
+/* The live card's share (owner 2026-11-27: "a share button for this weeks estimate"). */
+.spx-live__acts { display: inline-flex; align-items: center; gap: 8px; }
+.spx-live__share { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: rgb(255 255 255 / 0.08); color: rgba(244, 244, 242, 0.8); cursor: pointer; transition: background-color 150ms var(--tf-ease), color 150ms var(--tf-ease); }
+.spx-live__share:hover { background: rgb(255 255 255 / 0.16); color: #f4f4f2; }
+.spx-live__share:focus-visible { outline: 2px solid var(--tf-brand); outline-offset: 2px; }
+
+/* The projection switch keeps its own size on a phone (the app's 44px touch rule stretched it); the hit area is
+   widened instead. */
+.spx-proj { display: inline-flex; align-items: center; gap: 8px; }
+/* The app's touch rule (`:root :is(button, …, input:not(…):not(…):not(…)):not(…)…`, min-height 44px) counts as seven
+   classes; the switch is a fixed 38x22 control with its hit area in ::after, so it opts out outright. */
+.spx .spx-proj .tf-switch { min-height: 0 !important; min-width: 0; }
+.spx .spx-proj .tf-switch::after { content: ''; position: absolute; inset: -11px -6px; }
+.spx-proj .tf-choice__l { font-size: 13px; color: var(--tf-muted); white-space: nowrap; }
+@media (max-width: 720px) {
+  .spx-wbar { row-gap: 10px; }
+  .spx-wbar .spx-proj { flex-basis: 100%; }
+  .spx-lever { gap: 10px; padding-left: 10px; padding-right: 10px; }
+  .spx-levers .rf-pay em { font-size: 15px; }
+}
+/* The squad header's pills keep their drawn size on a touch screen; the 44px hit area is in ::after. */
+.spq-pill, .spq-name { position: relative; min-height: 0 !important; }
+.spq-pill::after, .spq-name::after { content: ''; position: absolute; inset: -9px -4px; }

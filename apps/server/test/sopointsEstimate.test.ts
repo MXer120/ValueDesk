@@ -53,7 +53,8 @@ test('the wallet’s own weeks:quiet weeks give its extra, busy ones its ratio (
   assert.equal(c.weeks, 6);
   // raw ratio 1.5 shrunk by 4 / (4 + 2): 1 + 0.5 x 2/3
   assert.ok(Math.abs(c.ratio - 1.333) < 0.01, String(c.ratio));
-  assert.equal(c.referral, 4);
+  // Invited: half last week's 4, half the trend of 0, 1, 4, 4, 4, 4 a week on (rising): a little over 4.
+  assert.ok(c.referral > 4 && c.referral < 6, String(c.referral));
   const r4 = c.rows.find((r) => r.weekNo === 4)!;
   assert.equal(r4.explained, 20);
   assert.ok(Math.abs(r4.other - 15.2) < 0.2, String(r4.other)); // 39 x 1.25 = 48.75 → 49 points, / 1.25 − 4 = 35.2 own
