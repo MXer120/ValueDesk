@@ -68,8 +68,12 @@ const CHART_VIEWS: ReadonlyArray<readonly [ChartView, string]> = [['value', 'Tot
 
 // --- the numbers ------------------------------------------------------------------------
 
-export function useSummary(c: PortfolioContext, w: WealthState): { summary: PortfolioSummary; evmRows: Array<{ chain: string; chainLabel: string; symbol: string; usd: number }>; evmLoading: boolean } {
+/** What a page reads of the wallet on chain, when it reads more than the address menu's store (the On-chain tab). */
+export interface EvmOverride { rows: Array<{ chain: string; chainLabel: string; chainIcon?: string; symbol: string; usd: number }> | null; loading: boolean }
+
+export function useSummary(c: PortfolioContext, w: WealthState, evmOverride?: EvmOverride): { summary: PortfolioSummary; evmRows: Array<{ chain: string; chainLabel: string; chainIcon?: string; symbol: string; usd: number }>; evmLoading: boolean } {
   const totals = useAccountTotals(c.address);
+  const evmIn = evmOverride ? evmOverride.rows : totals.evm;
   const px = useAsync(() => coinPrices(), [], { pollMs: 60_000 });
   // The same shared feed the address menu and the Balances table read: no extra request.
   const spotState = useAccountResource(c.address ? `state:spot:${c.address}` : null, () => api.state('spot', c.address!), 20_000);
@@ -85,13 +89,13 @@ export function useSummary(c: PortfolioContext, w: WealthState): { summary: Port
   const summary = useMemo(() => summarize({
     perps: c.model.account ? c.model.account.accountValue : totals.perpsUsd,
     spot,
-    evm: totals.evm,
+    evm: evmIn,
     wealth: w.rows,
     venueTotal,
-  }), [c.model.account, totals.perpsUsd, spot, totals.evm, w.rows, venueTotal]);
+  }), [c.model.account, totals.perpsUsd, spot, evmIn, w.rows, venueTotal]);
   const claimed = useMemo(() => claimedCoins(w.rows), [w.rows]);
-  const evmRows = (totals.evm ?? []).filter((h) => h.usd >= 0.01 && !(h.chain === 'VALUECHAIN' && claimed.has(shareKey(h.symbol))));
-  return { summary, evmRows, evmLoading: !!c.address && totals.evmLoading };
+  const evmRows = (evmIn ?? []).filter((h) => h.usd >= 0.01 && !(h.chain === 'VALUECHAIN' && claimed.has(shareKey(h.symbol))));
+  return { summary, evmRows, evmLoading: !!c.address && (evmOverride ? evmOverride.loading : totals.evmLoading) };
 }
 
 /** SoDEX's 24-hour window (finer than the daily spine). Today's PnL and the chart's 24H read it. */

@@ -25,6 +25,7 @@ import type { ChartPoint } from '../../../performance';
 import { coinPrices, priceOf } from '../../../trading/prices';
 import { leaderboardPage, walletRank } from '../../../exchange/sodexData';
 import { useBotsAccess } from '../../../beta/access';
+import { useOnchain, type OnchainState } from './useOnchain';
 import { logLoadFailure } from '../../LoadFailed';
 
 export type Bucket = 'perps' | 'spot' | 'wealth' | 'evm';
@@ -34,7 +35,9 @@ export const BUCKETS: ReadonlyArray<{ key: Bucket; label: string; line: string }
   { key: 'perps', label: 'Perps', line: 'Margin and open positions' },
   { key: 'spot', label: 'Spot', line: 'Coins on SoDEX' },
   { key: 'wealth', label: 'Wealth', line: 'Funds and vaults' },
-  { key: 'evm', label: 'EVM', line: 'Your wallet, on chain' },
+  // On-chain (owner 2026-11-27 "add evm ... support non evm chains too"): the wallet on every EVM chain and the
+  // addresses added for other chains. The key stays `evm` (summary.ts, stored picks).
+  { key: 'evm', label: 'On-chain', line: 'Your wallets, every chain' },
 ];
 
 export interface Part { key: Bucket; label: string; line: string; usd: number | null; share: number | null }
@@ -53,8 +56,10 @@ export interface PfData {
   w: WealthState;
   s: PortfolioSummary;
   parts: Part[];
-  evmRows: Array<{ chain: string; chainLabel: string; symbol: string; usd: number }>;
+  evmRows: Array<{ chain: string; chainLabel: string; chainIcon?: string; symbol: string; usd: number }>;
   evmLoading: boolean;
+  /** Every chain: the On-chain tab's reads (useOnchain.ts). */
+  onchain: OnchainState;
   spotCoins: SpotCoin[] | null;
   vol7d: number | null;
   h24: ChartPoint[] | null;
@@ -104,7 +109,13 @@ const NONE = summarize({ perps: null, spot: null, evm: null, wealth: null, venue
 
 export function usePfData(c: PortfolioContext): PfData {
   const w = useWealth(c.address, c.refreshToken);
-  const { summary, evmRows, evmLoading } = useSummary(c, w);
+  const onchain = useOnchain(c);
+  // The On-chain bucket is what the On-chain tab reads (every chain), not the address menu's narrower store.
+  const evmOverride = useMemo(() => ({
+    rows: onchain.total === null ? null : onchain.counted.map((h) => ({ chain: h.chain, chainLabel: h.chainLabel, chainIcon: h.chainIcon, symbol: h.symbol, usd: h.usd! })),
+    loading: onchain.loading && onchain.total === null,
+  }), [onchain.counted, onchain.total, onchain.loading]);
+  const { summary, evmRows, evmLoading } = useSummary(c, w, evmOverride);
   // The shared account feed keeps its last read when the address goes away (a wallet disconnected, or the switch's
   // view of another wallet ended): with no wallet nothing is known, whatever the feed still holds.
   const s = c.address ? summary : NONE;
@@ -150,7 +161,7 @@ export function usePfData(c: PortfolioContext): PfData {
   }, [s]);
 
   return {
-    c, w, s, parts, evmRows, evmLoading, spotCoins, vol7d, h24, today, week, weekValues,
+    c, w, s, parts, evmRows, evmLoading, onchain, spotCoins, vol7d, h24, today, week, weekValues,
     fees: { perps: asRate(perpsFee.data), spot: asRate(spotFee.data) },
     month, ever, ranked, botsOpen,
   };

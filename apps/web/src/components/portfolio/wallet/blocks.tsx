@@ -196,19 +196,35 @@ export function ViewAll({ label, onClick, dir = 'right' }: { label: string; onCl
   );
 }
 
-/** The wallet's coins on the EVM chains. No table of its own below, so the rows past `limit` open in place. */
-export function EvmList({ d, limit }: { d: PfData; limit?: number }) {
+/** The coins on chain, largest first; past `limit`, the way to the On-chain tab (or, without one, all of them here). */
+export function EvmList({ d, limit, onAll }: { d: PfData; limit?: number; onAll?: () => void }) {
   const m = useMasks();
   const [all, setAll] = useState(false);
-  if (d.evmRows.length === 0) return <p className="pfv-quiet">{d.evmLoading ? 'Reading your wallet…' : 'Nothing on ValueChain or the other EVM chains.'}</p>;
+  if (d.evmRows.length === 0) return <p className="pfv-quiet">{d.evmLoading ? 'Reading your wallets…' : 'Nothing on chain.'}</p>;
   const cut = limit !== undefined && d.evmRows.length > limit;
+  if (cut && onAll) {
+    return (
+      <>
+        <ul className="pfv-coins">
+          {d.evmRows.slice(0, limit).map((h) => (
+            <li key={`${h.chain}:${h.symbol}`}>
+              <span className="pfv-coins__ic"><CoinIcon coin={h.symbol} size={24} /><CoinIcon chain={h.chainIcon ?? h.chain} size={12} className="pfv-coins__chain" /></span>
+              <span className="pfv-coins__t">{h.symbol}<small>{h.chainLabel}</small></span>
+              <b>{m.funds(fmtUsd(h.usd))}</b>
+            </li>
+          ))}
+        </ul>
+        <ViewAll label={`View all ${d.evmRows.length} on chain`} onClick={onAll} />
+      </>
+    );
+  }
   const rows = cut && !all ? d.evmRows.slice(0, limit) : d.evmRows;
   return (
     <>
       <ul className="pfv-coins">
         {rows.map((h) => (
           <li key={`${h.chain}:${h.symbol}`}>
-            <span className="pfv-coins__ic"><CoinIcon coin={h.symbol} size={24} /><CoinIcon chain={h.chain} size={12} className="pfv-coins__chain" /></span>
+            <span className="pfv-coins__ic"><CoinIcon coin={h.symbol} size={24} /><CoinIcon chain={h.chainIcon ?? h.chain} size={12} className="pfv-coins__chain" /></span>
             <span className="pfv-coins__t">{h.symbol}<small>{h.chainLabel}</small></span>
             <b>{m.funds(fmtUsd(h.usd))}</b>
           </li>
@@ -565,10 +581,14 @@ export function ApyFig({ apy }: { apy: number | null }) {
 
 // --- the account band -------------------------------------------------------------------------------------------
 
-export type Section = 'perps' | 'spot' | 'wealth' | 'copy' | 'bots';
+export type Section = 'all' | 'perps' | 'spot' | 'wealth' | 'onchain' | 'copy' | 'bots';
+/** The accounts, where money is (owner 2026-11-27: "Perps spot wealth add evm ... Add an all tab too"). */
 const SECTION_TABS: Array<SegOption<Section>> = [
-  { value: 'perps', label: 'Perps' }, { value: 'spot', label: 'Spot' }, { value: 'wealth', label: 'Wealth' }, { value: 'copy', label: 'Copy trading' }, { value: 'bots', label: 'Bots' },
+  { value: 'all', label: 'All' }, { value: 'perps', label: 'Perps' }, { value: 'spot', label: 'Spot' }, { value: 'wealth', label: 'Wealth' }, { value: 'onchain', label: 'On-chain' },
 ];
+/** What runs inside them, split off to the right ("split copy trading & bots of to the right side"). */
+const AUTO_TABS: Array<SegOption<Section>> = [{ value: 'copy', label: 'Copy trading' }, { value: 'bots', label: 'Bots' }];
+export const SECTIONS: readonly Section[] = [...SECTION_TABS, ...AUTO_TABS].map((t) => t.value);
 
 /** The trade page's account tables, untouched, for one engine. `select` switches to one of its tabs (a "View all"). */
 export function Band({ c, engine, select }: { c: PortfolioContext; engine: 'perps' | 'spot'; select?: { key: string; n: number } | null }) {
@@ -589,8 +609,14 @@ export function Band({ c, engine, select }: { c: PortfolioContext; engine: 'perp
   );
 }
 
+/** Two groups: the accounts on the left, copy trading and bots on the right (one row; they wrap under on a phone). */
 export function SectionTabs({ value, onChange }: { value: Section; onChange: (s: Section) => void }) {
-  return <Tabs tabs={SECTION_TABS} value={value} onChange={onChange} label="Accounts" className="pfv-sectabs" />;
+  return (
+    <div className="pfv-sectabs2">
+      <Tabs tabs={SECTION_TABS} value={value} onChange={onChange} label="Accounts" className="pfv-sectabs" />
+      <Tabs tabs={AUTO_TABS} value={value} onChange={onChange} label="Automation" className="pfv-sectabs is-auto" />
+    </div>
+  );
 }
 
 export function CopiesPanel({ onOpenTab }: { onOpenTab: (t: Tab) => void }) {

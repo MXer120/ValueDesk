@@ -156,10 +156,10 @@ async function fakeBook(ctx: BrowserContext) {
 const page = (p: Page) => ({
   /** The card: the page is up. */
   ready: () => p.locator('.pfv3-card').waitFor({ timeout: 30_000 }),
-  /** An account's row in Accounts (Perps, Spot, Wealth, EVM) and its figure. */
+  /** An account's row in Accounts (Perps, Spot, Wealth, On-chain) and its figure. */
   row: (label: string) => p.locator('.pfv3-accounts .pfv-legend__row', { has: p.locator('.pfv-legend__k', { hasText: new RegExp(`^${label}$`) }) }),
   value: (label: string) => page(p).row(label).locator('.pfv-legend__v b'),
-  /** The band's account tabs (Perps, Spot, Wealth, Copy trading, Bots). */
+  /** The band's tabs: All, Perps, Spot, Wealth, On-chain, and on the right Copy trading, Bots (owner 2026-11-27). */
   section: (name: string) => p.locator('.pfv3-band').getByRole('tab', { name, exact: true }),
   /** Wealth, the view: from its account's drawer. */
   openWealth: async () => {
@@ -197,12 +197,12 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   await p.goto(new URL('/portfolio', origin).href);
   await clearOverlays(p);
   await page(p).ready();
-  for (const label of ['Wealth', 'Spot', 'Perps', 'EVM']) await until(p, async () => (await page(p).value(label).innerText()).includes('$'), `the ${label} account`, 20_000);
+  for (const label of ['Wealth', 'Spot', 'Perps', 'On-chain']) await until(p, async () => (await page(p).value(label).innerText()).includes('$'), `the ${label} account`, 20_000);
   const money = async (label: string) => num((await page(p).value(label).innerText()).replace(/[^0-9.,]/g, ''));
   const perps = await money('Perps');
   const spot = await money('Spot');
   const wealth = await money('Wealth');
-  const evm = await money('EVM').catch(() => 0);
+  const evm = await money('On-chain').catch(() => 0);
   const total = num((await p.locator('.pfv3-card__v').innerText()).replace(/[^0-9.,]/g, ''));
   assert.ok(Math.abs(total - (perps + spot + wealth + evm)) < 0.02, `total ${total} = ${perps} + ${spot} + ${wealth} + ${evm}`);
   // 1290 + 315 + 505 settled, minus the 404 of soUSDC pledged in Perps, plus 120 in flight.
@@ -273,7 +273,7 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   await p.getByRole('dialog').first().waitFor();
   await shot(p, 'fee-sheet', false);
   await p.keyboard.press('Escape');
-  for (const name of ['Spot', 'Wealth', 'Copy trading', 'Bots']) {
+  for (const name of ['All', 'Spot', 'Wealth', 'On-chain', 'Copy trading', 'Bots']) {
     await page(p).section(name).click();
     await p.waitForTimeout(700);
     await shot(p, `section-${name.toLowerCase().replace(' ', '-')}`);

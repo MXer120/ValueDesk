@@ -29,10 +29,12 @@ import { Private } from '../../../privacy';
 import { usePfData, type Bucket, type PfData } from './data';
 import {
   AllocBar, AllocLegend, AllocationNote, ApyFig, Band, EngineSwitch, EvmList, Exposure, FeeRates, Fig, Identity, ManageCopies, MarginMeter,
-  MoneyKeys, RangeSwitch, SectionTabs, SharePnl, SpotList, TradeSummary, CopiesPanel, BotsPanel,
+  MoneyKeys, RangeSwitch, SECTIONS, SectionTabs, SharePnl, SpotList, TradeSummary, CopiesPanel, BotsPanel,
   health, signedUsd, tone, useMasks, useOffers, type Section,
 } from './blocks';
 import { Holdings, WealthArea } from './WealthArea';
+import { AllView } from './AllView';
+import { OnchainPanel } from './Onchain';
 import type { PortfolioContext } from '../../Portfolio';
 import '../../bots/kit/kit.css';
 import '../../bots/botsPages.css';
@@ -65,7 +67,7 @@ function Inside({ k, d, c, onWealth, onAll, onOpenMarket, provider }: {
     );
   }
   if (k === 'spot') return <div className="pfv3-in"><SpotList d={d} limit={ROWS} onAll={() => onAll('spot', 'balances')} /></div>;
-  if (k === 'evm') return <div className="pfv3-in"><EvmList d={d} limit={ROWS} /></div>;
+  if (k === 'evm') return <div className="pfv3-in"><EvmList d={d} limit={ROWS} onAll={() => onAll('onchain')} /></div>;
   return (
     <div className="pfv3-in">
       <Holdings w={d.w} address={c.address} provider={provider} onOpenMarket={onOpenMarket} onDone={c.onChanged} readOnly={c.readOnly} compact limit={ROWS - 1} picks={2} onAll={onWealth} />
@@ -147,7 +149,9 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab }: Wallet
   const [open, setOpen] = useStored<Bucket | null>('vs.pfv3.open', 'perps');
   const [engine, setEngine] = useStored<'perps' | 'spot'>('vs.pfv.sum.engine', 'perps');
   const [sumRange, setSumRange] = useStored<Period>('vs.pfv.sum.period', '30D');
-  const [section, setSection] = useStored<Section>('vs.pfv.section', 'perps');
+  // All first (owner 2026-11-27): a new key, so a pick stored before the tabs changed does not hold.
+  const [storedSection, setSection] = useStored<Section>('vs.pfv.section2', 'all');
+  const section: Section = SECTIONS.includes(storedSection) ? storedSection : 'all';
   // A "View all" picks the band's account and one of its tables (positions, balances), then brings the band into view.
   const [select, setSelect] = useState<{ key: string; n: number } | null>(null);
   const bandRef = useRef<HTMLElement>(null);
@@ -239,10 +243,12 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab }: Wallet
     <Shell className="pfv3-band" ref={bandRef}>
       <div className="pfv3-band__bar">
         <SectionTabs value={section} onChange={(s) => { setSelect(null); setSection(s); }} />
-        {(section === 'copy' || section === 'bots') && <AllocationNote />}
       </div>
-      <Panel className="pfv3-band__body">
-        {section === 'perps' || section === 'spot' ? <Band c={c} engine={section} select={select} />
+      {(section === 'copy' || section === 'bots') && <div className="pfv3-band__note"><AllocationNote /></div>}
+      <Panel className={`pfv3-band__body${section === 'all' || section === 'onchain' ? ' is-grow' : ''}`}>
+        {section === 'all' ? <div className="pfv-pad"><AllView d={d} onSection={(s) => { setSelect(null); setSection(s); }} /></div>
+          : section === 'onchain' ? <div className="pfv-pad"><OnchainPanel o={d.onchain} /></div>
+          : section === 'perps' || section === 'spot' ? <Band c={c} engine={section} select={select} />
           : section === 'wealth' ? <div className="pfv-scroll pfv-pad"><Holdings w={d.w} address={c.address} provider={provider} onOpenMarket={onOpenMarket} onDone={c.onChanged} readOnly={c.readOnly} picks={4} onAll={goWealth} /></div>
           : section === 'copy' ? <div className="pfv-scroll pfv-pad"><CopiesPanel onOpenTab={onOpenTab} /></div>
           : <div className="pfv-scroll pfv-pad"><BotsPanel c={c} provider={provider} botsOpen={d.botsOpen} onOpenTab={onOpenTab} /></div>}

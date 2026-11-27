@@ -298,6 +298,15 @@
                                 a Hyperliquid trader's fills), Lighter, Arcus - every user's exchange
                                 traffic leaves from their own browser and IP,
                                 never through ValueDesk (docs/ARCH-traffic.md);
+                    + the Portfolio's On-chain tab (trading/chainHoldings.ts),
+                                read-only: LI.FI's wallet balances (every EVM
+                                chain, one request), Blockscout explorers (NFTs),
+                                and one public service per other chain for the
+                                addresses a user adds (Bitcoin, Solana, Tron, TON,
+                                Sui, Aptos, Cosmos, XRP, Stellar, NEAR, ...).
+                                NFT pictures: img-src allows only Blockscout's
+                                image cache and one IPFS gateway; a picture
+                                anywhere else is not loaded.
                                 the WalletConnect relay (wss) and its wallet list
                                 (api.web3modal.org), and its usage reports
                                 (pulse.walletconnect.org) - sent only with the
@@ -363,7 +372,7 @@
         default-src 'self';
         script-src 'self' 'wasm-unsafe-eval';
         style-src 'self' 'unsafe-inline';
-        img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net;
+        img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net https://nft-prod.blockscout.com https://ipfs.filebase.io;
         frame-src https://verify.walletconnect.org https://www.youtube.com https://player.twitch.tv https://player.kick.com https://player.vimeo.com;
         worker-src 'self';
         media-src 'self' blob:;
@@ -384,6 +393,14 @@
           https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
           https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
           https://*.boltdns.net https://*.brightcovecdn.com
+          https://li.quest
+          https://eth.blockscout.com https://explorer.optimism.io https://zksync.blockscout.com https://unichain.blockscout.com
+          https://worldchain-mainnet.explorer.alchemy.com https://soneium.blockscout.com https://explorer.inkonchain.com
+          https://celo.blockscout.com https://explorer.mode.network https://blockscout.lisk.com https://rootstock.blockscout.com
+          https://mempool.space https://litecoinspace.org https://api.blockcypher.com https://solana-rpc.publicnode.com
+          https://api.trongrid.io https://toncenter.com https://tonapi.io https://graphql.mainnet.sui.io
+          https://api.mainnet.aptoslabs.com https://rest.cosmos.directory https://xrplcluster.com
+          https://horizon.stellar.org https://free.rpc.fastnear.com
           wss://api.valuedesk.so https://api.valuedesk.so;
         form-action 'none';
         base-uri 'none';
