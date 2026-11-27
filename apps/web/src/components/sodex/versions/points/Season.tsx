@@ -290,10 +290,14 @@ export function Climb({ weeks, ahead }: { weeks: readonly AnyWeek[]; ahead?: Ahe
   const phone = usePhone();
   const [at, setAt] = useState<number | null>(null);
   const cum = useMemo(() => { let t = 0; return weeks.map((w) => (t += w.split.week.points)); }, [weeks]);
+  const end = cum.at(-1) ?? 0;
+  // The weeks to come, added up: each week's own estimate on the total so far.
+  const proj = useMemo(() => {
+    let m = end, b = end, q = end;
+    return (ahead?.weeks ?? []).map((x) => ({ no: x.no, mid: (m += x.mid), busy: (b += x.busy), quiet: (q += x.quiet) }));
+  }, [ahead, end]);
   if (!weeks.length) return <div className="rfc is-empty"><p>Your season draws here from the first scored week.</p></div>;
-  const end = cum.at(-1)!;
-  const k = ahead && ahead.to >= ahead.from ? ahead.to - ahead.from + 1 : 0;
-  const proj = Array.from({ length: k }, (_, i) => ({ no: ahead!.from + i, mid: end + ahead!.mid * (i + 1), busy: end + ahead!.busy * (i + 1), quiet: end + ahead!.quiet * (i + 1) }));
+  const k = proj.length;
   const n = weeks.length + k;
   const reach = proj.length ? proj.at(-1)!.quiet : end;
   // The next tier above the season's reach stays on the axis while it is in sight: the goal.
@@ -335,7 +339,7 @@ export function Climb({ weeks, ahead }: { weeks: readonly AnyWeek[]; ahead?: Ahe
           {pAt ? (<>
             <small>Layer 1 · Week {pAt.no}, estimate</small>
             <span className="is-est"><i />Season so far<b>≈ {pts(pAt.mid)}</b></span>
-            <span><i style={{ opacity: 0 }} />Busy to quiet<b>{pts(pAt.busy)} – {pts(pAt.quiet)}</b></span>
+            <span><i style={{ opacity: 0 }} />Range<b>{pts(pAt.busy)} – {pts(pAt.quiet)}</b></span>
           </>) : (<>
             <small>{weeks[at]!.name}</small>
             <span className="is-own"><i />Points so far<b>{pts(cum[at]!)}</b></span>

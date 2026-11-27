@@ -48,6 +48,8 @@ export interface EstCalib {
   referral: number;
   weeks: number;
   rows: Array<{ weekNo: number; own: number; explained: number; other: number }>;
+  /** The wallet's weekly points trend: week k+1 ahead against this week, and the scatter around it (log scale). */
+  trend?: { growth: number; sigma: number; factors: number[] };
 }
 
 export interface EstAnswer {
@@ -83,8 +85,8 @@ const memo = new Map<string, Promise<EstAnswer | null>>();
 const MEMO_MAX = 200;
 
 /** The server's answer, or null (no model, offline, refused). The same body is asked once. */
-export function fetchEstimate(plans: readonly EstPlan[], weeks: readonly EstWeek[] | null): Promise<EstAnswer | null> {
-  const body = JSON.stringify(weeks && weeks.length ? { plans, weeks } : { plans });
+export function fetchEstimate(plans: readonly EstPlan[], weeks: readonly EstWeek[] | null, ahead = 0): Promise<EstAnswer | null> {
+  const body = JSON.stringify(weeks && weeks.length ? { plans, weeks, ahead } : { plans });
   const hit = memo.get(body);
   if (hit) return hit;
   const p = fetch('/api/vs/sopoints/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'omit', body })
@@ -128,8 +130,9 @@ export interface EstState {
  * Plans priced by the server. `null` plans: nothing asked. The first answer is asked at once, later changes after
  * `debounceMs`; `keepKey` keeps the last answer in this browser for the next visit (a wallet's address, a page's name).
  */
-export function useEstimate(plans: readonly EstPlan[] | null, weeks: readonly EstWeek[] | null, opts: { debounceMs?: number; keepKey?: string | null } = {}): EstState {
-  const key = useMemo(() => (plans ? JSON.stringify([plans, weeks ?? null]) : null), [plans, weeks]);
+export function useEstimate(plans: readonly EstPlan[] | null, weeks: readonly EstWeek[] | null, opts: { debounceMs?: number; keepKey?: string | null; ahead?: number } = {}): EstState {
+  const ahead = opts.ahead ?? 0;
+  const key = useMemo(() => (plans ? JSON.stringify([plans, weeks ?? null, ahead]) : null), [plans, weeks, ahead]);
   const keepKey = opts.keepKey ?? null;
   const [st, setSt] = useState<EstState>(() => ({ data: kept(keepKey), loading: !!plans, failed: false }));
   const first = useRef(true);
@@ -138,7 +141,7 @@ export function useEstimate(plans: readonly EstPlan[] | null, weeks: readonly Es
     let live = true;
     setSt((s) => ({ ...s, loading: true }));
     const go = () => {
-      void fetchEstimate(plans, weeks).then((a) => {
+      void fetchEstimate(plans, weeks, ahead).then((a) => {
         if (!live) return;
         if (a) keep(keepKey, a);
         setSt((s) => ({ data: a ?? s.data, loading: false, failed: !a && !s.data }));

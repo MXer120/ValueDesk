@@ -12,7 +12,7 @@ import type { S2Week, WeekSplit } from '../../soPointsV2';
 import { estWeeks, useEstimate, type EstBand } from '../../sopointsEstimate';
 import {
   Clock, DASH, EstPill, STEPS, SignInPanel, WeekPill, boostedOf, coefText, estPlan, leverPlans, levers, logScale, money, plusPct, pts, ptsEst,
-  useSignIn, usePointsView, weekRange, type Plan, type PointsView,
+  stepsFor, useSignIn, usePointsView, usualOf, weekRange, type Plan, type PointsView,
 } from './shared';
 
 const FUT = logScale(3, 7, true);
@@ -53,11 +53,12 @@ export function Planner({ address, provider, sample }: { address: string | null;
   }, [v.mine, lastL1, v.squad]);
   const set = (p: Partial<Plan>) => { setPlan((x) => ({ ...x, ...p })); setFrom(null); };
   const weeksIn = useMemo(() => (v.mine ? estWeeks(v.all) : null), [v.mine, v.all]);
-  const plans = useMemo(() => leverPlans(plan, b.coef), [plan, b.coef]);
+  const steps = useMemo(() => stepsFor(usualOf(v.mine ? v.all : [], START)), [v.mine, v.all]);
+  const plans = useMemo(() => leverPlans(plan, b.coef, steps), [plan, b.coef, steps]);
   const est = useEstimate(plans, weeksIn, { debounceMs: 160 });
   const own = est.data?.plans[0] ?? null;
   const mult = 1 + plan.squadPct / 100;
-  const list = levers(plan, b.coef, v.mine ? v.squad : null, c.boost, v.mine ? v.last?.split.referral ?? null : null, est.data?.plans ?? null, b.rows[0]?.symbol ?? null);
+  const list = levers(plan, b.coef, v.mine ? v.squad : null, c.boost, v.mine ? v.last?.split.referral ?? null : null, est.data?.plans ?? null, { steps, refEst: v.mine ? est.data?.calib?.referral ?? 0 : 0, boosted: b.rows.map((r) => r.symbol), bot: 'BTC' });
   const maxSquad = c.boost?.maxTotalBonusPct ?? 50;
   const fromWeek = from ? v.all.find((w) => w.key === from) ?? null : null;
   return (

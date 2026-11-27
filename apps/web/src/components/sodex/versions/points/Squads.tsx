@@ -44,8 +44,18 @@ const CopyIcon = () => (
 );
 
 const Bolt = ({ size = 14 }: { size?: number }) => (
-  <svg className="spq-bolt" viewBox="0 0 16 16" width={size} height={size} aria-hidden="true"><path d="M9.2 1.2 3 9h4.2l-.9 5.8L12.6 7H8.4z" fill="currentColor" /></svg>
+  <svg className="spq-bolt" viewBox="0 0 16 16" width={size} height={size} aria-hidden="true"><path d="M9.6 1.2 3.3 9.1h4.3l-1.1 5.7 6.2-7.9H8.4l1.2-5.7z" fill="currentColor" /></svg>
 );
+
+/** SoDEX's rule, behind an ⓘ beside "Squad Energy" as SoDEX shows it (owner 2026-11-27: the boxed note was too much). */
+function EnergyInfo({ window }: { window: number }) {
+  return (
+    <span className="spx-tip spq-info">
+      <button type="button" aria-label="What is Squad Energy?"><Icon name="info" size={13} /></button>
+      <span role="tooltip" className="spx-tip__box">$1 traded by a squad’s members is 1 energy, counted over the last {window} weeks. More energy, a bigger boost on every point of every member.</span>
+    </span>
+  );
+}
 
 type Which = 'built' | 'joined';
 
@@ -95,9 +105,6 @@ export function Squads({ v }: { v: PointsView }) {
             : <JoinSquad v={v} />}
         </div>
       )}
-      {cfg && (
-        <p className="spq-rule"><span className="spq-rule__i"><Bolt size={13} /></span><span><b>$1 traded by a squad is 1 energy</b>, counted over the last {cfg.windowRounds} weeks. More energy, a bigger boost on every point of every member.</span></p>
-      )}
       {open && q && cfg && <SquadInfo v={v} which={open} name={names[open]} cfg={cfg} list={d.members?.[open] ?? null} onClose={() => setOpen(null)} onShare={() => { setOpen(null); setShare(open); }} />}
       {share && v.mine && <SquadShare v={v} which={share} name={names[share]} onClose={() => setShare(null)} />}
       {naming && v.c.address && <NameSquad address={v.c.address} onClose={() => setNaming(false)} onDone={(name) => { if (d.names) d.setNames({ ...d.names, built: name, canSet: false, alreadySet: true }); d.bump(); }} />}
@@ -132,19 +139,19 @@ function SquadBlock({ name, named = true, cfg, volume, pct, members, onOpen, onS
         )}
         <span className="spq-block__end">
           {pct > 0 && <span className="spq-boost">{plusPct(pct)}</span>}
-          {onShare && <button type="button" className="spq-share" onClick={onShare} aria-label={`Share ${name}`} title="Share"><Icon name="share" size={14} /></button>}
+          {onShare && <button type="button" className="spq-share" onClick={onShare} aria-label={`Share ${name}`} title="Share"><Icon name="share" size={18} /></button>}
         </span>
       </div>
       {volume !== null && (
         <div className="spq-block__e">
-          <span className="spq-chip"><Bolt size={16} /><b className="sx-num">{energy(vol)}</b><span>Squad Energy</span></span>
+          <span className="spq-chip"><Bolt size={14} /><b className="sx-num">{energy(vol)}</b><span>Squad Energy</span><EnergyInfo window={cfg.windowRounds} /></span>
           <span className="spq-next">{nxt ? <>Earn <Bolt size={12} /><b className="sx-num">{energy(Number(nxt.threshold) - vol)}</b> more to reach <em>{plusPct(nxt.bonusPct)}</em></> : <>Top step reached</>}</span>
         </div>
       )}
       <div className="spq-track" role="img" aria-label={volume === null ? `Squad steps: ${steps.map((s) => `${plusPct(s.bonusPct)} at ${energy(Number(s.threshold))}`).join(', ')}` : `${name}: ${energy(vol)} energy, ${pct ? plusPct(pct) : 'no boost yet'}`}>
         <div className="spq-track__bar">
           <i style={{ width: `${volume === null ? 0 : fill}%` }} />
-          {volume !== null && vol > 0 && <span className="spq-knob" style={{ left: `${fill}%` }}><Bolt size={11} /></span>}
+          {volume !== null && vol > 0 && <span className="spq-knob" style={{ left: `${fill}%` }}><Bolt size={12} /></span>}
           {steps.map((s, i) => <span key={s.threshold} className={`spq-dot${i < reached ? ' is-on' : i === reached && volume !== null ? ' is-next' : ''}`} style={{ left: `${((i + 1) / steps.length) * 100}%` }} />)}
         </div>
         <ol className="spq-steps">
@@ -263,7 +270,7 @@ function SquadInfo({ v, which, name, cfg, list, onClose, onShare }: { v: PointsV
       footer={<div className="spq-dlg__foot"><button type="button" className="dlg-btn" onClick={onShare}><Icon name="share" size={14} />Share</button><button type="button" className="dlg-btn is-go" onClick={onClose}>Done</button></div>}>
       <div className="dlg spq-dlg__body">
         <div className="spq-dlg__hero">
-          <span className="spq-chip is-big"><Bolt size={18} /><b className="sx-num">{energy(q.volume)}</b><span>Squad Energy</span></span>
+          <span className="spq-chip is-big"><Bolt size={16} /><b className="sx-num">{energy(q.volume)}</b><span>Squad Energy</span><EnergyInfo window={cfg.windowRounds} /></span>
           <span className={`spq-boost${q.pct ? '' : ' is-zero'}`}>{q.pct ? plusPct(q.pct) : 'No boost yet'}</span>
         </div>
         <dl className="spq-dlg__kv">

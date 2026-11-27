@@ -520,8 +520,11 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
 
 /* ------------------------------------------------------------------ round 3 (owner 2026-11-27) ----- */
 
-.spx { --spx-est: #7fb8f0; --spx-gold: #e6c15a; --spx-amber: #f0a43a; }
-html[data-theme='light'] .spx { --spx-est: #2f6fb3; --spx-gold: #a87a12; --spx-amber: #c4741a; }
+.spx { --spx-est: #7fb8f0; --spx-gold: #e6c15a; --spx-amber: #f0a43a; --spx-teal: #3ccfc0; }
+html[data-theme='light'] .spx { --spx-est: #2f6fb3; --spx-gold: #a87a12; --spx-amber: #c4741a; --spx-teal: #0f8f84; }
+/* The bot row's market changes in place: the new one fades in. */
+.spx-rot { animation: spx-rot-in 320ms var(--tf-ease); }
+@keyframes spx-rot-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
 /* This week's card: no "Live SoPoints · Week N" line, the number, then its range as a small chart. */
 .spx-live__k { font-size: 13px; font-weight: 600; color: rgba(244, 244, 242, 0.72); }
@@ -603,14 +606,19 @@ html[data-theme='light'] .spx { --spx-est: #2f6fb3; --spx-gold: #a87a12; --spx-a
 .spx-tbl__info:focus-visible { outline: 2px solid var(--tf-brand); outline-offset: 2px; }
 .spx-other { display: inline-block; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--spx-est) 14%, transparent); color: var(--spx-est); font-weight: 500; }
 .spx-rk { font-weight: 600; color: var(--tf-fg); }
+.spx-rk.is-r0 { color: #fff1c2; text-shadow: 0 0 10px rgb(230 193 90 / 0.75); }
+html[data-theme='light'] .spx-rk.is-r0 { color: #8a5a00; text-shadow: 0 0 8px rgb(230 193 90 / 0.6); }
 .spx-rk.is-r1 { color: var(--spx-gold); }
+.spx-rk.is-r5 { color: var(--spx-teal); }
 .spx-rk.is-r2 { color: var(--tf-pos, var(--pos)); }
 .spx-rk.is-r3 { color: var(--spx-est); }
 .spx-rk.is-r4 { color: var(--tf-fg); }
 .spx-weeks__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 20px; margin-top: 4px; }
 .spx-ranklegend { margin-top: 12px; }
 .spx-ranklegend i { border-radius: 50%; }
+.spx-ranklegend .is-r0 { background: radial-gradient(circle at 35% 35%, #fff6d6, #e6c15a); box-shadow: 0 0 6px rgb(230 193 90 / 0.8); }
 .spx-ranklegend .is-r1 { background: var(--spx-gold); }
+.spx-ranklegend .is-r5 { background: var(--spx-teal); }
 .spx-ranklegend .is-r2 { background: var(--tf-pos, var(--pos)); }
 .spx-ranklegend .is-r3 { background: var(--spx-est); }
 .spx-ranklegend .is-r4 { background: rgb(var(--ink) / 0.35); }
@@ -661,32 +669,37 @@ html[data-theme='light'] .spx { --spx-est: #2f6fb3; --spx-gold: #a87a12; --spx-a
 .spq-name:hover { background: color-mix(in srgb, var(--spx-amber) 26%, transparent); }
 .spq-boost { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 999px; background: color-mix(in srgb, var(--pos) 16%, transparent); color: var(--tf-pos, var(--pos)); font: 600 12.5px var(--font-num); }
 .spq-boost.is-zero { background: rgb(var(--ink) / 0.07); color: var(--tf-muted); font-family: var(--font-text); font-weight: 500; }
-.spq-share { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--tf-muted); cursor: pointer; transition: background-color 150ms var(--tf-ease), color 150ms var(--tf-ease); }
-.spq-share:hover { background: rgb(var(--ink) / 0.08); color: var(--tf-fg); }
+.spq-share { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: rgb(var(--ink) / 0.06); color: var(--tf-muted); cursor: pointer; transition: background-color 150ms var(--tf-ease), color 150ms var(--tf-ease); }
+.spq-share:hover { background: rgb(var(--ink) / 0.12); color: var(--tf-fg); }
 
 .spq-block__e { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 12px; }
 .spq-bolt { flex: none; color: var(--tf-pos, var(--pos)); }
+/* The energy: a small green chip, as SoDEX's (owner 2026-11-27: "too big, should be greenish"). */
 .spq-chip {
-  display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px 0 12px; border-radius: 12px;
-  background: #111214; color: #f4f4f2; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 10px; border-radius: 10px;
+  background: color-mix(in srgb, var(--pos) 11%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 24%, transparent);
 }
-.spq-chip b { font: 600 19px var(--font-num); letter-spacing: -0.01em; }
-.spq-chip span { font-size: 13px; color: rgba(244, 244, 242, 0.62); }
-.spq-chip.is-big { height: 48px; }
-.spq-chip.is-big b { font-size: 24px; }
+.spq-chip b { font: 600 15px var(--font-num); letter-spacing: -0.01em; color: var(--tf-fg); }
+.spq-chip > span:not(.spx-tip) { font-size: 12.5px; color: var(--tf-muted); }
+.spq-chip.is-big { height: 38px; padding: 0 10px 0 12px; }
+.spq-chip.is-big b { font-size: 20px; }
 .spq-next { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 13px; color: var(--tf-muted); }
 .spq-next b { font: 600 14px var(--font-num); color: var(--tf-fg); }
 .spq-next em { font-style: normal; font-weight: 600; color: var(--spx-amber); }
 
-.spq-track { margin-top: 18px; padding: 0 12px; }
-.spq-track__bar { position: relative; height: 8px; border-radius: 999px; background: rgb(var(--ink) / 0.1); }
-.spq-track__bar > i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--pos) 55%, transparent), var(--pos)); box-shadow: 0 0 12px -2px color-mix(in srgb, var(--pos) 70%, transparent); transition: width 500ms var(--tf-ease); }
-.spq-knob { position: absolute; top: 50%; display: grid; place-items: center; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; transform: translateY(-50%); background: #0c0d0e; color: var(--pos); box-shadow: 0 0 0 2px var(--pos), 0 0 12px color-mix(in srgb, var(--pos) 60%, transparent); }
-.spq-knob .spq-bolt { color: var(--pos); }
-.spq-dot { position: absolute; top: 50%; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; transform: translateY(-50%); background: var(--bg); box-shadow: inset 0 0 0 2px rgb(var(--ink) / 0.22); }
-.spq-dot.is-on { background: var(--pos); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pos) 25%, transparent); }
-.spq-dot.is-next { box-shadow: inset 0 0 0 2px var(--spx-amber), 0 0 0 3px color-mix(in srgb, var(--spx-amber) 18%, transparent); }
-.spq-steps { position: relative; height: 40px; margin: 10px 0 0; padding: 0; list-style: none; }
+/* The track: SoDEX's five equal steps, a node at each; the knob rides the end of the fill. */
+.spq-track { margin-top: 20px; padding: 0 12px; }
+.spq-track__bar { position: relative; height: 6px; border-radius: 999px; background: rgb(var(--ink) / 0.1); }
+.spq-track__bar > i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--pos) 50%, transparent), var(--pos)); transition: width 500ms var(--tf-ease); }
+.spq-dot { position: absolute; top: 50%; z-index: 1; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; transform: translateY(-50%); background: var(--bg); box-shadow: inset 0 0 0 2px rgb(var(--ink) / 0.24); }
+.spq-dot.is-on { background: var(--pos); box-shadow: 0 0 0 2px var(--bg); }
+.spq-dot.is-next { background: var(--bg); box-shadow: inset 0 0 0 2px var(--spx-amber); }
+.spq-knob {
+  position: absolute; top: 50%; z-index: 2; display: grid; place-items: center; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%;
+  transform: translateY(-50%); background: var(--pos); color: #07140d; box-shadow: 0 0 0 3px var(--bg), 0 0 14px color-mix(in srgb, var(--pos) 55%, transparent);
+}
+.spq-knob .spq-bolt { color: #07140d; }
+.spq-steps { position: relative; height: 40px; margin: 12px 0 0; padding: 0; list-style: none; }
 .spq-steps li { position: absolute; left: var(--at); display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); white-space: nowrap; }
 .spq-steps li:last-child { transform: translateX(-80%); align-items: flex-end; }
 .spq-steps b { font: 600 13px var(--font-num); color: var(--tf-faint); }
@@ -695,6 +708,19 @@ html[data-theme='light'] .spx { --spx-est: #2f6fb3; --spx-gold: #a87a12; --spx-a
 .spq-steps li.is-on small { color: var(--tf-muted); }
 .spq-steps li.is-next b { color: var(--spx-amber); }
 .spq-steps li.is-next small { color: var(--tf-muted); }
+
+/* An ⓘ with its words on hover or focus, in the page's own colours. */
+.spx-tip { position: relative; display: inline-flex; }
+.spx-tip > button { position: relative; display: grid; place-items: center; width: 18px; height: 18px; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--tf-faint); cursor: help; }
+.spx-tip > button::after { content: ''; position: absolute; inset: -12px; }
+.spx-tip > button:hover, .spx-tip > button:focus-visible { color: var(--tf-fg); outline: none; }
+.spx-tip__box {
+  position: absolute; z-index: 6; left: 50%; bottom: calc(100% + 10px); width: 250px; padding: 10px 12px; border-radius: 12px; transform: translate(-50%, 4px);
+  background: var(--rf-raise, var(--bg)); box-shadow: 0 0 0 1px var(--rf-hair, rgb(var(--ink) / 0.1)), 0 16px 32px -12px rgb(0 0 0 / 0.5);
+  font-size: 12px; line-height: 17px; color: var(--tf-muted); white-space: normal; text-align: left;
+  opacity: 0; visibility: hidden; transition: opacity 140ms var(--tf-ease), transform 140ms var(--tf-ease), visibility 0s 140ms;
+}
+.spx-tip:hover .spx-tip__box, .spx-tip:focus-within .spx-tip__box { opacity: 1; visibility: visible; transform: translate(-50%, 0); transition-delay: 0s; }
 
 .spq-block.is-join { display: flex; flex-direction: column; gap: 10px; }
 .spq-empty { margin: 0; font-size: 13px; line-height: 19px; color: var(--tf-muted); }
@@ -713,9 +739,6 @@ html[data-theme='light'] .spx { --spx-est: #2f6fb3; --spx-gold: #a87a12; --spx-a
 .spq-join__sq small { font: 400 12px var(--font-num); color: var(--tf-muted); }
 .spq-join__fine { flex-basis: 100%; font-size: 12px; line-height: 17px; color: var(--tf-muted); }
 
-.spq-rule { display: flex; align-items: flex-start; gap: 10px; margin: 16px 0 0; padding: 12px 14px; border-radius: 14px; background: rgb(var(--ink) / 0.03); font-size: 13px; line-height: 19px; color: var(--tf-muted); }
-.spq-rule b { color: var(--tf-fg); font-weight: 600; }
-.spq-rule__i { display: grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: color-mix(in srgb, var(--pos) 14%, transparent); }
 
 /* The squad's details and the naming dialog. */
 .spq-dlg__body { display: flex; flex-direction: column; gap: 16px; }
@@ -764,7 +787,6 @@ html[data-theme='light'] .spx { --spx-est: #2f6fb3; --spx-gold: #a87a12; --spx-a
 }
 .spx-qs > button { position: relative; min-width: 0; min-height: 0; }
 .spx-qs > button::after { content: ''; position: absolute; inset: -11px; }
-html[data-theme='light'] .spq-knob { background: var(--bg); }
 @media (max-width: 720px) {
   .spq-block { position: relative; }
   .spq-block__h { padding-right: 92px; }

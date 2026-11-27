@@ -14,7 +14,14 @@
  * model explains from that week's activity. What a quiet week earns anyway is carried as `extra`, the wallet's usual
  * distance from the model as `ratio` (shrunk toward 1 when few weeks say so), and its recent invited points as
  * `referral`. What the model cannot explain in a week is returned as that week's `other`: loyalty and consistency
- * rewards, bug reports, campaigns, or the model's own error.
+ * rewards, bug reports, campaigns, or the model's own error (SoDEX's own rounding of the week's points is not counted).
+ *
+ * The weeks to come (owner 2026-11-27: "projection needs to be more accurate ... the trend is slowly going down, use
+ * last 4 weeks or something, a combination of longterm and short term"): the wallet's points before the squad's boost,
+ * on a log scale, get two weighted line fits, a short one (the last 6 weeks, half-life 3 weeks) and a long one (every
+ * week from week 5, after the early-bird weeks, half-life 8 weeks). Their slopes are blended 65/35 and damped by 0.9 a
+ * week ahead, so a trend slows instead of running away; `factors[k]` is week k+1 ahead against this week, `sigma` the
+ * short fit's scatter (the range widens with it).
  */
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,6 +62,15 @@ export interface WeekIn {
   bonusPct?: number;
 }
 
+export interface Trend {
+  /** Weekly growth of the points before the squad's boost (log scale), blended short and long. */
+  growth: number;
+  /** Scatter of a week around the short fit (log scale). */
+  sigma: number;
+  /** Week k+1 ahead against this week. */
+  factors: number[];
+}
+
 export interface Calibration {
   ratio: number;
   extra: number;
@@ -62,6 +78,7 @@ export interface Calibration {
   /** Scored weeks the ratio and extra were read from. */
   weeks: number;
   rows: Array<{ weekNo: number; own: number; explained: number; other: number }>;
+  trend: Trend;
 }
 
 export interface PlanOut {
@@ -142,12 +159,52 @@ const ownAt = (m: ModelParams, score: number, rate: number) => (score > 0 ? rate
 
 /* ------------------------------------------------------------------------------------- the wallet's own ----- */
 
+/** A weighted least-squares line through (x, y); null with fewer than three points or no spread in x. */
+function fitLine(pts: Array<{ x: number; y: number; w: number }>): { a: number; b: number; sigma: number } | null {
+  if (pts.length < 3) return null;
+  const W = pts.reduce((t, p) => t + p.w, 0);
+  const mx = pts.reduce((t, p) => t + p.w * p.x, 0) / W;
+  const my = pts.reduce((t, p) => t + p.w * p.y, 0) / W;
+  const sxx = pts.reduce((t, p) => t + p.w * (p.x - mx) ** 2, 0);
+  if (sxx <= 0) return null;
+  const b = pts.reduce((t, p) => t + p.w * (p.x - mx) * (p.y - my), 0) / sxx;
+  const a = my - b * mx;
+  const sigma = Math.sqrt(pts.reduce((t, p) => t + p.w * (p.y - (a + b * p.x)) ** 2, 0) / W);
+  return { a, b, sigma };
+}
+
+const SHORT = { weeks: 6, half: 3 };
+const LONG = { from: 5, half: 8 };
+const BLEND = 0.65;
+const DAMP = 0.9;
+export const MAX_AHEAD = 30;
+
+/** The trend of a wallet's weekly points before the squad's boost, for `ahead` weeks after this one. */
+export function trendOf(rows: ReadonlyArray<{ weekNo: number; pre: number }>, ahead: number): Trend {
+  const n = Math.max(0, Math.min(MAX_AHEAD, Math.trunc(ahead)));
+  const last = rows.length ? rows[rows.length - 1]!.weekNo : 0;
+  const pts = (list: typeof rows, half: number) => list.map((r) => ({ x: r.weekNo, y: Math.log1p(Math.max(0, r.pre)), w: 0.5 ** ((last - r.weekNo) / half) }));
+  const short = fitLine(pts(rows.filter((r) => r.weekNo > last - SHORT.weeks), SHORT.half));
+  const longRows = rows.filter((r) => r.weekNo >= LONG.from);
+  const long = fitLine(pts(longRows.length >= 3 ? longRows : rows, LONG.half));
+  const g = short && long ? BLEND * short.b + (1 - BLEND) * long.b : short?.b ?? long?.b ?? 0;
+  const growth = Math.max(-0.2, Math.min(0.2, g));
+  const sigma = Math.max(0.04, Math.min(0.6, short?.sigma ?? long?.sigma ?? 0.25));
+  const factors: number[] = [];
+  let damp = 0;
+  for (let k = 1; k <= n; k++) {
+    damp += DAMP ** k;
+    factors.push(Math.round(Math.exp(growth * damp) * 10_000) / 10_000);
+  }
+  return { growth: Math.round(growth * 10_000) / 10_000, sigma: Math.round(sigma * 1000) / 1000, factors };
+}
+
 /** Weeks whose model part is under this many points count as quiet: what they earned is the wallet's extra. */
 const QUIET = 2;
 /** Weeks the ratio and extra are read from: the latest scored ones. */
 const RECENT = 8;
 
-export function calibrate(m: ModelParams, weeks: readonly WeekIn[]): Calibration {
+export function calibrate(m: ModelParams, weeks: readonly WeekIn[], ahead = 0): Calibration {
   const rows = weeks
     .filter((w) => Number.isInteger(w.weekNo) && w.weekNo > 0)
     .sort((a, b) => a.weekNo - b.weekNo)
@@ -157,7 +214,10 @@ export function calibrate(m: ModelParams, weeks: readonly WeekIn[]): Calibration
       const rate = m.weekRates[String(w.weekNo)] ?? m.rate.mid;
       // SoDEX's week volume already carries the boosted markets' weight, so no boost on top here.
       const explained = ownAt(m, scoreOf(m, activityOf(w, false)), rate);
-      return { weekNo: w.weekNo, own, explained, other: own - explained, referral: num(w.referral) };
+      // SoDEX rounds the week's points and the invited part to whole points: what that leaves is not "other".
+      const round = 0.5 / (1 + b / 100) + 0.55;
+      const other = Math.abs(own - explained) <= round ? 0 : own - explained;
+      return { weekNo: w.weekNo, own, explained, other, referral: num(w.referral), pre: num(w.points) / (1 + b / 100) };
     });
   const recent = rows.slice(-RECENT);
   const quiet = recent.filter((r) => r.explained < QUIET);
@@ -173,6 +233,7 @@ export function calibrate(m: ModelParams, weeks: readonly WeekIn[]): Calibration
     referral: r1(referral),
     weeks: recent.length,
     rows: rows.map((r) => ({ weekNo: r.weekNo, own: r1(r.own), explained: r1(r.explained), other: r1(r.other) })),
+    trend: trendOf(rows, ahead),
   };
 }
 
@@ -199,13 +260,13 @@ export const MAX_WEEKS = 40;
 
 /** The route's answer for one request body; null when the body is not a request. */
 export function answer(m: ModelParams, body: unknown): { model: { fittedOn: string; fittedAt: string }; plans: PlanOut[]; calib: Calibration | null } | null {
-  const b = (body ?? {}) as { plans?: unknown; weeks?: unknown };
+  const b = (body ?? {}) as { plans?: unknown; weeks?: unknown; ahead?: unknown };
   if (!Array.isArray(b.plans) || b.plans.length > MAX_PLANS) return null;
   if (b.weeks !== undefined && (!Array.isArray(b.weeks) || b.weeks.length > MAX_WEEKS)) return null;
   const plans = b.plans.filter((p): p is PlanIn => !!p && typeof p === 'object');
   const weeks = Array.isArray(b.weeks)
     ? b.weeks.filter((w): w is WeekIn => !!w && typeof w === 'object').map((w) => ({ ...w, weekNo: Math.trunc(Number(w.weekNo)) }))
     : [];
-  const calib = weeks.length ? calibrate(m, weeks) : null;
+  const calib = weeks.length ? calibrate(m, weeks, Number(b.ahead) || 0) : null;
   return { model: { fittedOn: m.fittedOn, fittedAt: m.fittedAt }, plans: plans.map((p) => estimatePlan(m, p, calib)), calib };
 }

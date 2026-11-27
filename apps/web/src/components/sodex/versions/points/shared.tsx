@@ -9,7 +9,7 @@
  */
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { usePointsContext, type PointsContext } from '../../../Points';
-import { TIERS, fetchVenueDaily, type BoostConfig, type DailyPoint, type WeekInfo } from '../../../../points';
+import { TIERS, type BoostConfig, type WeekInfo } from '../../../../points';
 import { SODEX_POINTS_SIGNIN_LIVE } from '../../../../sodexProgrammes';
 import type { Eip1193Provider } from '../../../../wallet';
 import { warmWalletModal } from '../../../../walletconnect';
@@ -49,31 +49,15 @@ export interface PointsView {
   pace: number | null;
 }
 
-/**
- * With the Sample on: the venue's own daily volume and open interest (SoDEX's public series, the same reads a sign-in
- * makes), so the platform's side of the cost-per-point chart is real while the wallet's side is the sample's.
- */
-function useSampleVenue(on: boolean): { vol: DailyPoint[]; oi: DailyPoint[] } | null {
-  const [d, setD] = useState<{ vol: DailyPoint[]; oi: DailyPoint[] } | null>(null);
-  useEffect(() => {
-    if (!on || d) return;
-    let live = true;
-    void Promise.allSettled([fetchVenueDaily('volume', 150), fetchVenueDaily('open-interest', 150)]).then(([a, b]) => {
-      if (live) setD({ vol: a.status === 'fulfilled' ? a.value : [], oi: b.status === 'fulfilled' ? b.value : [] });
-    });
-    return () => { live = false; };
-  }, [on, d]);
-  return d;
-}
-
 export function usePointsView(address: string | null, provider: Eip1193Provider | null, sample: boolean): PointsView {
   const c = usePointsContext(address, provider);
   const real = SODEX_POINTS_SIGNIN_LIVE && c.tokenPresent && !!address;
-  const v2 = useSoPointsV2(address, real && !sample);
-  const venue = useSampleVenue(sample);
-  const demo = useMemo(() => (sample ? { ...samplePoints(c.week, c.boost), venueDaily: venue?.vol ?? [], venueOiDaily: venue?.oi ?? [] } : null), [sample, c.week, c.boost, venue]);
+  // The venue's daily series are not read: no chart on this page uses them (owner 2026-11-27: faster).
+  const v2 = useSoPointsV2(address, real && !sample, { venue: false });
+  // The switch's Sample, on localhost only: a build drops this branch and the sample with it.
+  const demo = useMemo(() => (import.meta.env.DEV && sample ? samplePoints(c.week, c.boost) : null), [sample, c.week, c.boost]);
   const s = demo ?? v2;
-  const mine = sample || real;
+  const mine = (import.meta.env.DEV && sample) || real;
   return useMemo(() => {
     const all = mine ? allWeeks(s.s1, s.weeks) : [];
     const scored = all.filter((w) => w.split.week.pointsStatus === 'CONFIRMED');
@@ -354,10 +338,31 @@ export function SquadTracks({ v }: { v: PointsView }) {
 export type BarMetric = 'points' | 'total' | 'invited' | 'rank';
 
 /**
- * The weeks still to come, priced by the estimate (owner 2026-11-27: "make it possible to enable projections in the
- * chart"): Layer 1 weeks `from` to `to`, each earning `mid` points in a typical week, `busy` to `quiet` around it.
+ * The weeks still to come (owner 2026-11-27: "make it possible to enable projections in the chart"; "more accurate ...
+ * a combination of longterm and short term"): each Layer 1 week from this one to the season's last, its points in a
+ * typical week and the range around it. This week is the estimate; the weeks after follow the wallet's own trend.
  */
-export interface Ahead { from: number; to: number; mid: number; busy: number; quiet: number }
+export interface AheadWeek { no: number; mid: number; busy: number; quiet: number }
+export interface Ahead { weeks: AheadWeek[] }
+
+/**
+ * The projection from this week's estimate (`mid`, `busy`, `quiet`) and the wallet's trend (sopointsEstimate EstCalib
+ * trend): week k after this one is this week times factors[k-1]; its range is the wider of this week's busy-to-quiet
+ * and the trend's own scatter, which grows with the distance.
+ */
+export function aheadOf(from: number, to: number, wk: { mid: number; busy: number; quiet: number }, trend?: { sigma: number; factors: number[] } | null): Ahead {
+  const busyR = wk.mid > 0 ? wk.busy / wk.mid : 1;
+  const quietR = wk.mid > 0 ? wk.quiet / wk.mid : 1;
+  const sigma = trend?.sigma ?? 0;
+  const weeks: AheadWeek[] = [];
+  for (let no = from, k = 0; no <= to; no++, k++) {
+    const f = k === 0 ? 1 : trend?.factors[k - 1] ?? trend?.factors.at(-1) ?? 1;
+    const mid = wk.mid * f;
+    const spread = Math.exp(sigma * Math.sqrt(k + 1));
+    weeks.push({ no, mid, busy: mid * Math.min(busyR, 1 / spread), quiet: mid * Math.max(quietR, spread) });
+  }
+  return { weeks };
+}
 
 /** Every scored week as a column: own, from invitees and the squad's boost stacked; the invited part alone; or the
  * week's rank (1 at the top). With `ahead`, the weeks to come follow as estimated columns with their busy-to-quiet range. */
@@ -365,11 +370,11 @@ export function WeekBars({ weeks, metric = 'points', height = 220, ahead }: { we
   const [at, setAt] = useState<number | null>(null);
   const ws = metric === 'rank' ? weeks.filter((w) => w.split.week.rank > 0) : weeks;
   const none = metric === 'invited' && !ws.some((w) => w.split.referral > 0);
-  const fut = metric === 'points' && ahead && ahead.to >= ahead.from ? Array.from({ length: ahead.to - ahead.from + 1 }, (_, i) => ahead.from + i) : [];
+  const fut = metric === 'points' && ahead ? ahead.weeks : [];
   if (!ws.length || none) return <div className="rfc is-empty spx-bars" style={{ minHeight: height }}><p>{metric === 'rank' ? 'No ranked week yet.' : none ? 'No points from invitees yet.' : 'Your weeks draw here from the first scored one.'}</p></div>;
   const val = (w: AnyWeek) => (metric === 'invited' ? w.split.referral : w.split.week.points);
   const n = ws.length + fut.length;
-  const top = metric === 'rank' ? Math.max(10, ...ws.map((w) => w.split.week.rank)) : Math.max(1, ...ws.map(val), fut.length ? ahead!.quiet : 0);
+  const top = metric === 'rank' ? Math.max(10, ...ws.map((w) => w.split.week.rank)) : Math.max(1, ...ws.map(val), ...fut.map((x) => x.quiet));
   const decades = Math.ceil(Math.log10(top));
   const h = (w: AnyWeek) => (metric === 'rank' ? Math.max(0.04, 1 - Math.log10(Math.max(1, w.split.week.rank)) / Math.max(1, decades)) : val(w) / top);
   const every = Math.ceil(n / 9);
@@ -395,10 +400,10 @@ export function WeekBars({ weeks, metric = 'points', height = 220, ahead }: { we
             </span>
           </span>
         ))}
-        {fut.map((k, i) => (
-          <span key={`a${k}`} className={`is-ahead${at === ws.length + i ? ' is-on' : ''}${i === 0 ? ' is-first' : ''}`}>
-            <em className="spx-bars__range" style={{ bottom: pct(ahead!.busy), height: `${Math.max(0, ((ahead!.quiet - ahead!.busy) / top) * 100)}%` }} />
-            <span style={{ height: pct(ahead!.mid) }}><i className="is-est" style={{ flexGrow: 1 }} /></span>
+        {fut.map((x, i) => (
+          <span key={`a${x.no}`} className={`is-ahead${at === ws.length + i ? ' is-on' : ''}${i === 0 ? ' is-first' : ''}`}>
+            <em className="spx-bars__range" style={{ bottom: pct(x.busy), height: `${Math.max(0, ((x.quiet - x.busy) / top) * 100)}%` }} />
+            <span style={{ height: pct(x.mid) }}><i className="is-est" style={{ flexGrow: 1 }} /></span>
           </span>
         ))}
       </div>
@@ -407,9 +412,9 @@ export function WeekBars({ weeks, metric = 'points', height = 220, ahead }: { we
       {(w || f !== null) && at !== null && (
         <span className="rfc__tip" style={{ left: `clamp(90px, ${(100 / n) * (at + 0.5)}%, calc(100% - 90px))` }}>
           {f !== null ? (<>
-            <small>Layer 1 · Week {f}, estimate</small>
-            <span className="is-est"><i />Typical week<b>≈ {ptsEst(ahead!.mid)}</b></span>
-            <span><i style={{ opacity: 0 }} />Busy to quiet<b>{ptsEst(ahead!.busy)} – {ptsEst(ahead!.quiet)}</b></span>
+            <small>Layer 1 · Week {f.no}, estimate</small>
+            <span className="is-est"><i />Typical week<b>≈ {ptsEst(f.mid)}</b></span>
+            <span><i style={{ opacity: 0 }} />Range<b>{ptsEst(f.busy)} – {ptsEst(f.quiet)}</b></span>
           </>) : (<>
             <small>{w!.name}</small>
             {metric === 'rank' ? <span><i style={{ color: 'var(--rf-points)' }} />Rank<b>#{pts(w!.split.week.rank)}</b></span> : metric === 'invited' ? (<>
@@ -426,7 +431,7 @@ export function WeekBars({ weeks, metric = 'points', height = 220, ahead }: { we
       )}
       <span className="rfc__ax is-cells">
         {ws.map((x, i) => <i key={x.key}>{i % every === 0 ? x.short : ''}</i>)}
-        {fut.map((k, i) => <i key={`a${k}`}>{(ws.length + i) % every === 0 ? `L${k}` : ''}</i>)}
+        {fut.map((x, i) => <i key={`a${x.no}`}>{(ws.length + i) % every === 0 ? `L${x.no}` : ''}</i>)}
       </span>
     </div>
   );
@@ -435,22 +440,29 @@ export function WeekBars({ weeks, metric = 'points', height = 220, ahead }: { we
 export function BarsLegend({ metric = 'points', ahead = false }: { metric?: BarMetric; ahead?: boolean }) {
   if (metric === 'rank') return <ul className="spx-legend"><li><i className="is-own" />Rank, #1 at the top</li></ul>;
   if (metric === 'invited') return <ul className="spx-legend"><li><i className="is-referral" />From invitees, before the squad's boost</li></ul>;
-  return <ul className="spx-legend"><li><i className="is-own" />Own</li><li><i className="is-referral" />From invitees</li><li><i className="is-boost" />Squad boost</li>{ahead && <li><i className="is-est" />Estimate, busy to quiet week</li>}</ul>;
+  return <ul className="spx-legend"><li><i className="is-own" />Own</li><li><i className="is-referral" />From invitees</li><li><i className="is-boost" />Squad boost</li>{ahead && <li><i className="is-est" />Estimate, with its range</li>}</ul>;
 }
 
 /* -------------------------------------------------------------------------------- rank colour ----- */
 
 /**
  * A week's place among everyone SoDEX ranked that week, as a colour step (owner 2026-11-27: "totalpoints per week
- * colored depending on users rank in that week"): top 0.1% gold, top 1% green, top 10% blue, the rest plain.
+ * colored depending on users rank in that week"; then "needs to be top 0.01% too, and top 5%"): top 0.01%, 0.1%, 1%,
+ * 5%, 10%, the rest plain.
  */
+export const RANK_STEPS = [
+  { at: 0.01, cls: 'is-r0', label: 'Top 0.01%' },
+  { at: 0.1, cls: 'is-r1', label: 'Top 0.1%' },
+  { at: 1, cls: 'is-r2', label: 'Top 1%' },
+  { at: 5, cls: 'is-r5', label: 'Top 5%' },
+  { at: 10, cls: 'is-r3', label: 'Top 10%' },
+] as const;
+
 export function rankStep(rank: number, users: number): { cls: string; label: string } | null {
   if (!(rank > 0) || !(users > 0)) return null;
   const p = (rank / users) * 100;
-  if (p <= 0.1) return { cls: 'is-r1', label: 'Top 0.1%' };
-  if (p <= 1) return { cls: 'is-r2', label: 'Top 1%' };
-  if (p <= 10) return { cls: 'is-r3', label: 'Top 10%' };
-  return { cls: 'is-r4', label: `Top ${Math.ceil(p)}%` };
+  const s = RANK_STEPS.find((x) => p <= x.at);
+  return s ? { cls: s.cls, label: s.label } : { cls: 'is-r4', label: `Top ${Math.ceil(p)}%` };
 }
 
 /** "Top 0.61%": SoDEX's own words when it gave them, else rank over users. */
@@ -458,13 +470,13 @@ export const topText = (rank: number, users: number, given?: string): string => 
   if (given && /top/i.test(given)) return localize(given);
   if (!(rank > 0) || !(users > 0)) return DASH;
   const p = (rank / users) * 100;
-  return localize(`Top ${p < 1 ? Number(p.toFixed(2)) : Math.ceil(p)}%`);
+  return localize(`Top ${p < 0.1 ? Number(p.toFixed(3)) : p < 1 ? Number(p.toFixed(2)) : Math.ceil(p)}%`);
 };
 
 export function RankLegend() {
   return (
     <ul className="spx-legend spx-ranklegend" aria-label="Points coloured by rank that week">
-      <li><i className="is-r1" />Top 0.1%</li><li><i className="is-r2" />Top 1%</li><li><i className="is-r3" />Top 10%</li><li><i className="is-r4" />Below</li>
+      {RANK_STEPS.map((x) => <li key={x.cls}><i className={x.cls} />{x.label}</li>)}<li><i className="is-r4" />Below</li>
     </ul>
   );
 }
@@ -557,7 +569,7 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
                     <td className="right num">{w.rank ? `#${pts(w.rank)}` : DASH}</td>
                     {season === 'L1' && <td className={`right num${w.totalBonusPct ? ' pos' : ''}`}>{plusPct(w.totalBonusPct ?? 0)}</td>}
                     <td className="right num">{tbd ? DASH : pts(r.split.own)}</td>
-                    {season === 'L1' && <td className="right num">{tbd || o === null ? DASH : o >= 0.5 ? <span className="spx-other">≈ {ptsEst(o)}</span> : '0'}</td>}
+                    {season === 'L1' && <td className="right num">{tbd || o === null ? DASH : o >= 1 ? <span className="spx-other">≈ {ptsEst(o)}</span> : '0'}</td>}
                     <td className="right num">{tbd ? DASH : pts(r.split.referral)}</td>
                     {pointsCell}
                   </tr>
@@ -587,40 +599,85 @@ export interface Lever { id: string; icon: IconName; title: string; line: string
 /** A plan as the estimate reads it (SoDEX's boosted coefficient applied by the server). */
 export const estPlan = (p: Plan, coef: number): EstPlan => ({ futures: p.futures, spot: p.spot, oi: p.oi, wealth: p.wealth ?? 0, vault: p.vault ?? 0, boostedShare: p.boostedShare, coef });
 
-/** The plans the levers compare, in this order: the plan, all of it on boosted markets, $1K more held, $10K moved to spot, $10K more futures. */
-export function leverPlans(p: Plan, coef: number): EstPlan[] {
+/** The wallet's usual week: the median of its last four scored Layer 1 weeks (SoDEX's rows); the plan without them. */
+export interface Usual { futures: number; spot: number; oi: number }
+export function usualOf(all: readonly AnyWeek[], fallback: Plan): Usual {
+  const rows = all.filter((w) => w.season === 'L1' && w.split.week.pointsStatus === 'CONFIRMED').slice(-4).map((w) => w.split.week);
+  if (!rows.length) return { futures: fallback.futures, spot: fallback.spot, oi: fallback.oi };
+  const med = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2; };
+  return { futures: med(rows.map((w) => w.futuresVolume || 0)), spot: med(rows.map((w) => w.spotVolume || 0)), oi: med(rows.map((w) => w.oi ?? 0)) };
+}
+
+/** 1, 2 or 5 times a power of ten, nearest on a log scale: $1K, $2K, $5K, $10K ... */
+const nice = (x: number): number => {
+  const e = 10 ** Math.floor(Math.log10(x));
+  const m = x / e;
+  return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * e;
+};
+
+/**
+ * The levers' steps, sized to the wallet (owner 2026-11-27: "hold $1k more, hold 10k more etc should be dynamic
+ * depending on the wallets usual activity"): half its usual futures week more, its usual position held once more, a
+ * quarter of its futures moved to spot; never under $10K of volume or a $1K position.
+ */
+export interface Steps { volume: number; oi: number; spot: number }
+export const stepsFor = (u: Usual): Steps => ({
+  volume: nice(Math.min(5_000_000, Math.max(10_000, u.futures * 0.5))),
+  oi: nice(Math.min(1_000_000, Math.max(1_000, u.oi))),
+  spot: nice(Math.min(1_000_000, Math.max(10_000, u.futures * 0.25))),
+});
+
+/** The plans the levers compare, in this order: the plan, on boosted markets, a step more held, a step moved to spot,
+ * a step more futures (a bot's week too). */
+export function leverPlans(p: Plan, coef: number, st: Steps): EstPlan[] {
+  // On boosted markets: the futures it trades moved there, or (already there, or none yet) a step more traded there.
+  const boosted: Plan = p.futures > 0 && p.boostedShare < 0.95
+    ? { ...p, boostedShare: 1 }
+    : { ...p, futures: p.futures + st.volume, boostedShare: (p.futures * p.boostedShare + st.volume) / (p.futures + st.volume) };
   return [
     estPlan(p, coef),
-    estPlan({ ...p, boostedShare: 1 }, coef),
-    estPlan({ ...p, oi: p.oi + 1000 }, coef),
-    estPlan(p.futures >= 10_000 ? { ...p, futures: p.futures - 10_000, spot: p.spot + 10_000 } : p, coef),
-    estPlan({ ...p, futures: p.futures + 10_000 }, coef),
+    estPlan(boosted, coef),
+    estPlan({ ...p, oi: p.oi + st.oi }, coef),
+    estPlan(p.futures >= st.spot ? { ...p, futures: p.futures - st.spot, spot: p.spot + st.spot } : p, coef),
+    estPlan({ ...p, futures: p.futures + st.volume }, coef),
   ];
 }
 
+/** The markets the bot row cycles through (owner 2026-11-27: "bot ... switching between btc eth and xaut"). */
+export const BOT_MARKETS = ['BTC', 'ETH', 'XAUT'] as const;
+
 /**
  * What would move this week's points most, ranked by points gained: the squad's next step, boosted markets, a held
- * position, spot. `bands` are the server's answers for leverPlans (null while they load: the rows show without figures).
- * Each row goes where it is done (owner 2026-11-27: squad and invites to the Referrals page, trading to the trade page).
+ * position, spot, more volume, a bot. `bands` are the server's answers for leverPlans (null while they load: the rows
+ * show without figures). The squad's boost lifts the invited points too (SoDEX: points = (own + invited) x (1 + boost),
+ * exact on every measured week), so its gain counts `refEst`, the wallet's usual invited points. Each row goes where it
+ * is done (owner 2026-11-27: squad and invites to the Referrals page, trading to the trade page, the bot to New bot).
  */
-export function levers(p: Plan, coef: number, squad: SquadBreakdown | null, cfg: BoostConfig | null, lastRef: number | null, bands: readonly EstBand[] | null, boostedSymbol: string | null): Lever[] {
+export function levers(p: Plan, coef: number, squad: SquadBreakdown | null, cfg: BoostConfig | null, lastRef: number | null, bands: readonly EstBand[] | null,
+  o: { steps: Steps; refEst: number; boosted: readonly string[]; bot: string }): Lever[] {
   const mult = 1 + p.squadPct / 100;
   const ok = bands && bands.length >= 5;
-  const base = ok ? bands[0]!.mid : null;
+  const base = ok ? bands[0]!.mid + o.refEst : null;
   const gainAt = (i: number) => (ok ? (bands[i]!.mid - bands[0]!.mid) * mult : null);
+  const st = o.steps;
   const out: Lever[] = [];
   if (cfg) {
     const steps = [squad?.built.next && { who: 'your squad', ...squad.built.next, from: squad.built.pct }, squad?.joined.next && squad.joined.volume > 0 && { who: 'the squad you joined', ...squad.joined.next, from: squad.joined.pct }]
       .filter(Boolean) as Array<{ who: string; threshold: number; pct: number; missing: number; from: number }>;
     const best = steps.sort((a, b) => a.missing - b.missing)[0];
-    if (best) out.push({ id: 'squad', icon: 'layers', title: `Next squad step, ${plusPct(best.pct)}`, line: `${money(best.missing)} more in ${best.who} over ${cfg.windowRounds} weeks lifts every point`, gain: base !== null ? base * ((best.pct - best.from) / 100) : null, value: '', est: true, href: '/referrals', go: 'Grow your squad' });
+    if (best) out.push({ id: 'squad', icon: 'layers', title: `Next squad step, ${plusPct(best.pct)}`, line: `${money(best.missing)} more in ${best.who} over ${cfg.windowRounds} weeks lifts every point, invited ones too`, gain: base !== null ? base * ((best.pct - best.from) / 100) : null, value: '', est: true, href: '/referrals', go: 'Grow your squad' });
     else if (!squad) { const first = stepsOf(cfg)[0]; if (first) out.push({ id: 'squad', icon: 'layers', title: `A squad, up to ${plusPct(cfg.maxTotalBonusPct)}`, line: `From ${money(Number(first.threshold))} a squad's volume adds ${plusPct(first.bonusPct)} to every point`, gain: base !== null ? base * (first.bonusPct / 100) : null, value: '', est: true, href: '/referrals', go: 'Build a squad' }); }
   }
   const trade = (sym: string | null) => (sym ? `/trade?symbol=${encodeURIComponent(sym)}` : '/trade');
-  if (coef > 1 && p.futures > 0 && p.boostedShare < 1) out.push({ id: 'boosted', icon: 'bolt', title: `Boosted markets, ${coefText(coef)}`, line: 'Trade the same futures volume on the boosted markets', gain: gainAt(1), value: '', est: true, href: trade(boostedSymbol), go: boostedSymbol ? `Trade ${boostedSymbol.replace(/-USD$/, '')}` : 'Trade' });
-  out.push({ id: 'hold', icon: 'clock', title: 'Hold a $1K position all week', line: 'Open interest counts every hour a position is open', gain: gainAt(2), value: '', est: true, href: '/trade', go: 'Open a position' });
-  if (p.futures >= 10_000) out.push({ id: 'spot', icon: 'coins', title: 'Move $10K from futures to spot', line: 'Spot volume counts more than futures', gain: gainAt(3), value: '', est: true, href: '/trade', go: 'Trade spot' });
-  out.push({ id: 'more', icon: 'chart', title: 'Trade $10K more futures', line: 'Volume earns less per dollar as it grows', gain: gainAt(4), value: '', est: true, href: '/trade', go: 'Trade' });
+  if (coef > 1) {
+    const names = o.boosted.slice(0, 3).map((x) => x.replace(/-USD$/, '')).join(', ');
+    const move = p.futures > 0 && p.boostedShare < 0.95;
+    out.push({ id: 'boosted', icon: 'bolt', title: move ? `Trade on boosted markets, ${coefText(coef)}` : `Trade ${money(st.volume)} on boosted markets`, line: `${names}${o.boosted.length > 3 ? ' and more' : ''} count ${coefText(coef)}${move ? ': the same futures volume there' : ''}`, gain: gainAt(1), value: '', est: true, href: trade(o.boosted[0] ?? null), go: o.boosted[0] ? `Trade ${o.boosted[0].replace(/-USD$/, '')}` : 'Trade' });
+  }
+  out.push({ id: 'hold', icon: 'clock', title: `Hold ${money(st.oi)} more, all week`, line: 'An open position counts every hour it is open', gain: gainAt(2), value: '', est: true, href: '/trade', go: 'Open a position' });
+  if (p.futures >= st.spot) out.push({ id: 'spot', icon: 'coins', title: `Move ${money(st.spot)} from futures to spot`, line: 'Spot volume counts more than futures', gain: gainAt(3), value: '', est: true, href: '/trade', go: 'Trade spot' });
+  out.push({ id: 'more', icon: 'chart', title: `Trade ${money(st.volume)} more futures`, line: 'Volume earns less per dollar as it grows', gain: gainAt(4), value: '', est: true, href: '/trade', go: 'Trade' });
+  out.push({ id: 'bot', icon: 'robot', title: `Start a bot on ${o.bot}`, line: `A bot trading about ${money(st.volume)} a week for you, around the clock`, gain: gainAt(4), value: '', est: true, href: `/bots/new?market=${encodeURIComponent(`${o.bot}-USD`)}`, go: 'Start a bot' });
   out.sort((a, b) => (b.gain ?? 0) - (a.gain ?? 0));
   out.push({ id: 'invite', icon: 'share', title: 'Invite traders', line: lastRef ? `Your invitees earned you ${pts(lastRef)} last week, before your squad's boost` : 'You get 25% of what they earn, they get +5%', gain: null, value: '25%', est: false, href: '/referrals', go: 'Invite' });
   return out.map((l) => ({ ...l, value: l.value || (l.gain !== null ? `+${ptsEst(Math.max(0, l.gain))}` : '') }));

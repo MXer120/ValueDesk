@@ -21,17 +21,17 @@ import { Icon, IconTile, Segmented, Skeleton, Slider, Switch } from '../../../bo
 import { HeatGrid } from '../../../referrals/CreditCalendar';
 import { pointsGrid } from '../../../referrals/calendar';
 import { SeasonCard, SoPointsCard, TIER_STYLE } from '../../SoPointsMine';
-import { DifficultyChart, PointsMix } from '../../pointsCharts';
 import { estWeeks, useEstimate, type EstAnswer, type EstState } from '../../sopointsEstimate';
 import { Climb, Ladder } from './Season';
 import { Field, START, planOf } from './Planner';
 import { PointsShare } from './PointsShare';
 import { Squads } from './Squads';
 import {
-  BarsLegend, BoostedMarkets, DASH, EstPill, SignInButton, SignInPanel, WeekBars, WeekPill, WeeksTable,
-  STEPS, boostedOf, coefText, estPlan, leverPlans, levers, logScale, money, plusPct, pts, ptsEst, useSignIn, usePointsView,
-  type Ahead, type BarMetric, type Plan, type PointsView,
+  BOT_MARKETS, BarsLegend, BoostedMarkets, DASH, EstPill, SignInButton, SignInPanel, WeekBars, WeekPill, WeeksTable,
+  STEPS, aheadOf, boostedOf, coefText, estPlan, leverPlans, levers, logScale, money, plusPct, pts, ptsEst, stepsFor, useSignIn, usePointsView, usualOf,
+  type Ahead, type BarMetric, type Plan, type PointsView, type Steps,
 } from './shared';
+import './points.css';
 
 export function Stage({ address, provider, sample }: { address: string | null; provider: Eip1193Provider | null; sample: boolean }) {
   const v = usePointsView(address, provider, sample);
@@ -49,10 +49,14 @@ export function Stage({ address, provider, sample }: { address: string | null; p
   const b = boostedOf(c);
   // One question to the server per change: this week's plan and the levers' plans, with the wallet's scored weeks.
   const weeksIn = useMemo(() => (v.mine ? estWeeks(v.all) : null), [v.mine, v.all]);
-  const plans = useMemo(() => leverPlans(live.plan, b.coef), [live.plan, b.coef]);
-  const est = useEstimate(plans, weeksIn, { debounceMs: 160, keepKey: v.sample ? null : v.mine && c.address ? `stage:${c.address.toLowerCase()}` : 'stage:out' });
+  // The levers' steps follow the wallet's usual week (the median of its last four), not the plan's sliders.
+  const steps = useMemo(() => stepsFor(usualOf(v.mine ? v.all : [], START)), [v.mine, v.all]);
+  const plans = useMemo(() => leverPlans(live.plan, b.coef, steps), [live.plan, b.coef, steps]);
+  const aheadN = week ? Math.max(0, RULES.seasonWeeks - week.weekNo) : 0;
+  const est = useEstimate(plans, weeksIn, { debounceMs: 160, ahead: aheadN, keepKey: v.sample ? null : v.mine && c.address ? `stage:${c.address.toLowerCase()}` : 'stage:out' });
   const wk = weekEstimate(est.data, live.plan.squadPct, v.mine);
-  const ahead: Ahead | null = wk && week ? { from: week.weekNo, to: RULES.seasonWeeks, mid: wk.mid, busy: wk.busy, quiet: wk.quiet } : null;
+  // This week by the estimate, the weeks after it by the wallet's own trend (short and long blended, damped).
+  const ahead: Ahead | null = useMemo(() => (wk && week ? aheadOf(week.weekNo, RULES.seasonWeeks, wk, v.mine ? est.data?.calib?.trend ?? null : null) : null), [wk?.mid, wk?.busy, wk?.quiet, week, v.mine, est.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const other = useMemo(() => (est.data?.calib ? new Map(est.data.calib.rows.map((r) => [r.weekNo, r.other])) : null), [est.data]);
   return (
     <div className="tf bots-page rf-page sx spx">
@@ -83,10 +87,8 @@ export function Stage({ address, provider, sample }: { address: string | null; p
           {v.mine ? <MineCol v={v} /> : <PublicCol v={v} />}
           {/* Signed out, the weeks wait for a sign-in; what a week earns is the live card's (its sliders shut, owner 2026-11-27). */}
           <section className="spx-panel" aria-label="Your weeks">{v.mine ? <WeeksPanel v={v} ahead={ahead} /> : <SignInPanel c={c} line={c.address ? 'Your weeks, as SoDEX scored them' : undefined} />}</section>
-          <EarnMore v={v} plan={live.plan} est={est} />
+          <EarnMore v={v} plan={live.plan} est={est} steps={steps} refEst={v.mine ? est.data?.calib?.referral ?? 0 : 0} />
         </div>
-
-        {v.mine && <Analytics v={v} />}
 
         <div className="spx-duo">
           <Squads v={v} />
@@ -217,10 +219,6 @@ function LiveCard({ v, live, est, adjust, onAdjust, controls }: { v: PointsView;
     ...(coef > 1 && plan.boostedShare > 0 ? [{ k: 'Boosted', v: `${Math.round(plan.boostedShare * 100)}%` }] : []),
     { k: 'Squad', v: plusPct(plan.squadPct) },
   ];
-  // What of the wallet's past the number carries, said once and plainly.
-  const past = v.mine && wk && wk.weeks > 0
-    ? [wk.extra >= 0.5 ? `${ptsEst(wk.extra)} a quiet week earns you anyway` : null, wk.ref >= 0.5 ? `≈ ${ptsEst(wk.ref)} from invitees` : null].filter(Boolean).join(' · ')
-    : '';
   return (
     <div className="spx-tilt tf-tilt" ref={tilt.ref} onPointerMove={tilt.onMove} onPointerLeave={tilt.onLeave}>
       <section className="spx-card spx-live" aria-label="SoPoints this week, estimated" aria-busy={est.loading || undefined}>
@@ -233,7 +231,6 @@ function LiveCard({ v, live, est, adjust, onAdjust, controls }: { v: PointsView;
           <span>{est.failed && !wk ? 'No estimate right now' : 'SoPoints'}</span>
         </div>
         {wk ? <RangeChart busy={wk.busy} mid={wk.mid} quiet={wk.quiet} /> : <div className="spx-range is-wait" aria-hidden="true" />}
-        {past && <small className="spx-live__past">Includes {past}, from your last {wk!.weeks} {wk!.weeks === 1 ? 'week' : 'weeks'}.</small>}
         <div className="spx-live__foot">
           <div className="spx-live__src">
             <span>{source}</span>
@@ -399,7 +396,7 @@ function WeeksPanel({ v, ahead }: { v: PointsView; ahead: Ahead | null }) {
   const all = v.scored.reduce((t, w) => t + w.split.week.points, 0);
   const canProj = (metric === 'points' && show === 'chart') || metric === 'total';
   const a = proj && canProj ? ahead : null;
-  const end = ahead ? all + ahead.mid * (ahead.to - ahead.from + 1) : null;
+  const end = ahead ? all + ahead.weeks.reduce((t, x) => t + x.mid, 0) : null;
   return (
     <>
       <div className="rf-earn__bar spx-wbar">
@@ -425,11 +422,12 @@ function WeeksPanel({ v, ahead }: { v: PointsView; ahead: Ahead | null }) {
  * Ranked by points gained this week, against this week's plan (the live card's, so Adjust re-ranks them). Every row
  * goes where it is done (owner 2026-11-27: "earn more needs to have hover effects & e.g. clickable").
  */
-function EarnMore({ v, plan, est }: { v: PointsView; plan: Plan; est: EstState }) {
+function EarnMore({ v, plan, est, steps, refEst }: { v: PointsView; plan: Plan; est: EstState; steps: Steps; refEst: number }) {
   const { c } = v;
   const b = boostedOf(c);
-  const first = b.rows[0]?.symbol ?? null;
-  const list = levers(plan, b.coef, v.mine ? v.squad : null, c.boost, v.mine ? v.last?.split.referral ?? null : null, est.data?.plans ?? null, first);
+  const bot = useRotating(BOT_MARKETS, 2600);
+  const list = levers(plan, b.coef, v.mine ? v.squad : null, c.boost, v.mine ? v.last?.split.referral ?? null : null, est.data?.plans ?? null,
+    { steps, refEst, boosted: b.rows.map((r) => r.symbol), bot });
   return (
     <section className="spx-earn" aria-label="Earn more">
       <div className="spx-earn__h"><h3>Earn more</h3><EstPill /></div>
@@ -439,7 +437,7 @@ function EarnMore({ v, plan, est }: { v: PointsView; plan: Plan; est: EstState }
           <li key={l.id}>
             <a className="spx-lever" href={l.href} aria-label={`${l.title}: ${l.go}`}>
               <IconTile icon={l.icon} />
-              <span><b>{l.title}</b><small>{l.line}</small></span>
+              <span><b key={l.id === 'bot' ? l.title : undefined} className={l.id === 'bot' ? 'spx-rot' : undefined}>{l.title}</b><small>{l.line}</small></span>
               <span className="rf-pay">{l.value ? <em className={l.gain !== null && l.gain > 0 ? 'is-credit' : undefined}>{l.value}</em> : l.est ? <Skeleton className="spx-lever__skel" /> : null}{l.gain !== null && <small>a week</small>}</span>
               <span className="spx-lever__go" aria-hidden="true">{l.go}<Icon name="arrowRight" size={13} /></span>
             </a>
@@ -450,21 +448,12 @@ function EarnMore({ v, plan, est }: { v: PointsView; plan: Plan; est: EstState }
   );
 }
 
-/* ------------------------------------------------------------------------- Original's analytics ----- */
-
-/**
- * The analytics only Original had, in Original's own cards: where the points come from (pointsCharts PointsMix) and the
- * cost per point against the venue's (DifficultyChart). Points over the season live in the weeks panel's Total now.
- * With the Sample on, the cost chart reads no trade history: the wallet's side is the sample's, the venue's side SoDEX's.
- */
-function Analytics({ v }: { v: PointsView }) {
-  const pool = v.week?.weekPoolPoints ?? null;
-  return (
-    <div className="pf sdx spx-cards">
-      <div className="spx-cards__row is-even">
-        <PointsMix s={v.s} />
-        <DifficultyChart s={v.s} pool={pool} address={v.sample ? null : v.c.address} />
-      </div>
-    </div>
-  );
+/** One of `items` after another, every `ms` (the bot row's market). Stops while the tab is hidden. */
+function useRotating<T>(items: readonly T[], ms: number): T {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => { if (!document.hidden) setI((x) => (x + 1) % items.length); }, ms);
+    return () => window.clearInterval(t);
+  }, [items.length, ms]);
+  return items[i % items.length]!;
 }

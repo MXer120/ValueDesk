@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
 import { SOPOINTS_ESTIMATE_LIMIT, sopointsEstimateRoutes } from '../src/routes/sopointsEstimate.js';
-import { calibrate, estimatePlan, loadParams, parseParams, type ModelParams } from '../src/valuedesk/sodex/sopointsModel.js';
+import { calibrate, estimatePlan, loadParams, parseParams, trendOf, type ModelParams } from '../src/valuedesk/sodex/sopointsModel.js';
 
 // Made-up: half-power, 10 points per 10,000 in a typical week.
 const M: ModelParams = {
@@ -107,3 +107,22 @@ test('the private file: read, checked, missing or broken means no model', () => 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('the trend: a slowly falling wallet keeps falling, damped; SoDEX’s rounding is no "other"', () => {
+  // The owner's test wallet 2026-11-27 (referral-only, squad +5..+30%): weeks 5-12 as SoDEX scored them.
+  const weeks = [[5, 86, 66, 30], [6, 95, 76, 25], [7, 71, 65, 10], [8, 63, 60, 5], [9, 60, 57, 5], [10, 57, 54, 5], [11, 53, 50, 5], [12, 57, 54, 5]]
+    .map(([weekNo, points, referral, bonusPct]) => ({ weekNo: weekNo!, points: points!, referral: referral!, bonusPct: bonusPct! }));
+  const c = calibrate(M, weeks, 8);
+  assert.ok(c.trend.growth < 0 && c.trend.growth > -0.1, String(c.trend.growth));
+  assert.equal(c.trend.factors.length, 8);
+  assert.ok(c.trend.factors.every((f, i) => f < 1 && (i === 0 || f <= c.trend.factors[i - 1]!)), c.trend.factors.join());
+  // Damped: the eighth week falls less than eight first weeks would.
+  assert.ok(c.trend.factors[7]! > c.trend.factors[0]! ** 8);
+  // 53 / 1.05 - 50 = 0.48 and the like: rounding, not points.
+  assert.ok(c.rows.every((r) => r.other === 0), JSON.stringify(c.rows));
+  // Growing weeks grow; one or two weeks give no trend.
+  assert.ok(trendOf([1, 2, 3, 4, 5, 6].map((n) => ({ weekNo: n, pre: 10 * 1.1 ** n })), 3).growth > 0.05);
+  assert.equal(trendOf([{ weekNo: 3, pre: 9 }], 2).growth, 0);
+  assert.deepEqual(trendOf([], 0).factors, []);
+});
+

@@ -461,35 +461,70 @@ export interface S2State {
   error: string | null;
 }
 
-export function useSoPointsV2(address: string | null, signedIn: boolean): S2State {
+const EMPTY: S2State = { summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, bonus: null, venueDaily: [], loading: false, error: null };
+const KEPT = 'vs.sp.v2.';
+
+/** The wallet's last answer in this browser (its own figures, its own device), so a return visit draws at once. */
+function keptState(address: string): Pick<S2State, 'summary' | 'weeks' | 's1' | 'bonus'> | null {
+  try {
+    const raw = localStorage.getItem(KEPT + address.toLowerCase());
+    if (!raw) return null;
+    const k = JSON.parse(raw) as Pick<S2State, 'summary' | 'weeks' | 's1' | 'bonus'>;
+    return Array.isArray(k.weeks) && Array.isArray(k.s1) ? k : null;
+  } catch {
+    return null;
+  }
+}
+function keepState(address: string, k: Pick<S2State, 'summary' | 'weeks' | 's1' | 'bonus'>): void {
+  try { localStorage.setItem(KEPT + address.toLowerCase(), JSON.stringify(k)); } catch { /* storage full or off: the next visit reads again */ }
+}
+
+/**
+ * The wallet's SoPoints from SoDEX (signed in). Fast (owner 2026-11-27: "make sopoints page data load faster"): the last
+ * answer kept in this browser shows at once, each read fills its part as it lands instead of all waiting for the
+ * slowest, and the venue's daily series (only the cost-per-point charts use them) are read only when asked for.
+ */
+export function useSoPointsV2(address: string | null, signedIn: boolean, opts: { venue?: boolean } = {}): S2State {
+  const venue = opts.venue !== false;
   // Loading from the first render when the wallet is signed in, so nothing shows a default before the reads start.
-  const [s, set] = useState<S2State>({ summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, bonus: null, venueDaily: [], loading: !!address && signedIn, error: null });
+  const [s, set] = useState<S2State>(() => {
+    const k = address && signedIn ? keptState(address) : null;
+    return { ...EMPTY, ...(k ?? {}), loading: !!address && signedIn, error: null };
+  });
   useEffect(() => {
-    if (!address || !signedIn) { set({ summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, bonus: null, venueDaily: [], loading: false, error: null }); return; }
+    if (!address || !signedIn) { set(EMPTY); return; }
     let live = true;
-    set((x) => ({ ...x, loading: true, error: null }));
-    void Promise.allSettled([fetchS2Summary(address), fetchS2Weeks(address), fetchS2TeamBonus(address), fetchVenueDaily('volume', 90), fetchS1Weeks(address), fetchVenueDaily('open-interest', 90), fetchMmDaily(Date.now() - 90 * 86_400_000)]).then(([a, b, c, d, e, g, h]) => {
+    const k = keptState(address);
+    // Another wallet's figures never stay on screen: start from this wallet's kept answer, or from nothing.
+    set({ ...EMPTY, ...(k ?? {}), loading: true, error: null });
+    const put = (p: Partial<S2State>) => { if (live) set((x) => ({ ...x, ...p })); };
+    const sum = fetchS2Summary(address).then((v) => { put({ summary: v }); return v; });
+    const wks = fetchS2Weeks(address).then((v) => { put({ weeks: v }); return v; });
+    const bon = fetchS2TeamBonus(address).then((v) => { put({ bonus: v }); return v; });
+    const s1 = fetchS1Weeks(address).then((v) => { put({ s1: v }); return v; });
+    if (venue) {
+      void fetchVenueDaily('volume', 90).then((v) => put({ venueDaily: v })).catch(() => undefined);
+      void fetchVenueDaily('open-interest', 90).then((v) => put({ venueOiDaily: v })).catch(() => undefined);
+      void fetchMmDaily(Date.now() - 90 * 86_400_000).then((v) => put({ mmDays: v?.days ?? null })).catch(() => undefined);
+    }
+    // Loaded once the wallet's own three reads are in; Season 1 follows on its own.
+    void Promise.allSettled([sum, wks, bon]).then(([a, b, c]) => {
       if (!live) return;
       const err = [a, b, c].find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
-      logWeeks(address, {
-        summary: a.status === 'fulfilled' ? a.value : null,
-        bonus: c.status === 'fulfilled' ? c.value : null,
-        layer1: b.status === 'fulfilled' ? b.value : [],
-        season1: e.status === 'fulfilled' ? e.value : [],
-      });
-      set({
+      set((x) => ({ ...x, loading: false, error: err ? String((err.reason as Error)?.message ?? err.reason) : null }));
+    });
+    void Promise.allSettled([sum, wks, bon, s1]).then(([a, b, c, e]) => {
+      if (!live) return;
+      const got = {
         summary: a.status === 'fulfilled' ? a.value : null,
         weeks: b.status === 'fulfilled' ? b.value : [],
-        s1: e.status === 'fulfilled' ? e.value : [],
-        venueOiDaily: g.status === 'fulfilled' ? g.value : [],
-        mmDays: h.status === 'fulfilled' ? h.value?.days ?? null : null,
         bonus: c.status === 'fulfilled' ? c.value : null,
-        venueDaily: d.status === 'fulfilled' ? d.value : [],
-        loading: false,
-        error: err ? String((err.reason as Error)?.message ?? err.reason) : null,
-      });
+        s1: e.status === 'fulfilled' ? e.value : [],
+      };
+      if (a.status === 'fulfilled' && b.status === 'fulfilled') keepState(address, got);
+      logWeeks(address, { summary: got.summary, bonus: got.bonus, layer1: got.weeks, season1: got.s1 });
     });
     return () => { live = false; };
-  }, [address, signedIn]);
+  }, [address, signedIn, venue]);
   return s;
 }

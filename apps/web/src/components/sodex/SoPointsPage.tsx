@@ -21,6 +21,7 @@ import { ChartLab } from './ChartLab';
 import { EarnMore, MySquadBoost, SeasonCard, SoPointsCard, ThisWeek, WeekTable } from './SoPointsMine';
 import { DifficultyChart, PointsByWeek, PointsMix, RankByWeek, SeasonPoints } from './pointsCharts';
 import { useSoPointsV2 } from './soPointsV2';
+import { Stage } from './versions/points/Stage';
 import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
 import { openConnectDialog } from '../account/connect';
 import { useAccountPending } from '../account/actions';
@@ -40,18 +41,18 @@ const fmtEnergy = (raw: string): string => {
 };
 
 /*
- * Localhost only (owner 2026-11-26): the page's versions behind a switch (versions/points/PointsVersions.tsx), Original
- * among them. A build never loads that file: `import.meta.env.DEV` is false there, so the import is dropped and
- * production renders SoPointsOriginal, today's page, unchanged.
+ * The page is the Stage version since 2026-11-27 (owner: "make stage version the new original"; versions/points/
+ * Stage.tsx). Localhost keeps the versions behind a switch (versions/points/PointsVersions.tsx) with the page before it
+ * as "Previous"; a build never loads that file (`import.meta.env.DEV` is false there, so the import is dropped).
  */
 const PointsVersions = import.meta.env.DEV ? lazy(() => import('./versions/points/PointsVersions')) : null;
 
 export function SoPointsPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
-  if (PointsVersions) return <Suspense fallback={null}><PointsVersions address={address} provider={provider} Original={SoPointsOriginal} /></Suspense>;
-  return <SoPointsOriginal address={address} provider={provider} />;
+  if (PointsVersions) return <Suspense fallback={null}><PointsVersions address={address} provider={provider} Previous={SoPointsOriginal} /></Suspense>;
+  return <Stage address={address} provider={provider} sample={false} />;
 }
 
-/** Today's page, as it was: the "Original" of the switch, and the only one a build has. */
+/** The page before Stage: "Previous" in the localhost switch, kept until the owner says it can go; no build has it. */
 export function SoPointsOriginal({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
   const c = usePointsContext(address, provider);
   const now = useNow();
