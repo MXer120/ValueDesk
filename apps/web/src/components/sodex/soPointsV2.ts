@@ -8,8 +8,8 @@
  *  - Every field below is SoDEX's, read as is.
  *  - points = round((own + referral) x (1 + squad %)) is fitted from 19 of the owner's wallets (all referral-only weeks
  *    within 1 point); the split of a week into own / referral / boost uses it.
- *  - "Twice the volume earns about 1.6x the points" is fitted (exponent ~0.62-0.71 on volume share) and is labelled
- *    an estimate wherever it is shown.
+ *  - ValueDesk's fitted model is not here (owner 2026-11-27: "our formula cant be in the frontend code"): estimates are
+ *    the server's (sopointsEstimate.ts). "Next $10K adds" below is the wallet's own cost per point, plain arithmetic.
  */
 import { useEffect, useState } from 'react';
 import { authed, fetchVenueDaily, type BoostConfig, type DailyPoint, type VolumeWeights } from '../../points';
@@ -181,9 +181,6 @@ export function splitWeek(w: S2Week): WeekSplit {
 
 /* --- this week so far ------------------------------------------------------------------------------------------ */
 
-/** Our fitted exponent on volume share (Season 1: 0.71, Layer 1: ~0.62): points grow slower than volume. */
-export const VOLUME_EXPONENT = 0.65;
-
 export interface WeekForecast {
   live: S2Week;
   volume: number;
@@ -193,7 +190,7 @@ export interface WeekForecast {
   own: number | null;
   /** The same with this week's squad boost on top (estimate). */
   boosted: number | null;
-  /** What the next $10K of volume adds, boost included (estimate; concave). */
+  /** What the next $10K of volume adds at the wallet's own cost per point, boost included (arithmetic on its weeks). */
   per10k: number | null;
 }
 
@@ -207,8 +204,7 @@ export function forecastWeek(weeks: S2Week[]): WeekForecast | null {
   const mult = 1 + (live.totalBonusPct ?? 0) / 100;
   const own = dpp && volume > 0 ? volume / dpp : dpp ? 0 : null;
   const boosted = own !== null ? own * mult : null;
-  // Marginal points of the next $10K: d(points)/d(volume) = k * points / volume on a power law; from zero, the plain rate.
-  const per10k = dpp ? (volume > 0 && own ? VOLUME_EXPONENT * (own / volume) * 10_000 : 10_000 / dpp) * mult : null;
+  const per10k = dpp ? (10_000 / dpp) * mult : null;
   return { live, volume, dpp, own, boosted, per10k };
 }
 
@@ -341,7 +337,7 @@ export function difficultyRows(all: AnyWeek[], venueVol: Map<number, number>, ve
 /* --- how to earn more -------------------------------------------------------------------------------------------- */
 
 export interface Tip {
-  id: 'squad' | 'boosted' | 'pace' | 'steady' | 'hold' | 'invite';
+  id: 'squad' | 'boosted' | 'pace' | 'hold' | 'invite';
   title: string;
   /** The one figure that matters, already formatted. */
   value: string;
@@ -400,10 +396,6 @@ export function earnTips(input: {
     tips.push({ id: 'pace', kind: 'fact', title: 'Your cost per point', value: `${usd(traded.dollarsPerPoint!)}`,
       line: `${traded.week.weekName}: ${usd(traded.dollarsPerPoint!)} of your volume per point${field ? `, against ${usd(field)} for the whole venue` : ''}.` });
   }
-
-  // 4. Steady beats one big week (our fit).
-  tips.push({ id: 'steady', kind: 'estimate', title: 'Steady beats big', value: '2× → ~1.6×',
-    line: 'Points grow slower than volume: twice the volume earned about 1.6× the points in the weeks we measured. Trading every week earns more than the same volume in one week.' });
 
   // 5. Holdings and open positions.
   const holds = scored.slice(0, 4).some((w) => (w.wealthTvl ?? 0) > 1 || (w.vaultHolding ?? 0) > 1);

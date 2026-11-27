@@ -2,17 +2,18 @@
  * The calculators (owner 2026-11-23: V4's fee calculator "is very smart", plus "one with SoPoints like that, estimated
  * from volume done or USD allocated"). Both in V4's calculator layout, switched with the app's own Segmented control.
  *
- * SoPoints: SoDEX's points for trading on SoDEX, estimated with ValueDesk's fitted model (sopoints.ts): from a week's
+ * SoPoints: SoDEX's points for trading on SoDEX, estimated by ValueDesk's model, which the server answers (the page never
+ * holds it, owner 2026-11-27: "our formula cant be in the frontend code"; sodex/sopointsEstimate.ts): from a week's
  * futures volume and the average open position held over the week (the "USD allocated" that counts: positions earn
- * points too, x10). Shown as the central estimate with the quiet-week to busy-week band, never as one sure number.
+ * points too). Shown as the typical week with the busy-week to quiet-week range, never as one sure number.
  * The fees on that volume use the new wallet's bot fee and SoDEX's maker fee read now; plain arithmetic, labelled.
  */
-import { useState, type CSSProperties } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { Segmented, Slider } from '../../bots/kit/kit';
 import { bp, FEES } from '../shared';
 import { Calculator, Glide, money } from '../v4/V4';
 import { HeatGlass } from '../v4/heat';
-import { estimate, SOPOINTS_MODEL } from './sopoints';
+import { useEstimate } from '../../sodex/sopointsEstimate';
 import '../../vip.css';
 import '../v4/v4.css';
 
@@ -38,7 +39,10 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
   const [tp, setTp] = useState(() => POS.t(1_000));
   const futures = VOL.of(tv);
   const oi = POS.of(tp);
-  const e = estimate({ futures, oi });
+  // The server prices the week; a drag asks once it rests, and the last answer stays until the next one is in.
+  const plans = useMemo(() => [{ futures, oi }], [futures, oi]);
+  const est = useEstimate(plans, null, { debounceMs: 140 });
+  const e = est.data?.plans[0] ?? null;
   // The fee the executor would charge: the step for 14 days of this volume (two weeks like this one), VIP from its volume.
   const vol14 = futures * 2;
   const vipMin = FEES.vipMinUsd;
@@ -47,7 +51,7 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
   const fee = vip ? FEES.botLowest : FEES.botLadder[step]!.fee;
   const ours = (futures * (fee / 10)) / 10_000;
   const sodex = makerBps === null ? null : (futures * makerBps) / 10_000;
-  const perPoint = sodex === null || e.mid <= 0 ? null : (ours + sodex) / e.mid;
+  const perPoint = sodex === null || !e || e.mid <= 0 ? null : (ours + sodex) / e.mid;
   return (
     <div className="v4-calc vd-pcalc">
       <div className="v4-calc__in tf">
@@ -73,9 +77,9 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
           </div>
         </div>
         <ul className="vd-pcalc__how">
-          <li><b>1 ×</b> futures volume</li>
-          <li><b>10 ×</b> the position you hold</li>
-          <li><b>^ 0.70</b> big volume earns less per dollar</li>
+          <li><b>Volume</b> every futures trade counts</li>
+          <li><b>Positions</b> held all week count too</li>
+          <li><b>Steady</b> big volume earns less per dollar</li>
         </ul>
       </div>
 
@@ -83,8 +87,8 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
         <HeatGlass layout="card" rib={22} className="v4-calc__heat" />
         <div className="v4-calc__res">
           <p className="v4-calc__k">Estimated own SoPoints for that week</p>
-          <p className="v4-calc__big">≈ <Glide value={e.mid} fmt={pts} /></p>
-          <p className="v4-calc__eq">quiet week <b>{pts(e.low)}</b> · busy week <b>{pts(e.high)}</b></p>
+          <p className="v4-calc__big">≈ {e ? <Glide value={e.mid} fmt={pts} /> : '—'}</p>
+          <p className="v4-calc__eq">{e ? <>busy week <b>{pts(e.busy)}</b> · quiet week <b>{pts(e.quiet)}</b></> : est.failed ? 'No estimate right now' : 'Estimating…'}</p>
           <div className="v4-calc__split">
             <div>
               <small>Fees on that volume</small>
@@ -107,7 +111,7 @@ export function PointsCalc({ makerBps }: { makerBps: number | null }) {
         </div>
       </div>
       <p className="v4-calc__note">
-        An estimate, not a promise. SoPoints are SoDEX's and SoDEX decides them; it publishes no formula. This uses ValueDesk's model fitted on {SOPOINTS_MODEL.fittedOn}.
+        An estimate, not a promise. SoPoints are SoDEX's and SoDEX decides them; it publishes no formula. This uses ValueDesk's model{est.data ? `, fitted on ${est.data.model.fittedOn}` : ''}.
       </p>
     </div>
   );

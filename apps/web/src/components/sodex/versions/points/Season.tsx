@@ -13,7 +13,7 @@ import { SODEX_POOL_SHOWN } from '../../SoPointsMine';
 import type { AnyWeek } from '../../soPointsV2';
 import {
   BoostedMarkets, Clock, DASH, SignInButton, SignInPanel, SquadLadder, SquadTracks, TierName, WeekPill,
-  boostedOf, coefText, money, plusPct, pts, tierProgress, usePhone, usePointsView, weekRange, weekday, type PointsView,
+  boostedOf, coefText, money, plusPct, pts, tierProgress, usePhone, usePointsView, weekRange, weekday, type Ahead, type PointsView,
 } from './shared';
 
 const WEEK_MS = 7 * 86_400_000;
@@ -84,10 +84,11 @@ export function Ladder({ v, figures = true }: { v: PointsView; figures?: boolean
   return (
     <section className={`spn-ladder${v.mine ? ' is-mine' : ''}${figures ? '' : ' is-slim'}`} aria-label="Tiers">
       <div className="spn-ladder__top">
+        {/* Slim (Stage): no weeks-left line (owner 2026-11-27: the season's 20 weeks are SoDEX's, announced; the line
+            only repeated them). */}
         {!figures ? (
           <div className="spn-ladder__me">
             <span className="spn-ladder__k">{v.mine ? 'Your place on SoDEX’s tiers' : 'SoDEX’s tiers, by SoPoints held'}</span>
-            {v.week && <span>Week {v.week.weekNo} of {RULES.seasonWeeks} · {weeksLeft} {weeksLeft === 1 ? 'week' : 'weeks'} left in {RULES.season}</span>}
           </div>
         ) : v.mine ? (
           v.total === null ? <Skeleton className="spx-skel-md" /> : (
@@ -101,9 +102,10 @@ export function Ladder({ v, figures = true }: { v: PointsView; figures?: boolean
         {prog?.nxt && (
           <div className="spn-ladder__goal">
             <span><b className="sx-num">{pts(prog.left)}</b> to <TierName tier={prog.nxt.name} /></span>
-            <small>{need !== null && weeksLeft !== null
-              ? (need <= weeksLeft ? `≈ ${need} ${need === 1 ? 'week' : 'weeks'} at your last 4 weeks’ pace${figures ? ` · ${weeksLeft} left in the season` : ''}` : `Not this season at your last 4 weeks’ pace${figures ? ` · ${weeksLeft} weeks left` : ''}`)
-              : figures ? `${weeksLeft ?? DASH} weeks left in the season` : 'No pace yet: no scored week'}</small>
+            {/* Only a pace that reaches the tier this season is said (owner 2026-11-27: no "Not this season ..."). */}
+            {need !== null && weeksLeft !== null && need <= weeksLeft
+              ? <small>≈ {need} {need === 1 ? 'week' : 'weeks'} at your last 4 weeks’ pace{figures ? ` · ${weeksLeft} left in the season` : ''}</small>
+              : figures ? <small>{weeksLeft ?? DASH} weeks left in the season</small> : null}
           </div>
         )}
       </div>
@@ -278,44 +280,73 @@ function Detail({ c, v }: { c: Cell; v: PointsView }) {
 const CW = 600;
 const CH = 220;
 
-export function Climb({ weeks }: { weeks: readonly AnyWeek[] }) {
+/**
+ * The season's points added up, week by week, with SoDEX's tiers on its axis (owner 2026-11-27: "show total points
+ * e.g. the points over season thing with the ranks on y axis"). With `ahead`, the weeks to come continue it as the
+ * estimate: a dashed line for a typical week and the busy-to-quiet range around it, to the season's last week.
+ */
+export function Climb({ weeks, ahead }: { weeks: readonly AnyWeek[]; ahead?: Ahead | null }) {
   const id = useId();
   const phone = usePhone();
   const [at, setAt] = useState<number | null>(null);
   const cum = useMemo(() => { let t = 0; return weeks.map((w) => (t += w.split.week.points)); }, [weeks]);
   if (!weeks.length) return <div className="rfc is-empty"><p>Your season draws here from the first scored week.</p></div>;
-  const top = Math.max(10, cum.at(-1)!) * 1.12;
-  const X = (i: number) => (weeks.length <= 1 ? CW / 2 : (i / (weeks.length - 1)) * CW);
+  const end = cum.at(-1)!;
+  const k = ahead && ahead.to >= ahead.from ? ahead.to - ahead.from + 1 : 0;
+  const proj = Array.from({ length: k }, (_, i) => ({ no: ahead!.from + i, mid: end + ahead!.mid * (i + 1), busy: end + ahead!.busy * (i + 1), quiet: end + ahead!.quiet * (i + 1) }));
+  const n = weeks.length + k;
+  const reach = proj.length ? proj.at(-1)!.quiet : end;
+  // The next tier above the season's reach stays on the axis while it is in sight: the goal.
+  const goal = TIERS.find((t) => t.at > reach);
+  const top = Math.max(10, goal && goal.at <= reach * 2.5 ? goal.at : reach) * 1.1;
+  const X = (i: number) => (n <= 1 ? CW / 2 : (i / (n - 1)) * CW);
   const Y = (p: number) => CH - (p / top) * (CH - 8);
   const line = cum.map((p, i) => `${i ? 'L' : 'M'}${X(i)} ${Y(p)}`).join('');
+  const last = weeks.length - 1;
+  const pLine = proj.length ? `M${X(last)} ${Y(end)}${proj.map((p, i) => `L${X(weeks.length + i)} ${Y(p.mid)}`).join('')}` : '';
+  const fan = proj.length ? `M${X(last)} ${Y(end)}${proj.map((p, i) => `L${X(weeks.length + i)} ${Y(p.quiet)}`).join('')}${[...proj].reverse().map((p, j) => `L${X(weeks.length + proj.length - 1 - j)} ${Y(p.busy)}`).join('')}Z` : '';
   // A tier's line only where it has room: on a linear axis Bronze (10) and Silver (100) crowd the floor.
-  const lines = TIERS.filter((t) => t.at > 0 && t.at < top && t.at >= top * 0.07);
+  const lines = TIERS.filter((t) => t.at > 0 && t.at < top && t.at >= top * 0.06);
   const read = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
-    setAt(Math.round(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (weeks.length - 1)));
+    setAt(Math.round(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (n - 1)));
   };
   const left = at === null ? 0 : (X(at) / CW) * 100;
-  const every = Math.ceil(weeks.length / (phone ? 5 : 9));
+  const every = Math.ceil(n / (phone ? 5 : 9));
+  const pAt = at !== null && at >= weeks.length ? proj[at - weeks.length]! : null;
+  const yAt = at === null ? 0 : pAt ? pAt.mid : cum[at]!;
   return (
-    <div className="rfc spn-climb" role="img" aria-label="SoPoints over the season" onPointerDown={read} onPointerMove={read} onPointerLeave={(e) => { if (e.pointerType !== 'touch') setAt(null); }}>
+    <div className={`rfc spn-climb${k ? ' is-ahead' : ''}`} role="img" aria-label={`SoPoints over the season${k ? ', with the estimate to the season’s end' : ''}`} onPointerDown={read} onPointerMove={read} onPointerLeave={(e) => { if (e.pointerType !== 'touch') setAt(null); }}>
       <svg viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" aria-hidden="true">
         <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--rf-points)" stopOpacity="0.32" /><stop offset="1" stopColor="var(--rf-points)" stopOpacity="0" /></linearGradient></defs>
-        {lines.map((t) => <path key={t.name} className="spn-climb__tier" d={`M0 ${Y(t.at)}H${CW}`} />)}
-        <path d={`${line}V${CH}H0Z`} fill={`url(#${id})`} />
+        {lines.map((t) => <path key={t.name} className={`spn-climb__tier is-${t.name.toLowerCase()}`} d={`M0 ${Y(t.at)}H${CW}`} />)}
+        <path d={`${line}V${CH}H${X(0)}Z`} fill={`url(#${id})`} />
+        {fan && <path className="spn-climb__fan" d={fan} />}
+        {pLine && <path className="spn-climb__p" d={pLine} />}
         <path className="spn-climb__l" d={line} />
       </svg>
-      {lines.map((t) => <span key={t.name} className="spn-climb__lab" style={{ top: `calc((100% - 24px) * ${Y(t.at) / CH})` }}><TierName tier={t.name} /></span>)}
+      {/* SoDEX's tiers on the axis, each at its threshold. */}
+      {lines.map((t) => <span key={t.name} className="spn-climb__lab" style={{ top: `calc((100% - 24px) * ${Y(t.at) / CH})` }}><TierName tier={t.name} /><small className="sx-num">{pts(t.at)}</small></span>)}
+      {k > 0 && <span className="spn-climb__now" style={{ left: `${(X(last) / CW) * 100}%` }} aria-hidden="true" />}
       {at !== null && <span className="rfc__x" style={{ left: `${left}%` }} />}
-      {at !== null && <span className="rfc__d spn-climb__d" style={{ left: `${left}%`, top: `calc((100% - 24px) * ${Y(cum[at]!) / CH})` }} />}
+      {at !== null && <span className={`rfc__d spn-climb__d${pAt ? ' is-est' : ''}`} style={{ left: `${left}%`, top: `calc((100% - 24px) * ${Y(yAt) / CH})` }} />}
       {at !== null && (
         <span className="rfc__tip" style={{ left: `clamp(90px, ${left}%, calc(100% - 90px))` }}>
-          <small>{weeks[at]!.name}</small>
-          <span className="is-own"><i />Points so far<b>{pts(cum[at]!)}</b></span>
-          <span><i style={{ opacity: 0 }} />That week<b>+{pts(weeks[at]!.split.week.points)}</b></span>
+          {pAt ? (<>
+            <small>Layer 1 · Week {pAt.no}, estimate</small>
+            <span className="is-est"><i />Season so far<b>≈ {pts(pAt.mid)}</b></span>
+            <span><i style={{ opacity: 0 }} />Busy to quiet<b>{pts(pAt.busy)} – {pts(pAt.quiet)}</b></span>
+          </>) : (<>
+            <small>{weeks[at]!.name}</small>
+            <span className="is-own"><i />Points so far<b>{pts(cum[at]!)}</b></span>
+            <span><i style={{ opacity: 0 }} />That week<b>+{pts(weeks[at]!.split.week.points)}</b></span>
+          </>)}
         </span>
       )}
-      <span className="rfc__ax is-cells">{weeks.map((w, i) => <i key={w.key}>{i % every === 0 ? w.short : ''}</i>)}</span>
+      <span className="rfc__ax is-cells">
+        {weeks.map((w, i) => <i key={w.key}>{i % every === 0 ? w.short : ''}</i>)}
+        {proj.map((p, i) => <i key={`p${p.no}`}>{(weeks.length + i) % every === 0 ? `L${p.no}` : ''}</i>)}
+      </span>
     </div>
   );
 }
-

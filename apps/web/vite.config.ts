@@ -261,6 +261,37 @@ function devSodexAuth(): Plugin {
   };
 }
 
+/**
+ * Dev only: POST /api/vs/sopoints/estimate answered here by the server's own route (apps/server/tools/
+ * sopointsEstimate-dev.ts -> src/routes/sopointsEstimate.ts) with the private model file on this laptop, so localhost
+ * has SoPoints estimates before the route is released. Without the file the request goes on to the usual proxy.
+ * Never in a build.
+ */
+function devSopointsEstimate(): Plugin {
+  return {
+    name: 'vs-dev-sopoints-estimate',
+    apply: 'serve',
+    configureServer(server) {
+      const file = fileURLToPath(new URL('../server/tools/sopointsEstimate-dev.ts', import.meta.url));
+      type Dev = { hasModel: () => boolean; handle: (u: string, b: string, ip: string) => Promise<{ status: number; body: string }> };
+      server.middlewares.use((req, res, next) => {
+        if (req.method !== 'POST' || req.url !== '/api/vs/sopoints/estimate') return next();
+        void server.ssrLoadModule(file).then((m) => {
+          const dev = m as Dev;
+          if (!dev.hasModel()) return next();
+          let body = '';
+          req.on('data', (c: Buffer) => { body += c; if (body.length > 32_768) req.destroy(); });
+          req.on('end', () => {
+            void dev.handle(req.url!, body, req.socket.remoteAddress ?? '127.0.0.1')
+              .then((r) => { res.statusCode = r.status; res.setHeader('Content-Type', 'application/json'); res.setHeader('x-vs-dev-sopoints', 'local'); res.end(r.body); })
+              .catch((e: Error) => { res.statusCode = 502; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: false, error: `local estimate: ${e.message}` })); });
+          });
+        }).catch(() => next());
+      });
+    },
+  };
+}
+
 function botsFixtures(): Plugin {
   const dir = process.env.VS_BOTS_FIXTURES?.trim();
   return {
@@ -318,7 +349,7 @@ function siteBuildPlugins(): Plugin[] {
 export default defineConfig({
   customLogger: logger,
   // bootShell after routePreload: it rewrites the theme-boot.js tag routePreload places its own script after.
-  plugins: [react(), trackAppOrigin(), ...(ADMIN_PAGE ? [] : siteBuildPlugins()), bootShell({ webRoot: fileURLToPath(new URL('.', import.meta.url)) }), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), botsFixtures()],
+  plugins: [react(), trackAppOrigin(), ...(ADMIN_PAGE ? [] : siteBuildPlugins()), bootShell({ webRoot: fileURLToPath(new URL('.', import.meta.url)) }), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), devSopointsEstimate(), botsFixtures()],
   define: { __VS_BUILD__: JSON.stringify(buildId()) },
   /* No sticky hover on a touch screen: every rule styling a hovered element is behind @media (hover: hover)
      (tools/hover-media.mjs says which are left as they are, and why). Identical wherever a pointer can hover. */

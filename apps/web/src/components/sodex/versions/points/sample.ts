@@ -5,16 +5,15 @@
  */
 import { TIERS, type BoostConfig, type WeekInfo } from '../../../../points';
 import { stepPct, type S1Week, type S2State, type S2Week } from '../../soPointsV2';
-import { ownPoints, scoreOf } from '../../../landing/site/sopoints';
 
 const WEEK_S = 7 * 86_400;
-/* Per settled Layer 1 week: futures, spot, mean open position, Wealth, referral points, points per $10K that week. */
+/* Per settled Layer 1 week: futures, spot, mean open position, Wealth, referral points, own points (made up, no model). */
 const L1: ReadonlyArray<readonly [number, number, number, number, number, number]> = [
-  [42_000, 0, 1_200, 0, 4, 55], [65_000, 2_000, 900, 0, 6, 50], [18_000, 0, 400, 150, 9, 48], [0, 0, 0, 150, 12, 41],
-  [120_000, 5_000, 2_400, 150, 15, 40], [88_000, 0, 1_800, 300, 20, 50], [54_000, 1_000, 600, 300, 18, 38], [140_000, 0, 3_100, 300, 26, 41],
-  [96_000, 4_000, 1_500, 500, 31, 31], [210_000, 0, 4_200, 500, 40, 37], [160_000, 2_500, 2_800, 500, 36, 35], [75_000, 0, 1_100, 500, 44, 36],
+  [42_000, 0, 1_200, 0, 4, 128], [65_000, 2_000, 900, 0, 6, 160], [18_000, 0, 400, 150, 9, 74], [0, 0, 0, 150, 12, 14],
+  [120_000, 5_000, 2_400, 150, 15, 205], [88_000, 0, 1_800, 300, 20, 190], [54_000, 1_000, 600, 300, 18, 98], [140_000, 0, 3_100, 300, 26, 215],
+  [96_000, 4_000, 1_500, 500, 31, 126], [210_000, 0, 4_200, 500, 40, 262], [160_000, 2_500, 2_800, 500, 36, 214], [75_000, 0, 1_100, 500, 44, 120],
 ];
-const RANKS = [9_210, 7_400, 15_800, 38_200, 4_100, 5_200, 8_900, 3_600, 4_700, 2_900, 3_300, 6_100];
+const RANKS = [9_210, 1_740, 15_800, 38_200, 1_100, 5_200, 8_900, 210, 4_700, 1_900, 3_300, 6_100];
 const S1_POINTS = [8, 14, 0, 22, 35, 18, 40, 52, 0, 31];
 
 export function samplePoints(week: WeekInfo | null, boost: BoostConfig | null, now = Date.now()): S2State {
@@ -27,9 +26,8 @@ export function samplePoints(week: WeekInfo | null, boost: BoostConfig | null, n
   const users = (n: number) => 217_000 + n * 760;
   const weeks: S2Week[] = [];
   for (let n = 1; n < liveNo; n++) {
-    const [futures, spot, oi, wealth, ref, rate] = L1[(n - 1) % L1.length]!;
+    const [futures, spot, oi, wealth, ref, own] = L1[(n - 1) % L1.length]!;
     const bonus = squad + (n <= 4 ? 20 : 0);
-    const own = ownPoints(scoreOf({ futures, spot, oi }), rate) + (wealth > 0 ? wealth * 0.1 : 0);
     const points = Math.round((own + ref) * (1 + bonus / 100));
     weeks.push({
       weekNo: n, weekName: `Week ${n}`, status: 'COMPLETED', weekStartTime: start(n), weekEndTime: start(n) + WEEK_S, distributionTime: start(n) + WEEK_S + 3 * 86_400,

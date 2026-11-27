@@ -41,13 +41,13 @@ test('a week splits into trading, referrals and the squad boost (points = (own +
   assert.equal(splitWeek(week({ pointsStatus: 'TBD', points: 0 })).dollarsPerPoint, null);
 });
 
-test('tips: the squad tip names the cheapest next step; the fitted one is marked an estimate', () => {
+test('tips: the squad tip names the cheapest next step; no fitted tip is left on the page', () => {
   const bonus: S2TeamBonus = { eligible: true, teamMemberCount: 3, activeTeamCount: 1, isEarlyBird: false, windowRounds: 4, uplineTeamVolume: '0', downlineTeamVolume: '350000', asOfTsMs: 0 };
   const tips = earnTips({ weeks: [week({ points: 100 })], squad: squadBreakdown(bonus, CFG, null), cfg: CFG, weights: null, pool: 1_000_000, venue: new Map() });
   const sq = tips.find((t) => t.id === 'squad')!;
   assert.equal(sq.value, '+5%');
   assert.match(sq.line, /\$50K more volume in your squad/);
-  assert.equal(tips.find((t) => t.id === 'steady')!.kind, 'estimate');
+  assert.equal(tips.some((t) => (t.id as string) === 'steady'), false);
 });
 
 test('difficulty: a week SoDEX lists without volume takes the wallet\'s own history volume', () => {

@@ -46,7 +46,8 @@ const copy = async (text: string, what: string) => {
 
 /* --- the tier card (SoDEX's) --------------------------------------------------------------------------------------- */
 
-export function SoPointsCard({ s }: { s: S2State }) {
+/** `onShare`: the page's own share dialog (Stage); without it, the system share sheet with a line of text. */
+export function SoPointsCard({ s, onShare }: { s: S2State; onShare?: () => void }) {
   if (!s.summary && s.loading) return <div className="spm-card spm-card--skel sdx-skel__row" aria-label="Loading your SoPoints" />;
   const sum = s.summary;
   const tier = tierKey(sum?.currentTier);
@@ -61,6 +62,7 @@ export function SoPointsCard({ s }: { s: S2State }) {
   const last = s.weeks.filter((w) => w.pointsStatus === 'CONFIRMED').sort((a, b) => b.weekNo - a.weekNo)[0];
   const share = () => {
     if (total === null) return;
+    if (onShare) { onShare(); return; }
     const text = `I'm ${tier} on SoDEX with ${total.toLocaleString('en-US')} SoPoints${sum?.rank ? `, rank ${sum.rank.toLocaleString('en-US')}` : ''}.`;
     const url = `${location.origin}/points`;
     void shareNative({ text, url }).then((r) => { if (r === 'failed' || r === 'unsupported') void copy(`${text} ${url}`, 'Text'); });
@@ -100,7 +102,9 @@ export function SoPointsCard({ s }: { s: S2State }) {
 
 /* --- the season card (SoDEX's) ------------------------------------------------------------------------------------ */
 
-export function SeasonCard({ week, address, settled }: { week: WeekInfo | null; address: string | null; settled: boolean }) {
+/** `bare` (Stage, owner 2026-11-27): without the "Week N is Live · Split this week" line and the snapshot and distribution
+ * times under the countdown; the page's own week pill says which week is live. */
+export function SeasonCard({ week, address, settled, bare = false }: { week: WeekInfo | null; address: string | null; settled: boolean; bare?: boolean }) {
   const now = useNow();
   // The user's own ValueDesk invite link (its SoDEX code; invites/invites.ts), never ours (owner 2026-11-16).
   const own = useOwnCode(address);
@@ -123,10 +127,12 @@ export function SeasonCard({ week, address, settled }: { week: WeekInfo | null; 
   return (
     <section className="spm-season" aria-label="This week">
       <div className="spm-season__main">
-        <div className="spm-season__live">
-          <span className={`spm-season__on${live ? '' : ' is-off'}`}><i />{week ? `Layer1 Season ${week.weekName} is ${live ? 'Live' : 'closed'}` : 'Layer1 Season'}</span>
-          <span className="spm-season__split">· Split this week</span>
-        </div>
+        {!bare && (
+          <div className="spm-season__live">
+            <span className={`spm-season__on${live ? '' : ' is-off'}`}><i />{week ? `Layer1 Season ${week.weekName} is ${live ? 'Live' : 'closed'}` : 'Layer1 Season'}</span>
+            <span className="spm-season__split">· Split this week</span>
+          </div>
+        )}
         <b className="spm-season__pool">{SODEX_POOL_SHOWN.toLocaleString('en-US')}</b>
         <span className="spm-season__sub">SoPoints · 20-week season</span>
         <div className="spm-season__snap">
@@ -137,7 +143,7 @@ export function SeasonCard({ week, address, settled }: { week: WeekInfo | null; 
             ))}
           </span>
         </div>
-        {week && <span className="spm-season__when">Snapshot every {at(week.nextWeekStartTime * 1000)} · distribution every {at(week.distributionTime * 1000)} (your time)</span>}
+        {week && !bare && <span className="spm-season__when">Snapshot every {at(week.nextWeekStartTime * 1000)} · distribution every {at(week.distributionTime * 1000)} (your time)</span>}
       </div>
       <div className="spm-season__invite">
         <div>

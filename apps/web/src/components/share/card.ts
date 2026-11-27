@@ -9,7 +9,7 @@
  * a number up. What the user hides (dollar amounts, prices, an address) is taken out before drawing (cardView).
  */
 
-export type CardKind = 'trade' | 'position' | 'portfolio' | 'copy' | 'bot' | 'botvol';
+export type CardKind = 'trade' | 'position' | 'portfolio' | 'copy' | 'bot' | 'botvol' | 'points' | 'squad';
 export type Ratio = 'wide' | 'square';
 
 export const SIZES: Record<Ratio, [number, number]> = { wide: [1200, 675], square: [1080, 1080] };

@@ -3,9 +3,9 @@
  * tier coin, the boosted markets, the squad tracks, the week bars, the week table and the levers.
  *
  * Every figure is SoDEX's (its public reads; the wallet's own after the SoDEX sign-in, through the same relay and call
- * as Original: PointsContext.signIn), arithmetic on SoDEX's figures, or ValueDesk's fitted model (landing/site/
- * sopoints.ts), which is labelled an estimate wherever it shows. The switch's Sample replaces the wallet's own figures
- * with made-up ones (sample.ts), never in a build.
+ * as Original: PointsContext.signIn), arithmetic on SoDEX's figures, or ValueDesk's estimate, which the server answers
+ * (sopointsEstimate.ts: the model never reaches the page) and which is labelled an estimate wherever it shows. The
+ * switch's Sample replaces the wallet's own figures with made-up ones (sample.ts), never in a build.
  */
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { usePointsContext, type PointsContext } from '../../../Points';
@@ -24,7 +24,7 @@ import { localize } from '../../../../numStyle';
 import { TIER_STYLE, tierKey } from '../../SoPointsMine';
 import { useNow } from '../../parts';
 import { allWeeks, squadBreakdown, useSoPointsV2, type AnyWeek, type S2State, type S2Week, type SquadBreakdown } from '../../soPointsV2';
-import { SOPOINTS_MODEL, estimate, ownPoints, scoreOf } from '../../../landing/site/sopoints';
+import type { EstBand, EstPlan } from '../../sopointsEstimate';
 import { samplePoints } from './sample';
 
 /* ------------------------------------------------------------------------------------------- data ----- */
@@ -346,36 +346,41 @@ export function SquadTracks({ v }: { v: PointsView }) {
   );
 }
 
+
 /* -------------------------------------------------------------------------------- week bars ----- */
 
-/** Points stacked; mix = each week's own, invited and squad parts as shares of it (Original's "Points mix by week");
- * invited = the points from invitees alone (Original's "Referral points by week"); rank with 1 at the top. */
-export type BarMetric = 'points' | 'mix' | 'invited' | 'rank';
+/** Points stacked (own, invited, squad); total = the season's points added up (Season.tsx Climb, tiers on its axis);
+ * invited = the points from invitees alone; rank with 1 at the top. (Owner 2026-11-27: no "Mix".) */
+export type BarMetric = 'points' | 'total' | 'invited' | 'rank';
 
-const shareOf = (part: number, w: AnyWeek) => {
-  const t = w.split.own + w.split.referral + w.split.boost;
-  return t > 0 ? `${Math.round((part / t) * 100)}%` : DASH;
-};
+/**
+ * The weeks still to come, priced by the estimate (owner 2026-11-27: "make it possible to enable projections in the
+ * chart"): Layer 1 weeks `from` to `to`, each earning `mid` points in a typical week, `busy` to `quiet` around it.
+ */
+export interface Ahead { from: number; to: number; mid: number; busy: number; quiet: number }
 
-/** Every scored week as a column: own, from invitees and the squad's boost stacked (or their shares); the invited part
- * alone; or the week's rank (1 at the top). */
-export function WeekBars({ weeks, metric = 'points', height = 220 }: { weeks: readonly AnyWeek[]; metric?: BarMetric; height?: number }) {
+/** Every scored week as a column: own, from invitees and the squad's boost stacked; the invited part alone; or the
+ * week's rank (1 at the top). With `ahead`, the weeks to come follow as estimated columns with their busy-to-quiet range. */
+export function WeekBars({ weeks, metric = 'points', height = 220, ahead }: { weeks: readonly AnyWeek[]; metric?: BarMetric; height?: number; ahead?: Ahead | null }) {
   const [at, setAt] = useState<number | null>(null);
   const ws = metric === 'rank' ? weeks.filter((w) => w.split.week.rank > 0) : weeks;
   const none = metric === 'invited' && !ws.some((w) => w.split.referral > 0);
+  const fut = metric === 'points' && ahead && ahead.to >= ahead.from ? Array.from({ length: ahead.to - ahead.from + 1 }, (_, i) => ahead.from + i) : [];
   if (!ws.length || none) return <div className="rfc is-empty spx-bars" style={{ minHeight: height }}><p>{metric === 'rank' ? 'No ranked week yet.' : none ? 'No points from invitees yet.' : 'Your weeks draw here from the first scored one.'}</p></div>;
   const val = (w: AnyWeek) => (metric === 'invited' ? w.split.referral : w.split.week.points);
-  const top = metric === 'rank' ? Math.max(10, ...ws.map((w) => w.split.week.rank)) : Math.max(1, ...ws.map(val));
+  const n = ws.length + fut.length;
+  const top = metric === 'rank' ? Math.max(10, ...ws.map((w) => w.split.week.rank)) : Math.max(1, ...ws.map(val), fut.length ? ahead!.quiet : 0);
   const decades = Math.ceil(Math.log10(top));
-  const h = (w: AnyWeek) => (metric === 'rank' ? Math.max(0.04, 1 - Math.log10(Math.max(1, w.split.week.rank)) / Math.max(1, decades))
-    : metric === 'mix' ? (w.split.week.points > 0 ? 1 : 0) : val(w) / top);
-  const every = Math.ceil(ws.length / 9);
+  const h = (w: AnyWeek) => (metric === 'rank' ? Math.max(0.04, 1 - Math.log10(Math.max(1, w.split.week.rank)) / Math.max(1, decades)) : val(w) / top);
+  const every = Math.ceil(n / 9);
   const read = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
-    setAt(Math.min(ws.length - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * ws.length))));
+    setAt(Math.min(n - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * n))));
   };
-  const w = at === null ? null : ws[at]!;
+  const w = at === null || at >= ws.length ? null : ws[at]!;
+  const f = at !== null && at >= ws.length ? fut[at - ws.length]! : null;
   const l1 = ws.findIndex((x) => x.season === 'L1');
+  const pct = (x: number) => `${Math.max(1.5, (x / top) * 100)}%`;
   return (
     <div className="rfc is-bars spx-bars" style={{ minHeight: height }} role="img" aria-label={metric === 'rank' ? 'Rank by week' : 'SoPoints by week'} onPointerDown={read} onPointerMove={read} onPointerLeave={(e) => { if (e.pointerType !== 'touch') setAt(null); }}>
       <div className="rfc__bars" aria-hidden="true">
@@ -390,84 +395,171 @@ export function WeekBars({ weeks, metric = 'points', height = 220 }: { weeks: re
             </span>
           </span>
         ))}
+        {fut.map((k, i) => (
+          <span key={`a${k}`} className={`is-ahead${at === ws.length + i ? ' is-on' : ''}${i === 0 ? ' is-first' : ''}`}>
+            <em className="spx-bars__range" style={{ bottom: pct(ahead!.busy), height: `${Math.max(0, ((ahead!.quiet - ahead!.busy) / top) * 100)}%` }} />
+            <span style={{ height: pct(ahead!.mid) }}><i className="is-est" style={{ flexGrow: 1 }} /></span>
+          </span>
+        ))}
       </div>
-      {l1 > 0 && <span className="spx-bars__season" style={{ left: `${(l1 / ws.length) * 100}%` }}>Layer 1</span>}
-      {w && at !== null && (
-        <span className="rfc__tip" style={{ left: `clamp(90px, ${(100 / ws.length) * (at + 0.5)}%, calc(100% - 90px))` }}>
-          <small>{w.name}</small>
-          {metric === 'rank' ? <span><i style={{ color: 'var(--rf-points)' }} />Rank<b>#{pts(w.split.week.rank)}</b></span> : metric === 'invited' ? (<>
-            <span className="is-referral"><i />From invitees<b>{pts(w.split.referral)}</b></span>
-            <span><i style={{ opacity: 0 }} />Week<b>{pts(w.split.week.points)}</b></span>
+      {l1 > 0 && <span className="spx-bars__season" style={{ left: `${(l1 / n) * 100}%` }}>Layer 1</span>}
+      {fut.length > 0 && <span className="spx-bars__season is-ahead" style={{ left: `${(ws.length / n) * 100}%` }}>Estimate</span>}
+      {(w || f !== null) && at !== null && (
+        <span className="rfc__tip" style={{ left: `clamp(90px, ${(100 / n) * (at + 0.5)}%, calc(100% - 90px))` }}>
+          {f !== null ? (<>
+            <small>Layer 1 · Week {f}, estimate</small>
+            <span className="is-est"><i />Typical week<b>≈ {ptsEst(ahead!.mid)}</b></span>
+            <span><i style={{ opacity: 0 }} />Busy to quiet<b>{ptsEst(ahead!.busy)} – {ptsEst(ahead!.quiet)}</b></span>
           </>) : (<>
-            <span className="is-own"><i />Own<b>{metric === 'mix' ? shareOf(w.split.own, w) : pts(w.split.own)}</b></span>
-            <span className="is-referral"><i />From invitees<b>{metric === 'mix' ? shareOf(w.split.referral, w) : pts(w.split.referral)}</b></span>
-            {w.season === 'L1' && <span className="is-boost"><i />Squad {plusPct(w.split.week.totalBonusPct ?? 0)}<b>{metric === 'mix' ? shareOf(w.split.boost, w) : pts(w.split.boost)}</b></span>}
-            <span><i style={{ opacity: 0 }} />Week<b>{pts(w.split.week.points)}</b></span>
+            <small>{w!.name}</small>
+            {metric === 'rank' ? <span><i style={{ color: 'var(--rf-points)' }} />Rank<b>#{pts(w!.split.week.rank)}</b></span> : metric === 'invited' ? (<>
+              <span className="is-referral"><i />From invitees<b>{pts(w!.split.referral)}</b></span>
+              <span><i style={{ opacity: 0 }} />Week<b>{pts(w!.split.week.points)}</b></span>
+            </>) : (<>
+              <span className="is-own"><i />Own<b>{pts(w!.split.own)}</b></span>
+              <span className="is-referral"><i />From invitees<b>{pts(w!.split.referral)}</b></span>
+              {w!.season === 'L1' && <span className="is-boost"><i />Squad {plusPct(w!.split.week.totalBonusPct ?? 0)}<b>{pts(w!.split.boost)}</b></span>}
+              <span><i style={{ opacity: 0 }} />Week<b>{pts(w!.split.week.points)}</b></span>
+            </>)}
           </>)}
         </span>
       )}
-      <span className="rfc__ax is-cells">{ws.map((x, i) => <i key={x.key}>{i % every === 0 ? x.short : ''}</i>)}</span>
+      <span className="rfc__ax is-cells">
+        {ws.map((x, i) => <i key={x.key}>{i % every === 0 ? x.short : ''}</i>)}
+        {fut.map((k, i) => <i key={`a${k}`}>{(ws.length + i) % every === 0 ? `L${k}` : ''}</i>)}
+      </span>
     </div>
   );
 }
 
-export function BarsLegend({ metric = 'points' }: { metric?: BarMetric }) {
+export function BarsLegend({ metric = 'points', ahead = false }: { metric?: BarMetric; ahead?: boolean }) {
   if (metric === 'rank') return <ul className="spx-legend"><li><i className="is-own" />Rank, #1 at the top</li></ul>;
   if (metric === 'invited') return <ul className="spx-legend"><li><i className="is-referral" />From invitees, before the squad's boost</li></ul>;
-  return <ul className="spx-legend"><li><i className="is-own" />Own</li><li><i className="is-referral" />From invitees</li><li><i className="is-boost" />Squad boost</li>{metric === 'mix' && <li>Each week's share</li>}</ul>;
+  return <ul className="spx-legend"><li><i className="is-own" />Own</li><li><i className="is-referral" />From invitees</li><li><i className="is-boost" />Squad boost</li>{ahead && <li><i className="is-est" />Estimate, busy to quiet week</li>}</ul>;
+}
+
+/* -------------------------------------------------------------------------------- rank colour ----- */
+
+/**
+ * A week's place among everyone SoDEX ranked that week, as a colour step (owner 2026-11-27: "totalpoints per week
+ * colored depending on users rank in that week"): top 0.1% gold, top 1% green, top 10% blue, the rest plain.
+ */
+export function rankStep(rank: number, users: number): { cls: string; label: string } | null {
+  if (!(rank > 0) || !(users > 0)) return null;
+  const p = (rank / users) * 100;
+  if (p <= 0.1) return { cls: 'is-r1', label: 'Top 0.1%' };
+  if (p <= 1) return { cls: 'is-r2', label: 'Top 1%' };
+  if (p <= 10) return { cls: 'is-r3', label: 'Top 10%' };
+  return { cls: 'is-r4', label: `Top ${Math.ceil(p)}%` };
+}
+
+/** "Top 0.61%": SoDEX's own words when it gave them, else rank over users. */
+export const topText = (rank: number, users: number, given?: string): string => {
+  if (given && /top/i.test(given)) return localize(given);
+  if (!(rank > 0) || !(users > 0)) return DASH;
+  const p = (rank / users) * 100;
+  return localize(`Top ${p < 1 ? Number(p.toFixed(2)) : Math.ceil(p)}%`);
+};
+
+export function RankLegend() {
+  return (
+    <ul className="spx-legend spx-ranklegend" aria-label="Points coloured by rank that week">
+      <li><i className="is-r1" />Top 0.1%</li><li><i className="is-r2" />Top 1%</li><li><i className="is-r3" />Top 10%</li><li><i className="is-r4" />Below</li>
+    </ul>
+  );
 }
 
 /* -------------------------------------------------------------------------------- week table ----- */
 
 type SeasonPick = 'L1' | 'S1';
+type TableView = 'simple' | 'detailed';
 
-export function WeeksTable({ v }: { v: PointsView }) {
+/** What the estimate says each scored week earned beyond its activity, by week number (sopointsEstimate EstCalib rows). */
+export type OtherByWeek = ReadonlyMap<number, number> | null;
+
+const OTHER_INFO = 'From ValueDesk’s estimate: own points beyond what the week’s trading, positions and holdings explain. '
+  + 'Loyalty and consistency rewards, bug reports, campaigns, or the estimate’s own error: points SoDEX does not itemise.';
+
+/**
+ * Every week, simple by default (week, rank, points coloured by that week's rank); Detailed is the full row
+ * (owner 2026-11-27) with the points the estimate cannot place in their own column.
+ */
+export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek }) {
   const phone = usePhone();
   const [season, setSeason] = useState<SeasonPick>('L1');
+  const [view, setView] = useState<TableView>('simple');
   const [empty, setEmpty] = useState(false);
   const rows = useMemo(() => v.all.filter((r) => r.season === season && (empty || r.split.week.points > 0 || r.split.week.isLive)).reverse(), [v.all, season, empty]);
   const hasS1 = v.all.some((r) => r.season === 'S1');
+  const detailed = view === 'detailed' && !phone;
+  const oth = (r: AnyWeek) => (r.season === 'L1' && other ? other.get(r.split.week.weekNo) ?? null : null);
   if (v.s.loading && !v.all.length) return <div className="spx-skelrows">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="rf-skel-row" />)}</div>;
   return (
     <div className="spx-weeks">
       <div className="spx-weeks__bar">
         <SeasonSwitch value={season} onChange={setSeason} s1={hasS1} />
-        <button type="button" className="rf-text" onClick={() => setEmpty(!empty)}>{empty ? 'Hide empty weeks' : 'Show empty weeks'}</button>
+        {!phone && <Segmented<TableView> label="View" value={view} onChange={setView} options={[{ value: 'simple', label: 'Simple' }, { value: 'detailed', label: 'Detailed' }]} />}
+        <button type="button" className="rf-text spx-weeks__empty" onClick={() => setEmpty(!empty)}>{empty ? 'Hide empty weeks' : 'Show empty weeks'}</button>
       </div>
       {!rows.length ? <EmptyState compact icon="clock" title="No weeks here yet" /> : phone ? (
         <ul className="rf-list spx-weeklist">
           {rows.map((r) => {
             const w = r.split.week;
             const tbd = w.pointsStatus !== 'CONFIRMED';
+            const step = rankStep(w.rank, w.totalUser);
             return (
               <li key={r.key}>
                 <span className="spx-wk">{r.short}</span>
-                <span><b>{w.weekName}{w.isLive && <StatusPill size="sm" tone="positive" dot>Live</StatusPill>}</b><small>{r.split.volume ? money(r.split.volume) : 'No volume'}{w.rank ? ` · #${pts(w.rank)}` : ''}{r.season === 'L1' ? ` · ${plusPct(w.totalBonusPct ?? 0)}` : ''}</small></span>
-                <span className="rf-pay"><em>{tbd ? 'TBD' : pts(w.points)}</em>{!tbd && r.split.referral > 0 && <small>{pts(r.split.referral)} invited</small>}</span>
+                <span><b>{w.weekName}{w.isLive && <StatusPill size="sm" tone="positive" dot>Live</StatusPill>}</b><small>{w.rank ? `#${pts(w.rank)} · ${topText(w.rank, w.totalUser, w.rankPercentile)}` : 'Not ranked'}</small></span>
+                <span className="rf-pay"><em className={`spx-rk ${step?.cls ?? ''}`}>{tbd ? 'TBD' : pts(w.points)}</em>{!tbd && r.split.referral > 0 && <small>{pts(r.split.referral)} invited</small>}</span>
               </li>
             );
           })}
         </ul>
       ) : (
-        <div className="bots-tablewrap">
+        <div className={`bots-tablewrap spx-tblwrap${detailed ? ' is-detailed' : ''}`}>
           <table className="bots-table spx-tbl">
-            <thead><tr><th>Week</th><th className="right">Volume</th><th className="right">Open interest</th><th className="right">Holdings</th><th className="right">Rank</th>{season === 'L1' && <th className="right">Squad</th>}<th className="right">Own</th><th className="right">Invited</th><th className="right">Points</th></tr></thead>
+            <thead>
+              {detailed ? (
+                <tr>
+                  <th>Week</th><th className="right">Volume</th><th className="right">Open interest</th><th className="right">Holdings</th><th className="right">Rank</th>
+                  {season === 'L1' && <th className="right">Squad</th>}<th className="right">Own</th>
+                  {season === 'L1' && <th className="right"><span className="spx-tbl__info" title={OTHER_INFO} tabIndex={0} aria-label={`Loyalty and other. ${OTHER_INFO}`}>Loyalty &amp; other<Icon name="info" size={12} /></span></th>}
+                  <th className="right">Invited</th><th className="right">Points</th>
+                </tr>
+              ) : <tr><th>Week</th><th className="right">Rank</th><th className="right">Place</th><th className="right">Points</th></tr>}
+            </thead>
             <tbody>
               {rows.map((r) => {
                 const w = r.split.week;
                 const tbd = w.pointsStatus !== 'CONFIRMED';
                 const hold = (w.wealthTvl ?? 0) + (w.vaultHolding ?? 0);
+                const step = rankStep(w.rank, w.totalUser);
+                const o = oth(r);
+                const pointsCell = <td className="right num spx-tbl__pts"><span className={`spx-rk ${tbd ? '' : step?.cls ?? ''}`}>{tbd ? 'TBD' : pts(w.points)}</span></td>;
+                const weekCell = <td><span className="spx-tbl__wk"><b>{w.weekName}</b>{w.isLive && <StatusPill size="sm" tone="positive" dot>Live</StatusPill>}<small>{weekRange(w.weekStartTime)}</small></span></td>;
+                if (!detailed) {
+                  return (
+                    <tr key={r.key} className={w.isLive ? 'is-live' : undefined}>
+                      {weekCell}
+                      <td className="right num">{w.rank ? `#${pts(w.rank)}` : DASH}</td>
+                      <td className="right num">{w.rank ? topText(w.rank, w.totalUser, w.rankPercentile) : DASH}</td>
+                      {pointsCell}
+                    </tr>
+                  );
+                }
                 return (
                   <tr key={r.key} className={w.isLive ? 'is-live' : undefined}>
-                    <td><span className="spx-tbl__wk"><b>{w.weekName}</b>{w.isLive && <StatusPill size="sm" tone="positive" dot>Live</StatusPill>}<small>{weekRange(w.weekStartTime)}</small></span></td>
+                    {weekCell}
                     <td className="right num">{r.split.volume ? money(r.split.volume) : DASH}</td>
                     <td className="right num">{w.oi ? money(w.oi) : DASH}</td>
                     <td className="right num">{hold >= 1 ? money(hold) : DASH}</td>
                     <td className="right num">{w.rank ? `#${pts(w.rank)}` : DASH}</td>
                     {season === 'L1' && <td className={`right num${w.totalBonusPct ? ' pos' : ''}`}>{plusPct(w.totalBonusPct ?? 0)}</td>}
                     <td className="right num">{tbd ? DASH : pts(r.split.own)}</td>
+                    {season === 'L1' && <td className="right num">{tbd || o === null ? DASH : o >= 0.5 ? <span className="spx-other">≈ {ptsEst(o)}</span> : '0'}</td>}
                     <td className="right num">{tbd ? DASH : pts(r.split.referral)}</td>
-                    <td className="right num spx-tbl__pts">{tbd ? 'TBD' : pts(w.points)}</td>
+                    {pointsCell}
                   </tr>
                 );
               })}
@@ -475,6 +567,10 @@ export function WeeksTable({ v }: { v: PointsView }) {
           </table>
         </div>
       )}
+      <div className="spx-weeks__foot">
+        <RankLegend />
+        {detailed && season === 'L1' && <small className="spx-weeks__note"><Icon name="info" size={12} />Loyalty &amp; other is an estimate: points SoDEX gave beyond what the week’s activity explains.</small>}
+      </div>
     </div>
   );
 }
@@ -485,35 +581,49 @@ function SeasonSwitch({ value, onChange, s1 }: { value: SeasonPick; onChange: (v
 
 /* -------------------------------------------------------------------------------- the levers ----- */
 
-export interface Plan { futures: number; spot: number; oi: number; boostedShare: number; squadPct: number }
-export interface Lever { id: string; icon: IconName; title: string; line: string; gain: number | null; value: string; est: boolean }
+export interface Plan { futures: number; spot: number; oi: number; boostedShare: number; squadPct: number; wealth?: number; vault?: number }
+export interface Lever { id: string; icon: IconName; title: string; line: string; gain: number | null; value: string; est: boolean; href: string; go: string }
 
-/** ValueDesk's fitted model (sopoints.ts): own points of a week, before referral points and the squad's boost. */
-export function planOwn(p: Plan, coef: number) {
-  const futures = p.futures * (1 + (coef - 1) * p.boostedShare);
-  return estimate({ futures, spot: p.spot, oi: p.oi });
+/** A plan as the estimate reads it (SoDEX's boosted coefficient applied by the server). */
+export const estPlan = (p: Plan, coef: number): EstPlan => ({ futures: p.futures, spot: p.spot, oi: p.oi, wealth: p.wealth ?? 0, vault: p.vault ?? 0, boostedShare: p.boostedShare, coef });
+
+/** The plans the levers compare, in this order: the plan, all of it on boosted markets, $1K more held, $10K moved to spot, $10K more futures. */
+export function leverPlans(p: Plan, coef: number): EstPlan[] {
+  return [
+    estPlan(p, coef),
+    estPlan({ ...p, boostedShare: 1 }, coef),
+    estPlan({ ...p, oi: p.oi + 1000 }, coef),
+    estPlan(p.futures >= 10_000 ? { ...p, futures: p.futures - 10_000, spot: p.spot + 10_000 } : p, coef),
+    estPlan({ ...p, futures: p.futures + 10_000 }, coef),
+  ];
 }
 
-/** What would move this week's points most, ranked by points gained: the squad's next step, boosted markets, a held position, spot. */
-export function levers(p: Plan, coef: number, squad: SquadBreakdown | null, cfg: BoostConfig | null, lastRef: number | null): Lever[] {
+/**
+ * What would move this week's points most, ranked by points gained: the squad's next step, boosted markets, a held
+ * position, spot. `bands` are the server's answers for leverPlans (null while they load: the rows show without figures).
+ * Each row goes where it is done (owner 2026-11-27: squad and invites to the Referrals page, trading to the trade page).
+ */
+export function levers(p: Plan, coef: number, squad: SquadBreakdown | null, cfg: BoostConfig | null, lastRef: number | null, bands: readonly EstBand[] | null, boostedSymbol: string | null): Lever[] {
   const mult = 1 + p.squadPct / 100;
-  const base = planOwn(p, coef).mid;
-  const own = (q: Partial<Plan>) => planOwn({ ...p, ...q }, coef).mid;
+  const ok = bands && bands.length >= 5;
+  const base = ok ? bands[0]!.mid : null;
+  const gainAt = (i: number) => (ok ? (bands[i]!.mid - bands[0]!.mid) * mult : null);
   const out: Lever[] = [];
   if (cfg) {
     const steps = [squad?.built.next && { who: 'your squad', ...squad.built.next, from: squad.built.pct }, squad?.joined.next && squad.joined.volume > 0 && { who: 'the squad you joined', ...squad.joined.next, from: squad.joined.pct }]
       .filter(Boolean) as Array<{ who: string; threshold: number; pct: number; missing: number; from: number }>;
     const best = steps.sort((a, b) => a.missing - b.missing)[0];
-    if (best) out.push({ id: 'squad', icon: 'layers', title: `Next squad step, ${plusPct(best.pct)}`, line: `${money(best.missing)} more in ${best.who} over ${cfg.windowRounds} weeks lifts every point`, gain: base * ((best.pct - best.from) / 100), value: '', est: true });
-    else if (!squad) { const first = stepsOf(cfg)[0]; if (first) out.push({ id: 'squad', icon: 'layers', title: `A squad, up to ${plusPct(cfg.maxTotalBonusPct)}`, line: `From ${money(Number(first.threshold))} a squad's volume adds ${plusPct(first.bonusPct)} to every point`, gain: base * (first.bonusPct / 100), value: '', est: true }); }
+    if (best) out.push({ id: 'squad', icon: 'layers', title: `Next squad step, ${plusPct(best.pct)}`, line: `${money(best.missing)} more in ${best.who} over ${cfg.windowRounds} weeks lifts every point`, gain: base !== null ? base * ((best.pct - best.from) / 100) : null, value: '', est: true, href: '/referrals', go: 'Grow your squad' });
+    else if (!squad) { const first = stepsOf(cfg)[0]; if (first) out.push({ id: 'squad', icon: 'layers', title: `A squad, up to ${plusPct(cfg.maxTotalBonusPct)}`, line: `From ${money(Number(first.threshold))} a squad's volume adds ${plusPct(first.bonusPct)} to every point`, gain: base !== null ? base * (first.bonusPct / 100) : null, value: '', est: true, href: '/referrals', go: 'Build a squad' }); }
   }
-  if (coef > 1 && p.futures > 0 && p.boostedShare < 1) out.push({ id: 'boosted', icon: 'bolt', title: `Boosted markets, ${coefText(coef)}`, line: 'Trade the same futures volume on the boosted markets', gain: (own({ boostedShare: 1 }) - base) * mult, value: '', est: true });
-  out.push({ id: 'hold', icon: 'clock', title: 'Hold a $1K position all week', line: 'Open interest counts ten times its value, every hour it is open', gain: (own({ oi: p.oi + 1000 }) - base) * mult, value: '', est: true });
-  if (p.futures >= 10_000) out.push({ id: 'spot', icon: 'coins', title: 'Move $10K from futures to spot', line: 'Spot volume counts three times futures', gain: (own({ futures: p.futures - 10_000, spot: p.spot + 10_000 }) - base) * mult, value: '', est: true });
-  out.push({ id: 'more', icon: 'chart', title: 'Trade $10K more futures', line: 'Volume earns less per dollar as it grows', gain: (own({ futures: p.futures + 10_000 }) - base) * mult, value: '', est: true });
+  const trade = (sym: string | null) => (sym ? `/trade?symbol=${encodeURIComponent(sym)}` : '/trade');
+  if (coef > 1 && p.futures > 0 && p.boostedShare < 1) out.push({ id: 'boosted', icon: 'bolt', title: `Boosted markets, ${coefText(coef)}`, line: 'Trade the same futures volume on the boosted markets', gain: gainAt(1), value: '', est: true, href: trade(boostedSymbol), go: boostedSymbol ? `Trade ${boostedSymbol.replace(/-USD$/, '')}` : 'Trade' });
+  out.push({ id: 'hold', icon: 'clock', title: 'Hold a $1K position all week', line: 'Open interest counts every hour a position is open', gain: gainAt(2), value: '', est: true, href: '/trade', go: 'Open a position' });
+  if (p.futures >= 10_000) out.push({ id: 'spot', icon: 'coins', title: 'Move $10K from futures to spot', line: 'Spot volume counts more than futures', gain: gainAt(3), value: '', est: true, href: '/trade', go: 'Trade spot' });
+  out.push({ id: 'more', icon: 'chart', title: 'Trade $10K more futures', line: 'Volume earns less per dollar as it grows', gain: gainAt(4), value: '', est: true, href: '/trade', go: 'Trade' });
   out.sort((a, b) => (b.gain ?? 0) - (a.gain ?? 0));
-  out.push({ id: 'invite', icon: 'share', title: 'Invite traders', line: lastRef ? `Your invitees earned you ${pts(lastRef)} last week, before your squad's boost` : 'You get 25% of what they earn, they get +5%', gain: null, value: '25%', est: false });
-  return out.map((l) => ({ ...l, value: l.value || (l.gain !== null ? `+${ptsEst(Math.max(0, l.gain))}` : DASH) }));
+  out.push({ id: 'invite', icon: 'share', title: 'Invite traders', line: lastRef ? `Your invitees earned you ${pts(lastRef)} last week, before your squad's boost` : 'You get 25% of what they earn, they get +5%', gain: null, value: '25%', est: false, href: '/referrals', go: 'Invite' });
+  return out.map((l) => ({ ...l, value: l.value || (l.gain !== null ? `+${ptsEst(Math.max(0, l.gain))}` : '') }));
 }
 
 /** A slider's 0..STEPS on a log scale from 10^lo to 10^hi, two significant figures; 0 is $0 when `zero` (the landing calculator's). */
@@ -523,13 +633,9 @@ export const logScale = (lo: number, hi: number, zero = false) => ({
   t: (usd: number): number => (usd <= 0 ? 0 : Math.max(zero ? 1 : 0, Math.min(STEPS, Math.round(((Math.log10(usd) - lo) / (hi - lo)) * STEPS)))),
 });
 
-/** A week's own points at the season's central rate and its quiet and busy weeks (sopoints.ts rateLow, rateHigh). */
-export const bandOf = (score: number) => ({ mid: ownPoints(score), low: ownPoints(score, SOPOINTS_MODEL.rateLow), high: ownPoints(score, SOPOINTS_MODEL.rateHigh) });
-export { SOPOINTS_MODEL, scoreOf };
-
-/** The pill every model figure carries. */
+/** The pill every estimated figure carries. */
 export function EstPill() {
-  return <StatusPill size="sm" tone="neutral" title={`ValueDesk's fit of ${SOPOINTS_MODEL.fittedOn} (${SOPOINTS_MODEL.fittedAt}), not a SoDEX figure`}>Estimate</StatusPill>;
+  return <StatusPill size="sm" tone="neutral" title="ValueDesk’s estimate from SoDEX’s scored weeks, not a SoDEX figure">Estimate</StatusPill>;
 }
 
 export { fmt, DASH };

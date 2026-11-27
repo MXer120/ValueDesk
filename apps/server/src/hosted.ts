@@ -209,6 +209,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/vs/sodex-auth/verify', cls: 'auth' },
   // The SoPoints week log (routes/sopointsLog.ts): a signed-in wallet's weeks as SoDEX answered them.
   { method: 'POST', url: '/api/vs/sopoints/log', cls: 'write' },
+  // The SoPoints estimate (routes/sopointsEstimate.ts): weeks priced by the model that stays on this server.
+  { method: 'POST', url: '/api/vs/sopoints/estimate', cls: 'write' },
   // The builder fee a wallet owes, signed (routes/builder.ts, docs/BUILDER-TIERS.md §3). Asking is a
   // read of this server's own ledger and one signature. A hint is what later costs SoDEX reads from
   // this server's address, so a request that carries one counts as `upstream` too.

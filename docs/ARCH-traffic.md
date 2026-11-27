@@ -394,6 +394,11 @@ Against this inventory, HOSTED_ROUTES should be:
   and `POST /api/vs/invites/join` (cls `write`, 4 KB, 12 a minute per client): invite codes, a signed join, a wallet's fee
   credits (routes/invites.ts, `invites.db`). Upstream: one SoDEX `checkEligibility` read per code never seen before (whose code it is, kept); the credits come from the builder ledger on this server.
 - **Add**: `POST /api/vs/sopoints/log` (cls `write`, 64 KiB, 6 a minute per client): a signed-in wallet's SoPoints weeks (Season 1 and Layer 1 lists, summary, squad bonus) as SoDEX answered its page, kept in `sopoints.db` one row per wallet, season and week for the points formula fit (routes/sopointsLog.ts). No token or signature is sent. No upstream.
+- **Add**: `POST /api/vs/sopoints/estimate` (cls `write`, 32 KiB, 120 a minute per client): the SoPoints estimate. The page sends
+  the weeks it wants priced (volumes, positions, holdings) and, signed in, the wallet's scored weeks as SoDEX gave them; the answer is
+  each week's own points in a typical, a busy and a quiet week, made the wallet's own by its past weeks (routes/sopointsEstimate.ts,
+  valuedesk/sodex/sopointsModel.ts). The model's numbers come from a private file on the server (VALUESCAN_SOPOINTS_MODEL, else
+  `sopoints-model.json` in the data dir), never from the repository; without it, 503. No address is sent, nothing is kept. No upstream.
 - **Add**: `GET /api/vs/sodex/mm-daily?from=` (cls `upstream`, cached an hour): per UTC day, SoDEX accounts 1002 + 23342's volume (from 2026-11-06, our index) and SoDEX's internal pair's open interest (its sizes now x each day's mark close), for the SoPoints difficulty (valuedesk/sodex/mmDaily.ts). Upstream: one mark-candle read per market the pair holds (>= 0.2% of its USD) and one positions read, per hour.
 - **Add**: `POST /api/vs/sodex-auth/nonce` and `POST /api/vs/sodex-auth/verify` (cls `auth`: the site Origin exactly,
   capped per client and overall): the SoPoints sign-in relay (routes/pointsAuth.ts, owner 2026-11-16). SoDEX's two

@@ -1,7 +1,7 @@
 /**
  * SoPoints, version "Planner" (localhost only, owner 2026-11-26): the page as a tool for the question traders ask, "what
  * gets me more points this week?". A week is planned with the kit's sliders (futures, spot, the position held, the share
- * on boosted markets, the squad's boost) and priced with ValueDesk's fitted model, labelled an estimate everywhere; the
+ * on boosted markets, the squad's boost) and priced by ValueDesk's estimate (the server's), labelled an estimate everywhere; the
  * levers beside it re-rank as it moves. Signed in, any of the wallet's own weeks fills the plan (SoDEX's rows, its
  * boosted share from SoDEX's weight details). Under it: $10K six ways, and the wallet's weeks.
  */
@@ -9,9 +9,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Eip1193Provider } from '../../../../wallet';
 import { IconTile, Skeleton, Slider } from '../../../bots/kit/kit';
 import type { S2Week, WeekSplit } from '../../soPointsV2';
+import { estWeeks, useEstimate, type EstBand } from '../../sopointsEstimate';
 import {
-  Clock, DASH, EstPill, SOPOINTS_MODEL, STEPS, SignInPanel, WeekPill, bandOf, boostedOf, coefText, levers, logScale, money, planOwn, plusPct, pts, ptsEst,
-  scoreOf, useSignIn, usePointsView, weekRange, type Plan, type PointsView,
+  Clock, DASH, EstPill, STEPS, SignInPanel, WeekPill, boostedOf, coefText, estPlan, leverPlans, levers, logScale, money, plusPct, pts, ptsEst,
+  useSignIn, usePointsView, weekRange, type Plan, type PointsView,
 } from './shared';
 
 const FUT = logScale(3, 7, true);
@@ -27,6 +28,8 @@ export function planOf(w: S2Week, squadNow: number | null): Plan {
     oi: w.oi ?? 0,
     boostedShare: w.futuresVolume > 0 ? Math.min(1, boosted / w.futuresVolume) : 0,
     squadPct: w.isLive ? squadNow ?? w.totalBonusPct ?? 0 : w.totalBonusPct ?? 0,
+    wealth: w.wealthTvl ?? 0,
+    vault: w.vaultHolding ?? 0,
   };
 }
 
@@ -49,9 +52,12 @@ export function Planner({ address, provider, sample }: { address: string | null;
     setFrom(lastL1.key);
   }, [v.mine, lastL1, v.squad]);
   const set = (p: Partial<Plan>) => { setPlan((x) => ({ ...x, ...p })); setFrom(null); };
-  const own = planOwn(plan, b.coef);
+  const weeksIn = useMemo(() => (v.mine ? estWeeks(v.all) : null), [v.mine, v.all]);
+  const plans = useMemo(() => leverPlans(plan, b.coef), [plan, b.coef]);
+  const est = useEstimate(plans, weeksIn, { debounceMs: 160 });
+  const own = est.data?.plans[0] ?? null;
   const mult = 1 + plan.squadPct / 100;
-  const list = levers(plan, b.coef, v.mine ? v.squad : null, c.boost, v.mine ? v.last?.split.referral ?? null : null);
+  const list = levers(plan, b.coef, v.mine ? v.squad : null, c.boost, v.mine ? v.last?.split.referral ?? null : null, est.data?.plans ?? null, b.rows[0]?.symbol ?? null);
   const maxSquad = c.boost?.maxTotalBonusPct ?? 50;
   const fromWeek = from ? v.all.find((w) => w.key === from) ?? null : null;
   return (
@@ -76,7 +82,7 @@ export function Planner({ address, provider, sample }: { address: string | null;
               <EstPill />
               <FromWeek v={v} from={fromWeek?.split.week.weekName ?? null} onPick={() => { if (lastL1) { setPlan(planOf(lastL1.split.week, v.squad?.total ?? null)); setFrom(lastL1.key); } }} />
             </div>
-            <Result own={own} mult={mult} plan={plan} coef={b.coef} scored={fromWeek && fromWeek.split.week.pointsStatus === 'CONFIRMED' ? fromWeek.split : null} />
+            <Result own={own} mult={mult} scored={fromWeek && fromWeek.split.week.pointsStatus === 'CONFIRMED' ? fromWeek.split : null} />
             <div className="spp-inputs">
               <Field label="Futures volume" value={plan.futures ? money(plan.futures) : '$0'}>
                 <Slider value={FUT.t(plan.futures)} min={0} max={STEPS} onChange={(t) => set({ futures: FUT.of(t) })} label={`Futures volume in the week: ${money(plan.futures)}`} minLabel="$0" maxLabel="$10M" />
@@ -96,7 +102,7 @@ export function Planner({ address, provider, sample }: { address: string | null;
                 <Slider value={plan.squadPct} min={0} max={maxSquad} step={5} onChange={(x) => set({ squadPct: x })} label="Squad boost" minLabel="0%" maxLabel={plusPct(maxSquad)} />
               </Field>
             </div>
-            <p className="spp-plan__fine">ValueDesk’s fit of {SOPOINTS_MODEL.fittedOn} ({SOPOINTS_MODEL.fittedAt}); SoDEX publishes no formula. Referral points come on top.</p>
+            <p className="spp-plan__fine">ValueDesk’s estimate{est.data ? `, fitted on ${est.data.model.fittedOn} (${est.data.model.fittedAt})` : ''}; SoDEX publishes no formula. Referral points come on top.</p>
           </section>
 
           <section className="spx-earn spp-levers" aria-label="What moves it">
@@ -108,7 +114,7 @@ export function Planner({ address, provider, sample }: { address: string | null;
                   <em className="spp-rank sx-num">{l.gain !== null ? i + 1 : ''}</em>
                   <IconTile icon={l.icon} />
                   <span><b>{l.title}</b><small>{l.line}</small></span>
-                  <span className="rf-pay"><em className={l.gain !== null && l.gain > 0 ? 'is-credit' : undefined}>{l.value}</em>{l.gain !== null && <small>a week</small>}</span>
+                  <span className="rf-pay"><em className={l.gain !== null && l.gain > 0 ? 'is-credit' : undefined}>{l.value || DASH}</em>{l.gain !== null && <small>a week</small>}</span>
                 </li>
               ))}
             </ul>
@@ -145,22 +151,21 @@ export function Field({ label, value, children }: { label: string; value: string
   );
 }
 
-/** The plan's points and where they come from: each part of the score's share of the own points, then the squad's boost. */
-function Result({ own, mult, plan, coef, scored }: { own: ReturnType<typeof planOwn>; mult: number; plan: Plan; coef: number; scored: WeekSplit | null }) {
-  const futures = plan.futures * (1 + (coef - 1) * plan.boostedShare);
-  const parts = own.score > 0 ? [
-    { k: 'fut', label: 'Futures', v: own.mid * (futures / own.score) },
-    { k: 'spot', label: 'Spot', v: own.mid * ((SOPOINTS_MODEL.weights.spot * plan.spot) / own.score) },
-    { k: 'oi', label: 'Position', v: own.mid * ((SOPOINTS_MODEL.weights.oi * plan.oi) / own.score) },
+/** The plan's points and where they come from (the server's split of its own points), then the squad's boost. */
+function Result({ own, mult, scored }: { own: EstBand | null; mult: number; scored: WeekSplit | null }) {
+  const parts = own ? [
+    { k: 'fut', label: 'Futures', v: own.parts.futures },
+    { k: 'spot', label: 'Spot', v: own.parts.spot },
+    { k: 'oi', label: 'Position', v: own.parts.oi },
+    ...(own.parts.wealth + own.parts.vault + own.parts.extra > 0.01 ? [{ k: 'hold', label: 'Holdings & other', v: own.parts.wealth + own.parts.vault + own.parts.extra }] : []),
     { k: 'sq', label: 'Squad', v: own.mid * (mult - 1) },
   ] : [];
-  const total = own.mid * mult;
   return (
     <div className="spp-result">
       <div className="spp-result__n">
-        <b className="sx-num">≈ {ptsEst(total)}</b>
+        {own ? <b className="sx-num">≈ {ptsEst(own.mid * mult)}</b> : <Skeleton className="spx-live__skel" />}
         <span>SoPoints this week</span>
-        <small className="sx-num">Quiet week {ptsEst(own.low * mult)} · busy week {ptsEst(own.high * mult)}</small>
+        {own && <small className="sx-num">Busy week {ptsEst(own.busy * mult)} · quiet week {ptsEst(own.quiet * mult)}</small>}
         {/* Filled from a scored week: what SoDEX gave it, so the estimate can be held against the real figure. */}
         {scored && <small className="spp-result__real">SoDEX scored that {scored.week.weekName} <b className="sx-num">{pts(scored.week.points)}</b>{scored.referral > 0 ? `, ${pts(scored.referral * (1 + (scored.week.totalBonusPct ?? 0) / 100))} of it from invitees` : ''}</small>}
       </div>
@@ -173,24 +178,29 @@ function Result({ own, mult, plan, coef, scored }: { own: ReturnType<typeof plan
 }
 
 function SixWays({ coef }: { coef: number }) {
-  const rows: Array<{ k: string; what: string; sub: string; score: number }> = [
-    { k: 'f', what: '$10K futures', sub: 'Volume, any market', score: scoreOf({ futures: 10_000 }) },
-    { k: 's', what: '$10K spot', sub: 'Counts three times futures', score: scoreOf({ futures: 0, spot: 10_000 }) },
-    ...(coef > 1 ? [{ k: 'b', what: '$10K on a boosted market', sub: `Counts ${coefText(coef)}`, score: scoreOf({ futures: 10_000 * coef }) }] : []),
-    { k: 'p1', what: '$1K position, all week', sub: 'Held, not traded', score: scoreOf({ futures: 0, oi: 1_000 }) },
-    { k: 'p10', what: '$10K position, all week', sub: 'Ten times the position', score: scoreOf({ futures: 0, oi: 10_000 }) },
-    { k: 'f100', what: '$100K futures', sub: 'Ten times the volume', score: scoreOf({ futures: 100_000 }) },
-  ];
-  const top = Math.max(...rows.map((r) => bandOf(r.score).high));
+  const rows: Array<{ k: string; what: string; sub: string; plan: Plan }> = useMemo(() => {
+    const p = (x: Partial<Plan>): Plan => ({ futures: 0, spot: 0, oi: 0, boostedShare: 0, squadPct: 0, ...x });
+    return [
+      { k: 'f', what: '$10K futures', sub: 'Volume, any market', plan: p({ futures: 10_000 }) },
+      { k: 's', what: '$10K spot', sub: 'Spot counts more than futures', plan: p({ spot: 10_000 }) },
+      ...(coef > 1 ? [{ k: 'b', what: '$10K on a boosted market', sub: `Counts ${coefText(coef)}`, plan: p({ futures: 10_000, boostedShare: 1 }) }] : []),
+      { k: 'p1', what: '$1K position, all week', sub: 'Held, not traded', plan: p({ oi: 1_000 }) },
+      { k: 'p10', what: '$10K position, all week', sub: 'Ten times the position', plan: p({ oi: 10_000 }) },
+      { k: 'f100', what: '$100K futures', sub: 'Ten times the volume', plan: p({ futures: 100_000 }) },
+    ];
+  }, [coef]);
+  const plans = useMemo(() => rows.map((r) => estPlan(r.plan, coef)), [rows, coef]);
+  const bands = useEstimate(plans, null).data?.plans ?? null;
+  const top = bands ? Math.max(1, ...bands.map((e) => e.quiet)) : 1;
   return (
     <ul className="spp-six">
-      {rows.map((r) => {
-        const e = bandOf(r.score);
+      {rows.map((r, i) => {
+        const e = bands?.[i] ?? null;
         return (
           <li key={r.k}>
             <span><b>{r.what}</b><small>{r.sub}</small></span>
-            <span className="spp-six__bar" aria-hidden="true"><i style={{ left: `${(e.low / top) * 100}%`, width: `${((e.high - e.low) / top) * 100}%` }} /><em style={{ left: `${(e.mid / top) * 100}%` }} /></span>
-            <span className="spp-six__v"><b className="sx-num">≈ {ptsEst(e.mid)}</b><small className="sx-num">{ptsEst(e.low)} – {ptsEst(e.high)}</small></span>
+            <span className="spp-six__bar" aria-hidden="true">{e && <><i style={{ left: `${(e.busy / top) * 100}%`, width: `${((e.quiet - e.busy) / top) * 100}%` }} /><em style={{ left: `${(e.mid / top) * 100}%` }} /></>}</span>
+            <span className="spp-six__v">{e ? <><b className="sx-num">≈ {ptsEst(e.mid)}</b><small className="sx-num">{ptsEst(e.busy)} – {ptsEst(e.quiet)}</small></> : <Skeleton className="spx-lever__skel" />}</span>
           </li>
         );
       })}
