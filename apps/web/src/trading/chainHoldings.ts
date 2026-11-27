@@ -453,7 +453,7 @@ async function readNear(owner: string): Promise<Base[]> {
 
 let hlMids: { at: number; map: Promise<Map<string, number>> } | null = null;
 /** Hyperliquid's mid for every coin it lists (one request, a minute's cache). */
-function hyperliquidMids(): Promise<Map<string, number>> {
+export function hyperliquidMids(): Promise<Map<string, number>> {
   if (hlMids && Date.now() - hlMids.at < 60_000) return hlMids.map;
   const map = post<Record<string, string>>(HL_INFO_URL, { type: 'allMids' }).then((j) => {
     const m = new Map<string, number>();

@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Button, EmptyState, Icon, IconButton, Segmented, SegmentedBar, Skeleton, StatusPill, TextInput } from '../../bots/kit/kit';
 import { CoinIcon } from '../../CoinIcon';
-import { coinLogo } from '../../../logos';
+import { chainLogo, coinLogo } from '../../../logos';
 import { DASH, fmt, fmtUsd } from '../../../format';
 import { Private } from '../../../privacy';
 import { NFT_CHAINS, chainOf, detectAddress, readNfts, supportedChains, type ChainHolding, type Detected, type Family, type Nft } from '../../../trading/chainHoldings';
@@ -31,6 +31,14 @@ const amountText = (v: number) => fmt(v, v >= 1000 ? 2 : v >= 1 ? 4 : 6);
 const priceText = (v: number | null) => (v === null ? DASH : fmtUsd(v, v >= 1 ? 2 : Math.min(14, Math.max(4, Math.ceil(-Math.log10(v)) + 2))));
 
 /**
+ * A chain's icon: its own logo, else its coin's from any of the app's icon sets (Cosmos Hub has no chain logo, ATOM has
+ * a coin one), else the app's fallback.
+ */
+export function ChainIcon({ icon, size, className }: { icon: string; size: number; className?: string }) {
+  return chainLogo(icon) || !coinLogo(icon) ? <CoinIcon chain={icon} size={size} className={className} /> : <CoinIcon coin={icon} size={size} className={className} />;
+}
+
+/**
  * A token's icon with its chain's as a badge. A token none of the app's icon sets knows shows its chain's icon alone:
  * the app's fallback mark is SoDEX's, which would say the token is SoDEX's.
  */
@@ -38,8 +46,8 @@ export function TokenIcon({ symbol, chainIcon, size = 26 }: { symbol: string; ch
   return (
     <span className="pfv-coins__ic">
       {coinLogo(symbol)
-        ? <><CoinIcon coin={symbol} size={size} /><CoinIcon chain={chainIcon} size={12} className="pfv-coins__chain" /></>
-        : <CoinIcon chain={chainIcon} size={size} />}
+        ? <><CoinIcon coin={symbol} size={size} /><ChainIcon icon={chainIcon} size={12} className="pfv-coins__chain" /></>
+        : <ChainIcon icon={chainIcon} size={size} />}
     </span>
   );
 }
@@ -57,14 +65,14 @@ function AddressChips({ o, adding, onAdd }: { o: OnchainState; adding: boolean; 
         const failed = read.length > 0 && read.every((r) => r.status === 'failed');
         return (
           <span key={`${w.family}:${w.address}`} className={cx('pfo-chip', failed && 'is-failed')} role="listitem" title={w.address}>
-            <CoinIcon chain={i === 0 ? 'VALUECHAIN' : ch.icon} size={16} />
+            <ChainIcon icon={i === 0 ? 'VALUECHAIN' : ch.icon} size={16} />
             <span className="pfo-chip__t">
               <b>{w.label || (i === 0 ? 'Your wallet' : ch.label)}</b>
               <small>{i === 0 ? 'EVM chains' : w.label ? ch.label : ''} {m.address(shortAddr(w.address))}</small>
             </span>
             {busy && <span className="tf-spin pfo-chip__spin" role="status" aria-label="Reading" />}
             {failed && <StatusPill tone="negative" size="sm">Not read</StatusPill>}
-            {i > 0 && <IconButton icon="x" label={`Remove ${ch.label} address`} className="pfo-chip__x" onClick={() => o.remove(w.address)} />}
+            {i > 0 && o.canAdd && <IconButton icon="x" label={`Remove ${ch.label} address`} className="pfo-chip__x" onClick={() => o.remove(w.address)} />}
           </span>
         );
       })}
@@ -113,7 +121,7 @@ function AddForm({ o, onDone }: { o: OnchainState; onDone: () => void }) {
       </div>
       {showAll && (
         <ul className="pfo-supported" aria-label="Chains this page reads">
-          {chains.map((c) => <li key={c.key}><CoinIcon chain={c.icon} size={14} />{c.label}</li>)}
+          {chains.map((c) => <li key={c.key}><ChainIcon icon={c.icon} size={14} />{c.label}</li>)}
         </ul>
       )}
     </form>
@@ -144,7 +152,7 @@ function ChainSplit({ o }: { o: OnchainState }) {
         {parts.map((p, i) => (
           <li key={p.key}>
             <i className="pfo-dot" style={{ background: `var(--pfo-c${Math.min(i, 6)})` }} aria-hidden="true" />
-            {p.key !== 'OTHER' && <CoinIcon chain={p.icon} size={14} />}
+            {p.key !== 'OTHER' && <ChainIcon icon={p.icon} size={14} />}
             <span>{p.label}</span>
             <b>{m.funds(fmtUsd(p.usd))}</b>
             <small>{share(p.usd / total)}</small>
@@ -225,12 +233,12 @@ function NftCard({ n }: { n: Nft }) {
         <span className="pfo-nft__img">
           {n.image && !broken
             ? <img src={n.image} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setBroken(true)} />
-            : <span className="pfo-nft__none" aria-hidden="true"><CoinIcon chain={n.chainIcon} size={28} /></span>}
+            : <span className="pfo-nft__none" aria-hidden="true"><ChainIcon icon={n.chainIcon} size={28} /></span>}
           {n.count > 1 && <span className="pfo-nft__n">×{n.count}</span>}
         </span>
         <span className="pfo-nft__t">
           <b>{n.name}</b>
-          <small><CoinIcon chain={n.chainIcon} size={12} />{n.collection}</small>
+          <small><ChainIcon icon={n.chainIcon} size={12} />{n.collection}</small>
         </span>
       </a>
     </li>
@@ -304,7 +312,7 @@ export function OnchainPanel({ o }: { o: OnchainState }) {
       {adding && <AddForm o={o} onDone={() => setAdding(false)} />}
       <ChainSplit o={o} />
       <Holdings o={o} />
-      <Nfts owner={o.watched[0]!.address} />
+      {o.nftOwner && <Nfts owner={o.nftOwner} />}
       <p className="pfo-src"><Icon name="info" size={13} />Read from your browser: LI.FI (EVM chains, prices), ValueChain’s and Blockscout’s explorers, and each chain’s public node. Addresses you add stay in this browser.</p>
     </div>
   );

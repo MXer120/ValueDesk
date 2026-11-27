@@ -5,9 +5,11 @@
  * The added addresses are the owner's own list, kept in this browser only (`vs.pf.chains.<wallet>`), never sent to a
  * ValueDesk server. A read-only view (a watched wallet) reads that wallet's EVM chains and nothing else.
  */
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useStored } from '../../../hooks';
-import { chainReads, chainsVersion, refreshChains, subscribeChains, type ChainHolding, type SourceRead, type Watched } from '../../../trading/chainHoldings';
+import { chainOf, chainReads, chainsVersion, hyperliquidMids, priceBase, refreshChains, subscribeChains, type ChainHolding, type SourceRead, type Watched } from '../../../trading/chainHoldings';
+import { coinPrices } from '../../../trading/prices';
+import { DEMO_ADDED, DEMO_NFT_OWNER, useDevDemo } from '../devDemo';
 import type { PortfolioContext } from '../../Portfolio';
 
 export interface ChainTotal { key: string; label: string; icon: string; usd: number }
@@ -32,6 +34,27 @@ export interface OnchainState {
   /** Some source is still out. */
   loading: boolean;
   failed: SourceRead[];
+  /** Whose NFTs the tab shows: the wallet (localhost demo: a ValueChain holder's). */
+  nftOwner: string | null;
+}
+
+/** Localhost demo (devDemo.ts): the sample addresses' holdings, valued at the live prices. */
+function useDemoReads(demo: boolean): SourceRead[] {
+  const [reads, setReads] = useState<SourceRead[]>([]);
+  useEffect(() => {
+    if (!demo) { setReads([]); return; }
+    let off = false;
+    void Promise.all([coinPrices().catch(() => null), hyperliquidMids().catch(() => null)]).then(([s, h]) => {
+      if (off) return;
+      setReads(DEMO_ADDED.map((w) => {
+        const ch = chainOf(w);
+        const rows = w.holdings.map((x) => ({ chain: ch.key, chainLabel: ch.label, chainIcon: ch.icon, owner: w.address, symbol: x.symbol, name: x.name, token: x.token ?? '', amount: x.amount, verified: x.verified ?? true }));
+        return { id: `demo:${w.address}`, label: ch.label, owner: w.address, status: 'ok' as const, rows: priceBase(rows, s, h) };
+      }));
+    });
+    return () => { off = true; };
+  }, [demo]);
+  return reads;
 }
 
 const REFRESH_MS = 60_000;
@@ -43,18 +66,23 @@ export function useOnchain(c: PortfolioContext): OnchainState {
   const canAdd = !!owner && !c.readOnly;
   const [stored, setStored] = useStored<Watched[]>(`vs.pf.chains.${owner ?? 'none'}`, []);
   const added = useMemo(() => (canAdd && Array.isArray(stored) ? stored.filter((w) => w && typeof w.address === 'string' && w.family !== 'evm') : []), [canAdd, stored]);
-  const watched = useMemo((): Watched[] => (owner ? [{ family: 'evm', address: owner }, ...added] : []), [owner, added]);
-  const key = watched.map((w) => `${w.family}:${w.address}`).join('|');
+  const live = useMemo((): Watched[] => (owner ? [{ family: 'evm', address: owner }, ...added] : []), [owner, added]);
+  const demo = useDevDemo();
+  const demoReads = useDemoReads(demo && !!owner);
+  // The demo's sample addresses are shown as chips but never read from a chain.
+  const watched = useMemo((): Watched[] => (demo && owner ? [...live, ...DEMO_ADDED.map(({ holdings: _h, ...w }) => w)] : live), [demo, owner, live]);
+  const key = live.map((w) => `${w.family}:${w.address}`).join('|');
 
   useEffect(() => {
-    if (!watched.length) return;
-    refreshChains(watched);
-    const t = window.setInterval(() => { if (document.visibilityState === 'visible') refreshChains(watched); }, REFRESH_MS);
+    if (!live.length) return;
+    refreshChains(live);
+    const t = window.setInterval(() => { if (document.visibilityState === 'visible') refreshChains(live); }, REFRESH_MS);
     return () => window.clearInterval(t);
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const version = useSyncExternalStore(subscribeChains, chainsVersion, chainsVersion);
-  const reads = useMemo(() => chainReads(watched), [version, key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const liveReads = useMemo(() => chainReads(live), [version, key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const reads = useMemo(() => (demoReads.length ? [...liveReads, ...demoReads] : liveReads), [liveReads, demoReads]);
 
   const add = useCallback((w: Watched) => {
     const a = w.address.trim();
@@ -82,6 +110,7 @@ export function useOnchain(c: PortfolioContext): OnchainState {
       byChain: [...totals.values()].sort((a, b) => b.usd - a.usd),
       loading: reads.some((r) => r.status === 'loading'),
       failed: reads.filter((r) => r.status === 'failed'),
+      nftOwner: demo ? DEMO_NFT_OWNER : owner,
     };
-  }, [reads, watched, added, canAdd, add, remove]);
+  }, [reads, watched, added, canAdd, add, remove, demo, owner]);
 }

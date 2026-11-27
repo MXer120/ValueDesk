@@ -35,6 +35,7 @@ import type { Eip1193Provider } from '../../../wallet';
 import { lazyChunk } from '../../../lazyPage';
 import type { ChartPoint } from '../../../performance';
 import type { Bucket, PfData, Part } from './data';
+import { DEMO_BOTS, DEMO_COPIES, useDevDemo } from '../devDemo';
 
 const CopiesDialog = lazyChunk(() => import('../../copy/CopiesDialog'));
 
@@ -510,6 +511,8 @@ export function FeeRates({ c, fees, layout = 'rows' }: { c: PortfolioContext; fe
 
 export function useCopies() {
   const live = useSyncExternalStore(subscribeLiveCopy, getLiveCopy, getLiveCopy);
+  // Localhost demo (devDemo.ts): sample figures.
+  if (useDevDemo()) return DEMO_COPIES;
   const rows = copyRows(live);
   const running = rows.filter((r) => r.view.subscription.status !== 'stopped');
   const real = running.filter((r) => !r.view.subscription.settings.paper);
@@ -663,9 +666,31 @@ export function BotsPanel({ c, provider, botsOpen, onOpenTab }: { c: PortfolioCo
   const signedIn = owner !== null && readiness(live, 'hosted').connected;
   const { bots, loading } = useBots(owner, signedIn);
   const shown = useMemo(() => [...bots].sort((a, b) => (b.algo.startedAt ?? b.algo.createdAt) - (a.algo.startedAt ?? a.algo.createdAt)), [bots]);
+  const demo = useDevDemo();
   const empty = (title: string, line: string, action: ReactNode) => (
     <div className="pfv-empty"><EmptyState icon="robot" title={title} description={line} actions={action} /></div>
   );
+  if (demo) {
+    // Localhost demo (devDemo.ts): sample bots, in the list's own rows.
+    return (
+      <div className="pfv-bots">
+        <ul className="pfv-botlist">
+          {DEMO_BOTS.map((b) => (
+            <li key={b.id}>
+              <button type="button" onClick={() => onOpenTab('bots')}>
+                <BotAvatar symbol={b.symbol} strategy={b.strategy} size={30} />
+                <span className="pfv-botlist__t"><b>{b.name}</b><small>{STRATEGY_INFO[b.strategy].name} · {b.paper ? 'practice' : 'real orders'} · Demo</small></span>
+                <StatePill s={b.state} size="sm" />
+                <span className="pfv-botlist__f"><small>Volume</small><b>{m.funds(fmtUsd(b.volume, 0))}</b></span>
+                <span className="pfv-botlist__f"><small>Net PnL</small><b className={tone(b.netPnl)}>{m.pnl(fmtPnl(b.netPnl))}</b></span>
+                <Icon name="arrowRight" size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
   if (!botsOpen) return empty('Bots are in beta', 'Market-making and grid strategies that run around the clock from your own accounts.', <Button variant="primary" onClick={applyForBeta}>Get access</Button>);
   if (signedIn && loading && !bots.length) return <div className="pfv-skels">{[0, 1, 2].map((i) => <Skeleton key={i} className="pfv-skel-row" />)}</div>;
   if (!shown.length) {

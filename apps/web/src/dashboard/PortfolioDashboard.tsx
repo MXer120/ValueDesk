@@ -30,10 +30,14 @@ import {
 import type { PortfolioPageLinks } from '../components/portfolio/PortfolioPage';
 import { PortfolioPage } from '../components/portfolio/Page';
 import { useDevWatch } from '../components/portfolio/devWatch';
+import { DEMO_WALLET, useDevDemo } from '../components/portfolio/devDemo';
 
 export function PortfolioDashboard({ provider, onOpenMarket, onOpenTab, ...props }: PortfolioProps & PortfolioPageLinks) {
   // Localhost only: the version switch can show another wallet, read-only (always null in a build).
-  const watch = useDevWatch();
+  // Localhost only: the demo shows a real, active wallet read-only, with sample data on top (devDemo.ts).
+  const demo = useDevDemo();
+  const watched = useDevWatch();
+  const watch = demo ? DEMO_WALLET : watched;
   const context = usePortfolioContext(watch ? { ...props, address: watch, unlocked: false } : props);
   const c = watch ? { ...context, readOnly: true } : context;
   return <PortfolioPage c={c} provider={provider} onOpenMarket={onOpenMarket} onOpenTab={onOpenTab} />;

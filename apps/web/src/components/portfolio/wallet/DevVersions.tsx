@@ -16,6 +16,7 @@ import type { PortfolioContext } from '../../Portfolio';
 import { PortfolioOriginal, type PortfolioPageLinks } from '../PortfolioPage';
 import { PortfolioWallet } from './Wallet';
 import { isAddress, setDevWatch, useDevWatch } from '../devWatch';
+import { setDevDemo, useDevDemo } from '../devDemo';
 import { shortAddr } from './blocks';
 
 export type VersionProps = { c: PortfolioContext } & PortfolioPageLinks;
@@ -43,6 +44,7 @@ export default function DevVersions(props: VersionProps) {
   // The page on screen stays until the next version has loaded.
   const [, startTransition] = useTransition();
   const watch = useDevWatch();
+  const demo = useDevDemo();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const choose = (i: number) => {
@@ -74,7 +76,9 @@ export default function DevVersions(props: VersionProps) {
             </button>
           ))}
           <i className="pfv-switch__sep" aria-hidden="true" />
-          {watch
+          {/* Demo data (owner 2026-11-27, devDemo.ts): a real active wallet read-only plus sample chains, NFTs, copies, bots. */}
+          <button type="button" className={`is-watch${demo ? ' is-on' : ''}`} aria-pressed={demo} onClick={() => { setDevDemo(!demo); setEditing(false); }}>Demo{demo ? ' ×' : ''}</button>
+          {demo ? null : watch
             ? <button type="button" className="is-watch is-on" onClick={() => setDevWatch(null)} title="Back to my wallet">{shortAddr(watch)} <span aria-hidden="true">×</span></button>
             : <button type="button" className="is-watch" aria-expanded={editing} onClick={() => { setDraft(''); setEditing((v) => !v); }}>View a wallet</button>}
         </nav>
