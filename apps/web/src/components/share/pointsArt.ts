@@ -84,19 +84,6 @@ function crown(c: Ctx, x: number, cy: number, s: number, color: string): void {
   c.restore();
 }
 
-/** A black vignette inside a card (owner 2026-11-27: "more vignette, and black vignette"): clear in the middle, going black toward its edges and corners. */
-function vignette(c: Ctx, x: number, y: number, w: number, h: number, r: number, strength: number): void {
-  c.save();
-  rr(c, x, y, w, h, r); c.clip();
-  c.translate(x + w / 2, y + h / 2);
-  c.scale(w / Math.max(w, h), h / Math.max(w, h));
-  const R = Math.max(w, h) * 0.7;
-  const g = c.createRadialGradient(0, 0, R * 0.3, 0, 0, R);
-  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.55, `rgba(0,0,0,${strength * 0.45})`); g.addColorStop(1, `rgba(0,0,0,${strength})`);
-  c.fillStyle = g; c.fillRect(-R, -R, R * 2, R * 2);
-  c.restore();
-}
-
 function tierCard(c: Ctx, a: TierArt, x: number, y: number, w: number, h: number, s: number, R = 30 * s): void {
   // SoDEX's card: the tier's gradient (165 degrees), its edge, its shadow.
   c.save();
@@ -113,8 +100,7 @@ function tierCard(c: Ctx, a: TierArt, x: number, y: number, w: number, h: number
   sh.addColorStop(0, 'rgba(255,255,255,0.16)'); sh.addColorStop(0.5, 'rgba(255,255,255,0)');
   c.fillStyle = sh; c.fillRect(x, y, w, h);
   c.restore();
-  vignette(c, x, y, w, h, R, 0.78);
-  // The tier's edge last, so the vignette never dims it.
+  // The tier's edge.
   rr(c, x, y, w, h, R); c.strokeStyle = a.border; c.lineWidth = 3; c.stroke();
   const p = 46 * s;
   // The tier's name, the number and its chip.
@@ -156,7 +142,6 @@ function estimateCard(c: Ctx, a: EstimateArt, x: number, y: number, w: number, h
   g.addColorStop(0, '#212225'); g.addColorStop(0.46, '#141517'); g.addColorStop(1, '#0c0c0d');
   c.fillStyle = g; c.fill();
   c.restore();
-  vignette(c, x, y, w, h, R, 0.85);
   rr(c, x, y, w, h, R); c.strokeStyle = 'rgba(255,255,255,0.14)'; c.lineWidth = 1.5; c.stroke();
   const p = 44 * s;
   c.font = `500 ${26 * s}px ${TEXT}`; c.fillStyle = 'rgba(244,244,242,0.78)';
