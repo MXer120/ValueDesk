@@ -3,6 +3,24 @@
  * ground (referrals.css) with the kit's controls. A kind or a state is a pill, a dot, an icon or a fill, never a
  * coloured edge on one side. SoDEX's tier colours sit on the tier's own marks (coin, gem, card).
  */
+/* The page's frame (was in ../versions.css, which only localhost loads: the live page had no section spacing). */
+.sx { --sx-gap: 36px; }
+.sx .bots-col { max-width: 1240px; }
+.sx .sx-sec { margin-top: var(--sx-gap); min-width: 0; }
+.sx .sx-sec__h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; min-height: 36px; margin-bottom: 20px; }
+.sx .sx-sec__h h2 { margin: 0; font-size: 20px; line-height: 26px; }
+.sx .sx-sec__h p { margin: 4px 0 0; font-size: 13.5px; line-height: 19px; color: var(--tf-muted); }
+.sx-num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+html[data-theme='light'] .sx .coin-ic[src*='sodex' i] { border-radius: 50%; background: #141414; }
+.sx-muted { color: var(--tf-muted); }
+.sx-faint { color: var(--tf-faint); }
+@media (max-width: 720px) {
+  .sx { --sx-gap: 28px; }
+  .sx .sx-sec__h h2 { font-size: 18px; line-height: 24px; }
+}
+/* The squads and boosted markets, then every week: room between them. */
+.spx-duo + .sx-sec { margin-top: 56px; }
+
 .spx { --rf-points: #8c9bf5; --spx-own: var(--rf-points); }
 html[data-theme='light'] .spx { --rf-points: #4957c4; }
 .spx .neg { color: var(--tf-neg); }
@@ -522,8 +540,10 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
 
 .spx { --spx-est: #7fb8f0; --spx-gold: #e6c15a; --spx-amber: #f0a43a; --spx-teal: #3ccfc0; }
 html[data-theme='light'] .spx { --spx-est: #2f6fb3; --spx-gold: #a87a12; --spx-amber: #c4741a; --spx-teal: #0f8f84; }
-/* The bot row's market changes in place: the new one fades in. */
-.spx-rot { animation: spx-rot-in 320ms var(--tf-ease); }
+/* The bot row's market changes in place: only its coin and symbol fade in. */
+.spx-rot { display: inline-block; animation: spx-rot-in 320ms var(--tf-ease); }
+.spx-lever__coin { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: rgb(var(--ink) / 0.06); }
+.spx-lever__coin .coin-ic { display: block; }
 @keyframes spx-rot-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
 /* This week's card: no "Live SoPoints · Week N" line, the number, then its range as a small chart. */
@@ -819,3 +839,36 @@ html[data-theme='light'] .spx-rk.is-r0 { color: #8a5a00; text-shadow: 0 0 8px rg
 /* The squad header's pills keep their drawn size on a touch screen; the 44px hit area is in ::after. */
 .spq-pill, .spq-name { position: relative; min-height: 0 !important; }
 .spq-pill::after, .spq-name::after { content: ''; position: absolute; inset: -9px -4px; }
+
+/* Join a squad: the button stays the page's own, quiet until a code is typed (owner 2026-11-27: "bugged if no selected"). */
+.spq-join__go:disabled { opacity: 1; background: rgb(var(--ink) / 0.08); color: var(--tf-faint); box-shadow: none; cursor: default; }
+.spq-join__in input::placeholder { color: var(--tf-faint); letter-spacing: 0; font-family: var(--font-text); }
+
+/* Earn more's pages. */
+.spx-pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 10px; font-size: 12.5px; color: var(--tf-muted); }
+.spx-pager button { position: relative; display: grid; place-items: center; width: 30px; height: 30px; min-height: 0 !important; padding: 0; border: 0; border-radius: 50%; background: rgb(var(--ink) / 0.06); color: var(--tf-fg); cursor: pointer; transition: background-color 150ms var(--tf-ease); }
+.spx-pager button::after { content: ''; position: absolute; inset: -7px; }
+.spx-pager button:hover:not(:disabled) { background: rgb(var(--ink) / 0.12); }
+.spx-pager button:disabled { opacity: 0.35; cursor: default; }
+.spx-pager button:focus-visible { outline: 2px solid var(--tf-brand); outline-offset: 2px; }
+
+/* The live card's inputs (the activity it prices), and its locked face before the sign-in. */
+ul.spx-live__src { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
+ul.spx-live__src li { display: flex; flex-direction: column; }
+.spx-live__lock { display: flex; flex: 1; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; margin-top: 14px; }
+.spx-live__lock p { margin: 0; max-width: 30ch; font-size: 13px; line-height: 19px; color: rgba(244, 244, 242, 0.62); }
+.spx-live__ghost { display: flex; align-items: center; gap: 12px; width: 100%; }
+.spx-live__ghost b { font: 800 44px/1 var(--font-num); letter-spacing: -0.02em; color: rgba(244, 244, 242, 0.18); filter: blur(2px); }
+.spx-live__ghost i { flex: 1; height: 8px; border-radius: 999px; background: linear-gradient(90deg, rgb(255 255 255 / 0.06), rgb(140 155 245 / 0.22), rgb(255 255 255 / 0.06)); }
+
+/* Every week, Detailed: two header rows (Activity | Rank | Points), the boost's % and an "other" under their figures. */
+.spx-tbl__groups th { padding-bottom: 0; border-bottom: 0; }
+.spx-tbl__group { text-align: center; font-size: 11.5px; letter-spacing: 0.02em; color: var(--tf-faint); }
+.spx-tbl__group::after { content: ''; display: block; height: 1px; margin: 6px 8px 0; background: rgb(var(--ink) / 0.1); }
+.spx-tbl__group.is-points .spx-tbl__info { justify-content: center; }
+.spx-tbl__cell { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
+.spx-tbl__cell small { font-size: 11px; color: var(--tf-faint); }
+.spx-tbl__cell small.pos { color: var(--tf-pos, var(--pos)); }
+.spx-tbl__cell .spx-other { margin-top: 2px; padding: 0 6px; font-size: 10.5px; }
+.spx-tblwrap.is-detailed .spx-tbl { font-size: 12.5px; }
+.spx-tblwrap.is-detailed .spx-tbl th, .spx-tblwrap.is-detailed .spx-tbl td { padding-left: 8px; padding-right: 8px; }

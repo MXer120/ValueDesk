@@ -11,6 +11,8 @@ import { ShareCard } from '../../../share/ShareCard';
 import type { CardData, CardFact } from '../../../share/card';
 import { inviteLink, useOwnCode } from '../../../../invites/invites';
 import { localize } from '../../../../numStyle';
+import { TIER_STYLE, tierKey } from '../../SoPointsMine';
+import type { PointsArt } from '../../../share/pointsArt';
 import type { EstBand } from '../../sopointsEstimate';
 import { plusPct, pts, ptsEst, topText, type PointsView } from './shared';
 
@@ -26,9 +28,17 @@ const Opt = ({ label, children }: { label: string; children: React.ReactNode }) 
 
 /** The wallet's SoPoints card. `week` is this week's estimate (total points, the squad's boost included) when there is
  * one; `start` the period the dialog opens on (the live card's share opens on this week). */
-export function PointsShare({ v, week, start = 'total', onClose }: { v: PointsView; week: Pick<EstBand, 'mid' | 'busy' | 'quiet'> | null; start?: Period; onClose: () => void }) {
+/** SoDEX's colours of a tier (SoPointsMine TIER_STYLE): its gradient stops, edge, chip and bar stops. */
+function tierColours(tier: string) {
+  const st = TIER_STYLE[tierKey(tier)]!;
+  const cols = (css: string) => css.match(/#[0-9a-f]{6}\b|#[0-9a-f]{3}\b|rgba?\([^)]*\)/gi) ?? ['#52525B', '#27272A'];
+  return { stops: cols(st.bg), border: st.border, chip: st.chip, bar: cols(st.bar) };
+}
+
+export function PointsShare({ v, week, weekLabel = 'so far', inputs = [], start = 'total', onClose }: { v: PointsView; week: Pick<EstBand, 'mid' | 'busy' | 'quiet'> | null; weekLabel?: string; inputs?: Array<{ k: string; v: string }>; start?: Period; onClose: () => void }) {
   const own = useOwnCode(v.c.address);
-  const code = own.state === 'ok' ? own.code : null;
+  // The localhost Sample has no wallet, so no code of its own: a stand-in shows where the code goes (never in a build).
+  const code = own.state === 'ok' ? own.code : import.meta.env.DEV && v.sample ? 'SAMPLE' : null;
   const [lead, setLead] = useState<Lead>('points');
   const [period, setPeriod] = useState<Period>(start === 'now' && !week ? 'total' : start);
   const [showCode, setShowCode] = useState(true);
@@ -59,6 +69,26 @@ export function PointsShare({ v, week, start = 'total', onClose }: { v: PointsVi
     let t = 0;
     const ys = period === 'total' ? v.scored.map((w) => (t += w.split.week.points)) : v.scored.map((w) => w.split.week.points);
     const link = showCode && code ? inviteLink(code) : `${location.origin}/points`;
+    const when = v.week ? `Layer 1 · ${v.week.weekName}` : 'Layer 1 Season';
+    // The image: the page's own card, drawn large (owner 2026-11-27: "look just like the actual card").
+    let art: PointsArt;
+    if (now) {
+      const max = Math.max(1, week!.quiet * 1.12);
+      art = {
+        kind: 'estimate', when, title: `${v.week?.weekName ?? 'This week'}, ${weekLabel}`, big: `≈ ${ptsEst(week!.mid)}`,
+        busy: ptsEst(week!.busy), mid: ptsEst(week!.mid), quiet: ptsEst(week!.quiet),
+        at: { busy: week!.busy / max, mid: week!.mid / max, quiet: week!.quiet / max }, inputs: inputs.slice(0, 4),
+      };
+    } else {
+      const col = tierColours(v.tier);
+      const next = sum?.nextTier && sum.nextTierPoints ? { name: tierKey(sum.nextTier), at: pts(sum.nextTierPoints), pct: total / sum.nextTierPoints } : null;
+      art = {
+        kind: 'tier', when, tier: v.tier, ...col,
+        label: lead1.label, big: lead1.big, unit: top && rank ? null : 'SOPOINTS',
+        line: weekly ? `${pts(total)} SoPoints in all` : lw ? `Last week +${pts(lw.points)}` : null,
+        next, rank: rank ? (top ? `#${pts(rank)} of ${pts(users)}` : `Rank ${pts(rank)} of all users`) : null,
+      };
+    }
     return {
       kind: 'points', label: now ? 'SoPoints estimate' : 'SoPoints', when: v.week ? `Layer 1 · ${v.week.weekName}` : 'Layer 1 Season',
       title: `${v.tier} tier`, pills: [], usd: null, pct: null,
@@ -68,9 +98,9 @@ export function PointsShare({ v, week, start = 'total', onClose }: { v: PointsVi
         const head = now ? `On track for about +${ptsEst(week!.mid)} SoPoints this week on SoDEX` : top && rank ? `${topTxt} on SoDEX's SoPoints` : weekly ? `+${pts(lw.points)} SoPoints in ${lw.weekName} on SoDEX` : `${pts(total)} SoPoints on SoDEX, ${v.tier}`;
         return `${head}.${showCode && code ? ` Trade with my code ${code}:` : ''}`;
       },
-      second: null, wallet: null,
+      second: null, wallet: null, art,
     };
-  }, [v, last, sum, period, now, top, week, showCode, code]);
+  }, [v, last, sum, period, now, top, week, weekLabel, inputs, showCode, code]);
   const controls = (
     <>
       <Opt label="Show"><DlgSeg label="Show" value={top ? 'top' : 'points'} onChange={setLead} disabled={now} options={[{ value: 'points', label: 'Points' }, { value: 'top', label: 'Top %' }]} /></Opt>

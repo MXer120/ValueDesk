@@ -280,10 +280,33 @@ function Detail({ c, v }: { c: Cell; v: PointsView }) {
 const CW = 600;
 const CH = 220;
 
+/** A smooth line through points that never overshoots them (monotone cubic, Fritsch-Carlson), as an SVG path. */
+export function smoothPath(pts: ReadonlyArray<readonly [number, number]>, move = true): string {
+  const n = pts.length;
+  if (!n) return '';
+  if (n < 3) return pts.map(([x, y], i) => `${i || !move ? 'L' : 'M'}${x} ${y}`).join('');
+  const dx = pts.slice(1).map(([x], i) => x - pts[i]![0]);
+  const m = pts.slice(1).map(([, y], i) => (y - pts[i]![1]) / (dx[i] || 1));
+  const t = pts.map((_, i) => (i === 0 ? m[0]! : i === n - 1 ? m[n - 2]! : m[i - 1]! * m[i]! <= 0 ? 0 : (m[i - 1]! + m[i]!) / 2));
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = 0; t[i + 1] = 0; continue; }
+    const a = t[i]! / m[i]!, b = t[i + 1]! / m[i]!, h = a * a + b * b;
+    if (h > 9) { const k = 3 / Math.sqrt(h); t[i] = k * a * m[i]!; t[i + 1] = k * b * m[i]!; }
+  }
+  let d = `${move ? 'M' : 'L'}${pts[0]![0]} ${pts[0]![1]}`;
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = pts[i]!, [x1, y1] = pts[i + 1]!, h = dx[i]! / 3;
+    d += `C${x0 + h} ${y0 + t[i]! * h} ${x1 - h} ${y1 - t[i + 1]! * h} ${x1} ${y1}`;
+  }
+  return d;
+}
+
 /**
  * The season's points added up, week by week, with SoDEX's tiers on its axis (owner 2026-11-27: "show total points
- * e.g. the points over season thing with the ranks on y axis"). With `ahead`, the weeks to come continue it as the
- * estimate: a dashed line for a typical week and the busy-to-quiet range around it, to the season's last week.
+ * e.g. the points over season thing with the ranks on y axis"). With `ahead`, the weeks to come continue it as a curve
+ * ("projection can also be a curve"): a dashed one for the likely total and the range around it. The scale follows the
+ * history and the likely total, not the range's far edge (which is cut at the top), and the wallet's own tier and the
+ * next one are always on the axis (owner: "why is gold not there").
  */
 export function Climb({ weeks, ahead }: { weeks: readonly AnyWeek[]; ahead?: Ahead | null }) {
   const id = useId();
@@ -291,26 +314,33 @@ export function Climb({ weeks, ahead }: { weeks: readonly AnyWeek[]; ahead?: Ahe
   const [at, setAt] = useState<number | null>(null);
   const cum = useMemo(() => { let t = 0; return weeks.map((w) => (t += w.split.week.points)); }, [weeks]);
   const end = cum.at(-1) ?? 0;
-  // The weeks to come, added up: each week's own estimate on the total so far.
+  // The weeks to come, added up. A week's miss is partly made up by the next, so the total's range is the root of the
+  // summed squares of the weeks' own ranges, not their sum.
   const proj = useMemo(() => {
-    let m = end, b = end, q = end;
-    return (ahead?.weeks ?? []).map((x) => ({ no: x.no, mid: (m += x.mid), busy: (b += x.busy), quiet: (q += x.quiet) }));
+    let m = end, up = 0, down = 0;
+    return (ahead?.weeks ?? []).map((x) => {
+      m += x.mid; up += (x.quiet - x.mid) ** 2; down += (x.mid - x.busy) ** 2;
+      return { no: x.no, mid: m, busy: Math.max(end, m - Math.sqrt(down)), quiet: m + Math.sqrt(up) };
+    });
   }, [ahead, end]);
   if (!weeks.length) return <div className="rfc is-empty"><p>Your season draws here from the first scored week.</p></div>;
   const k = proj.length;
   const n = weeks.length + k;
-  const reach = proj.length ? proj.at(-1)!.quiet : end;
-  // The next tier above the season's reach stays on the axis while it is in sight: the goal.
-  const goal = TIERS.find((t) => t.at > reach);
-  const top = Math.max(10, goal && goal.at <= reach * 2.5 ? goal.at : reach) * 1.1;
+  const likely = proj.length ? proj.at(-1)!.mid : end;
+  const own = [...TIERS].reverse().find((t) => end >= t.at && t.at > 0) ?? null;
+  const goal = TIERS.find((t) => t.at > likely);
+  const top = Math.max(10, likely * 1.15, goal && goal.at <= likely * 2.5 ? goal.at * 1.08 : 0);
   const X = (i: number) => (n <= 1 ? CW / 2 : (i / (n - 1)) * CW);
-  const Y = (p: number) => CH - (p / top) * (CH - 8);
-  const line = cum.map((p, i) => `${i ? 'L' : 'M'}${X(i)} ${Y(p)}`).join('');
+  const Y = (p: number) => CH - (Math.min(p, top * 1.4) / top) * (CH - 8);
+  const hist = cum.map((p, i) => [X(i), Y(p)] as const);
+  const line = smoothPath(hist);
   const last = weeks.length - 1;
-  const pLine = proj.length ? `M${X(last)} ${Y(end)}${proj.map((p, i) => `L${X(weeks.length + i)} ${Y(p.mid)}`).join('')}` : '';
-  const fan = proj.length ? `M${X(last)} ${Y(end)}${proj.map((p, i) => `L${X(weeks.length + i)} ${Y(p.quiet)}`).join('')}${[...proj].reverse().map((p, j) => `L${X(weeks.length + proj.length - 1 - j)} ${Y(p.busy)}`).join('')}Z` : '';
-  // A tier's line only where it has room: on a linear axis Bronze (10) and Silver (100) crowd the floor.
-  const lines = TIERS.filter((t) => t.at > 0 && t.at < top && t.at >= top * 0.06);
+  const pMid = proj.length ? smoothPath([[X(last), Y(end)], ...proj.map((p, i) => [X(weeks.length + i), Y(p.mid)] as const)]) : '';
+  const fan = proj.length
+    ? `${smoothPath([[X(last), Y(end)], ...proj.map((p, i) => [X(weeks.length + i), Y(p.quiet)] as const)])}${smoothPath([...proj].reverse().map((p, j) => [X(weeks.length + proj.length - 1 - j), Y(p.busy)] as const).concat([[X(last), Y(end)]]), false)}Z`
+    : '';
+  // A tier's line where it has room; the wallet's own tier and the next one always.
+  const lines = TIERS.filter((t) => t.at > 0 && t.at < top && (t.at >= top * 0.06 || t === own || t === goal));
   const read = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     setAt(Math.round(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (n - 1)));
@@ -322,12 +352,17 @@ export function Climb({ weeks, ahead }: { weeks: readonly AnyWeek[]; ahead?: Ahe
   return (
     <div className={`rfc spn-climb${k ? ' is-ahead' : ''}`} role="img" aria-label={`SoPoints over the season${k ? ', with the estimate to the season’s end' : ''}`} onPointerDown={read} onPointerMove={read} onPointerLeave={(e) => { if (e.pointerType !== 'touch') setAt(null); }}>
       <svg viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" aria-hidden="true">
-        <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--rf-points)" stopOpacity="0.32" /><stop offset="1" stopColor="var(--rf-points)" stopOpacity="0" /></linearGradient></defs>
-        {lines.map((t) => <path key={t.name} className={`spn-climb__tier is-${t.name.toLowerCase()}`} d={`M0 ${Y(t.at)}H${CW}`} />)}
-        <path d={`${line}V${CH}H${X(0)}Z`} fill={`url(#${id})`} />
-        {fan && <path className="spn-climb__fan" d={fan} />}
-        {pLine && <path className="spn-climb__p" d={pLine} />}
-        <path className="spn-climb__l" d={line} />
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--rf-points)" stopOpacity="0.32" /><stop offset="1" stopColor="var(--rf-points)" stopOpacity="0" /></linearGradient>
+          <clipPath id={`${id}c`}><rect x="0" y="0" width={CW} height={CH} /></clipPath>
+        </defs>
+        <g clipPath={`url(#${id}c)`}>
+          {lines.map((t) => <path key={t.name} className={`spn-climb__tier is-${t.name.toLowerCase()}`} d={`M0 ${Y(t.at)}H${CW}`} />)}
+          <path d={`${line}V${CH}H${X(0)}Z`} fill={`url(#${id})`} />
+          {fan && <path className="spn-climb__fan" d={fan} />}
+          {pMid && <path className="spn-climb__p" d={pMid} />}
+          <path className="spn-climb__l" d={line} />
+        </g>
       </svg>
       {/* SoDEX's tiers on the axis, each at its threshold. */}
       {lines.map((t) => <span key={t.name} className="spn-climb__lab" style={{ top: `calc((100% - 24px) * ${Y(t.at) / CH})` }}><TierName tier={t.name} /><small className="sx-num">{pts(t.at)}</small></span>)}

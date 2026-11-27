@@ -16,12 +16,13 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Eip1193Provider } from '../../../../wallet';
 import { useTilt } from '../../../../tilt';
+import { CoinIcon } from '../../../CoinIcon';
 import { RULES } from '../../../../points';
 import { Icon, IconTile, Segmented, Skeleton, Slider, Switch } from '../../../bots/kit/kit';
 import { HeatGrid } from '../../../referrals/CreditCalendar';
 import { pointsGrid } from '../../../referrals/calendar';
 import { SeasonCard, SoPointsCard, TIER_STYLE } from '../../SoPointsMine';
-import { estWeeks, useEstimate, type EstAnswer, type EstState } from '../../sopointsEstimate';
+import { estWeeks, useEstimate, type EstAnswer, type EstBand, type EstState } from '../../sopointsEstimate';
 import { Climb, Ladder } from './Season';
 import { Field, START, planOf } from './Planner';
 import { PointsShare, type Period } from './PointsShare';
@@ -47,16 +48,21 @@ export function Stage({ address, provider, sample }: { address: string | null; p
   const [adjust, setAdjust] = useState(false);
   const [sharing, setSharing] = useState<Period | null>(null);
   const b = boostedOf(c);
-  // One question to the server per change: this week's plan and the levers' plans, with the wallet's scored weeks.
+  // One question to the server per change, signed in only (owner 2026-11-27: the estimate is "behind the sign in gate"):
+  // this week as it stands (or the sliders' plan), then the levers' plans on the wallet's expected week.
   const weeksIn = useMemo(() => (v.mine ? estWeeks(v.all) : null), [v.mine, v.all]);
   // The levers' steps follow the wallet's usual week (the median of its last four), not the plan's sliders.
   const steps = useMemo(() => stepsFor(usualOf(v.mine ? v.all : [], START)), [v.mine, v.all]);
-  const plans = useMemo(() => leverPlans(live.plan, b.coef, steps), [live.plan, b.coef, steps]);
+  const plans = useMemo(() => (v.mine ? [estPlan(live.plan, b.coef), ...leverPlans(live.expected, b.coef, steps)] : null), [v.mine, live.plan, live.expected, b.coef, steps]);
   const aheadN = week ? Math.max(0, RULES.seasonWeeks - week.weekNo) : 0;
-  const est = useEstimate(plans, weeksIn, { debounceMs: 160, ahead: aheadN, keepKey: v.sample ? null : v.mine && c.address ? `stage:${c.address.toLowerCase()}` : 'stage:out' });
-  const wk = weekEstimate(est.data, live.plan.squadPct, v.mine);
-  // This week by the estimate, the weeks after it by the wallet's own trend (short and long blended, damped).
-  const ahead: Ahead | null = useMemo(() => (wk && week ? aheadOf(week.weekNo, RULES.seasonWeeks, wk, v.mine ? est.data?.calib?.trend ?? null : null) : null), [wk?.mid, wk?.busy, wk?.quiet, week, v.mine, est.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const est = useEstimate(plans, weeksIn, { debounceMs: 160, ahead: aheadN, keepKey: v.sample || !c.address ? null : `stage2:${c.address.toLowerCase()}` });
+  const bands = v.mine ? est.data?.plans ?? null : null;
+  // The card: this week's activity so far, its invited points so far (the week's estimate times the part gone).
+  const wk = useMemo(() => (v.mine ? weekEstimate(bands?.[0], est.data, live.plan.squadPct, live.from === 'now' ? live.done : 1) : null), [v.mine, bands, est.data, live.plan.squadPct, live.from, live.done]);
+  // The projection: the expected full week, then the wallet's own trend (short and long blended, damped).
+  const full = useMemo(() => (v.mine ? weekEstimate(bands?.[1], est.data, live.expected.squadPct, 1) : null), [v.mine, bands, est.data, live.expected.squadPct]);
+  const shareInputs = useMemo(() => inputsOf(live.plan, b.coef), [live.plan, b.coef]);
+  const ahead: Ahead | null = useMemo(() => (full && week ? aheadOf(week.weekNo, RULES.seasonWeeks, full, est.data?.calib?.trend ?? null) : null), [full?.mid, full?.busy, full?.quiet, week, est.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const other = useMemo(() => (est.data?.calib ? new Map(est.data.calib.rows.map((r) => [r.weekNo, r.other])) : null), [est.data]);
   return (
     <div className="tf bots-page rf-page sx spx">
@@ -72,7 +78,7 @@ export function Stage({ address, provider, sample }: { address: string | null; p
           <div className={`spx-st__cards${v.mine ? '' : ' is-out'}`}>
             {v.mine ? <div className="spx-tilt tf-tilt" ref={tierTilt.ref} onPointerMove={tierTilt.onMove} onPointerLeave={tierTilt.onLeave}><SoPointsCard s={v.s} onShare={() => setSharing('total')} /></div> : <SignInFront v={v} />}
             <div className="spx-tilt tf-tilt" ref={seasonTilt.ref} onPointerMove={seasonTilt.onMove} onPointerLeave={seasonTilt.onLeave}><SeasonCard week={week} address={address} settled={c.publicSettled} bare /></div>
-            <LiveCard v={v} live={live} est={est} adjust={adjust} onAdjust={() => setAdjust(!adjust)} controls={id} onShare={() => setSharing('now')} />
+            <LiveCard v={v} live={live} est={est} wk={wk} adjust={adjust} onAdjust={() => setAdjust(!adjust)} controls={id} onShare={() => setSharing('now')} />
           </div>
           {/* The plan's settings, shut until asked for (owner 2026-11-27: "Hide any sliders or settings per default"). */}
           <div id={id} className={`spx-adj${adjust ? ' is-open' : ''}`} {...(adjust ? {} : { inert: '' })}>
@@ -87,7 +93,7 @@ export function Stage({ address, provider, sample }: { address: string | null; p
           {v.mine ? <MineCol v={v} /> : <PublicCol v={v} />}
           {/* Signed out, the weeks wait for a sign-in; what a week earns is the live card's (its sliders shut, owner 2026-11-27). */}
           <section className="spx-panel" aria-label="Your weeks">{v.mine ? <WeeksPanel v={v} ahead={ahead} /> : <SignInPanel c={c} line={c.address ? 'Your weeks, as SoDEX scored them' : undefined} />}</section>
-          <EarnMore v={v} plan={live.plan} est={est} steps={steps} refEst={v.mine ? est.data?.calib?.referral ?? 0 : 0} />
+          <EarnMore v={v} plan={live.expected} bands={bands ? bands.slice(1) : null} steps={steps} refEst={v.mine ? est.data?.calib?.referral ?? 0 : 0} />
         </div>
 
         <div className="spx-duo">
@@ -113,7 +119,7 @@ export function Stage({ address, provider, sample }: { address: string | null; p
           </section>
         )}
       </div>
-      {sharing && v.mine && <PointsShare v={v} week={wk} start={sharing} onClose={() => setSharing(null)} />}
+      {sharing && v.mine && <PointsShare v={v} week={wk} weekLabel={live.from === 'now' ? 'so far' : 'with your plan'} inputs={shareInputs} start={sharing} onClose={() => setSharing(null)} />}
     </div>
   );
 }
@@ -122,17 +128,15 @@ export function Stage({ address, provider, sample }: { address: string | null; p
  * This week's points from the server's answer (plans[0] = the plan): own points, the wallet's usual invited points on
  * top (its last weeks', SoDEX's figure), times the squad's boost (SoDEX's rule: (own + invited) x (1 + boost)).
  */
-function weekEstimate(a: EstAnswer | null, squadPct: number, mine: boolean): { mid: number; busy: number; quiet: number; ref: number; extra: number; weeks: number } | null {
-  const p = a?.plans[0];
+function weekEstimate(p: EstBand | undefined, a: EstAnswer | null, squadPct: number, refShare: number): { mid: number; busy: number; quiet: number } | null {
   if (!p) return null;
-  const ref = mine ? a!.calib?.referral ?? 0 : 0;
+  const ref = (a?.calib?.referral ?? 0) * Math.max(0, Math.min(1, refShare));
   const m = 1 + squadPct / 100;
   const mid = (p.mid + ref) * m;
   // The range: the wider of a busy-to-quiet week (the own points') and the wallet's own week-to-week spread.
-  const w = Math.exp(mine ? a!.calib?.trend?.spread ?? 0 : 0);
-  return { mid, busy: Math.min((p.busy + ref) * m, mid / w), quiet: Math.max((p.quiet + ref) * m, mid * w), ref, extra: mine ? a!.calib?.extra ?? 0 : 0, weeks: mine ? a!.calib?.weeks ?? 0 : 0 };
+  const w = Math.exp(Math.min(Math.log(2.5), a?.calib?.trend?.spread ?? 0));
+  return { mid, busy: Math.min((p.busy + ref) * m, mid / w), quiet: Math.max((p.quiet + ref) * m, mid * w) };
 }
-
 /** The share of the last scored Layer 1 week's futures volume that SoDEX weighted as boosted (its weight details). */
 function boostedShare(v: PointsView): { pct: number; week: string } | null {
   if (!v.mine) return null;
@@ -164,66 +168,67 @@ function SignInFront({ v }: { v: PointsView }) {
 /* ------------------------------------------------------------------------ this week, live ----- */
 
 interface LivePlan {
+  /** What the card prices: this week so far, or the sliders' plan once one moved. */
   plan: Plan;
-  /** Where the plan came from, in words, or null once a slider moved it. */
-  from: string | null;
-  /** What "back" returns to. */
-  back: string | null;
+  /** The week as it is most likely to end: so far, plus the usual week for the days left (the levers, the projection). */
+  expected: Plan;
+  /** How much of the week is gone, 0..1. */
+  done: number;
+  /** 'now': the plan is this week so far; null: the sliders moved it. */
+  from: 'now' | null;
   set: (p: Partial<Plan>) => void;
   reset: () => void;
 }
 
 /**
- * This week as it is most likely to end (owner 2026-11-27: "as accurate as possible with all the research we done"):
- * what the wallet traded and held so far this week (SoDEX's live row), plus its usual week (the median of its last
- * four) for the part of the week still to come; its holdings as they are now, its squad's boost now. Without a live row,
- * its last scored Layer 1 week; signed out, a $100K futures week.
+ * This week from SoDEX's live row (owner 2026-11-27: "the estimation card needs to be of this weeks actual activity not
+ * projected"): what the wallet traded and held so far, its holdings and squad's boost now. Beside it the week as it is
+ * most likely to end (so far, plus its usual week, the median of its last four, for the part still to come), which the
+ * levers and the projection use. Without a live row, its last scored Layer 1 week for both.
  */
-function expectedWeek(v: PointsView): { plan: Plan; from: string } | null {
+function weekPlans(v: PointsView): { now: Plan; expected: Plan; done: number } {
   const lastL1 = [...v.all].reverse().find((w) => w.season === 'L1' && w.split.week.pointsStatus === 'CONFIRMED') ?? null;
-  const base = lastL1 ? planOf(lastL1.split.week, v.squad?.total ?? null) : null;
+  const base = lastL1 ? planOf(lastL1.split.week, v.squad?.total ?? null) : START;
   const live = v.live;
-  if (!live) return base && lastL1 ? { plan: base, from: `From your ${lastL1.split.week.weekName}` } : null;
-  const usual = usualOf(v.all, base ?? START);
+  if (!live) return { now: base, expected: base, done: 1 };
+  const usual = usualOf(v.all, base);
   const span = live.weekEndTime > live.weekStartTime ? live.weekEndTime - live.weekStartTime : 7 * 86_400;
   const done = Math.min(1, Math.max(0, (Date.now() / 1000 - live.weekStartTime) / span));
   const rest = 1 - done;
-  return {
-    plan: {
-      futures: Math.round((live.futuresVolume || 0) + usual.futures * rest),
-      spot: Math.round((live.spotVolume || 0) + usual.spot * rest),
-      oi: Math.round(done * (live.oi ?? 0) + rest * usual.oi),
-      boostedShare: base?.boostedShare ?? 0,
-      squadPct: v.squad?.total ?? live.totalBonusPct ?? 0,
-      wealth: live.wealthTvl ?? base?.wealth ?? 0,
-      vault: live.vaultHolding ?? base?.vault ?? 0,
-    },
-    from: lastL1 ? 'Your week so far, then your usual week' : 'Your week so far',
+  const liveBoost = (live.futuresVolumeWeightDetails ?? []).reduce((t, d) => t + (Number(d.rawVolumeU) || 0), 0);
+  const now: Plan = {
+    futures: Math.round(live.futuresVolume || 0),
+    spot: Math.round(live.spotVolume || 0),
+    oi: Math.round(live.oi ?? 0),
+    boostedShare: live.futuresVolume > 0 ? Math.min(1, liveBoost / live.futuresVolume) : base.boostedShare,
+    squadPct: v.squad?.total ?? live.totalBonusPct ?? 0,
+    wealth: live.wealthTvl ?? base.wealth ?? 0,
+    vault: live.vaultHolding ?? base.vault ?? 0,
   };
+  const expected: Plan = {
+    ...now,
+    futures: Math.round(now.futures + usual.futures * rest),
+    spot: Math.round(now.spot + usual.spot * rest),
+    oi: Math.round(done * now.oi + rest * usual.oi),
+    boostedShare: now.futures > 0 ? now.boostedShare : base.boostedShare,
+  };
+  return { now, expected, done };
 }
 
 function useLivePlan(v: PointsView): LivePlan {
   const [plan, setPlan] = useState<Plan>(START);
-  const [from, setFrom] = useState<string | null>(null);
-  const filled = useRef(false);
-  const fill = () => {
-    const e = expectedWeek(v);
-    if (!e) { setPlan(START); setFrom(null); return; }
-    setPlan(e.plan);
-    setFrom(e.from);
-  };
-  useEffect(() => {
-    if (!v.mine) { filled.current = false; setFrom(null); setPlan(START); return; }
-    if (filled.current || !v.all.length) return;
-    filled.current = true;
-    fill();
-  }, [v.mine, v.all, v.live, v.squad]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [from, setFrom] = useState<'now' | null>('now');
+  // Recomputed when SoDEX's figures change, not on every render (the view's objects are new each time).
+  const key = JSON.stringify([v.live, v.squad?.total ?? null, v.all.length, v.all.at(-1)?.key ?? null, v.mine]);
+  const w = useMemo(() => weekPlans(v), [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  // While no slider moved it, the plan is this week as SoDEX has it (read, never copied into state).
   return {
-    plan,
+    plan: from === 'now' ? w.now : plan,
+    expected: w.expected,
+    done: w.done,
     from,
-    back: v.mine ? 'Back to your expected week' : 'Back to a $100K week',
-    set: (p) => { setPlan((x) => ({ ...x, ...p })); setFrom(null); },
-    reset: () => { if (v.mine) fill(); else { setPlan(START); setFrom(null); } },
+    set: (p) => { setPlan((x) => ({ ...(from === 'now' ? w.now : x), ...p })); setFrom(null); },
+    reset: () => setFrom('now'),
   };
 }
 
@@ -233,13 +238,9 @@ function useLivePlan(v: PointsView): LivePlan {
  * it earns in a quiet week, its usual invitee points, its usual distance from the model). The squad's boost is on top.
  * Under the number, the range as a small chart (owner: "Quiet week ... busy week ... What is this? Show a range chart").
  */
-function LiveCard({ v, live, est, adjust, onAdjust, controls, onShare }: { v: PointsView; live: LivePlan; est: EstState; adjust: boolean; onAdjust: () => void; controls: string; onShare: () => void }) {
-  const coef = boostedOf(v.c).coef;
-  const { plan } = live;
-  const tilt = useTilt(6, 5, 0.5);
-  const wk = weekEstimate(est.data, plan.squadPct, v.mine);
-  const source = live.from ?? (plan === START ? `From a ${money(plan.futures)} futures week` : 'From your plan');
-  const inputs = [
+/** What the live card prices, as chips (and as the share image's last line). */
+function inputsOf(plan: Plan, coef: number): Array<{ k: string; v: string }> {
+  return [
     { k: 'Futures', v: money(plan.futures) },
     ...(plan.spot > 0 ? [{ k: 'Spot', v: money(plan.spot) }] : []),
     { k: 'Position', v: plan.oi ? money(plan.oi) : '$0' },
@@ -247,35 +248,48 @@ function LiveCard({ v, live, est, adjust, onAdjust, controls, onShare }: { v: Po
     ...(coef > 1 && plan.boostedShare > 0 ? [{ k: 'Boosted', v: `${Math.round(plan.boostedShare * 100)}%` }] : []),
     { k: 'Squad', v: plusPct(plan.squadPct) },
   ];
+}
+
+function LiveCard({ v, live, est, wk, adjust, onAdjust, controls, onShare }: { v: PointsView; live: LivePlan; est: EstState; wk: { mid: number; busy: number; quiet: number } | null; adjust: boolean; onAdjust: () => void; controls: string; onShare: () => void }) {
+  const coef = boostedOf(v.c).coef;
+  const { plan } = live;
+  const tilt = useTilt(6, 5, 0.5);
+  const a = useSignIn(v.c);
+  const inputs = inputsOf(plan, coef);
   return (
     <div className="spx-tilt tf-tilt" ref={tilt.ref} onPointerMove={tilt.onMove} onPointerLeave={tilt.onLeave}>
-      <section className="spx-card spx-live" aria-label="SoPoints this week, estimated" aria-busy={est.loading || undefined}>
+      <section className={`spx-card spx-live${v.mine ? '' : ' is-locked'}`} aria-label="SoPoints this week, estimated" aria-busy={est.loading || undefined}>
         <div className="spx-live__top">
-          <span className="spx-live__k">This week</span>
+          <span className="spx-live__k">{v.mine ? (live.from === 'now' ? 'This week so far' : 'This week, your plan') : 'This week'}</span>
           <span className="spx-live__acts">
             <EstPill />
             {v.mine && wk && <button type="button" className="spx-live__share" onClick={onShare} aria-label="Share this week’s estimate" title="Share"><Icon name="share" size={15} /></button>}
           </span>
         </div>
-        <div className="spx-live__n">
-          {wk ? <b className={`sx-num${est.loading ? ' is-stale' : ''}`}>≈ {ptsEst(wk.mid)}</b> : est.failed ? <b className="sx-num is-none">{DASH}</b> : <Skeleton className="spx-live__skel" />}
-          <span>{est.failed && !wk ? 'No estimate right now' : 'SoPoints'}</span>
-        </div>
-        {wk ? <RangeChart busy={wk.busy} mid={wk.mid} quiet={wk.quiet} /> : <div className="spx-range is-wait" aria-hidden="true" />}
-        <div className="spx-live__foot">
-          <div className="spx-live__src">
-            <span>{source}</span>
-            <ul>{inputs.map((x) => <li key={x.k}><small>{x.k}</small><b className="sx-num">{x.v}</b></li>)}</ul>
+        {!v.mine ? (
+          // Behind the sign-in (owner 2026-11-27): no figure, no request, until the wallet's own weeks are here.
+          <div className="spx-live__lock">
+            <span className="spx-live__ghost" aria-hidden="true"><b>≈ •••</b><i /></span>
+            <p>Your SoPoints this week, from your own trading and weeks.</p>
+            <button type="button" className="spx-live__adj is-on" disabled={a.busy || a.off} onPointerEnter={a.warm} onFocus={a.warm} onClick={a.go}>{a.label}</button>
           </div>
-          <button type="button" className={`spx-live__adj${adjust ? ' is-on' : ''}`} aria-expanded={adjust} aria-controls={controls} onClick={onAdjust}>
-            <Icon name="gear" size={14} />{adjust ? 'Done' : 'Adjust'}
-          </button>
-        </div>
+        ) : (<>
+          <div className="spx-live__n">
+            {wk ? <b className={`sx-num${est.loading ? ' is-stale' : ''}`}>≈ {ptsEst(wk.mid)}</b> : est.failed ? <b className="sx-num is-none">{DASH}</b> : <Skeleton className="spx-live__skel" />}
+            <span>{est.failed && !wk ? 'No estimate right now' : 'SoPoints'}</span>
+          </div>
+          {wk ? <RangeChart busy={wk.busy} mid={wk.mid} quiet={wk.quiet} /> : <div className="spx-range is-wait" aria-hidden="true" />}
+          <div className="spx-live__foot">
+            <ul className="spx-live__src">{inputs.map((x) => <li key={x.k}><small>{x.k}</small><b className="sx-num">{x.v}</b></li>)}</ul>
+            <button type="button" className={`spx-live__adj${adjust ? ' is-on' : ''}`} aria-expanded={adjust} aria-controls={controls} onClick={onAdjust}>
+              <Icon name="gear" size={14} />{adjust ? 'Done' : 'Adjust'}
+            </button>
+          </div>
+        </>)}
       </section>
     </div>
   );
 }
-
 /**
  * The week's range as a small chart: a scale from 0, the busy-to-quiet band on it and the typical week marked, the two
  * ends named. The "?" says what the range is.
@@ -339,11 +353,7 @@ function PlanFields({ v, live, model }: { v: PointsView; live: LivePlan; model: 
       </div>
       <div className="spx-adj__foot">
         <p>ValueDesk’s estimate{model ? `, fitted on ${model.fittedOn} (${model.fittedAt})` : ''}{v.mine ? ', made yours by your scored weeks' : ''}. SoDEX publishes no formula.</p>
-        {live.back && (
-          <button type="button" className="rf-howbtn" onClick={live.reset} disabled={live.from !== null}>
-            {live.back}
-          </button>
-        )}
+        <button type="button" className="rf-howbtn" onClick={live.reset} disabled={live.from === 'now'}>Back to this week so far</button>
       </div>
     </div>
   );
@@ -382,14 +392,12 @@ function MineCol({ v }: { v: PointsView }) {
   );
 }
 
-/** Signed out: what SoDEX shows of the wallet publicly (its rank and volume), and what that volume is worth by our estimate. */
+/** Signed out: what SoDEX shows of the wallet publicly (its rank and volume). No estimate before the sign-in. */
 function PublicCol({ v }: { v: PointsView }) {
   const { c } = v;
   const days = c.window === '24H' ? 1 : c.window === '7D' ? 7 : 30;
   const st = c.standing;
   const week = st ? st.volumeUsd * (7 / days) : null;
-  const plans = useMemo(() => (week !== null ? [estPlan({ futures: week, spot: 0, oi: 0, boostedShare: 0, squadPct: 0 }, 1)] : null), [week]);
-  const e = useEstimate(plans, null).data?.plans[0] ?? null;
   const tilt = useTilt<HTMLElement>(6, 5, 0.5);
   return (
     <div className="spx-col1">
@@ -406,8 +414,6 @@ function PublicCol({ v }: { v: PointsView }) {
       </section>
       {c.address && <dl className="rf-kv">
         <div><dt>A week like this, as futures</dt><dd>{week !== null ? money(week) : DASH}</dd></div>
-        <div><dt>≈ own points a week <EstPill /></dt><dd>{e ? ptsEst(e.mid) : DASH}</dd></div>
-        <div><dt>Busy to quiet week</dt><dd>{e ? `${ptsEst(e.busy)} – ${ptsEst(e.quiet)}` : DASH}</dd></div>
       </dl>}
     </div>
   );
@@ -449,32 +455,52 @@ function WeeksPanel({ v, ahead }: { v: PointsView; ahead: Ahead | null }) {
   );
 }
 
+const PAGE = 4;
+
 /**
- * Ranked by points gained this week, against this week's plan (the live card's, so Adjust re-ranks them). Every row
- * goes where it is done (owner 2026-11-27: "earn more needs to have hover effects & e.g. clickable").
+ * Ranked by points gained a week, against the wallet's expected week. Every row goes where it is done (owner
+ * 2026-11-27: "earn more needs to have hover effects & e.g. clickable"); the list keeps one height and pages four rows
+ * at a time ("fixed height and pagination"); the bot row's market turns with its coin, nothing else in the row moves.
+ * Signed out, the rows stand without figures: an estimate is the wallet's own (owner: "behind the sign in gate").
  */
-function EarnMore({ v, plan, est, steps, refEst }: { v: PointsView; plan: Plan; est: EstState; steps: Steps; refEst: number }) {
+function EarnMore({ v, plan, bands, steps, refEst }: { v: PointsView; plan: Plan; bands: readonly EstBand[] | null; steps: Steps; refEst: number }) {
   const { c } = v;
   const b = boostedOf(c);
   const bot = useRotating(BOT_MARKETS, 2600);
-  const list = levers(plan, b.coef, v.mine ? v.squad : null, c.boost, v.mine ? v.last?.split.referral ?? null : null, est.data?.plans ?? null,
+  const list = levers(plan, b.coef, v.mine ? v.squad : null, c.boost, v.mine ? v.last?.split.referral ?? null : null, v.mine ? bands : null,
     { steps, refEst, boosted: b.rows.map((r) => r.symbol), bot });
+  const pages = Math.max(1, Math.ceil(list.length / PAGE));
+  const [page, setPage] = useState(0);
+  const at = Math.min(page, pages - 1);
+  const shown = list.slice(at * PAGE, at * PAGE + PAGE);
   return (
     <section className="spx-earn" aria-label="Earn more">
-      <div className="spx-earn__h"><h3>Earn more</h3><EstPill /></div>
-      <p className="spx-earn__base">Points a week gained against this week’s plan.</p>
-      <ul className="rf-list spx-levers">
-        {list.map((l) => (
+      <div className="spx-earn__h"><h3>Earn more</h3>{v.mine && <EstPill />}</div>
+      <p className="spx-earn__base">{v.mine ? 'Points a week gained, against your usual week.' : 'Sign in to see what each adds for you.'}</p>
+      <ul className="rf-list spx-levers" style={{ minHeight: `${PAGE * 68}px` }}>
+        {shown.map((l) => (
           <li key={l.id}>
             <a className="spx-lever" href={l.href} aria-label={`${l.title}: ${l.go}`}>
-              <IconTile icon={l.icon} />
-              <span><b key={l.id === 'bot' ? l.title : undefined} className={l.id === 'bot' ? 'spx-rot' : undefined}>{l.title}</b><small>{l.line}</small></span>
-              <span className="rf-pay">{l.value ? <em className={l.gain !== null && l.gain > 0 ? 'is-credit' : undefined}>{l.value}</em> : l.est ? <Skeleton className="spx-lever__skel" /> : null}{l.gain !== null && <small>a week</small>}</span>
+              {l.id === 'bot'
+                ? <span className="spx-lever__coin" aria-hidden="true"><span key={bot} className="spx-rot"><CoinIcon coin={bot} size={22} /></span></span>
+                : <IconTile icon={l.icon} />}
+              <span>
+                <b>{l.id === 'bot' ? <>Start a bot on <span key={bot} className="spx-rot">{bot}</span></> : l.title}</b>
+                <small>{l.line}</small>
+              </span>
+              <span className="rf-pay">{!v.mine ? null : l.value ? <em className={l.gain !== null && l.gain > 0 ? 'is-credit' : undefined}>{l.value}</em> : l.est ? <Skeleton className="spx-lever__skel" /> : null}{v.mine && l.gain !== null && <small>a week</small>}</span>
               <span className="spx-lever__go" aria-hidden="true">{l.go}<Icon name="arrowRight" size={13} /></span>
             </a>
           </li>
         ))}
       </ul>
+      {pages > 1 && (
+        <div className="spx-pager" role="group" aria-label="Pages">
+          <button type="button" onClick={() => setPage(at - 1)} disabled={at === 0} aria-label="Previous page"><Icon name="arrowLeft" size={14} /></button>
+          <span className="sx-num" aria-live="polite">{at + 1} / {pages}</span>
+          <button type="button" onClick={() => setPage(at + 1)} disabled={at >= pages - 1} aria-label="Next page"><Icon name="arrowRight" size={14} /></button>
+        </div>
+      )}
     </section>
   );
 }

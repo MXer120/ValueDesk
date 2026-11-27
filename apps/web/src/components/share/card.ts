@@ -9,6 +9,8 @@
  * a number up. What the user hides (dollar amounts, prices, an address) is taken out before drawing (cardView).
  */
 
+import { drawPointsArt, type PointsArt } from './pointsArt';
+
 export type CardKind = 'trade' | 'position' | 'portfolio' | 'copy' | 'bot' | 'botvol' | 'points' | 'squad';
 export type Ratio = 'wide' | 'square';
 
@@ -60,6 +62,8 @@ export interface CardData {
   second: { title: string; line?: string; kind: 'price' | 'stat' | 'title' } | null;
   /** The wallet's address, shown only when the user turns it on. */
   wallet: string | null;
+  /** A card drawn as the page's own (SoPoints: SoDEX's tier card, the week's estimate; pointsArt.ts) instead of the PnL layout. */
+  art?: PointsArt;
 }
 
 export interface CardOpts {
@@ -190,7 +194,7 @@ function mark(c: Ctx, x: number, y: number, size: number): void {
 }
 
 /** The lockup: the mark, a hairline, the name. Returns its width. */
-function lockup(c: Ctx, x: number, cy: number, h: number): number {
+export function lockup(c: Ctx, x: number, cy: number, h: number): number {
   mark(c, x, cy - h / 2, h);
   c.fillStyle = 'rgba(244,244,244,0.28)';
   c.fillRect(x + h + h * 0.34, cy - h * 0.45, 2, h * 0.9);
@@ -396,6 +400,7 @@ function factsList(c: Ctx, facts: CardFact[], x: number, y: number, w: number): 
 /** The card, drawn on `c` at its size times `k`. */
 export function drawCard(c: Ctx, d: CardData, o: CardOpts, k = 1): void {
   const [W, H] = SIZES[o.ratio];
+  if (d.art) { drawPointsArt(c, d.art, W, H, o.code, d.link, k); return; }
   const v = cardView(d, o);
   const wide = o.ratio === 'wide';
   const s = wide ? 1 : 1.12;
