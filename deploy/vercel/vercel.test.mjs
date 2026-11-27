@@ -748,6 +748,8 @@ test('feedback and error reports: POST and the thread token pass, a screenshot u
       assert.equal(proxy.isReportsPath('/api/vs/sodex-auth/verify'), true);
       assert.equal(proxy.isReportsPath('/api/vs/sodex-auth/other'), false);
       assert.equal(proxy.isReportsPath('/api/vs/sopoints/log'), true);
+      assert.equal(proxy.isReportsPath('/api/vs/sopoints/estimate'), true);
+      assert.equal(proxy.bodyLimitFor('/api/vs/sopoints/estimate'), 16 * 1024);
       assert.equal(proxy.bodyLimitFor('/api/vs/inbox/add'), 64 * 1024);
       assert.equal((await request(port, '/api/vs/leaderboard', { method: 'POST', body: '{}' })).status, 405, 'other index paths stay GET only');
     });

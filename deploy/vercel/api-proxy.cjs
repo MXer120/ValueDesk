@@ -206,7 +206,10 @@ const isInvitesPath = (p) => p === '/api/vs/invites/check' || p === '/api/vs/inv
   // The SoPoints sign-in relay (apps/server/src/routes/pointsAuth.ts): POST, never cached, the small body limit.
   || p === '/api/vs/sodex-auth/nonce' || p === '/api/vs/sodex-auth/verify'
   // The SoPoints week log (apps/server/src/routes/sopointsLog.ts): one wallet's weeks, up to 64 KiB.
-  || p === '/api/vs/sopoints/log';
+  || p === '/api/vs/sopoints/log'
+  // The SoPoints estimate (apps/server/src/routes/sopointsEstimate.ts): weeks to price and the wallet's scored weeks,
+  // a POST, never cached (the answer is one wallet's), the small body limit.
+  || p === '/api/vs/sopoints/estimate';
 /** The app's own analytics (apps/server/src/routes/analytics.ts): a POST, the viewer's country and region added. */
 const ANALYTICS_PATH = '/api/vs/a';
 /**
