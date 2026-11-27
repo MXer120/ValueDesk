@@ -22,6 +22,8 @@ import {
   bridgeRoutes,
   decodeTokenConfigBase,
   depositViaBridge,
+  ethText,
+  networkFeeWei,
   type BridgeDeps,
   type BridgeRoute,
 } from './bridgeDeposit';
@@ -113,6 +115,8 @@ interface World {
   balance: bigint;
   allowance: bigint;
   gas: bigint;
+  /** Base's gas price, wei (6,447,613 = 0.0064 gwei, read 2026-11-27). */
+  gasPrice: bigint;
   symbol: string;
   decimals: number;
   maintenance: Maintenance;
@@ -128,7 +132,7 @@ interface World {
 
 function world(over: Partial<World> = {}): { w: World; provider: Eip1193Provider; deps: BridgeDeps } {
   const w: World = {
-    chainId: BRIDGE_CHAIN.chainId, balance: 100_000_000n, allowance: 0n, gas: 10n ** 15n, symbol: 'USDC', decimals: 6, maintenance: OPEN,
+    chainId: BRIDGE_CHAIN.chainId, balance: 100_000_000n, allowance: 0n, gas: 10n ** 15n, gasPrice: 6_447_613n, symbol: 'USDC', decimals: 6, maintenance: OPEN,
     chainToken: USDC_BASE, chainBridge: BRIDGE, refuse: false, sent: [], walletCalls: [], receipts: new Map(), ...over,
   };
   const provider: Eip1193Provider = {
@@ -159,6 +163,7 @@ function world(over: Partial<World> = {}): { w: World; provider: Eip1193Provider
     maintenance: async () => w.maintenance,
     async baseRpc<T>(method: string, params: unknown[]) {
       if (method === 'eth_blockNumber') return { result: '0x11' as T };
+      if (method === 'eth_gasPrice') return { result: `0x${w.gasPrice.toString(16)}` as T };
       if (method === 'eth_getBalance') return { result: `0x${w.gas.toString(16)}` as T };
       if (method === 'eth_getTransactionReceipt') return { result: (w.receipts.get(params[0] as string) ?? null) as T };
       if (method === 'eth_call') {
@@ -232,8 +237,22 @@ test('nothing is sent: wrong token on Base, below the minimum, more than held, n
   await refused({}, '4.99', /minimum deposit is 5 USDC/);
   await refused({ balance: 9_000_000n }, '10', /holds 9 USDC on Base/);
   await refused({ gas: 0n }, '10', /no ETH on Base/);
+  // Some ETH, but less than the approval and the deposit take at twice today's price.
+  await refused({ gas: 1_000_000_000n }, '10', /needs about 0\.0000026 ETH on Base for the network fee and holds 0\.000000001/);
+  // A spike: 100x the price needs 100x the ETH.
+  await refused({ gas: 10n ** 13n, gasPrice: 644_761_300n }, '10', /needs about 0\.00024 ETH/);
   const w = await refused({ allowance: 50_000_000n, refuse: true }, '10', /bridge would refuse/);
   assert.ok(!w.walletCalls.includes('eth_sendTransaction'));
+});
+
+test('the network fee: measured gas at twice the price, the approval only when due; shown rounded up', () => {
+  const h = { gasPrice: 6_447_613n };
+  assert.equal(networkFeeWei(h, false), 110_000n * 6_447_613n * 2n + 100_000_000_000n);
+  assert.equal(networkFeeWei(h, true), 180_000n * 6_447_613n * 2n + 200_000_000_000n);
+  assert.equal(ethText(networkFeeWei(h, true)), '0.0000026'); // 2.521e-6, up
+  assert.equal(ethText(1_000_000_000n), '0.000000001');
+  assert.equal(ethText(10n ** 18n), '1');
+  assert.equal(ethText(0n), '0');
 });
 
 test('an approval that does not cover the amount stops before the deposit', async () => {
