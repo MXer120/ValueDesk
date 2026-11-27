@@ -202,9 +202,11 @@ function estimateCard(c: Ctx, a: EstimateArt, x: number, y: number, w: number, h
 const GREEN = '0,180,129';
 
 /**
- * The image: the card edge to edge, and the bar coming out from behind it: a hair narrower, its slim border, green
- * where it leaves the card fading into our ground (#0b0b0b) with a little green left at its foot; the lockup on the
- * left, the referral code on the right (or the week, when the code is hidden).
+ * The image: one slim frame around the card and the bar under it (owner 2026-11-27: "the valuedesk thing needs to have
+ * same width, and a slim border extending to the sides of the cards and then top"). The frame is green at the top and
+ * fades into our ground (#0b0b0b) toward its foot, a little green left there; the card sits in it a few pixels in, so
+ * the bar, the frame's open foot, is the card's width; the lockup on its left, the referral code on its right (the week
+ * when the code is hidden).
  */
 export function drawPointsArt(c: Ctx, a: PointsArt, W: number, H: number, code: string | null, _link: string, k = 1): void {
   const wide = W > H;
@@ -212,35 +214,35 @@ export function drawPointsArt(c: Ctx, a: PointsArt, W: number, H: number, code: 
   c.scale(k, k);
   c.clearRect(0, 0, W, H);
   const bar = wide ? 84 : 112;
-  const inset = wide ? 30 : 34;
+  const gap = wide ? 7 : 9;
   const radius = wide ? 30 : 34;
   const cardH = H - bar;
-  // The bar first, its top hidden under the card.
-  const bx = inset, bw = W - 2 * inset, by = cardH - 48, bh = H - by - 1;
-  rr(c, bx, by, bw, bh, radius * 0.8);
+  // The frame: the whole image, our ground, green from the top fading down, its slim edge.
+  rr(c, 0.5, 0.5, W - 1, H - 1, radius + gap);
   c.fillStyle = INK; c.fill();
-  const tint = c.createLinearGradient(0, cardH, 0, H);
-  tint.addColorStop(0, `rgba(${GREEN},0.42)`); tint.addColorStop(0.7, `rgba(${GREEN},0.1)`); tint.addColorStop(1, `rgba(${GREEN},0.07)`);
-  rr(c, bx, by, bw, bh, radius * 0.8); c.fillStyle = tint; c.fill();
-  const edge = c.createLinearGradient(0, cardH, 0, H);
-  edge.addColorStop(0, `rgba(${GREEN},0.7)`); edge.addColorStop(1, 'rgba(255,255,255,0.12)');
-  rr(c, bx + 0.5, by + 0.5, bw - 1, bh - 1, radius * 0.8); c.strokeStyle = edge; c.lineWidth = 1; c.stroke();
-  // The card over it, edge to edge.
+  const tint = c.createLinearGradient(0, 0, 0, H);
+  tint.addColorStop(0, `rgba(${GREEN},0.5)`); tint.addColorStop(0.6, `rgba(${GREEN},0.16)`); tint.addColorStop(1, `rgba(${GREEN},0.07)`);
+  rr(c, 0.5, 0.5, W - 1, H - 1, radius + gap); c.fillStyle = tint; c.fill();
+  const edge = c.createLinearGradient(0, 0, 0, H);
+  edge.addColorStop(0, `rgba(${GREEN},0.8)`); edge.addColorStop(1, 'rgba(255,255,255,0.14)');
+  rr(c, 0.5, 0.5, W - 1, H - 1, radius + gap); c.strokeStyle = edge; c.lineWidth = 1; c.stroke();
+  // The card in it, a few pixels in at the top and sides.
   const s = Math.min(1.25, W / 960);
-  if (a.kind === 'tier') tierCard(c, a, 1.5, 1.5, W - 3, cardH - 1.5, s * (wide ? 0.96 : 1.08), radius);
-  else estimateCard(c, a, 1.5, 1.5, W - 3, cardH - 1.5, s * (wide ? 0.96 : 1.05), radius);
-  // In the bar's open part: the lockup, and the code.
-  const cy = cardH + bar / 2 + 2;
-  const pad = bx + (wide ? 30 : 36);
+  const cw = W - 2 * gap, ch = cardH - gap;
+  if (a.kind === 'tier') tierCard(c, a, gap, gap, cw, ch, s * (wide ? 0.95 : 1.07), radius);
+  else estimateCard(c, a, gap, gap, cw, ch, s * (wide ? 0.95 : 1.04), radius);
+  // The frame's open foot: the lockup and the code.
+  const cy = cardH + bar / 2;
+  const pad = gap + (wide ? 34 : 40);
   lockup(c, pad, cy, wide ? 28 : 34);
   c.textBaseline = 'middle'; c.textAlign = 'right';
-  const right = bx + bw - (wide ? 30 : 36);
+  const right = W - pad;
   if (code) {
     c.font = `500 ${wide ? 30 : 38}px ${NUM}`; c.fillStyle = WHITE;
     c.fillText(code, right, cy);
-    const cw = c.measureText(code).width;
+    const tw = c.measureText(code).width;
     c.font = `400 ${wide ? 19 : 24}px ${TEXT}`; c.fillStyle = MUTED;
-    c.fillText('Referral code', right - cw - (wide ? 16 : 20), cy + 1);
+    c.fillText('Referral code', right - tw - (wide ? 16 : 20), cy + 1);
   } else {
     c.font = `400 ${wide ? 19 : 24}px ${TEXT}`; c.fillStyle = MUTED;
     c.fillText(a.when, right, cy + 1);
