@@ -221,6 +221,18 @@ async function baseCall(deps: BridgeDeps, tx: { from?: string; to: string; data:
   return r.result;
 }
 const asUint = (hex: string): bigint => (hex === '0x' ? 0n : BigInt(hex));
+/** Wei as ETH with at most 6 significant decimals, rounded UP (a fee shown lower than it is would mislead). */
+export function ethText(wei: bigint): string {
+  if (wei <= 0n) return '0';
+  const s = formatUnits(wei, 18);
+  const [w, f = ''] = s.split('.');
+  const lead = f.search(/[1-9]/);
+  if (lead < 0) return w!;
+  const keep = Math.min(18, lead + 2);
+  const step = 10n ** BigInt(18 - keep);
+  const up = ((wei + step - 1n) / step) * step;
+  return formatUnits(up, 18);
+}
 
 /** ABI `string` return (symbol). */
 function abiString(hex: string): string {
@@ -239,21 +251,39 @@ export interface BaseHoldings {
   allowance: bigint;
   /** ETH for gas, wei. */
   gas: bigint;
+  /** Base's gas price now, wei. */
+  gasPrice: bigint;
 }
+
+/**
+ * Gas the two steps take on Base, measured 2026-11-27: bridge() 78,979 and 83,767 gas, bridgeNativeToken() 69,686
+ * (real deposits' receipts); a USDC approve 56,240 (eth_estimateGas). Rounded up; the fee check doubles the price.
+ */
+const DEPOSIT_GAS = 110_000n;
+const APPROVE_GAS = 70_000n;
+/** Base's L1 data fee per transaction was 0.45-4.3 gwei-ETH on those receipts; this covers it with room. */
+const L1_FEE_ROOM = 100_000_000_000n;
+
+/** The ETH (wei) the wallet needs on Base for the network fee: the deposit, plus the approval when it is due - at twice today's gas price. */
+export const networkFeeWei = (h: Pick<BaseHoldings, 'gasPrice'>, approving: boolean): bigint =>
+  ((approving ? APPROVE_GAS : 0n) + DEPOSIT_GAS) * h.gasPrice * 2n + (approving ? 2n : 1n) * L1_FEE_ROOM;
 
 /** The token as Base itself reports it, and the wallet's balance, allowance for the bridge and gas - Base's public node. */
 export async function readBaseHoldings(route: BridgeRoute, owner: string, deps: BridgeDeps = defaultBridgeDeps): Promise<BaseHoldings> {
-  const [sym, dec, bal, allow, gas] = await Promise.all([
+  const quantity = (method: string, params: unknown[]) =>
+    deps.baseRpc<string>(method, params).then((r) => {
+      if (typeof r.result !== 'string') throw new Error(r.error?.message || 'Base did not answer');
+      return r.result;
+    });
+  const [sym, dec, bal, allow, gas, price] = await Promise.all([
     baseCall(deps, { to: route.token, data: '0x95d89b41' }),
     baseCall(deps, { to: route.token, data: '0x313ce567' }),
     baseCall(deps, { to: route.token, data: `0x70a08231${owner.replace(/^0x/, '').toLowerCase().padStart(64, '0')}` }),
     baseCall(deps, { to: route.token, data: allowanceData(owner, route.bridge) }),
-    deps.baseRpc<string>('eth_getBalance', [owner, 'latest']).then((r) => {
-      if (typeof r.result !== 'string') throw new Error(r.error?.message || 'Base did not answer');
-      return r.result;
-    }),
+    quantity('eth_getBalance', [owner, 'latest']),
+    quantity('eth_gasPrice', []),
   ]);
-  return { symbol: abiString(sym), decimals: Number(asUint(dec)), balance: asUint(bal), allowance: asUint(allow), gas: asUint(gas) };
+  return { symbol: abiString(sym), decimals: Number(asUint(dec)), balance: asUint(bal), allowance: asUint(allow), gas: asUint(gas), gasPrice: asUint(price) };
 }
 
 /**
@@ -287,11 +317,14 @@ export async function depositViaBridge(
   const units = parseUnits(amount, h.decimals);
   if (route.min && units < parseUnits(route.min, h.decimals)) throw new RangeError(`The minimum deposit is ${route.min} ${route.coin}.`);
   if (h.balance < units) throw new WalletError(`Your wallet holds ${formatUnits(h.balance, h.decimals)} ${route.coin} on Base - not enough for ${amount} ${route.coin}.`);
+  const approving = h.allowance < units;
+  // Base charges a network fee in ETH for each step (SoDEX's bridge itself takes none on a deposit).
   if (h.gas === 0n) throw new WalletError('Your wallet has no ETH on Base to pay the network fee. Nothing was sent.');
+  const fee = networkFeeWei(h, approving);
+  if (h.gas < fee) throw new WalletError(`Your wallet needs about ${ethText(fee)} ETH on Base for the network fee and holds ${ethText(h.gas)}. Nothing was sent.`);
 
   const wantChain = BRIDGE_CHAIN.chainId;
   const switching = (await getChainId(provider)) !== wantChain;
-  const approving = h.allowance < units;
   const ask = promptCounter(o.onStep, (switching ? 1 : 0) + (approving ? 1 : 0) + 1);
   if (switching) ask('approve');
   await addOrSwitchChain(provider, {

@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtDecimalString, toInputText } from '../../numStyle';
 import { confirmMoneyMove } from '../../trading/keyLock';
-import { bridgeRoutes, depositViaBridge, readBaseHoldings, type BaseHoldings, type BridgeDeposit } from '../../trading/bridgeDeposit';
+import { bridgeRoutes, depositViaBridge, ethText, networkFeeWei, readBaseHoldings, type BaseHoldings, type BridgeDeposit } from '../../trading/bridgeDeposit';
 import type { CoinConfig, FundsStep } from '../../trading/funds';
 import { formatUnits, parseUnits } from '../../trading/onboard';
 import { maintenanceFor, maintenanceNote, type Maintenance } from '../../trading/relay';
@@ -94,7 +94,11 @@ export function BridgePanel({ owner, provider, configs }: { owner: string; provi
       problem = (e as Error).message;
     }
   }
+  // Base's network fee in ETH: the deposit, plus the approval when the allowance is short (trading/bridgeDeposit.ts).
+  const approving = !!hold && (units > 0n ? hold.allowance < units : hold.allowance === 0n);
+  const fee = hold ? networkFeeWei(hold, approving) : 0n;
   const noGas = !!hold && hold.gas === 0n;
+  const lowGas = !!hold && !noGas && hold.gas < fee;
   /** Display: at most 6 decimals, cut (never rounded up), grouped. */
   const show = (u: bigint) => {
     const [w, f] = formatUnits(u, dp).split('.');
@@ -180,12 +184,13 @@ export function BridgePanel({ owner, provider, configs }: { owner: string; provi
       )}
       {problem && <p className="fx-note fx-note--err">{problem}</p>}
       {noGas && <p className="fx-note fx-note--warn">Your wallet has no ETH on Base for the network fee.</p>}
+      {lowGas && <p className="fx-note fx-note--warn">{`Not enough ETH on Base for the network fee: about ${ethText(fee)} ETH needed.`}</p>}
       {holdFailed && <p className="fx-note">Your Base balance could not be read - it is checked again before anything is sent.</p>}
       <button
         type="button"
         className="fx-cta"
         onClick={() => void submit()}
-        disabled={busy || !route || !provider || !amount || !!problem || paused || noGas}
+        disabled={busy || !route || !provider || !amount || !!problem || paused || noGas || lowGas}
       >
         {busy ? busyLabel(step) : 'Deposit'}
       </button>
