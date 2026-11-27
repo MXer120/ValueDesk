@@ -15,7 +15,8 @@ export class CalendarFeed {
   private active = false;
   private reading = false;
 
-  constructor(private readonly opts: { url: string; fetch: FetchLike; log?: { warn(msg: string, data?: Record<string, unknown>): void } }) {}
+  /** `headers`: extra request headers - the origin secret when the calendar is the API server behind its edge gate. */
+  constructor(private readonly opts: { url: string; fetch: FetchLike; headers?: Record<string, string>; log?: { warn(msg: string, data?: Record<string, unknown>): void } }) {}
 
   start(): void {
     this.active = true;
@@ -43,7 +44,7 @@ export class CalendarFeed {
       const u = new URL(this.opts.url);
       u.searchParams.set('from', String(now - 86_400_000));
       u.searchParams.set('to', String(now + 7 * 86_400_000));
-      const res = await this.opts.fetch(u.toString(), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+      const res = await this.opts.fetch(u.toString(), { headers: { Accept: 'application/json', ...this.opts.headers }, signal: AbortSignal.timeout(10_000) });
       if (!res.ok) throw new Error(`calendar answered ${res.status}`);
       const body = JSON.parse(await res.text()) as { data?: { events?: unknown[] }; events?: unknown[] };
       const raw = body.data?.events ?? body.events ?? [];

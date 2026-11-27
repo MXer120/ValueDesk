@@ -622,6 +622,25 @@ test('C: the calendar stopped during a read arms no next read; started again it 
   c.stop();
 });
 
+test('C: the calendar on server 1 gets the origin secret (403 without it, found 2026-11-27); a calendar on another host never does', async () => {
+  const headersOf = (env: Record<string, string>) => {
+    const m = make({ EXECUTOR_ORIGIN_SECRET: 'secret-1', ...env });
+    const h = (m.svc as unknown as { calendar: { opts: { headers?: Record<string, string> } } | null }).calendar?.opts.headers;
+    void m.cleanup();
+    return h;
+  };
+  assert.deepEqual(headersOf({ EXECUTOR_BETA_URL: 'https://s1.test/api/vs/builder/beta' }), { 'X-Origin-Verify': 'secret-1' }, 'derived from the beta URL: same server');
+  assert.deepEqual(headersOf({ EXECUTOR_BUILDER_URL: 'https://s1.test/api/vs/builder/volume' }), { 'X-Origin-Verify': 'secret-1' });
+  assert.equal(headersOf({ EXECUTOR_BETA_URL: 'https://s1.test/api/vs/builder/beta', EXECUTOR_CALENDAR_URL: 'https://elsewhere.test/cal' }), undefined, 'another host: no secret');
+  // The feed sends what it is given, beside Accept.
+  let seen: Record<string, string> = {};
+  const c = new CalendarFeed({ url: 'http://127.0.0.1:9/api/vs/calendar', headers: { 'X-Origin-Verify': 'v' }, fetch: async (_u, init) => { seen = (init?.headers ?? {}) as Record<string, string>; return { status: 200, ok: true, text: async () => JSON.stringify({ events: [] }) }; } });
+  c.start();
+  await new Promise((r) => setTimeout(r, 10));
+  c.stop();
+  assert.deepEqual(seen, { Accept: 'application/json', 'X-Origin-Verify': 'v' });
+});
+
 test('C: wallet caches are bounded (oldest out first)', () => {
   const m = new Map<string, number>();
   for (let i = 0; i < 10; i++) remember(m, `w${i}`, i, 3);
