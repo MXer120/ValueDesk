@@ -84,6 +84,19 @@ function crown(c: Ctx, x: number, cy: number, s: number, color: string): void {
   c.restore();
 }
 
+/** A soft vignette inside a card: clear in the middle, darker toward its edges and corners. */
+function vignette(c: Ctx, x: number, y: number, w: number, h: number, r: number, strength: number): void {
+  c.save();
+  rr(c, x, y, w, h, r); c.clip();
+  c.translate(x + w / 2, y + h / 2);
+  c.scale(w / Math.max(w, h), h / Math.max(w, h));
+  const R = Math.max(w, h) * 0.72;
+  const g = c.createRadialGradient(0, 0, R * 0.45, 0, 0, R);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${strength})`);
+  c.fillStyle = g; c.fillRect(-R, -R, R * 2, R * 2);
+  c.restore();
+}
+
 function tierCard(c: Ctx, a: TierArt, x: number, y: number, w: number, h: number, s: number, R = 30 * s): void {
   // SoDEX's card: the tier's gradient (165 degrees), its edge, its shadow.
   c.save();
@@ -94,13 +107,15 @@ function tierCard(c: Ctx, a: TierArt, x: number, y: number, w: number, h: number
   a.stops.forEach((col, i) => g.addColorStop(i / Math.max(1, a.stops.length - 1), col));
   c.fillStyle = g; c.fill();
   c.restore();
-  rr(c, x, y, w, h, R); c.strokeStyle = a.border; c.lineWidth = 3; c.stroke();
   // A soft sheen from the top left, as the card's glare.
   c.save(); rr(c, x, y, w, h, R); c.clip();
   const sh = c.createLinearGradient(x, y, x + w * 0.6, y + h * 0.8);
   sh.addColorStop(0, 'rgba(255,255,255,0.16)'); sh.addColorStop(0.5, 'rgba(255,255,255,0)');
   c.fillStyle = sh; c.fillRect(x, y, w, h);
   c.restore();
+  vignette(c, x, y, w, h, R, 0.34);
+  // The tier's edge last, so the vignette never dims it.
+  rr(c, x, y, w, h, R); c.strokeStyle = a.border; c.lineWidth = 3; c.stroke();
   const p = 46 * s;
   // The tier's name, the number and its chip.
   c.fillStyle = WHITE; c.font = `600 ${58 * s}px ${DISPLAY}`; c.textBaseline = 'alphabetic';
@@ -141,6 +156,7 @@ function estimateCard(c: Ctx, a: EstimateArt, x: number, y: number, w: number, h
   g.addColorStop(0, '#212225'); g.addColorStop(0.46, '#141517'); g.addColorStop(1, '#0c0c0d');
   c.fillStyle = g; c.fill();
   c.restore();
+  vignette(c, x, y, w, h, R, 0.45);
   rr(c, x, y, w, h, R); c.strokeStyle = 'rgba(255,255,255,0.14)'; c.lineWidth = 1.5; c.stroke();
   const p = 44 * s;
   c.font = `500 ${26 * s}px ${TEXT}`; c.fillStyle = 'rgba(244,244,242,0.78)';
@@ -234,7 +250,7 @@ export function drawPointsArt(c: Ctx, a: PointsArt, W: number, H: number, code: 
   // The frame's open foot: the lockup and the code.
   const cy = cardH + bar / 2;
   const pad = gap + (wide ? 34 : 40);
-  lockup(c, pad, cy, wide ? 28 : 34);
+  lockup(c, pad, cy, wide ? 36 : 44);
   c.textBaseline = 'middle'; c.textAlign = 'right';
   const right = W - pad;
   if (code) {
