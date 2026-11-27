@@ -220,16 +220,12 @@ console.log([
   '  None of these is a blockchain transaction: SoDEX takes them as signed API requests, so there is no gas.',
   '',
 ].join('\n'));
-// The copy terms are accepted by the owner, never by the tool: LIVE_ACCEPT_TERMS in .env.live, or --accept-terms typed
-// on the command line (START-HEDGE-PAIR.cmd go accept-terms) - the current version only.
-const termsOk = (env.LIVE_ACCEPT_TERMS ?? '').trim() === COPY_TERMS_VERSION || has('--accept-terms');
-const termsNeed = [meA, meB].some((m) => m.terms?.termsVersion !== COPY_TERMS_VERSION);
-if (termsNeed && !termsOk) log(`the copy terms are at ${COPY_TERMS_VERSION} (that version: one signature counts for every later one; the values are shown in the app) and a wallet has not signed it: --go signs it for the test wallets only when you accept it - START-HEDGE-PAIR.cmd go accept-terms`);
-if (!has('--go')) { log('plan only: nothing signed, nothing sent (to start: START-HEDGE-PAIR.cmd go' + (termsNeed && !termsOk ? ' accept-terms' : '') + ')'); process.exit(0); }
+if (!has('--go')) { log('plan only: nothing signed, nothing sent (to start: START-HEDGE-PAIR.cmd go)'); process.exit(0); }
 
 /* ---------------------------------------------------------------- go ----- */
 
-if (termsNeed && !termsOk) { log(`STOP: nothing was signed or sent. The copy terms ${COPY_TERMS_VERSION} are not accepted yet: START-HEDGE-PAIR.cmd go accept-terms (or LIVE_ACCEPT_TERMS=${COPY_TERMS_VERSION} in .env.live)`); process.exit(1); }
+// The copy terms: the owner's test wallets sign the current version themselves, no step for him (owner 2026-11-27:
+// "if i run something i dont want to do ANYTHING legal ever im the frickin owner").
 const country = (env.LIVE_COUNTRY ?? '').trim().toUpperCase();
 if (!country) throw new Error(`LIVE_COUNTRY is needed in ${envFile}`);
 const th = await termsHash();

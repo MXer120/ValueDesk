@@ -187,12 +187,12 @@ async function preflight(parts: readonly Part[], o: { mode: Mode; env: Record<st
   const runs = (t: string) => parts.some((p) => p.target === t && !p.skip);
 
   lines.push(`env file ${rel(o.envFile)}${o.envFound ? '' : ' - not found'} (names only, never a value)`);
-  const required = new Set(['LIVE_FOLLOWER_KEY', 'LIVE_COUNTRY', 'LIVE_ACCEPT_TERMS']);
+  const required = new Set(['LIVE_FOLLOWER_KEY', 'LIVE_COUNTRY']);
   for (const s of o.states) {
     const note = s.name === 'LIVE_LEADER_VENUE' ? ' (each part sets it)' : s.from === 'environment' ? ' (from this window\'s environment)' : '';
     ok(!live || s.name === 'LIVE_LEADER_VENUE' ? null : s.state === 'set' ? true : required.has(s.name) ? false : null, `${s.name.padEnd(19)} ${s.state}${note}`);
   }
-  if (!live) ok(null, 'dry run: throwaway wallets, no funds; a live run needs LIVE_FOLLOWER_KEY, LIVE_COUNTRY, LIVE_ACCEPT_TERMS, and a leader key for the copy scenarios');
+  if (!live) ok(null, 'dry run: throwaway wallets, no funds; a live run needs LIVE_FOLLOWER_KEY, LIVE_COUNTRY and a leader key for the copy scenarios');
 
   let follower: string | null = null;
   let country = '';
@@ -200,9 +200,8 @@ async function preflight(parts: readonly Part[], o: { mode: Mode; env: Record<st
     if (!o.envFound) f.all = `there is no env file ${rel(o.envFile)}: copy .env.example to .env.live in that folder and fill it in (README "Start here")`;
     follower = addressOf(o.env.LIVE_FOLLOWER_KEY);
     if (!follower) f.all ??= `LIVE_FOLLOWER_KEY must be the follower wallet's private key (64 hex characters) in ${rel(o.envFile)}`;
-    const accepted = (o.env.LIVE_ACCEPT_TERMS ?? '').trim() === COPY_TERMS_VERSION;
-    ok(accepted, `copy terms ${COPY_TERMS_VERSION} ${accepted ? 'accepted (LIVE_ACCEPT_TERMS)' : 'not accepted: LIVE_ACCEPT_TERMS must name this version'}`);
-    if (!accepted) f.all ??= `LIVE_ACCEPT_TERMS is not ${COPY_TERMS_VERSION}: read the copy terms (ValueDesk -> Copy -> terms, or apps/web/src/legal/copyTerms.ts) and set LIVE_ACCEPT_TERMS=${COPY_TERMS_VERSION}`;
+    // The owner's test wallets sign the current copy terms themselves (owner 2026-11-27: nothing legal for him to do).
+    ok(true, `copy terms ${COPY_TERMS_VERSION}: signed by the test wallets when needed`);
     country = (o.env.LIVE_COUNTRY ?? '').trim().toUpperCase();
     const policy = regionPolicy(country || null, null);
     ok(policy.allowed, `country ${country || '(none)'}: ${policy.allowed ? `${policy.region}${policy.maxLeverage ? `, ${policy.maxLeverage}x cap` : ''}` : policy.reason}`);

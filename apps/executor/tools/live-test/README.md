@@ -19,7 +19,7 @@ each, about $0.35 when SoDEX lets the harness take the position to the market's 
 - Fund them as `node node_modules/tsx/dist/cli.mjs apps/executor/tools/live-test/run.ts --budget` says (with
   `LIVE_LEADER_VENUE=hyperliquid` in the environment for a Hyperliquid leader); the preflight below checks it again.
 - `.env.live` in this folder, from `.env.example`: `LIVE_FOLLOWER_KEY`, `LIVE_LEADER_KEY` and/or `LIVE_HL_LEADER_KEY`,
-  `LIVE_COUNTRY`, `LIVE_ACCEPT_TERMS`. `LIVE_LEADER_VENUE` may stay empty: each part sets it.
+  `LIVE_COUNTRY`. `LIVE_LEADER_VENUE` may stay empty: each part sets it. The test wallets sign the current copy terms themselves.
 - Browser part: the dev web running from this checkout (`npm run dev` in `apps/web`, or the preview `valuescan-web`),
   and in `apps/web/.env.local` `VITE_LIVE_ALGOS_WALLETS=<the follower's address>` and the builder lines
   (`VITE_BUILDER_ID`, `VITE_BUILDER_FEE_PERPS`, ...) as `deploy/vercel/production.settings` has them; restart the dev
@@ -87,7 +87,6 @@ Exit code 0 when nothing failed and no part crashed.
    | `LIVE_LEADER_KEY` | a SoDEX leader's private key (empty: copy scenarios skipped) |
    | `LIVE_HL_LEADER_KEY` | a Hyperliquid leader's private key, only with `LIVE_LEADER_VENUE=hyperliquid` (empty: copy scenarios skipped) |
    | `LIVE_COUNTRY` | your country of residence, two letters, as you declare it in ValueDesk (EEA: the 2x cap applies, and the suite checks it) |
-   | `LIVE_ACCEPT_TERMS` | the copy terms version you read and accept, e.g. `2026-10-27.2`: the runner signs the terms in your name with it |
 
    The keys are read into the runner's memory only. They are never written anywhere, never put in any
    process's environment, and never sent to the executor. On `--target browser` the follower's key is also handed,

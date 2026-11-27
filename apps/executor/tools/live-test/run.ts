@@ -335,9 +335,7 @@ async function main(): Promise<number> {
   // The browser target runs in the local dev web, which the runner never starts itself: it must answer, and serve this checkout.
   const web = args.target === 'browser' ? await devWebFor(REPO, args.web) : null;
   if (web) log(`dev web ${web} (this checkout's), in Microsoft Edge${args.headed ? ' (shown)' : ''}`);
-  if (!args.dry && env.LIVE_ACCEPT_TERMS !== COPY_TERMS_VERSION) {
-    throw new Error(`The runner signs the copy terms ${COPY_TERMS_VERSION} in your name. Read them (ValueDesk -> Copy -> terms, or apps/web/src/legal/copyTerms.ts) and set LIVE_ACCEPT_TERMS=${COPY_TERMS_VERSION} in ${args.envFile}.`);
-  }
+  // The owner's test wallets sign the current copy terms themselves (owner 2026-11-27: nothing legal for him to do).
 
   // Wallets: live, the owner's two; dry, throwaway keys that never touch SoDEX or Hyperliquid.
   const fpk = args.dry ? secp256k1.utils.randomPrivateKey() : privateKey(env.LIVE_FOLLOWER_KEY, 'LIVE_FOLLOWER_KEY');
