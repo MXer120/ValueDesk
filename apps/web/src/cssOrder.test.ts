@@ -33,7 +33,6 @@ const EXEMPT = new Set([
   'components/sodex/wealth/wealth.css',
   'components/sodex/versions/versions.css',
   'components/sodex/versions/boxes/boxes.css',
-  'components/sodex/versions/points/points.css',
   'components/scan/versions/versions.css',
   'components/leaderboard/versions/versions.css',
   'components/leaderboard/versions/stage.css',

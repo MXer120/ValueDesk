@@ -18,7 +18,7 @@ import { warmWalletModal } from '../../walletconnect';
 import { allWeeks, difficultyRows, earnTips, forecastWeek, mmByWeek, squadBreakdown, venueOiByWeek, venueVolumeByWeek, type AnyWeek, type DifficultyRow, type S2State, type SquadBreakdown, type Tip } from './soPointsV2';
 
 /* SoDEX's own tier styles, as their points page draws its card (bundle 2026-11-16). */
-const TIER_STYLE: Record<string, { bg: string; border: string; shadow: string; bar: string; chip: string }> = {
+export const TIER_STYLE: Record<string, { bg: string; border: string; shadow: string; bar: string; chip: string }> = {
   Iron: { bg: 'linear-gradient(165deg, #27272A 0%, #18181B 50%, #2D2D2D 100%)', border: '#3F3F46', shadow: 'rgba(0,0,0,0.5)', bar: 'linear-gradient(to right, #52525B, #A1A1AA)', chip: '#A1A1AA' },
   Bronze: { bg: 'linear-gradient(165deg, #9A6754 0%, #795546 50%, #451A03 100%)', border: '#9A6754', shadow: 'rgba(154,103,84,0.4)', bar: 'linear-gradient(90deg, rgba(255,255,255,0.6) 0%, #fff 100%)', chip: '#F9A789' },
   Silver: { bg: 'linear-gradient(165deg, #94A3B8 0%, #475569 50%, #0F172A 100%)', border: '#94A3B8', shadow: 'rgba(148,163,184,0.4)', bar: 'linear-gradient(90deg, rgba(255,255,255,0.6) 0%, #fff 100%)', chip: '#CBD5E1' },
@@ -27,13 +27,13 @@ const TIER_STYLE: Record<string, { bg: string; border: string; shadow: string; b
   Epic: { bg: 'linear-gradient(165deg, #1A1A1A 0%, #080808 50%, #000000 100%)', border: 'rgba(255,255,255,0.2)', shadow: 'rgba(0,0,0,0.8)', bar: 'linear-gradient(to right, #6B7280, #FFFFFF, #D1D5DB)', chip: '#FFFFFF' },
 };
 /** SoDEX's mapping: an unknown tier is Iron (their EV). */
-const tierKey = (t: string | null | undefined) => {
+export const tierKey = (t: string | null | undefined) => {
   const k = (t ?? '').toLowerCase();
   return Object.keys(TIER_STYLE).find((x) => x.toLowerCase() === k) ?? 'Iron';
 };
 const usd = (n: number) => (n >= 1e6 ? `$${fmt(n / 1e6, n >= 1e7 ? 0 : 1)}M` : n >= 1e4 ? `$${fmt(n / 1e3, 0)}K` : n >= 10 ? `$${fmt(n, 0)}` : `$${fmt(n, 2)}`);
 /** SoDEX's season card shows a fixed 900,000 (their bundle's constant), not the API's pool field. */
-const SODEX_POOL_SHOWN = 900_000;
+export const SODEX_POOL_SHOWN = 900_000;
 
 const copy = async (text: string, what: string) => {
   try {
@@ -46,7 +46,8 @@ const copy = async (text: string, what: string) => {
 
 /* --- the tier card (SoDEX's) --------------------------------------------------------------------------------------- */
 
-export function SoPointsCard({ s }: { s: S2State }) {
+/** `onShare`: the page's own share dialog (Stage); without it, the system share sheet with a line of text. */
+export function SoPointsCard({ s, onShare }: { s: S2State; onShare?: () => void }) {
   if (!s.summary && s.loading) return <div className="spm-card spm-card--skel sdx-skel__row" aria-label="Loading your SoPoints" />;
   const sum = s.summary;
   const tier = tierKey(sum?.currentTier);
@@ -61,6 +62,7 @@ export function SoPointsCard({ s }: { s: S2State }) {
   const last = s.weeks.filter((w) => w.pointsStatus === 'CONFIRMED').sort((a, b) => b.weekNo - a.weekNo)[0];
   const share = () => {
     if (total === null) return;
+    if (onShare) { onShare(); return; }
     const text = `I'm ${tier} on SoDEX with ${total.toLocaleString('en-US')} SoPoints${sum?.rank ? `, rank ${sum.rank.toLocaleString('en-US')}` : ''}.`;
     const url = `${location.origin}/points`;
     void shareNative({ text, url }).then((r) => { if (r === 'failed' || r === 'unsupported') void copy(`${text} ${url}`, 'Text'); });
@@ -100,7 +102,9 @@ export function SoPointsCard({ s }: { s: S2State }) {
 
 /* --- the season card (SoDEX's) ------------------------------------------------------------------------------------ */
 
-export function SeasonCard({ week, address, settled }: { week: WeekInfo | null; address: string | null; settled: boolean }) {
+/** `bare` (Stage, owner 2026-11-27): without the "Week N is Live · Split this week" line and the snapshot and distribution
+ * times under the countdown; the page's own week pill says which week is live. */
+export function SeasonCard({ week, address, settled, bare = false }: { week: WeekInfo | null; address: string | null; settled: boolean; bare?: boolean }) {
   const now = useNow();
   // The user's own ValueDesk invite link (its SoDEX code; invites/invites.ts), never ours (owner 2026-11-16).
   const own = useOwnCode(address);
@@ -123,10 +127,12 @@ export function SeasonCard({ week, address, settled }: { week: WeekInfo | null; 
   return (
     <section className="spm-season" aria-label="This week">
       <div className="spm-season__main">
-        <div className="spm-season__live">
-          <span className={`spm-season__on${live ? '' : ' is-off'}`}><i />{week ? `Layer1 Season ${week.weekName} is ${live ? 'Live' : 'closed'}` : 'Layer1 Season'}</span>
-          <span className="spm-season__split">· Split this week</span>
-        </div>
+        {!bare && (
+          <div className="spm-season__live">
+            <span className={`spm-season__on${live ? '' : ' is-off'}`}><i />{week ? `Layer1 Season ${week.weekName} is ${live ? 'Live' : 'closed'}` : 'Layer1 Season'}</span>
+            <span className="spm-season__split">· Split this week</span>
+          </div>
+        )}
         <b className="spm-season__pool">{SODEX_POOL_SHOWN.toLocaleString('en-US')}</b>
         <span className="spm-season__sub">SoPoints · 20-week season</span>
         <div className="spm-season__snap">
@@ -137,7 +143,7 @@ export function SeasonCard({ week, address, settled }: { week: WeekInfo | null; 
             ))}
           </span>
         </div>
-        {week && <span className="spm-season__when">Snapshot every {at(week.nextWeekStartTime * 1000)} · distribution every {at(week.distributionTime * 1000)} (your time)</span>}
+        {week && !bare && <span className="spm-season__when">Snapshot every {at(week.nextWeekStartTime * 1000)} · distribution every {at(week.distributionTime * 1000)} (your time)</span>}
       </div>
       <div className="spm-season__invite">
         <div>

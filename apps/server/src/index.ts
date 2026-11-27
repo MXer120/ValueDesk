@@ -33,6 +33,7 @@ import { scanRoutes } from './routes/scan.js';
 import { profileOnSignal } from './indexer/cpuProfile.js';
 import { pointsAuthRoutes } from './routes/pointsAuth.js';
 import { sopointsLogRoutes } from './routes/sopointsLog.js';
+import { sopointsEstimateRoutes } from './routes/sopointsEstimate.js';
 import { keepValuedeskWarm, liveAskOf, valuedeskRoutes } from './routes/valuedesk.js';
 import { builderRoutes } from './routes/builder.js';
 import { betaRoutes } from './routes/beta.js';
@@ -265,6 +266,8 @@ await app.register(scanRoutes);
 await app.register(pointsAuthRoutes());
 // SoPoints week log (routes/sopointsLog.ts): a signed-in wallet's weeks, kept for the points formula fit.
 await app.register(sopointsLogRoutes());
+// SoPoints estimate (routes/sopointsEstimate.ts): the fitted model stays here, its numbers in a private file.
+await app.register(sopointsEstimateRoutes());
 // ValueDesk: multi-venue traders (SoDEX + Hyperliquid) for Explore,
 // Leaderboard, Scan and Copy. Read-only - see routes/valuedesk.ts.
 await app.register(valuedeskRoutes);

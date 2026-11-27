@@ -346,6 +346,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/vs/invites/join write',
       'POST /api/vs/sodex-auth/nonce auth',
       'POST /api/vs/sodex-auth/verify auth',
+      'POST /api/vs/sopoints/estimate write',
       'POST /api/vs/sopoints/log write',
       'POST /api/vs/username write',
       'POST /api/vs/username/change write',
@@ -369,7 +370,7 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
     // and a signed-in wallet keeps its own algos' and copies' notices in its inbox (ops/inbox.ts).
     if (r.url === '/api/vs/feedback/image') assert.ok(r.method === 'GET' && r.cls === 'read', r.url);
     else if (r.url === '/api/vs/feedback/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
-    else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors' || r.url === '/api/vs/a' || r.url === '/api/vs/username' || r.url === '/api/vs/username/change' || r.url === '/api/vs/invites/join' || r.url === '/api/vs/sopoints/log') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
+    else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors' || r.url === '/api/vs/a' || r.url === '/api/vs/username' || r.url === '/api/vs/username/change' || r.url === '/api/vs/invites/join' || r.url === '/api/vs/sopoints/log' || r.url === '/api/vs/sopoints/estimate') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
     // The owner's admin suite (routes/admin.ts): POST only, its own class (the suite's Origin, its own limits).
     else if (r.url.startsWith('/api/admin/')) assert.ok(r.method === 'POST' && r.cls === 'admin', r.url);
     // The beta channel's sign-in (routes/beta.ts, beta API only): a wallet's free signature, cls auth.

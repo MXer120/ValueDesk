@@ -8,8 +8,8 @@
  *  - Every field below is SoDEX's, read as is.
  *  - points = round((own + referral) x (1 + squad %)) is fitted from 19 of the owner's wallets (all referral-only weeks
  *    within 1 point); the split of a week into own / referral / boost uses it.
- *  - "Twice the volume earns about 1.6x the points" is fitted (exponent ~0.62-0.71 on volume share) and is labelled
- *    an estimate wherever it is shown.
+ *  - ValueDesk's fitted model is not here (owner 2026-11-27: "our formula cant be in the frontend code"): estimates are
+ *    the server's (sopointsEstimate.ts). "Next $10K adds" below is the wallet's own cost per point, plain arithmetic.
  */
 import { useEffect, useState } from 'react';
 import { authed, fetchVenueDaily, type BoostConfig, type DailyPoint, type VolumeWeights } from '../../points';
@@ -181,9 +181,6 @@ export function splitWeek(w: S2Week): WeekSplit {
 
 /* --- this week so far ------------------------------------------------------------------------------------------ */
 
-/** Our fitted exponent on volume share (Season 1: 0.71, Layer 1: ~0.62): points grow slower than volume. */
-export const VOLUME_EXPONENT = 0.65;
-
 export interface WeekForecast {
   live: S2Week;
   volume: number;
@@ -193,7 +190,7 @@ export interface WeekForecast {
   own: number | null;
   /** The same with this week's squad boost on top (estimate). */
   boosted: number | null;
-  /** What the next $10K of volume adds, boost included (estimate; concave). */
+  /** What the next $10K of volume adds at the wallet's own cost per point, boost included (arithmetic on its weeks). */
   per10k: number | null;
 }
 
@@ -207,8 +204,7 @@ export function forecastWeek(weeks: S2Week[]): WeekForecast | null {
   const mult = 1 + (live.totalBonusPct ?? 0) / 100;
   const own = dpp && volume > 0 ? volume / dpp : dpp ? 0 : null;
   const boosted = own !== null ? own * mult : null;
-  // Marginal points of the next $10K: d(points)/d(volume) = k * points / volume on a power law; from zero, the plain rate.
-  const per10k = dpp ? (volume > 0 && own ? VOLUME_EXPONENT * (own / volume) * 10_000 : 10_000 / dpp) * mult : null;
+  const per10k = dpp ? (10_000 / dpp) * mult : null;
   return { live, volume, dpp, own, boosted, per10k };
 }
 
@@ -341,7 +337,7 @@ export function difficultyRows(all: AnyWeek[], venueVol: Map<number, number>, ve
 /* --- how to earn more -------------------------------------------------------------------------------------------- */
 
 export interface Tip {
-  id: 'squad' | 'boosted' | 'pace' | 'steady' | 'hold' | 'invite';
+  id: 'squad' | 'boosted' | 'pace' | 'hold' | 'invite';
   title: string;
   /** The one figure that matters, already formatted. */
   value: string;
@@ -400,10 +396,6 @@ export function earnTips(input: {
     tips.push({ id: 'pace', kind: 'fact', title: 'Your cost per point', value: `${usd(traded.dollarsPerPoint!)}`,
       line: `${traded.week.weekName}: ${usd(traded.dollarsPerPoint!)} of your volume per point${field ? `, against ${usd(field)} for the whole venue` : ''}.` });
   }
-
-  // 4. Steady beats one big week (our fit).
-  tips.push({ id: 'steady', kind: 'estimate', title: 'Steady beats big', value: '2× → ~1.6×',
-    line: 'Points grow slower than volume: twice the volume earned about 1.6× the points in the weeks we measured. Trading every week earns more than the same volume in one week.' });
 
   // 5. Holdings and open positions.
   const holds = scored.slice(0, 4).some((w) => (w.wealthTvl ?? 0) > 1 || (w.vaultHolding ?? 0) > 1);
@@ -469,35 +461,70 @@ export interface S2State {
   error: string | null;
 }
 
-export function useSoPointsV2(address: string | null, signedIn: boolean): S2State {
+const EMPTY: S2State = { summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, bonus: null, venueDaily: [], loading: false, error: null };
+const KEPT = 'vs.sp.v2.';
+
+/** The wallet's last answer in this browser (its own figures, its own device), so a return visit draws at once. */
+function keptState(address: string): Pick<S2State, 'summary' | 'weeks' | 's1' | 'bonus'> | null {
+  try {
+    const raw = localStorage.getItem(KEPT + address.toLowerCase());
+    if (!raw) return null;
+    const k = JSON.parse(raw) as Pick<S2State, 'summary' | 'weeks' | 's1' | 'bonus'>;
+    return Array.isArray(k.weeks) && Array.isArray(k.s1) ? k : null;
+  } catch {
+    return null;
+  }
+}
+function keepState(address: string, k: Pick<S2State, 'summary' | 'weeks' | 's1' | 'bonus'>): void {
+  try { localStorage.setItem(KEPT + address.toLowerCase(), JSON.stringify(k)); } catch { /* storage full or off: the next visit reads again */ }
+}
+
+/**
+ * The wallet's SoPoints from SoDEX (signed in). Fast (owner 2026-11-27: "make sopoints page data load faster"): the last
+ * answer kept in this browser shows at once, each read fills its part as it lands instead of all waiting for the
+ * slowest, and the venue's daily series (only the cost-per-point charts use them) are read only when asked for.
+ */
+export function useSoPointsV2(address: string | null, signedIn: boolean, opts: { venue?: boolean } = {}): S2State {
+  const venue = opts.venue !== false;
   // Loading from the first render when the wallet is signed in, so nothing shows a default before the reads start.
-  const [s, set] = useState<S2State>({ summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, bonus: null, venueDaily: [], loading: !!address && signedIn, error: null });
+  const [s, set] = useState<S2State>(() => {
+    const k = address && signedIn ? keptState(address) : null;
+    return { ...EMPTY, ...(k ?? {}), loading: !!address && signedIn, error: null };
+  });
   useEffect(() => {
-    if (!address || !signedIn) { set({ summary: null, weeks: [], s1: [], venueOiDaily: [], mmDays: null, bonus: null, venueDaily: [], loading: false, error: null }); return; }
+    if (!address || !signedIn) { set(EMPTY); return; }
     let live = true;
-    set((x) => ({ ...x, loading: true, error: null }));
-    void Promise.allSettled([fetchS2Summary(address), fetchS2Weeks(address), fetchS2TeamBonus(address), fetchVenueDaily('volume', 90), fetchS1Weeks(address), fetchVenueDaily('open-interest', 90), fetchMmDaily(Date.now() - 90 * 86_400_000)]).then(([a, b, c, d, e, g, h]) => {
+    const k = keptState(address);
+    // Another wallet's figures never stay on screen: start from this wallet's kept answer, or from nothing.
+    set({ ...EMPTY, ...(k ?? {}), loading: true, error: null });
+    const put = (p: Partial<S2State>) => { if (live) set((x) => ({ ...x, ...p })); };
+    const sum = fetchS2Summary(address).then((v) => { put({ summary: v }); return v; });
+    const wks = fetchS2Weeks(address).then((v) => { put({ weeks: v }); return v; });
+    const bon = fetchS2TeamBonus(address).then((v) => { put({ bonus: v }); return v; });
+    const s1 = fetchS1Weeks(address).then((v) => { put({ s1: v }); return v; });
+    if (venue) {
+      void fetchVenueDaily('volume', 90).then((v) => put({ venueDaily: v })).catch(() => undefined);
+      void fetchVenueDaily('open-interest', 90).then((v) => put({ venueOiDaily: v })).catch(() => undefined);
+      void fetchMmDaily(Date.now() - 90 * 86_400_000).then((v) => put({ mmDays: v?.days ?? null })).catch(() => undefined);
+    }
+    // Loaded once the wallet's own three reads are in; Season 1 follows on its own.
+    void Promise.allSettled([sum, wks, bon]).then(([a, b, c]) => {
       if (!live) return;
       const err = [a, b, c].find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
-      logWeeks(address, {
-        summary: a.status === 'fulfilled' ? a.value : null,
-        bonus: c.status === 'fulfilled' ? c.value : null,
-        layer1: b.status === 'fulfilled' ? b.value : [],
-        season1: e.status === 'fulfilled' ? e.value : [],
-      });
-      set({
+      set((x) => ({ ...x, loading: false, error: err ? String((err.reason as Error)?.message ?? err.reason) : null }));
+    });
+    void Promise.allSettled([sum, wks, bon, s1]).then(([a, b, c, e]) => {
+      if (!live) return;
+      const got = {
         summary: a.status === 'fulfilled' ? a.value : null,
         weeks: b.status === 'fulfilled' ? b.value : [],
-        s1: e.status === 'fulfilled' ? e.value : [],
-        venueOiDaily: g.status === 'fulfilled' ? g.value : [],
-        mmDays: h.status === 'fulfilled' ? h.value?.days ?? null : null,
         bonus: c.status === 'fulfilled' ? c.value : null,
-        venueDaily: d.status === 'fulfilled' ? d.value : [],
-        loading: false,
-        error: err ? String((err.reason as Error)?.message ?? err.reason) : null,
-      });
+        s1: e.status === 'fulfilled' ? e.value : [],
+      };
+      if (a.status === 'fulfilled' && b.status === 'fulfilled') keepState(address, got);
+      logWeeks(address, { summary: got.summary, bonus: got.bonus, layer1: got.weeks, season1: got.s1 });
     });
     return () => { live = false; };
-  }, [address, signedIn]);
+  }, [address, signedIn, venue]);
   return s;
 }

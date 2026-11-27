@@ -20,6 +20,7 @@ import { ChartLab } from './ChartLab';
 import { EarnMore, MySquadBoost, SeasonCard, SoPointsCard, ThisWeek, WeekTable } from './SoPointsMine';
 import { DifficultyChart, PointsByWeek, PointsMix, RankByWeek, SeasonPoints } from './pointsCharts';
 import { useSoPointsV2 } from './soPointsV2';
+import { Stage } from './versions/points/Stage';
 import { Pill, ProgrammeHero, ProgrammePage, SkelRows, Tile, Tiles, fmtLeft, fmtWhen, useNow } from './parts';
 import { openConnectDialog } from '../account/connect';
 import { useAccountPending } from '../account/actions';
@@ -38,7 +39,23 @@ const fmtEnergy = (raw: string): string => {
   return n >= 1_000_000 ? `$${fmt(n / 1_000_000, n % 1_000_000 ? 1 : 0)}M` : `$${fmt(n / 1000, 0)}K`;
 };
 
+/*
+ * The page is the Stage version since 2026-11-27 (owner: "make stage version the new original"; versions/points/
+ * Stage.tsx), with no versions switch (owner the same day: "remove the versions switch at the bottom"). On localhost
+ * only, `localStorage['vs.dev.sopoints.sample'] = 'on'` draws it on made-up figures (versions/points/sample.ts) to check
+ * the layout; a build drops that branch.
+ */
+const devSample = (): boolean => {
+  if (!import.meta.env.DEV) return false;
+  try { return localStorage.getItem('vs.dev.sopoints.sample') === 'on'; } catch { return false; }
+};
+
 export function SoPointsPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
+  return <Stage address={address} provider={provider} sample={devSample()} />;
+}
+
+/** The page before Stage, no longer shown anywhere; kept until the owner says it can go. */
+export function SoPointsOriginal({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
   const c = usePointsContext(address, provider);
   const now = useNow();
   const w = c.week;

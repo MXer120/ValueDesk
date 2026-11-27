@@ -4,7 +4,7 @@
  * address - off unless turned on), and Post on X, Copy image and Download (on a phone: Save and Share). Drawn in the
  * browser (card.ts): nothing is uploaded.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Modal } from '../Modal';
 import { DlgFoot, DlgRow, DlgSeg, DlgSwitch } from '../dialogParts';
 import { track } from '../../analytics/usage';
@@ -12,7 +12,7 @@ import { cardPng, xIntent, type CardData, type CardOpts, type Ratio } from './ca
 import { prefersNativeShare, shareNative } from '../../share/nativeShare';
 import './share.css';
 
-const NOUN: Record<CardData['kind'], string> = { trade: 'trade', position: 'position', portfolio: 'portfolio', copy: 'copy', bot: 'bot', botvol: 'bot' };
+const NOUN: Record<CardData['kind'], string> = { trade: 'trade', position: 'position', portfolio: 'portfolio', copy: 'copy', bot: 'bot', botvol: 'bot', points: 'SoPoints', squad: 'squad' };
 
 const ICON = {
   down: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>,
@@ -24,7 +24,10 @@ const ICON = {
 /** A phone with the share sheet (share/nativeShare.ts): Save and Share instead of Copy and X. */
 const isPhone = (): boolean => prefersNativeShare();
 
-export function ShareCard({ card, code, onClose }: { card: CardData; code: string | null; onClose: () => void }) {
+/** `controls`: a card's own switches in place of the usual three, as `.share-opt` lines (label, control) in one compact
+ * block with the picture's shape (the SoPoints card: what leads, which period, the invite code); the card then already
+ * carries what they chose. */
+export function ShareCard({ card, code, onClose, controls }: { card: CardData; code: string | null; onClose: () => void; controls?: ReactNode }) {
   const [ratio, setRatio] = useState<Ratio>('wide');
   const [amounts, setAmounts] = useState(true);
   const [second, setSecond] = useState(true);
@@ -118,8 +121,15 @@ export function ShareCard({ card, code, onClose }: { card: CardData; code: strin
           {url && <img className={`share-preview${ratio === 'square' ? ' is-square' : ''}`} src={url} alt={`Share card: ${card.title}`} />}
           {!url && <span className={`share-preview share-wait${ratio === 'square' ? ' is-square' : ''}`}>Drawing…</span>}
         </div>
-        <div className="dlg-label"><span>Picture</span><DlgSeg label="Picture" value={ratio} onChange={setRatio} options={[{ value: 'wide', label: 'Wide' }, { value: 'square', label: 'Square' }]} /></div>
-        <div className="dlg-card">
+        {/* A card's own switches: one compact block, the picture's shape its first line (SoPoints, owner 2026-11-27:
+            "make the share menu slimmer"). */}
+        {controls ? (
+          <div className="share-opts">
+            <div className="share-opt"><span>Picture</span><DlgSeg label="Picture" value={ratio} onChange={setRatio} options={[{ value: 'wide', label: 'Wide' }, { value: 'square', label: 'Square' }]} /></div>
+            {controls}
+          </div>
+        ) : <div className="dlg-label"><span>Picture</span><DlgSeg label="Picture" value={ratio} onChange={setRatio} options={[{ value: 'wide', label: 'Wide' }, { value: 'square', label: 'Square' }]} /></div>}
+        {!controls && <div className="dlg-card">
           <DlgRow title="Dollar amounts" line="Hidden shows returns in % only">
             <DlgSwitch on={amounts} onChange={setAmounts} label="Dollar amounts" onWord="Shown" offWord="Hidden" />
           </DlgRow>
@@ -133,7 +143,7 @@ export function ShareCard({ card, code, onClose }: { card: CardData; code: strin
               <DlgSwitch on={wallet} onChange={setWallet} label="Wallet address" onWord="Shown" offWord="Hidden" />
             </DlgRow>
           )}
-        </div>
+        </div>}
       </div>
     </Modal>
   );
