@@ -20,7 +20,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { usePortfolioContext, type PortfolioContext, type PortfolioProps } from '../components/Portfolio';
 import { SCAN_VENUES, type Venue } from '../vsApi';
-import { ScanHeader } from '../components/scan/ScanHeader';
 import { useHlState } from '../components/scan/HlCards';
 import { analyticsSuspectNote, chartValueIsPnl } from '../components/scan/hlModel';
 import { useVsTrader, type Presence } from '../components/scan/useVs';
@@ -34,7 +33,16 @@ import '../components/scan/scan.css';
 import { resolveTarget } from './scanAliases';
 import { PortfolioWallet } from '../components/portfolio/wallet/Wallet';
 import { VenueWallet } from '../components/scan/VenueWallet';
-import { ScanKeys } from '../components/scan/ScanKeys';
+import { ScanStart, ScanWho } from '../components/scan/ScanTop';
+import { ScanSearch } from '../components/scan/versions/parts';
+import { bestVenue } from '../components/scan/versions/model';
+import { absent, cardFromProfile, unknownCard } from '../components/scan/addressVenues';
+import { pushRecent } from '../components/scan/tracked';
+import { scanShare } from '../components/share/shareData';
+import type { VsRead } from '../components/scan/useVs';
+import type { TraderProfile } from '../vsApi';
+import { Button } from '../components/bots/kit/kit';
+import { VENUE_LABEL } from '../vsApi';
 import { openPath } from '../nav';
 import { pathForTab, type Tab } from '../router';
 import type { Eip1193Provider } from '../wallet';
@@ -222,8 +230,10 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
       })),
     });
     setChecking(true);
+    const got: VenueCard[] = [];
     const land = (card: VenueCard) => {
       if (scanSeq.current !== seq) return;
+      got.push(card);
       setChoice((cur) => {
         if (!cur || cur.address !== addr) return cur;
         const cards = cur.cards.filter((c) => c.venue !== card.venue).concat(card);
@@ -231,7 +241,12 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
       });
     };
     void Promise.all(SCAN_VENUES.map((v) => readVenue(v, addr).then(land))).then(() => {
-      if (scanSeq.current === seq) setChecking(false);
+      if (scanSeq.current !== seq) return;
+      setChecking(false);
+      // As the Profile version: a search opens the largest active account at once; the platform switch has the rest.
+      // A wallet with no account anywhere stays here, its venues listed.
+      const best = bestVenue(got);
+      if (best) commitScan(addr, best);
     }).catch(() => {
       if (scanSeq.current !== seq) return;
       setChecking(false);
@@ -283,10 +298,6 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
   const xyzProfile = useVsTrader('tradexyz', scanned);
   const lighterProfile = useVsTrader('lighter', scanned);
   const arcusProfile = useVsTrader('arcus', scanned);
-  const sodexFallback: Presence | null = venue === 'sodex' && base.model.account
-    ? accountStanding(base.model.account, base.model.positions.length)
-    : null;
-  const sodexPresence = switchStanding(sodexProfile);
   // SoDEX's own history for this account is unusable (server flag): the charts give way to one sentence.
   // Until the profile answers (slow for a big account), the same first check on
   // the chart this page already holds - never headline the false value meanwhile.
@@ -296,19 +307,13 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
     context.historyNote = historyNote;
     context.liveEquity = sodexProfile.data?.summary.accountValue ?? base.model.account?.accountValue ?? null;
   }
-  /* The profile of the venue on screen a copy can follow: the header says which of its positions a copy could not. */
-  const copyProfile = venue === 'sodex' ? sodexProfile.data : venue === 'hyperliquid' ? hlProfile.data : null;
-  const presence: Partial<Record<Venue, Presence>> = {
-    sodex: sodexPresence === 'unknown' && sodexFallback ? sodexFallback : sodexPresence,
-    hyperliquid: switchStanding(hlProfile),
-    tradexyz: switchStanding(xyzProfile),
-    lighter: switchStanding(lighterProfile),
-    arcus: switchStanding(arcusProfile),
-  };
 
   /* The Hyperliquid view's data, read only while it is the venue on screen. */
   // Every venue but SoDEX is drawn by the Hyperliquid cards over its own profile + fills.
   const hl = useHlState(venue !== 'sodex' ? scanned : null, venue === 'sodex' ? 'hyperliquid' : venue);
+
+  // Every wallet opened on the Scan page (a search, a link, a venue switch) is a recent search; the window is not.
+  useEffect(() => { if (!embed && scanned) pushRecent(scanned, venue); }, [embed, scanned, venue]);
 
   const backToSearch = () => {
     setChoice(null);
@@ -320,18 +325,11 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
 
   if (!scanned) {
     const cards = sortOverview(SCAN_VENUES.map((v) => choice?.cards.find((c) => c.venue === v)).filter((c): c is VenueCard => !!c));
+    const done = !checking && cards.length > 0 && cards.every((c) => !c.pending);
     return (
-      <ScanFind
-        seed={choice?.address ?? ''}
-        busy={checking && cards.length === 0}
-        error={scanError}
-        connected={connected}
-        onScan={onScan}
-      >
-        {cards.map((card) => (
-          <ScanVenueCard key={card.venue} card={card} onPick={(v) => commitScan(choice!.address, v)} />
-        ))}
-      </ScanFind>
+      <ScanStart seed={choice?.address ?? ''} busy={checking} error={scanError} connected={connected} onSearch={onScan}>
+        {done ? cards.map((card) => <ScanVenueCard key={card.venue} card={card} onPick={(v) => commitScan(choice!.address, v)} />) : null}
+      </ScanStart>
     );
   }
 
@@ -342,82 +340,28 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
    * over the venue's profile and fills (VenueWallet.tsx). The header keeps the venue switch and the note on what a copy
    * could not follow; Copy and Counter-trade are the page's keys now.
    */
-  const keys = <ScanKeys address={scanned} venue={venue} />;
   const openTab = props.onOpenTab ?? ((t: Tab) => openPath(pathForTab(t)));
   const openMarket = props.onOpenMarket ?? (() => openPath(pathForTab('trade')));
+  // The platform switch (the Profile version's): each venue's card from the same five profile reads as the presence.
+  const reads: Record<Venue, VsRead<TraderProfile | null>> = { sodex: sodexProfile, hyperliquid: hlProfile, tradexyz: xyzProfile, lighter: lighterProfile, arcus: arcusProfile };
+  const venueCards = SCAN_VENUES.map((v): VenueCard => {
+    const r = reads[v];
+    if (!r.settled) return { ...absent(v), pending: true };
+    return r.error ? unknownCard(v) : cardFromProfile(v, r.data);
+  });
+  const shareAs = scanShare(scanned, venue, VENUE_LABEL[venue]);
   return (
     <div className="scanv scanv--pf">
-      <ScanHeader
-        venue={venue} onVenue={onVenue} presence={presence} scanned={scanned} onNewSearch={embed ? undefined : backToSearch}
-        positions={copyProfile?.positions ?? null} positionsAt={copyProfile?.updatedAt ?? null} copyButtons={false}
-      />
-      {venue === 'sodex'
-        ? <PortfolioWallet key={`sodex:${scanned}`} c={context} provider={props.provider ?? null} onOpenMarket={openMarket} onOpenTab={openTab} scan={{ keys }} />
-        : <VenueWallet key={`${venue}:${scanned}`} hl={hl} venue={venue} address={scanned} keys={keys} />}
-    </div>
-  );
-}
-
-function ScanFind({
-  seed, busy, error, connected, onScan, children,
-}: {
-  /** The address the overview below is for, shown in the field. */
-  seed: string;
-  busy: boolean;
-  error: string | null;
-  connected: string | null;
-  onScan: (input: string) => void;
-  children?: ReactNode;
-}) {
-  const [draft, setDraft] = useState(seed);
-  useEffect(() => { if (seed) setDraft(seed); }, [seed]);
-  /* An emptied field (or just "0x") folds the venues away without dropping
-     them: typing the address back brings them back, a new search replaces them. */
-  const folded = /^(0x)?$/i.test(draft.trim());
-  return (
-    <form
-      className="scan-find"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onScan(draft);
-      }}
-    >
-      <div className="scan-find__hero">
-        <span className="scan-find__marks" aria-hidden="true">
-          {SCAN_VENUES.map((v) => (
-            <span key={v} className="scan-find__mark"><VenueLogo venue={v} size={44} /></span>
-          ))}
-        </span>
-        <h1>Search any wallet</h1>
-      </div>
-      <div className="scan-find__row">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="0x… address or saved alias"
-          aria-label="Wallet address"
-          spellCheck={false}
-          autoComplete="off"
-          autoFocus
-        />
-        {connected && (
-          <button
-            type="button"
-            className="scan-find__me"
-            title="Scan the connected wallet"
-            onClick={() => { setDraft(connected); onScan(connected); }}
-          >
-            Me
-          </button>
-        )}
-        <button type="submit" className="scan-find__go" disabled={busy || !draft.trim()}>{busy ? 'Looking up…' : 'Search'}</button>
-      </div>
-      {error && <p className="scan-find__err">{error}</p>}
-      {children && (
-        <div className={`scan-find__fold${folded ? ' is-folded' : ''}`} aria-hidden={folded || undefined}>
-          <div className="scan-find__cards">{children}</div>
+      {!embed && (
+        <div className="sxh-bar">
+          <Button variant="quiet" icon="arrowLeft" onClick={backToSearch}>New search</Button>
+          <ScanSearch seed={scanned} connected={connected} onSearch={onScan} error={scanError} className="sxh-bar__find" />
         </div>
       )}
-    </form>
+      <ScanWho address={scanned} venue={venue} profile={reads[venue].data} cards={venueCards} onVenue={onVenue} settled={venueCards.every((c) => !c.pending)} />
+      {venue === 'sodex'
+        ? <PortfolioWallet key={`sodex:${scanned}`} c={context} provider={props.provider ?? null} onOpenMarket={openMarket} onOpenTab={openTab} scan={{ shareAs }} />
+        : <VenueWallet key={`${venue}:${scanned}`} hl={hl} venue={venue} address={scanned} shareAs={shareAs} />}
+    </div>
   );
 }

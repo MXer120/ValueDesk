@@ -269,3 +269,14 @@
   .cpk__body .pfo-tbl__onchain { display: inline; }
   .cpk__body .pfo-top { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Scan round 2 in the window: the header and the start answer to the window's width too. */
+@container cpk (max-width: 760px) {
+  .cpk__body .scanv--pf > .sxh { width: calc(100% - 20px); }
+  .cpk__body .sxh__who { flex-wrap: wrap; gap: 12px; }
+  .cpk__body .sxh__id .sx-name__alias, .cpk__body .sxh__id .sx-name__addr { font-size: 19px; line-height: 24px; }
+  .cpk__body .sxh__acts { flex: 1 1 100%; flex-wrap: wrap; }
+  .cpk__body .sxh__acts .sx-copy { flex: 1 1 auto; }
+  .cpk__body .sxh__acts .sx-copy .cpy-copybtn { flex: 1 1 0; }
+  .cpk__body .pfx-chart { min-height: 360px; }
+}

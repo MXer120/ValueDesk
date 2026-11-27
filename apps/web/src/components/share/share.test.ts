@@ -90,3 +90,15 @@ test('a grid card leads with its net PnL; its link is one click from the same se
   assert.match(xIntent(c, { amounts: true }), /^https:\/\/x\.com\/intent\/post\?text=.*&url=https%3A%2F%2Fvaluedesk\.so%2Fbots%2Fnew/);
   assert.ok(!c.post({ amounts: false }).includes('$'), 'hidden dollars stay out of the post too');
 });
+
+test('a portfolio share says which chart and window it is (owner 2026-11-28: exactly what is selected)', () => {
+  const pnl = cardView(portfolioCard({ range: '30D', change: 840, ys: [0, 300, 840], trades: null, volume: null, value: 9_000, wallet: W }), ON);
+  assert.equal(pnl.bigLabel, 'PnL, last 30 days');
+  const value = portfolioCard({ range: '7D', change: -3_059_300, ys: [0, -1, -3], trades: null, volume: null, value: 14_300_000, wallet: W, view: 'value', title: '0xca49…53c8 on Hyperliquid', label: 'Scan', link: 'https://valuedesk.so/scan?address=0xca49&venue=hyperliquid', foot: 'Hyperliquid' });
+  const v = cardView(value, ON);
+  assert.equal(v.bigLabel, 'Change in value, last 7 days');
+  assert.equal(v.title, '0xca49…53c8 on Hyperliquid');
+  assert.deepEqual(value.pills.map((x) => x.text), ['7D', 'Total value']);
+  assert.match(value.link, /\/scan\?address=/);
+  assert.equal(cardView(portfolioCard({ range: '14D', change: 1, ys: [0, 1], trades: null, volume: null, value: null, wallet: W }), ON).bigLabel, 'PnL, last 14 days');
+});

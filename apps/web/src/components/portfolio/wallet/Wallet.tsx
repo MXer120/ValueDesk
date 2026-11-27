@@ -20,7 +20,7 @@ import { Button, Panel, Shell, ShellHeader, StatusPill } from '../../bots/kit/ki
 import { PortfolioMargin } from '../../bots/Allocation';
 import { BrandMark } from '../../BrandMark';
 import type { Period } from '../../Portfolio';
-import { ChartCard, curveFor, type PortfolioPageLinks } from '../PortfolioPage';
+import { ChartCard, curveFor, type PortfolioPageLinks, type ShareAs } from '../PortfolioPage';
 import { SwapSheet } from '../SwapSheet';
 import { DASH, fmtUsd } from '../../../format';
 import { useStored } from '../../../hooks';
@@ -48,7 +48,12 @@ export type WalletProps = { c: PortfolioContext } & PortfolioPageLinks & {
    * beside the chart; Standing (SoDEX's board) sits beside Fees; the band has no Copy trading or Bots (they are the
    * viewer's, not the wallet's), and no fund tiles are offered.
    */
-  scan?: { keys: ReactNode };
+  scan?: {
+    /** Scan's keys under the card, if any (the page's header has Copy and Counter-trade since 2026-11-28). */
+    keys?: ReactNode;
+    /** How the shares name the wallet (shareData scanShare). */
+    shareAs?: ShareAs;
+  };
 };
 
 type View = 'home' | 'wealth';
@@ -117,11 +122,11 @@ export function ValueMove({ values, w = 160, h = 44 }: { values: number[]; w?: n
   );
 }
 
-function Card({ c, d }: { c: PortfolioContext; d: PfData }) {
+function Card({ c, d, shareAs, still }: { c: PortfolioContext; d: PfData; shareAs?: ShareAs; still?: boolean }) {
   const m = useMasks();
   const up = d.today === null || Math.abs(d.today) < 0.005 ? 'neutral' : d.today > 0 ? 'positive' : 'negative';
   // The card leans a little toward the mouse (owner 2026-11-26), as the VIP pass does.
-  const tilt = useTilt<HTMLElement>(6, 5, 0.5);
+  const tilt = useTilt<HTMLElement>(still ? 0 : 6, still ? 0 : 5, 0.5);
   // The same 7-day value series as the chart beside it (SoDEX's history and its last 24 hours), so the two agree.
   const win = useMemo(() => curveFor(c, d.h24, '7D', (p) => p.accountValue), [c, d.h24]);
   const vals = win && win.points.length > 1 ? win.points.map((p) => p.v) : null;
@@ -132,7 +137,8 @@ function Card({ c, d }: { c: PortfolioContext; d: PfData }) {
         <span className="pfv3-card__brand"><BrandMark size={18} />ValueDesk</span>
         <span className="pfv3-card__tr">
           <Identity c={c} />
-          <SharePnl c={c} h24={d.h24} range="7D" />
+          {/* The card shows the total and how the value moved over 7 days: that is what it shares (owner 2026-11-28). */}
+          <SharePnl c={c} h24={d.h24} range="7D" view="value" total={d.s.total} shareAs={shareAs} />
         </span>
       </div>
       <span className="pfv3-card__k">Total value</span>
@@ -196,10 +202,14 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab, scan }: 
     );
   }
 
-  const card = <Card c={c} d={d} />;
+  const card = <Card c={c} d={d} shareAs={scan?.shareAs} still={!!scan} />;
   const keys = <div className="pfv3-keys">{scan ? scan.keys : <MoneyKeys c={c} onSwap={() => setSwap(true)} />}</div>;
   // In the Original page's own wrapper (`pf pfx`): its controls' styles start there (the timeframe's sliding mark).
-  const chart = <div className="pf pfx pfv3-chart"><ChartCard c={c} h24={d.h24} /></div>;
+  const chart = (
+    <div className="pf pfx pfv3-chart">
+      {scan ? <ChartCard c={c} h24={d.h24} viewKey="vs.scan.chart.view" defaultView="pnl" shareAs={scan.shareAs} /> : <ChartCard c={c} h24={d.h24} />}
+    </div>
+  );
   const accounts = (
     <Shell className="pfv3-accounts">
       <ShellHeader title="Accounts" subtitle="Each dollar counted once" />
@@ -271,13 +281,15 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab, scan }: 
   );
 
   return (
-    <div className="tf bots-page pfv pfv3">
+    <div className={`tf bots-page pfv pfv3${scan ? ' pfv-scan' : ''}`}>
       <h1 className="pfv-h1">{scan ? 'Scan' : 'Portfolio'}</h1>
       <div className="bots-col pfv3-col">
         {/* The two columns end together (the chart takes up the difference); Fees and Trading then share one row, same
             top and height (owner 2026-11-26: "a slight misalignment between fees and trading"). */}
         <div className="pfv3-split">
-          <div className="pfv3-left">{card}{keys}{accounts}</div>
+          {/* Scan: the card and the accounts are one element (owner 2026-11-28: "In scan the card & accounts element
+              should be combined"); the keys are the header's Copy and Counter-trade. */}
+          <div className="pfv3-left">{scan ? <div className="pfv3-combo">{card}{accounts}</div> : <>{card}{keys}{accounts}</>}{scan?.keys}</div>
           <div className="pfv3-right">{chart}{scan ? trading : earn}</div>
         </div>
         <div className="pfv3-pair">{scan ? <>{standing}{fees}</> : <>{fees}{trading}</>}</div>

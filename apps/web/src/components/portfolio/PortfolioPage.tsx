@@ -15,6 +15,7 @@
  * a divider, carry an "Activity" label, and show what they did, with no balance of their own.
  */
 import { ShareButton } from '../share/host';
+import type { PortfolioFigures } from '../share/shareData';
 import { PortfolioMargin } from '../bots/Allocation';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AccountTabs } from '../AccountTabs';
@@ -219,8 +220,15 @@ function ValueCard({ c, s, today, vol, evmRows, evmLoading, onSection }: {
 export type ChartView = 'value' | 'pnl' | 'calendar';
 
 /** The value / PnL / calendar chart with its timeframe and share (the portfolio versions use it as it is). */
-export function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }) {
-  const [view, setView] = useStored<ChartView>('vs.pf.chart.view', 'value');
+/** Who a share names when the page is someone else's (Scan): shareData scanShare. */
+export type ShareAs = Pick<PortfolioFigures, 'title' | 'label' | 'link' | 'foot'>;
+
+export function ChartCard({ c, h24, viewKey = 'vs.pf.chart.view', defaultView = 'value', shareAs }: {
+  c: PortfolioContext; h24: ChartPoint[] | null;
+  /** Scan keeps its own pick and opens on PnL (owner 2026-11-28: "pnl being default"). */
+  viewKey?: string; defaultView?: ChartView; shareAs?: ShareAs;
+}) {
+  const [view, setView] = useStored<ChartView>(viewKey, defaultView);
   // 30 days by default (owner 2026-11-27); a new key, so an earlier pick of 7 days does not hold it.
   const [range, setRange] = useStored<Period>('vs.pf.chart.period', '30D');
   const win = view === 'calendar' ? null : curveFor(c, h24, range, view === 'value' ? (p) => p.accountValue : (p) => pnlAt('pnl-total', p));
@@ -234,13 +242,17 @@ export function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] |
         <span className="pfx-chart__acts">
           {c.address && c.venue.points && (
             <ShareButton
-              label="Share this PnL"
+              label={view === 'value' ? 'Share this chart' : 'Share this PnL'}
               make={(b) => {
-                // The card is the PnL over the window shown, whichever chart is open (SoDEX's own series).
-                const pw = curveFor(c, h24, range, (p) => pnlAt('pnl-total', p));
+                // Exactly what the card shows (owner 2026-11-28): the chart that is open, over the window picked.
+                const pw = curveFor(c, h24, range, view === 'value' ? (p) => p.accountValue : (p) => pnlAt('pnl-total', p));
                 if (!pw || pw.change === null) return null;
                 const value = c.model.account?.accountValue;
-                return b.portfolioCard({ range, change: pw.change, ys: pw.points.map((p) => p.v), trades: null, volume: null, value: typeof value === 'number' && Number.isFinite(value) ? value : null, wallet: c.address });
+                return b.portfolioCard({
+                  range, change: pw.change, ys: pw.points.map((p) => p.v), trades: null, volume: null,
+                  value: typeof value === 'number' && Number.isFinite(value) ? value : null, wallet: c.address,
+                  view: view === 'value' ? 'value' : 'pnl', ...shareAs,
+                });
               }}
             />
           )}

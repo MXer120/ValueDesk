@@ -18,7 +18,7 @@ import { IconCopyTrade } from '../../palette/icons';
 import { SodexMark } from '../../funds/ui';
 import { CrossFadeCal, fmtSigned, pnlAt, type Period, type PortfolioContext } from '../../Portfolio';
 import { EquityCurve, fmtCompactUsd, type CurveWindow } from '../parts';
-import { RANGES, atLevel, coverLine, curveFor, useActivityWindow, type ChartView } from '../PortfolioPage';
+import { RANGES, atLevel, coverLine, curveFor, useActivityWindow, type ChartView, type ShareAs } from '../PortfolioPage';
 import { requestConnect, requestDeposit, requestTransfer, requestWithdraw } from '../../account/actions';
 import { DepositIcon, TransferIcon, WithdrawIcon } from '../../account/moneyIcons';
 import { DASH, MINUS, fmt, fmtUsd, num, signClass } from '../../../format';
@@ -313,16 +313,21 @@ export function ChartBody({ c, view, range, win }: { c: PortfolioContext; view: 
 }
 
 /** The PnL card to share for the window shown (SoDEX's own series), whichever view is open. */
-export function SharePnl({ c, h24, range }: { c: PortfolioContext; h24: ChartPoint[] | null; range: Period }) {
+/**
+ * The card's share: what the card shows (owner 2026-11-28: "share buttons ... need to always show whats selected"):
+ * the total value and how the account value moved over the card's window, or the PnL when asked for.
+ */
+export function SharePnl({ c, h24, range, view = 'pnl', total, shareAs }: { c: PortfolioContext; h24: ChartPoint[] | null; range: Period; view?: 'pnl' | 'value'; total?: number | null; shareAs?: ShareAs }) {
   if (!c.address || !c.venue.points) return null;
   return (
     <ShareButton
-      label="Share this PnL"
+      label={view === 'value' ? 'Share this card' : 'Share this PnL'}
       make={(b) => {
-        const pw = curveFor(c, h24, range, (p) => pnlAt('pnl-total', p));
+        const pw = curveFor(c, h24, range, view === 'value' ? (p) => p.accountValue : (p) => pnlAt('pnl-total', p));
         if (!pw || pw.change === null) return null;
-        const value = c.model.account?.accountValue;
-        return b.portfolioCard({ range, change: pw.change, ys: pw.points.map((p) => p.v), trades: null, volume: null, value: typeof value === 'number' && Number.isFinite(value) ? value : null, wallet: c.address });
+        const own = c.model.account?.accountValue;
+        const value = total ?? (typeof own === 'number' && Number.isFinite(own) ? own : null);
+        return b.portfolioCard({ range, change: pw.change, ys: pw.points.map((p) => p.v), trades: null, volume: null, value, wallet: c.address, view, ...shareAs });
       }}
     />
   );

@@ -49,6 +49,8 @@ export interface CardData {
   base?: number | null;
   /** A card led by something other than PnL (the volume bot): its big number, label and the line under it. */
   lead?: { label: string; big: string; usdBig?: boolean; sub: string; subRest: string; altLabel: string; altBig: string; altSub: string; altSubRest: string };
+  /** The words over a dollar-led big number ("PnL, last 30 days", "Change in value, last 7 days"). */
+  bigLabel?: string;
   /** What leads when dollar amounts are hidden and there is no return to show (a bot's cost in bp). */
   hidden?: { label: string; big: string; tone: 'up' | 'down' | 'neutral' };
   facts: CardFact[];
@@ -156,7 +158,7 @@ export function cardView(d: CardData, o: Pick<CardOpts, 'amounts' | 'second' | '
   if (!o.amounts || d.usd === null) {
     return { big: d.pct !== null ? pctSigned(d.pct) : '', bigTone, bigLabel: null, sub: o.amounts && d.usd !== null ? usdSigned(d.usd) : null, subRest: o.amounts && d.usd !== null ? 'PnL' : null, subTone: bigTone, title, facts, footLeft, footRight };
   }
-  if (d.pct === null) return { big: usdSigned(d.usd), bigTone, bigLabel: null, sub: null, subRest: null, subTone: bigTone, title, facts, footLeft, footRight };
+  if (d.pct === null) return { big: usdSigned(d.usd), bigTone, bigLabel: d.bigLabel ?? null, sub: null, subRest: null, subTone: bigTone, title, facts, footLeft, footRight };
   return { big: pctSigned(d.pct), bigTone, bigLabel: null, sub: usdSigned(d.usd), subRest: d.base ? `PnL on ${usdShort(d.base)}` : 'PnL', subTone: bigTone, title, facts, footLeft, footRight };
 }
 

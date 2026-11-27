@@ -706,3 +706,12 @@ html[data-theme='light'] .pfv-pick img { background: #17181a; border-radius: 50%
 @media (max-width: 760px) {
   .scanv--pf > .scan-head { width: calc(100% - 20px); margin-top: 10px; }
 }
+
+
+/* --- Scan: card and accounts one element (owner 2026-11-28), and a chart with height -------------------------- */
+.pfv3-combo { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 6px; border: 1px solid var(--panel-line); border-radius: var(--radius-card, 22px); background: var(--tf-surface); }
+.pfv3-combo > .pfv3-card { border-radius: calc(var(--radius-card, 22px) - 4px); }
+.pfv3-combo > .pfv3-accounts { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.pfv3-left > .pfv3-combo { flex: 1 1 auto; }
+.pfv-scan .pfx-chart { min-height: 420px; }
+.scanv--pf > .pfv.bots-page { padding-top: 16px; }

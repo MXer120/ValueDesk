@@ -218,9 +218,25 @@ export interface PortfolioFigures {
   volume: number | null;
   value: number | null;
   wallet: string | null;
+  /**
+   * Which chart the element shows (owner 2026-11-28: "share buttons ... need to always show whats selected, timeframe,
+   * chart, exactly whats selected in the element"): the PnL, or the change in value. PnL when not given.
+   */
+  view?: 'pnl' | 'value';
+  /** Scan: someone else's wallet - the card names it and links to it instead of "SoDEX account" and /portfolio. */
+  title?: string;
+  label?: string;
+  link?: string;
+  foot?: string;
 }
 
-const RANGE_WORDS: Record<string, string> = { '24H': 'Last 24 hours', '7D': 'Last 7 days', '30D': 'Last 30 days', '90D': 'Last 90 days', ALL: 'All time' };
+const RANGE_WORDS: Record<string, string> = { '24H': 'Last 24 hours', '7D': 'Last 7 days', '14D': 'Last 14 days', '30D': 'Last 30 days', '90D': 'Last 90 days', ALL: 'All time' };
+
+/** How a Scan share names the wallet it shows: its short address and venue, linking to that Scan page. */
+export function scanShare(address: string, venue: string, venueName: string): Pick<PortfolioFigures, 'title' | 'label' | 'link' | 'foot'> {
+  const short = `${address.slice(0, 6)}…${address.slice(-4)}`;
+  return { title: `${short} on ${venueName}`, label: 'Scan', link: `${SITE}/scan?address=${address}${venue === 'sodex' ? '' : `&venue=${venue}`}`, foot: venueName };
+}
 
 export function portfolioCard(p: PortfolioFigures): CardData {
   const facts: CardFact[] = [];
@@ -228,13 +244,24 @@ export function portfolioCard(p: PortfolioFigures): CardData {
   if (ok(p.trades)) facts.push({ label: 'Trades', value: p.trades.toLocaleString('en-US'), kind: 'stat' });
   if (ok(p.volume)) facts.push({ label: 'Volume', value: usdShort(p.volume), kind: 'usd' });
   const when = RANGE_WORDS[p.range] ?? p.range;
+  const value = p.view === 'value';
+  const what = value ? 'Change in value' : 'PnL';
+  const whose = p.title ?? 'SoDEX account';
+  const mine = !p.title;
   return {
-    kind: 'portfolio', label: 'Portfolio', when, title: 'SoDEX account', pills: [{ text: p.range === 'ALL' ? 'All' : p.range }],
-    usd: p.change, pct: null,
-    // Hidden dollars: the chart says the rest; the words say which way, from the same PnL.
-    hidden: { label: `PnL, ${when.toLowerCase()}`, big: p.change >= 0 ? 'In profit' : 'In loss', tone: p.change >= 0 ? 'up' : 'down' },
-    facts, foot: 'SoDEX · fees and funding included', chart: p.ys.length > 1 ? { type: 'pnl', ys: p.ys } : null, link: `${SITE}/portfolio`,
+    kind: 'portfolio', label: p.label ?? 'Portfolio', when, title: whose,
+    pills: [{ text: p.range === 'ALL' ? 'All' : p.range }, ...(value ? [{ text: 'Total value' }] : [])],
+    usd: p.change, pct: null, bigLabel: `${what}, ${when.toLowerCase()}`,
+    // Hidden dollars: the chart says the rest; the words say which way, from the same figure.
+    hidden: value
+      ? { label: `${what}, ${when.toLowerCase()}`, big: p.change >= 0 ? 'Up' : 'Down', tone: p.change >= 0 ? 'up' : 'down' }
+      : { label: `${what}, ${when.toLowerCase()}`, big: p.change >= 0 ? 'In profit' : 'In loss', tone: p.change >= 0 ? 'up' : 'down' },
+    facts, foot: p.foot ?? (value ? 'SoDEX · deposits and withdrawals included' : 'SoDEX · fees and funding included'),
+    chart: p.ys.length > 1 ? { type: 'pnl', ys: p.ys } : null, link: p.link ?? `${SITE}/portfolio`,
     second: facts.some((f) => f.kind === 'stat') ? { title: 'Trades', kind: 'stat' } : null, wallet: p.wallet,
-    post: ({ amounts }) => amounts ? `My SoDEX account on ValueDesk, ${when.toLowerCase()}: ${usdSigned(p.change)}.` : `My SoDEX account on ValueDesk, ${when.toLowerCase()}.`,
+    post: ({ amounts }) => {
+      const who = mine ? 'My SoDEX account on ValueDesk' : `${whose} on ValueDesk`;
+      return amounts ? `${who}, ${what.toLowerCase()} ${when.toLowerCase()}: ${usdSigned(p.change)}.` : `${who}, ${when.toLowerCase()}.`;
+    },
   };
 }
