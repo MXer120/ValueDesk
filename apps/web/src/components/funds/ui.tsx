@@ -195,7 +195,7 @@ export function FxSelect({ value, options, onChange, label, compact, searchable,
             {compact && <span className="fx-row__k">{label}</span>}
             <span className="fx-sel__v">
               {current?.iconNode ?? (current?.icon && <Avatar seed={current.icon} kind={current.iconKind} />)}
-              <span>{current?.label ?? '—'}</span>
+              <span data-no-i18n={current?.iconKind === 'chain' ? '' : undefined}>{current?.label ?? '—'}</span>
             </span>
           </>
         )}
@@ -239,7 +239,8 @@ export function FxSelect({ value, options, onChange, label, compact, searchable,
                 }}
               >
                 {o.iconNode ?? (o.icon && <Avatar seed={o.icon} kind={o.iconKind} />)}
-                <span className="fx-opt-row__l">{o.label}</span>
+                {/* A chain is a name ("Base" is not "Basis"): the translation layer leaves it. */}
+                <span className="fx-opt-row__l" data-no-i18n={o.iconKind === 'chain' ? '' : undefined}>{o.label}</span>
                 {o.hint && <span className="fx-opt-row__h">{o.hint}</span>}
               </li>
             ))}
