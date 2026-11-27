@@ -1017,6 +1017,11 @@ export class ExecutorService {
     return vipJobView(job);
   }
 
+  /** The wallet runs a leg of a two-wallet hedge here (main or partner, not ended). */
+  private hasPairLeg(owner: string): boolean {
+    return this.algos.list(owner).some((a) => a.spec?.kind === 'hedge' && (a.spec as HedgeSpec).shape === 'pair' && !FINAL_STATUSES.has(a.status));
+  }
+
   /** Where the wallet's bots run when it is not here: the other executor's tier, else null. */
   private movedAway(owner: string): 'vip' | 'standard' | null {
     const t = this.db.moved(owner)?.tier;
@@ -1059,6 +1064,8 @@ export class ExecutorService {
     const out: VipJob[] = [];
     for (const owner of owners) {
       if (this.movedAway(owner) || this.vipMoving(owner)) continue;
+      // A wallet in a two-wallet hedge stays until the pair ends (the move would refuse it every day).
+      if (this.hasPairLeg(owner)) continue;
       if (downgradedToday(this.db.vipJobs<VipJob>(owner), now)) continue;
       try {
         const a = await this.vipEligible(owner);
@@ -1241,6 +1248,9 @@ export class ExecutorService {
         if (this.runtime.list(owner).some((s) => s.status !== 'stopped')) throw new Error('Stop your copies first: they keep their key on these servers.');
         if (this.algos.list(owner).some((a) => a.spec?.bot !== true && !FINAL_STATUSES.has(a.status))) throw new Error('Let your algo orders finish first: only bots move.');
         if (!this.db.key(owner, 'active') && bots.some((a) => !a.spec.paper)) throw new Error('Set up your SoDEX key first.');
+        // A two-wallet hedge's main drives both legs from one executor: moving one wallet would split the pair and leave
+        // the moved leg open with nothing watching its liquidation (found live 2026-11-27).
+        if (this.hasPairLeg(owner)) throw new Error('Stop your two-wallet hedge first: both of its legs must stay on the same servers.');
       });
       await step('pause', async () => {
         for (const a of bots) {

@@ -2676,6 +2676,23 @@ export class AlgoRuntime {
     };
   }
 
+  /** Both legs of the pair have run together here once: from then on, a missing other leg is a broken pair. */
+  private notePaired(a: AlgoRecord, other: AlgoRecord): void {
+    if (a.k.paired || other.status !== 'running') return;
+    a.k.paired = true;
+    this.dirty.add(a.id);
+  }
+
+  /**
+   * The other leg of a pair that ran together is not on this executor any more (a VIP move took one wallet's bots to
+   * other servers, found live 2026-11-27): nothing here can trade it, so this leg must not stay open on its own at the
+   * pair's leverage with nobody keeping it from its liquidation. It closes, whatever On stop says.
+   */
+  private async hedgeLost(a: AlgoRecord, who: string): Promise<void> {
+    const reason = `${who}'s leg is no longer on these servers, so this leg closed rather than stay open unhedged.`;
+    if (!(await this.stopBot(a, 'cancelled', reason, false, true))) await this.end(a, 'cancelled', reason);
+  }
+
   /**
    * A hedge's step. The main leg drives: both legs read, one plan (hedge.ts), its orders sent on each leg's own account.
    * The partner leg only watches its main; once that has stopped, the partner stops too (closing its own leg).
@@ -2684,20 +2701,30 @@ export class AlgoRuntime {
     const s = a.spec as HedgeSpec;
     if (s.role === 'partner') {
       const main = this.hedgeOther(a);
-      if (!main) return this.hold(a, `Waiting for the main wallet (${shortAddr(s.partner ?? '')}) to start its leg.`);
+      if (!main) {
+        if (a.k.paired) return this.hedgeLost(a, 'The main wallet');
+        return this.hold(a, `Waiting for the main wallet (${shortAddr(s.partner ?? '')}) to start its leg.`);
+      }
       if (FINAL_STATUSES.has(main.status) || main.k.closing) {
+        if (main.k.handedOver) return this.hedgeLost(a, 'The main wallet');
         if (!(await this.stopBot(a, 'cancelled', 'The main wallet stopped the hedge.'))) await this.end(a, 'cancelled', 'The main wallet stopped the hedge.');
         return;
       }
+      this.notePaired(a, main);
       return this.run(a);
     }
     const other = s.shape === 'pair' ? this.hedgeOther(a) : null;
     if (s.shape === 'pair') {
-      if (!other) return this.hold(a, `Waiting for the second wallet (${shortAddr(s.partner ?? '')}) to start its leg.`);
+      if (!other) {
+        if (a.k.paired) return this.hedgeLost(a, 'The second wallet');
+        return this.hold(a, `Waiting for the second wallet (${shortAddr(s.partner ?? '')}) to start its leg.`);
+      }
       if (FINAL_STATUSES.has(other.status) || other.k.closing) {
+        if (other.k.handedOver) return this.hedgeLost(a, 'The second wallet');
         if (!(await this.stopBot(a, 'cancelled', 'The second wallet stopped its leg.'))) await this.end(a, 'cancelled', 'The second wallet stopped its leg.');
         return;
       }
+      this.notePaired(a, other);
     }
     // Takers still settling on either leg: their fills move the positions the plan reads.
     if (this.live(a).length || (other && this.live(other).length)) return;

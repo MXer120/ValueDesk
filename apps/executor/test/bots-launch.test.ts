@@ -418,6 +418,23 @@ test('A6 VIP: a move hands the bots over (adopted and resumed there, ended here,
   await p.cleanup();
 });
 
+test('A6 VIP: a wallet with a two-wallet hedge leg does not move (the pair would split, its moved leg unwatched); found live 2026-11-27', async () => {
+  const w = new Wallet();
+  const p = pair();
+  p.std.svc.acceptTerms(w.sign(p.std.svc.executorId, 'accept-terms', TERMS()), ctx);
+  const HEDGE = { kind: 'hedge', symbol: 'BTC-USD', side: 'buy', shape: 'pair', role: 'main', pairId: 'pair-test-vipmove', partner: '0x00000000000000000000000000000000000000b2', sizeUsd: 1_000, minLiqPct: 3, growLiqPct: 6, sliceUsd: 250, maxSlipBps: 15, marginUsd: 100, maxLossUsd: 25, onStop: 'close', paper: true };
+  const b = await start(p.std, w, HEDGE);
+  p.std.svc.vipMove(w.sign(p.std.svc.executorId, 'vip-move', {}), ctx);
+  await until(() => p.std.svc.vipJob(w.address)?.state !== 'running');
+  const j = p.std.svc.vipJob(w.address)!;
+  assert.equal(j.state, 'failed');
+  assert.equal(j.outcome, 'not-moved');
+  assert.match(j.error ?? '', /two-wallet hedge/);
+  assert.ok(!['cancelled', 'paused'].includes(p.std.svc.algos.get(b.algo.id)!.status), 'the leg keeps running here');
+  assert.equal(p.vip.svc.algos.get(b.algo.id), null);
+  await p.cleanup();
+});
+
 test('A6 VIP: the key is sealed only to the pinned public key - another one in /info sends nothing and the bots resume here', async () => {
   const w = new Wallet();
   const p = pair({ vip: async (svc, path, body) => (path.endsWith('/info') ? { status: 200, body: { ...svc.info({ viewerCountry: null }), keyImport: { publicKey: new Secrets(mkdtempSync(join(tmpdir(), 'vd-x-'))).importPublicKey() } } } : route(svc, path, body)) });
