@@ -190,8 +190,7 @@ function JoinSquad({ v }: { v: PointsView }) {
       <p className="spq-empty">You joined no squad. On SoDEX you join one with its captain’s invite code: every point you earn then counts toward its boost, and its boost lifts your points.</p>
       <form className="spq-join" onSubmit={(e) => void look(e)}>
         <label className="spq-join__in">
-          <span className="sr-only">Invite code</span>
-          <input value={code} onChange={(e) => { setCode(codeOf(e.target.value)); setFound(null); }} placeholder="Invite code" autoComplete="off" spellCheck={false} maxLength={18} />
+          <input value={code} onChange={(e) => { setCode(codeOf(e.target.value)); setFound(null); }} placeholder="Captain's invite code" aria-label="Captain's invite code" autoComplete="off" spellCheck={false} maxLength={18} />
         </label>
         <button type="submit" className="rf-cta spq-join__go" disabled={codeOf(code).length < 4 || found === 'busy'}>{found === 'busy' ? 'Looking…' : 'Find squad'}</button>
       </form>
@@ -240,8 +239,7 @@ function NameSquad({ address, onClose, onDone }: { address: string; onClose: () 
         {step === 'edit' && (<>
           <p className="spq-dlg__lead">The name is shown to all your teammates and on your invite poster. <b>It can only be set once.</b></p>
           <label className="spq-namein">
-            <span className="sr-only">Squad name</span>
-            <input value={raw} onChange={(e) => { setRaw(e.target.value.slice(0, 80)); setError(null); }} placeholder="e.g. Alpha Hunters" autoFocus maxLength={80} />
+            <input aria-label="Squad name" value={raw} onChange={(e) => { setRaw(e.target.value.slice(0, 80)); setError(null); }} placeholder="e.g. Alpha Hunters" autoFocus maxLength={80} />
             <small className={`sx-num${count > NAME_MAX ? ' neg' : ''}`}>{count}/{NAME_MAX}</small>
           </label>
           <p className={`spq-dlg__hint${raw && !c.ok ? ' neg' : ''}`} role={raw && !c.ok ? 'alert' : undefined}>{raw && !c.ok ? c.error : 'Letters, numbers and spaces, 4 to 40 characters.'}</p>

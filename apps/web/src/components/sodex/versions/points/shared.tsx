@@ -358,7 +358,8 @@ export function aheadOf(from: number, to: number, wk: { mid: number; busy: numbe
   for (let no = from, k = 0; no <= to; no++, k++) {
     const f = k === 0 ? 1 : trend?.factors[k - 1] ?? trend?.factors.at(-1) ?? 1;
     const mid = wk.mid * f;
-    const w = Math.exp(spread * Math.sqrt(k + 1));
+    // At most two and a half times either way, however scattered the wallet's weeks were.
+    const w = Math.exp(Math.min(Math.log(2.5), spread * Math.sqrt(k + 1)));
     weeks.push({ no, mid, busy: mid * Math.min(busyR, 1 / w), quiet: mid * Math.max(quietR, w) });
   }
   return { weeks };
@@ -544,22 +545,29 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
         <div className={`bots-tablewrap spx-tblwrap${detailed ? ' is-detailed' : ''}`}>
           <table className="bots-table spx-tbl">
             <thead>
-              {detailed ? (
-                <tr>
-                  <th>Week</th><th className="right">Volume</th><th className="right">Open interest</th><th className="right">Holdings</th><th className="right">Rank</th>
-                  {season === 'L1' && <th className="right">Squad</th>}<th className="right">Own</th>
-                  {season === 'L1' && <th className="right"><span className="spx-tbl__info" title={OTHER_INFO} tabIndex={0} aria-label={`Loyalty and other. ${OTHER_INFO}`}>of it loyalty &amp; other<Icon name="info" size={12} /></span></th>}
-                  <th className="right">Invited</th>
-                  {season === 'L1' && <th className="right"><span className="spx-tbl__info" title={BOOST_INFO} tabIndex={0} aria-label={`Squad boost. ${BOOST_INFO}`}>Squad boost<Icon name="info" size={12} /></span></th>}
-                  <th className="right">Points</th>
+              {/* Detailed (owner 2026-11-27: "rework the 2 columns ... show spot and futures vol, wealth tvl, vault, oi, account
+                  value"): the week's activity as SoDEX lists it, then its points as parts that add up. */}
+              {detailed ? (<>
+                <tr className="spx-tbl__groups">
+                  <th />
+                  <th colSpan={6} className="spx-tbl__group">Activity</th>
+                  <th />
+                  <th colSpan={season === 'L1' ? 4 : 3} className="spx-tbl__group is-points"><span className="spx-tbl__info" title={BOOST_INFO} tabIndex={0} aria-label={`Points. ${BOOST_INFO}`}>Points: own + invited{season === 'L1' ? ' + squad boost' : ''}<Icon name="info" size={12} /></span></th>
                 </tr>
-              ) : <tr><th>Week</th><th className="right">Rank</th><th className="right">Place</th><th className="right">Points</th></tr>}
+                <tr>
+                  <th>Week</th><th className="right">Futures</th><th className="right">Spot</th><th className="right">Open interest</th><th className="right">Wealth</th><th className="right">Vault</th><th className="right">Account</th>
+                  <th className="right">Rank</th>
+                  <th className="right"><span className="spx-tbl__info" title={OTHER_INFO} tabIndex={0} aria-label={`Own. ${OTHER_INFO}`}>Own<Icon name="info" size={12} /></span></th>
+                  <th className="right">Invited</th>
+                  {season === 'L1' && <th className="right">Squad boost</th>}
+                  <th className="right">Total</th>
+                </tr>
+              </>) : <tr><th>Week</th><th className="right">Rank</th><th className="right">Place</th><th className="right">Points</th></tr>}
             </thead>
             <tbody>
               {rows.map((r) => {
                 const w = r.split.week;
                 const tbd = w.pointsStatus !== 'CONFIRMED';
-                const hold = (w.wealthTvl ?? 0) + (w.vaultHolding ?? 0);
                 const step = rankStep(w.rank, w.totalUser);
                 const o = oth(r);
                 const parts = weekParts(r);
@@ -575,18 +583,21 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
                     </tr>
                   );
                 }
+                const usd = (x: number | null | undefined) => (x && x >= 1 ? money(x) : DASH);
+                const other = tbd || o === null || o < 1 ? 0 : Math.min(o, parts.own);
                 return (
                   <tr key={r.key} className={w.isLive ? 'is-live' : undefined}>
                     {weekCell}
-                    <td className="right num">{r.split.volume ? money(r.split.volume) : DASH}</td>
-                    <td className="right num">{w.oi ? money(w.oi) : DASH}</td>
-                    <td className="right num">{hold >= 1 ? money(hold) : DASH}</td>
+                    <td className="right num">{usd(w.futuresVolume)}</td>
+                    <td className="right num">{usd(w.spotVolume)}</td>
+                    <td className="right num">{usd(w.oi)}</td>
+                    <td className="right num">{usd(w.wealthTvl)}</td>
+                    <td className="right num">{usd(w.vaultHolding)}</td>
+                    <td className="right num">{usd(w.accountValue)}</td>
                     <td className="right num">{w.rank ? `#${pts(w.rank)}` : DASH}</td>
-                    {season === 'L1' && <td className={`right num${w.totalBonusPct ? ' pos' : ''}`}>{plusPct(w.totalBonusPct ?? 0)}</td>}
-                    <td className="right num">{tbd ? DASH : pts(parts.own)}</td>
-                    {season === 'L1' && <td className="right num">{tbd || o === null ? DASH : o >= 1 ? <span className="spx-other">≈ {ptsEst(Math.min(o, parts.own))}</span> : '0'}</td>}
+                    <td className="right num">{tbd ? DASH : <span className="spx-tbl__cell">{pts(parts.own)}{other > 0 && <small className="spx-other" title={OTHER_INFO}>≈ {ptsEst(other)} other</small>}</span>}</td>
                     <td className="right num">{tbd ? DASH : pts(parts.invited)}</td>
-                    {season === 'L1' && <td className="right num">{tbd ? DASH : parts.boost ? `+${pts(parts.boost)}` : '0'}</td>}
+                    {season === 'L1' && <td className="right num">{tbd ? DASH : <span className="spx-tbl__cell">{parts.boost ? `+${pts(parts.boost)}` : '0'}<small className={w.totalBonusPct ? 'pos' : undefined}>{plusPct(w.totalBonusPct ?? 0)}</small></span>}</td>}
                     {pointsCell}
                   </tr>
                 );
@@ -597,7 +608,7 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
       )}
       <div className="spx-weeks__foot">
         <RankLegend />
-        {detailed && season === 'L1' && <small className="spx-weeks__note"><Icon name="info" size={12} />Own + Invited + Squad boost = Points. Loyalty &amp; other is the part of Own the week’s activity does not explain, an estimate.</small>}
+        {detailed && <small className="spx-weeks__note"><Icon name="info" size={12} />Own + invited{season === 'L1' ? ' + squad boost' : ''} = total. “Other” under Own: the part the week’s activity does not explain (loyalty, campaigns and the like), an estimate.</small>}
       </div>
     </div>
   );
