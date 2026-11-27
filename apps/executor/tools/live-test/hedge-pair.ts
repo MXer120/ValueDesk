@@ -114,7 +114,7 @@ if (split) {
       '    4. Press "Sign and start for 1 wallet". Your builder wallet signs a message that records the program:',
       '       no transaction, no gas, no money moves. It also gives the wallet the VIP bot fee for 30 days; "End now" on the',
       '       same page ends it.',
-      '    Then run --go again. Nothing else needs you: --go signs every other step itself with the keys in .env.live.',
+      '    Then start again (START-HEDGE-PAIR.cmd go). Nothing else needs you: --go signs every other step itself with the keys in .env.live.',
       '',
     ].join('\n'));
     if (has('--go')) { log('STOP: nothing was signed or sent'); process.exit(1); }
@@ -222,7 +222,7 @@ console.log([
   '  None of these is a blockchain transaction: SoDEX takes them as signed API requests, so there is no gas.',
   '',
 ].join('\n'));
-if (!has('--go')) { log('plan only: nothing signed, nothing sent (add --go to start)'); process.exit(0); }
+if (!has('--go')) { log('plan only: nothing signed, nothing sent (to start: START-HEDGE-PAIR.cmd go, or add --go)'); process.exit(0); }
 
 /* ---------------------------------------------------------------- go ----- */
 
