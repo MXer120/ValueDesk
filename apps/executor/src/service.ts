@@ -446,6 +446,9 @@ export class ExecutorService {
    * stops counting the moment it ends, whatever the cache.
    */
   private readonly perks = new Map<string, { vip: boolean; copy: Perk | null; bots: Perk | null; at: number }>();
+  /** Where the volume is this server's ledger copy: the perks' own read (perksFor), in flight and when last tried. */
+  private readonly perksReads = new Map<string, Promise<void>>();
+  private readonly perksTried = new Map<string, number>();
   /**
    * The real fills this executor booked per wallet lately (copies and algos), what a budgeted perk is counted against:
    * the invite welcome and fee credits come with a budget (server 1's invites/service.ts perkBudget) - what is left,
@@ -2656,13 +2659,19 @@ export class ExecutorService {
       if (!hit || Date.now() - hit.at >= VOLUME_TTL_MS) void this.freshVolume(owner);
       return hit?.usd ?? null;
     }
+    void this.perksFor(owner);
     return this.volumeFromDb(owner);
   }
 
   /** The follower's volume, read again when the last answer is older than VOLUME_TTL_MS. */
   private async freshVolume(owner: string): Promise<number | null> {
     if (!this.cfg.builderId) return null;
-    if (!this.cfg.builderUrl) return this.volumeFromDb(owner);
+    if (!this.cfg.builderUrl) {
+      // A wallet's first fee waits for its first read of VIP and programs (no answer yet: the read in flight).
+      const read = this.perksFor(owner);
+      if (read && !this.perks.has(owner)) await read;
+      return this.volumeFromDb(owner);
+    }
     const hit = this.volumes.get(owner);
     if (hit && Date.now() - hit.at < VOLUME_TTL_MS) return hit.usd;
     const pending = this.volumeReads.get(owner);
@@ -2681,41 +2690,69 @@ export class ExecutorService {
   private async volumeFromApi(owner: string): Promise<number | null> {
     const last = this.volumes.get(owner);
     try {
-      const u = new URL(this.cfg.builderUrl!);
-      u.searchParams.set('address', owner);
-      u.searchParams.set('builder', String(this.cfg.builderId));
-      u.searchParams.set('days', String(COPY_FEE_WINDOW_DAYS));
-      const headers: Record<string, string> = { Accept: 'application/json' };
-      if (this.cfg.builderToken) headers['X-Internal-Token'] = this.cfg.builderToken;
-      if (this.cfg.originSecrets[0]) headers['X-Origin-Verify'] = this.cfg.originSecrets[0];
-      const res = await this.deps.fetch(u.toString(), { headers, signal: AbortSignal.timeout(5_000) });
-      let body: { ok?: boolean; usd?: unknown; vip?: unknown; fees?: { copy?: unknown; bots?: unknown } } | null = null;
-      try {
-        body = JSON.parse(await res.text()) as { ok?: boolean; usd?: unknown; vip?: unknown; fees?: { copy?: unknown; bots?: unknown } };
-      } catch {
-        body = null;
-      }
-      if (!res.ok || !body?.ok || typeof body.usd !== 'number' || !Number.isFinite(body.usd)) throw new Error(`HTTP ${res.status}`);
-      this.rememberVolume(owner, body.usd);
-      const perk = (x: unknown): Perk | null => {
-        const o = x as { fee?: unknown; until?: unknown; budget?: unknown } | null | undefined;
-        if (!o || typeof o.fee !== 'number' || !Number.isFinite(o.fee)) return null;
-        const out: Perk = { fee: o.fee, until: typeof o.until === 'number' ? o.until : null };
-        if (o.budget !== undefined) {
-          const b = readBudget(o.budget);
-          // A budget that cannot be read: no perk (never a lowered fee without its limit).
-          if (!b) return null;
-          out.budget = b;
-        }
-        return out;
-      };
-      remember(this.perks, owner, { vip: body.vip === true, copy: perk(body.fees?.copy), bots: perk(body.fees?.bots), at: Date.now() });
-      return body.usd;
+      const r = await this.ledgerRead(owner, this.cfg.builderUrl!);
+      this.rememberVolume(owner, r.usd);
+      remember(this.perks, owner, { vip: r.vip, copy: r.copy, bots: r.bots, at: Date.now() });
+      return r.usd;
     } catch (e) {
       this.deps.log.warn('copy fee: the builder volume could not be read', { owner, error: String(e) });
       this.rememberVolume(owner, last?.usd ?? null);
       return last?.usd ?? null;
     }
+  }
+
+  /** One read of server 1's ledger route for the wallet: its volume, VIP and programs (a failed read throws). */
+  private async ledgerRead(owner: string, url: string): Promise<{ usd: number; vip: boolean; copy: Perk | null; bots: Perk | null }> {
+    const u = new URL(url);
+    u.searchParams.set('address', owner);
+    u.searchParams.set('builder', String(this.cfg.builderId));
+    u.searchParams.set('days', String(COPY_FEE_WINDOW_DAYS));
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (this.cfg.builderToken) headers['X-Internal-Token'] = this.cfg.builderToken;
+    if (this.cfg.originSecrets[0]) headers['X-Origin-Verify'] = this.cfg.originSecrets[0];
+    const res = await this.deps.fetch(u.toString(), { headers, signal: AbortSignal.timeout(5_000) });
+    let body: { ok?: boolean; usd?: unknown; vip?: unknown; fees?: { copy?: unknown; bots?: unknown } } | null = null;
+    try {
+      body = JSON.parse(await res.text()) as { ok?: boolean; usd?: unknown; vip?: unknown; fees?: { copy?: unknown; bots?: unknown } };
+    } catch {
+      body = null;
+    }
+    if (!res.ok || !body?.ok || typeof body.usd !== 'number' || !Number.isFinite(body.usd)) throw new Error(`HTTP ${res.status}`);
+    const perk = (x: unknown): Perk | null => {
+      const o = x as { fee?: unknown; until?: unknown; budget?: unknown } | null | undefined;
+      if (!o || typeof o.fee !== 'number' || !Number.isFinite(o.fee)) return null;
+      const out: Perk = { fee: o.fee, until: typeof o.until === 'number' ? o.until : null };
+      if (o.budget !== undefined) {
+        const b = readBudget(o.budget);
+        // A budget that cannot be read: no perk (never a lowered fee without its limit).
+        if (!b) return null;
+        out.budget = b;
+      }
+      return out;
+    };
+    return { usd: body.usd, vip: body.vip === true, copy: perk(body.fees?.copy), bots: perk(body.fees?.bots) };
+  }
+
+  /**
+   * VIP and the programs where the volume is this server's ledger copy (EXECUTOR_BUILDER_DB) and server 1 is named by
+   * the beta URL only (cfg.perksUrl; found 2026-11-27: Beta VIP never reached a bot's fee on server 2 or the VIP box).
+   * Read at most every VOLUME_TTL_MS per wallet; a failed read keeps the last answer (until PERKS_STALE_MS). The volume
+   * stays the local copy's, so a slow server 1 holds no order after the first. Null: nothing to read (or just tried).
+   */
+  private perksFor(owner: string): Promise<void> | null {
+    const url = this.cfg.perksUrl;
+    if (this.cfg.builderUrl || !url || !this.cfg.builderId) return null;
+    const pending = this.perksReads.get(owner);
+    if (pending) return pending;
+    const tried = this.perksTried.get(owner);
+    if (tried !== undefined && Date.now() - tried < VOLUME_TTL_MS) return null;
+    remember(this.perksTried, owner, Date.now());
+    const read = this.ledgerRead(owner, url)
+      .then((r) => { remember(this.perks, owner, { vip: r.vip, copy: r.copy, bots: r.bots, at: Date.now() }); })
+      .catch((e) => { this.deps.log.warn('fees: VIP and programs could not be read; the last answer stands', { owner, error: String(e) }); })
+      .finally(() => this.perksReads.delete(owner));
+    this.perksReads.set(owner, read);
+    return read;
   }
 
   /** The follower's verified 14-day volume, USD, from the builder ledger on this server (null: not known). */

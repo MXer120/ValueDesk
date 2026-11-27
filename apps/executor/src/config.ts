@@ -78,6 +78,13 @@ export interface ExecutorConfig {
   builderUrl: string | null;
   builderToken: string | null;
   /**
+   * Where a wallet's VIP and fee programs are read (server 1's /api/vs/builder/volume: its `vip` and `fees`): the
+   * builder URL, else that path on the beta URL's server (perksUrlFrom). Found 2026-11-27: server 2 and the VIP box
+   * read the volume from their copy of the ledger (EXECUTOR_BUILDER_DB) and name server 1 only by EXECUTOR_BETA_URL,
+   * so no program ever reached their fees - Beta VIP wallets paid the standard 0.2 bp on every bot order.
+   */
+  perksUrl?: string | null;
+  /**
    * EXECUTOR_BETA_URL: the API server's /api/vs/builder/beta (whether a wallet is on the beta list), asked with
    * the builder token. Unset: derived from EXECUTOR_BUILDER_URL (its /volume as /beta); neither: no wallet is.
    * Real bots run only from beta.valuedesk.so for listed wallets (owner, 2026-11-02: "Beta only"), plus the
@@ -207,6 +214,11 @@ export function vipCheckUrlFrom(raw: string | undefined, builderRaw: string | un
   return apiPath('/api/vs/bots/vip', builderRaw, betaRaw);
 }
 
+/** The builder URL (volume, VIP and programs in one answer), else the API server's /api/vs/builder/volume from the beta URL. */
+export function perksUrlFrom(builderRaw: string | undefined, betaRaw: string | undefined): string | null {
+  return builderUrl(builderRaw) ?? apiPath('/api/vs/builder/volume', undefined, betaRaw);
+}
+
 /** EXECUTOR_VIP_PUBKEY: a base64url SPKI (a P-256 public key is 91 bytes, ~122 characters); unset: null. */
 export function vipPubkeyFrom(raw: string | undefined, name = 'EXECUTOR_VIP_PUBKEY'): string | null {
   const v = raw?.trim();
@@ -287,6 +299,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
     builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,
     betaUrl: betaUrlFrom(env.EXECUTOR_BETA_URL, env.EXECUTOR_BUILDER_URL),
+    perksUrl: perksUrlFrom(env.EXECUTOR_BUILDER_URL, env.EXECUTOR_BETA_URL),
     calendarUrl: calendarUrlFrom(env.EXECUTOR_CALENDAR_URL, env.EXECUTOR_BUILDER_URL, env.EXECUTOR_BETA_URL),
     tier: env.EXECUTOR_TIER?.trim() === 'vip' ? 'vip' : 'standard',
     vipToken: env.EXECUTOR_VIP_TOKEN?.trim() || null,

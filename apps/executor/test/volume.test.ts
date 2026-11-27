@@ -9,7 +9,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FetchLike, WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
-import { loadConfig } from '../src/config.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { loadConfig, perksUrlFrom } from '../src/config.ts';
 import { ExecutorDb } from '../src/db.ts';
 import { Secrets } from '../src/secrets.ts';
 import { ExecutorService } from '../src/service.ts';
@@ -135,4 +136,84 @@ test('fees: the invite welcome and fee credits come with a budget - the lowered 
   await bad.fresh(OWNER);
   assert.equal(await (bad.svc as unknown as typeof s).algoFee({ owner: OWNER, spec: { kind: 'twap' } }), 25);
   bad.cleanup();
+});
+
+/* -------- server 2 and the VIP box: the volume from a ledger copy, server 1 named only by the beta URL -------- */
+
+/** An executor set up as server 2 is: EXECUTOR_BUILDER_DB (a copy of server 1's ledger) and EXECUTOR_BETA_URL, no builder URL. */
+function makeCopy(usd: number, answer: () => { status: number; body: unknown }, env: Record<string, string> = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'vd-perks-'));
+  const ledger = join(dir, 'builder.db');
+  const l = new DatabaseSync(ledger);
+  l.exec('CREATE TABLE days (builder INTEGER NOT NULL, address TEXT NOT NULL, engine TEXT NOT NULL, day INTEGER NOT NULL, micro INTEGER NOT NULL, PRIMARY KEY (builder, address, engine, day)) WITHOUT ROWID');
+  l.prepare('INSERT INTO days VALUES (234812, ?, ?, ?, ?)').run(OWNER, 'perps', Math.floor(Date.now() / 86_400_000), Math.round(usd * 1e6));
+  l.close();
+  const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+  const fetch: FetchLike = async (url, init) => {
+    calls.push({ url, headers: init?.headers ?? {} });
+    const a = answer();
+    return { status: a.status, ok: a.status < 400, text: async () => JSON.stringify(a.body) };
+  };
+  const cfg = loadConfig({
+    EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_ORIGIN_SECRET: 'edge-secret', EXECUTOR_BUILDER_ID: '234812',
+    EXECUTOR_BUILDER_DB: ledger, EXECUTOR_BETA_URL: 'https://api.example/api/vs/builder/beta', EXECUTOR_BUILDER_TOKEN: 'internal-token', ...env,
+  });
+  const db = new ExecutorDb(':memory:');
+  const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch, factory: noWs, log: silent });
+  const s = svc as unknown as { algoFee(a: { owner: string; spec: unknown }): Promise<number>; volumeOf(o: string): number | null };
+  const botFee = () => s.algoFee({ owner: OWNER, spec: { kind: 'mm', bot: true } });
+  return { cfg, calls, botFee, s, cleanup: async () => { await svc.stop(); db.close(); rmSync(dir, { recursive: true, force: true }); } };
+}
+
+test('perks URL: the builder URL, else /api/vs/builder/volume on the beta URL\'s server, else none', () => {
+  assert.equal(perksUrlFrom('https://api.example/api/vs/builder/volume', 'https://other.example/api/vs/builder/beta'), 'https://api.example/api/vs/builder/volume');
+  assert.equal(perksUrlFrom(undefined, 'https://api.example/api/vs/builder/beta?x=1'), 'https://api.example/api/vs/builder/volume');
+  assert.equal(perksUrlFrom(undefined, undefined), null);
+});
+
+test('fees on a ledger copy (server 2, 2026-11-27): a Beta VIP wallet\'s bots pay 0.1 bp, not the standard 0.2 bp; the volume stays the copy\'s', async () => {
+  const until = Date.now() + 28 * 86_400_000;
+  const { cfg, calls, botFee, s, cleanup } = makeCopy(202_000, () => ({ status: 200, body: { ok: true, usd: 999_999, days: 14, vip: false, fees: { copy: { fee: 10, until }, bots: { fee: 1, until } } } }));
+  assert.equal(cfg.perksUrl, 'https://api.example/api/vs/builder/volume');
+  assert.equal(await botFee(), 1, 'the program\'s fee from the first order on (its first read is waited for)');
+  assert.equal(await botFee(), 1);
+  assert.equal(calls.length, 1, 'one read for two minutes');
+  const u = new URL(calls[0]!.url);
+  assert.equal(u.pathname, '/api/vs/builder/volume');
+  assert.equal(u.searchParams.get('address'), OWNER);
+  assert.equal(calls[0]!.headers['X-Internal-Token'], 'internal-token');
+  assert.equal(calls[0]!.headers['X-Origin-Verify'], 'edge-secret');
+  assert.equal(s.volumeOf(OWNER), 202_000, 'the volume is the ledger copy\'s, not the answer\'s');
+  await cleanup();
+});
+
+test('fees on a ledger copy: a failed read keeps the last answer; no answer at all is the bot ladder; nothing to ask, nothing asked', async () => {
+  let fail = false;
+  const until = Date.now() + 86_400_000;
+  const a = makeCopy(50_000, () => (fail ? { status: 503, body: { ok: false } } : { status: 200, body: { ok: true, usd: 50_000, vip: false, fees: { copy: null, bots: { fee: 1, until } } } }));
+  assert.equal(await a.botFee(), 1);
+  fail = true;
+  const realNow = Date.now;
+  Date.now = () => realNow() + 3 * 60_000;
+  try {
+    assert.equal(await a.botFee(), 1, 'server 1 away: the program still counts');
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(a.calls.length, 2, 'read again after two minutes, in the background');
+    assert.equal(await a.botFee(), 1);
+  } finally {
+    Date.now = realNow;
+  }
+  await a.cleanup();
+
+  const b = makeCopy(50_000, () => ({ status: 503, body: { ok: false } }));
+  assert.equal(await b.botFee(), 2, 'never read: the bot ladder (0.2 bp)');
+  assert.equal(await b.botFee(), 2);
+  assert.equal(b.calls.length, 1, 'a failed read is not tried again for two minutes');
+  await b.cleanup();
+
+  const c = makeCopy(50_000, () => ({ status: 200, body: { ok: true, usd: 0 } }), { EXECUTOR_BETA_URL: '' });
+  assert.equal(c.cfg.perksUrl, null);
+  assert.equal(await c.botFee(), 2);
+  assert.equal(c.calls.length, 0);
+  await c.cleanup();
 });
