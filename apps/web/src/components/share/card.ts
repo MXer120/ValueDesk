@@ -9,7 +9,7 @@
  * a number up. What the user hides (dollar amounts, prices, an address) is taken out before drawing (cardView).
  */
 
-import { drawPointsArt, qrModules, type PointsArt } from './pointsArt';
+import { drawPointsArt, type PointsArt } from './pointsArt';
 
 export type CardKind = 'trade' | 'position' | 'portfolio' | 'copy' | 'bot' | 'botvol' | 'points' | 'squad';
 export type Ratio = 'wide' | 'square';
@@ -535,10 +535,8 @@ export async function cardFonts(): Promise<void> {
   }
 }
 
-export async function cardPng(d0: CardData, o: CardOpts): Promise<Blob> {
+export async function cardPng(d: CardData, o: CardOpts): Promise<Blob> {
   await cardFonts();
-  // The SoPoints cards carry a QR code of their link: made once per link, before the draw.
-  const d = d0.art && d0.art.qr === undefined ? { ...d0, art: { ...d0.art, qr: await qrModules(d0.link) } } : d0;
   const [W, H] = SIZES[o.ratio];
   const cv = document.createElement('canvas');
   cv.width = W;

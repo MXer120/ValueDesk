@@ -37,7 +37,8 @@ function tierColours(tier: string) {
 
 export function PointsShare({ v, week, weekLabel = 'so far', inputs = [], start = 'total', onClose }: { v: PointsView; week: Pick<EstBand, 'mid' | 'busy' | 'quiet'> | null; weekLabel?: string; inputs?: Array<{ k: string; v: string }>; start?: Period; onClose: () => void }) {
   const own = useOwnCode(v.c.address);
-  const code = own.state === 'ok' ? own.code : null;
+  // The localhost Sample has no wallet, so no code of its own: a stand-in shows where the code goes (never in a build).
+  const code = own.state === 'ok' ? own.code : import.meta.env.DEV && v.sample ? 'SAMPLE' : null;
   const [lead, setLead] = useState<Lead>('points');
   const [period, setPeriod] = useState<Period>(start === 'now' && !week ? 'total' : start);
   const [showCode, setShowCode] = useState(true);
