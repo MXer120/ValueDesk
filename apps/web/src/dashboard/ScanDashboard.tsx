@@ -121,8 +121,21 @@ export function ScanDashboard(props: Omit<PortfolioProps, 'address'> & { address
 }
 
 /** The page as it is live: unchanged, the switch's first entry. */
-function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string | null }) {
+/** Scan inside another page (the Copy page's trader popup, owner 2026-11-27): this wallet and venue to start with, and
+ * the browser's address bar left alone (no pushState, no popstate, no `?find=`). */
+export interface ScanEmbedTarget { address: string; venue: Venue }
+
+/** The Scan page for one wallet, inside another page (copy/TraderPeek.tsx). */
+export function ScanEmbed(props: Omit<PortfolioProps, 'address'> & { address: string | null; embed: ScanEmbedTarget }) {
+  return <ScanOriginal {...props} key={`${props.embed.venue}:${props.embed.address}`} />;
+}
+
+function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string | null; embed?: ScanEmbedTarget }) {
   const connected = props.address;
+  const embed = props.embed ?? null;
+  // Embedded, the page keeps its state to itself: the host page owns the URL.
+  const push = (url: string) => { if (!embed) window.history.pushState(null, '', url); };
+  const replace = (url: string) => { if (!embed) window.history.replaceState(null, '', url); };
 
   /*
    * The scanned address lives in the URL, so a scan is a link you can send.
@@ -130,6 +143,7 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
    * anyone already saved working.
    */
   const [scanned, setScanned] = useState<string | null>(() => {
+    if (embed) return ADDRESS_RE.test(embed.address) ? embed.address : null;
     const q = new URLSearchParams(window.location.search).get('address');
     return q && ADDRESS_RE.test(q) ? q : null;
   });
@@ -138,7 +152,7 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
   /* Set when the address is on more than one venue (or a venue couldn't be
      checked). Nothing is pushed until a row is picked. */
   const [choice, setChoice] = useState<{ address: string; cards: VenueCard[] } | null>(null);
-  const [venue, setVenue] = useState<Venue>(venueFromUrl);
+  const [venue, setVenue] = useState<Venue>(() => (embed ? embed.venue : venueFromUrl()));
   /* Read by the callbacks below without re-creating them on every switch. */
   const venueRef = useRef(venue);
   venueRef.current = venue;
@@ -147,6 +161,7 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
   const scanSeq = useRef(0);
 
   useEffect(() => {
+    if (embed) return;
     const onPop = () => {
       const q = new URLSearchParams(window.location.search).get('address');
       setScanned(q && ADDRESS_RE.test(q) ? q : null);
@@ -157,7 +172,7 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  }, [embed]);
 
   const commitScan = useCallback((addr: string, v: Venue) => {
     setChoice(null);
@@ -165,22 +180,22 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
     setScanError(null);
     setScanned(addr);
     setVenue(v);
-    window.history.pushState(null, '', scanUrl(addr, v));
-  }, []);
+    push(scanUrl(addr, v));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScan = useCallback((input: string) => {
     const t = input.trim();
     const seq = ++scanSeq.current;
     if (ADDRESS_RE.test(t) || resolveTarget(t)) {
       // The overview is a link too (`?find=`): the leaderboard opens it, reload keeps it.
-      window.history.replaceState(null, '', `/scan?find=${encodeURIComponent(resolveTarget(t) ?? t)}`);
+      replace(`/scan?find=${encodeURIComponent(resolveTarget(t) ?? t)}`);
     }
     if (!t) {
       setScanned(null);
       setScanError(null);
       setChoice(null);
       setChecking(false);
-      window.history.replaceState(null, '', scanUrl(null, venueRef.current));
+      replace(scanUrl(null, venueRef.current));
       return;
     }
     const addr = resolveTarget(t);
@@ -215,11 +230,12 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
       setChecking(false);
       setScanError(VENUE_FAIL);
     });
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* `/scan?find=<address>` - the overview for that address (the leaderboard's
      links). On load, and when back/forward lands on one. */
   useEffect(() => {
+    if (embed) return;
     const run = () => {
       const f = new URLSearchParams(window.location.search).get('find');
       if (f && !new URLSearchParams(window.location.search).get('address')) onScan(f);
@@ -227,15 +243,15 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
     run();
     window.addEventListener('popstate', run);
     return () => window.removeEventListener('popstate', run);
-  }, [onScan]);
+  }, [onScan, embed]);
 
   /* The venue switch is a history stop, like a new address: back returns to
      the venue you were reading. */
   const onVenue = useCallback((v: Venue) => {
     if (v === venueRef.current) return;
     setVenue(v);
-    window.history.pushState(null, '', scanUrl(scannedRef.current, v));
-  }, []);
+    push(scanUrl(scannedRef.current, v));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /*
    * The portfolio's own context, built for the SCANNED address. `unlocked:false`
@@ -322,7 +338,7 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
     setChecking(false);
     setScanError(null);
     setScanned(null);
-    window.history.pushState(null, '', scanUrl(null, venueRef.current));
+    push(scanUrl(null, venueRef.current));
   };
 
   if (!scanned) {
@@ -345,7 +361,7 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
   return (
     <div className="scanv">
       <ScanHeader
-        venue={venue} onVenue={onVenue} presence={presence} scanned={scanned} onNewSearch={backToSearch}
+        venue={venue} onVenue={onVenue} presence={presence} scanned={scanned} onNewSearch={embed ? undefined : backToSearch}
         positions={copyProfile?.positions ?? null} positionsAt={copyProfile?.updatedAt ?? null}
       />
       {venue === 'sodex' ? (

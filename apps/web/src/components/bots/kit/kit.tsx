@@ -62,6 +62,9 @@ const PATHS = {
   expand: <path d="M4 8V4h4M12 4h4v4M16 12v4h-4M8 16H4v-4" />,
   grid: <><path d="M4 7h12M4 10h12M4 13h12" /><circle cx="7" cy="7" r="1" /><circle cx="12" cy="10" r="1" /><circle cx="9" cy="13" r="1" /></>,
   info: <><circle cx="10" cy="10" r="6.5" /><path d="M10 9.2v4.2M10 6.6h.01" /></>,
+  /** A panel docked to the right side (copy/TraderPeek.tsx), and a window in the middle. */
+  dock: <><rect x="3" y="4" width="14" height="12" rx="2.4" /><path d="M11.5 4v12" /><path d="M13.6 7.4h1.4M13.6 10h1.4" /></>,
+  window: <><rect x="3" y="4" width="14" height="12" rx="2.4" /><rect x="6" y="7" width="8" height="6" rx="1.2" /></>,
   users: <><circle cx="8" cy="7.5" r="2.6" /><path d="M3.4 15.6c.6-2.4 2.4-3.6 4.6-3.6s4 1.2 4.6 3.6" /><path d="M12.8 5.2a2.4 2.4 0 0 1 0 4.6M14.6 12.4c1.2.5 1.9 1.6 2.2 3.2" /></>,
 } as const;
 export type IconName = keyof typeof PATHS;

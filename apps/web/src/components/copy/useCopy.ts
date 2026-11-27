@@ -8,6 +8,7 @@
  * change is the follower's own signature.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PortfolioProps } from '../Portfolio';
 import { useStored, useSymbolList } from '../../hooks';
 import { copyableMarket } from './notCopyable';
 import { logLoadFailure, useLoadFailedToast } from '../LoadFailed';
@@ -136,6 +137,8 @@ export interface CopyPageProps {
   address: string | null;
   provider: Eip1193Provider | null;
   onScan: (address: string, venue?: Venue) => void;
+  /** What the Scan page reads (App's ctx), for the trader popup (TraderPeek.tsx); without it a trader opens on Scan. */
+  scanCtx?: Omit<PortfolioProps, 'address'> & { address: string | null };
 }
 
 export interface SimState {

@@ -26,6 +26,7 @@ import { CopyModal } from './CopyModal';
 import { Discover } from './Discover';
 import { isCopyable } from './gridModel';
 import { useCopyContext, type CopyPageProps } from './useCopy';
+import { TraderPeek, type PeekTarget } from './TraderPeek';
 import './Copy.css';
 import './CopyHome.css';
 
@@ -78,8 +79,14 @@ export function CopyPage(props: CopyPageProps) {
     return () => window.removeEventListener('popstate', open);
   }, [copyTrader]);
 
-  /** A trader opens on Scan: the universal trader page. */
-  const openTrader = useCallback((row: Pick<TraderRow, 'address' | 'venue'>) => c.onScan(row.address, row.venue), [c]);
+  /** A trader opens in a large window over the page (TraderPeek.tsx: the Scan page itself, dockable to the side);
+   * without the Scan context, on Scan. */
+  const [peek, setPeek] = useState<PeekTarget | null>(null);
+  const openTrader = useCallback((row: Pick<TraderRow, 'address' | 'venue'>) => {
+    if (props.scanCtx) setPeek({ address: row.address, venue: row.venue });
+    else c.onScan(row.address, row.venue);
+  }, [c, props.scanCtx]);
+  const closePeek = useCallback(() => setPeek(null), []);
 
   return (
     <div className="cpy">
@@ -90,6 +97,8 @@ export function CopyPage(props: CopyPageProps) {
         onAddress={(address, venue) => openTrader({ address, venue })}
         onScan={openTrader}
       />
+
+      <TraderPeek target={peek} ctx={props.scanCtx ?? null} onClose={closePeek} onOpenScan={(t) => { setPeek(null); c.onScan(t.address, t.venue); }} />
 
       <CopyModal
         c={c}

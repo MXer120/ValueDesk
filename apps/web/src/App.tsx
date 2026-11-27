@@ -844,7 +844,7 @@ function AppShell({ onGate }: { onGate: (g: GateProps) => void }) {
         )}
 
         {shown === 'copy' && (
-          <Guarded name="Copy"><CopyPage address={address} provider={provider} onScan={openScanAddress} /></Guarded>
+          <Guarded name="Copy"><CopyPage address={address} provider={provider} onScan={openScanAddress} scanCtx={ctx} /></Guarded>
         )}
 
         {shown === 'leaderboard' && (

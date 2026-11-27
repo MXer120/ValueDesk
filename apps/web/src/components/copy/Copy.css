@@ -136,3 +136,104 @@
 .copy .copy-chart--band.is-neg .copy-swatch--you { background: var(--neg); }
 
 
+/* --- a trader, opened from the page (TraderPeek.tsx) ------------------------
+   The Scan page in a large window over the page, or docked as a sidebar at the
+   top right (the page beside it stays usable), or a sheet on a phone. Portalled
+   to <body>, so nothing here is scoped under `.copy`. Under the dialogs (100):
+   a copy set up from inside it opens over it. The way in eases out, the way out
+   is quicker and eases in; the glide between window and sidebar is one
+   transform (TraderPeek toggle), so the page inside never lays out per frame. */
+:root { --cpk-dock-w: clamp(380px, 38vw, 600px); }
+.cpk { position: fixed; inset: 0; z-index: 90; pointer-events: none; }
+.cpk__veil {
+  position: absolute; inset: 0; pointer-events: auto;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(8px) saturate(0.9); backdrop-filter: blur(8px) saturate(0.9);
+  opacity: 0; transition: opacity 200ms cubic-bezier(0.4, 0, 1, 1);
+}
+.cpk.is-in .cpk__veil { opacity: 1; transition: opacity 260ms var(--ease-view); }
+.cpk.is-docked .cpk__veil { opacity: 0; pointer-events: none; }
+.cpk__panel {
+  position: absolute; pointer-events: auto; outline: none;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: var(--shadow-modal);
+  opacity: 0;
+  transition: opacity 180ms cubic-bezier(0.4, 0, 1, 1), transform 240ms cubic-bezier(0.4, 0, 1, 1);
+}
+/* (Doubled class: above the modes' own resting transforms below.) */
+.cpk.cpk.is-in .cpk__panel {
+  opacity: 1; transform: none;
+  transition: opacity 220ms var(--ease-view), transform 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Large, never the whole window: 32px of the page shows round it. */
+.cpk.is-window .cpk__panel {
+  inset: 0; margin: auto;
+  width: min(1360px, calc(100vw - 64px));
+  height: min(940px, calc(100dvh - 56px));
+  transform: translateY(14px) scale(0.965);
+}
+/* Docked: under the top bar, to the window's right edge and bottom. */
+.cpk.is-docked .cpk__panel {
+  top: var(--cpk-top, 12px); right: 12px; bottom: 12px;
+  width: var(--cpk-dock-w);
+  border-radius: 14px;
+  transform: translateX(40px);
+}
+.cpk__h {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  padding: 10px 10px 10px 16px; border-bottom: 1px solid var(--line);
+}
+.cpk__who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cpk__who b { font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.cpk__who small { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cpk__acts { display: flex; align-items: center; gap: 4px; flex: none; }
+.cpk__acts .cpk__scan { gap: 4px; padding-right: 10px; }
+.cpk__body {
+  flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
+  container: cpk / inline-size;
+}
+/* Docked, the page makes room for it: nothing of the page sits under the sidebar (TraderPeek sets the class). */
+@media (min-width: 761px) {
+  html.cpk-docked .cpy { padding-right: calc(var(--cpk-dock-w) + 12px); }
+}
+/* Narrow (docked, a phone's sheet), Scan's one-row band takes two: the venues on the first (scrolling sideways when
+   they still don't fit, their "No account" left to the dimmed tab and its title, as Scan's own phone rule leaves the
+   sentence), Copy and Counter-trade under them. */
+@container cpk (max-width: 760px) {
+  .cpk__body .scan-head .scan-head__bar { height: auto; flex-wrap: wrap; padding: 0 var(--sp-2); }
+  .cpk__body .scan-head__note, .cpk__body .scan-head__idle { display: none; }
+  .cpk__body .scan-head .scan-head__bar > .dash-tabs__actions {
+    flex: 1 1 100%; width: 100%; min-width: 0; flex-wrap: wrap; justify-content: flex-end;
+    margin-left: 0; padding-left: 0; row-gap: 0;
+  }
+  .cpk__body .scan-head .scan-head__tabs { flex: 1 1 100%; min-width: 0; height: 40px; overflow-x: auto; scrollbar-width: none; }
+  .cpk__body .scan-head .scan-head__tabs::-webkit-scrollbar { display: none; }
+  .cpk__body .scan-head .scan-head__copy { margin: 0 0 var(--sp-2) auto; flex-wrap: wrap; justify-content: flex-end; }
+  .cpk__body .scan-head .scan-head__uncopyable, .cpk__body .scan-head .scan-head__nocopy { align-self: center; max-width: 100%; margin: 0 auto var(--sp-2) 0; }
+}
+/* While the page's code arrives: three dots, as the dashboard's own wait. */
+.cpk__wait { display: flex; align-items: center; justify-content: center; gap: 6px; height: 100%; min-height: 200px; }
+.cpk__wait span { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: cpk-dot 1s ease-in-out infinite; }
+.cpk__wait span:nth-child(2) { animation-delay: 0.15s; }
+.cpk__wait span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes cpk-dot { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+/* A phone: a sheet from the bottom, window or not (no room to dock). */
+@media (max-width: 760px) {
+  .cpk.is-docked .cpk__veil { opacity: 0; pointer-events: auto; }
+  .cpk.is-docked.is-in .cpk__veil { opacity: 1; }
+  .cpk.is-window .cpk__panel, .cpk.is-docked .cpk__panel {
+    inset: auto 0 0 0; margin: 0; width: auto;
+    height: calc(100dvh - var(--sp-6) - env(safe-area-inset-top, 0px));
+    border-radius: 16px 16px 0 0; border-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    transform: translateY(100%);
+  }
+  .cpk.cpk.is-in .cpk__panel { transform: none; transition: opacity 120ms linear, transform var(--dur-sheet) var(--ease-view); }
+  .cpk__dock { display: none !important; }
+  .cpk__h { padding-left: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cpk__panel, .cpk.is-in .cpk__panel, .cpk__veil, .cpk.is-in .cpk__veil { transition-property: opacity; transition-duration: 120ms; }
+  .cpk .cpk__panel { transform: none !important; }
+}
