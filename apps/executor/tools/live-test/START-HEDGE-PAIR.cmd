@@ -7,7 +7,8 @@ rem      START-HEDGE-PAIR.cmd               the plan: sizes, buffers, fees (noth
 rem      START-HEDGE-PAIR.cmd go            start the BTC pair (wallet A main, wallet B second leg)
 rem      START-HEDGE-PAIR.cmd status        watch the pair, every 60 s (read-only, Ctrl+C ends the watch)
 rem      START-HEDGE-PAIR.cmd stop          stop the pair: both legs close
-rem      START-HEDGE-PAIR.cmd go BTC,ETH    other markets of the run (BTC ETH ZEC HYPE)
+rem      START-HEDGE-PAIR.cmd go accept-terms     start, accepting the current copy terms for the two test wallets
+rem      START-HEDGE-PAIR.cmd go "BTC,ETH"        other markets of the run (BTC ETH ZEC HYPE), in quotes
 rem
 rem  This file only starts hedge-pair.ts with Node. The keys stay in .env.live,
 rem  which the tool reads itself; nothing here reads or prints them.
@@ -32,10 +33,14 @@ if not defined VS_NODE for /f "delims=" %%N in ('where node 2^>nul') do if not d
 if not defined VS_NODE goto nonode
 if not exist "node_modules\tsx\package.json" goto nopackages
 
-set "VS_COINS=%~2"
+rem "accept-terms" (typed by you, after or instead of the markets): you accept the current copy terms for the test wallets.
+set "VS_COINS="
+set "VS_TERMS="
+if /i "%~2"=="accept-terms" (set "VS_TERMS=--accept-terms") else (set "VS_COINS=%~2")
+if /i "%~3"=="accept-terms" set "VS_TERMS=--accept-terms"
 if not defined VS_COINS set "VS_COINS=BTC"
-set "VS_ARGS=--only %VS_COINS%"
-if /i "%~1"=="go" set "VS_ARGS=--only %VS_COINS% --go"
+set "VS_ARGS=--only %VS_COINS% %VS_TERMS%"
+if /i "%~1"=="go" set "VS_ARGS=--only %VS_COINS% --go %VS_TERMS%"
 if /i "%~1"=="status" set "VS_ARGS=--status --watch 60 --events"
 if /i "%~1"=="stop" set "VS_ARGS=--stop"
 

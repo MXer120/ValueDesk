@@ -91,19 +91,26 @@ for (const t of targets) await t.start();
 const onVip = [await targets[0].followVip(), await targets[1].followVip()];
 const [A, B] = wallets.map((w) => w.address) as [string, string];
 log(`wallet A ${A} (main legs)${onVip[0] ? ' on VIP' : ''}, wallet B ${B} (partner legs)${onVip[1] ? ' on VIP' : ''}`);
-// Found 2026-11-27: A is on VIP (its Beta VIP program), B on standard. With --go, the wallet still on standard moves to
-// VIP with its own signed 'vip-move' (the Savings page's move). VIP takes only a VIP wallet (executor vipEligible:
-// listed, or the server's /api/vs/bots/vip says eligible: $1M in 14 days or a VIP program), so the server is asked
-// first: a wallet that is not VIP stops --go before anything is signed, with the one step the owner takes (a VIP
-// program on the admin suite's Fees page, signed by the builder wallet). There is no move back on request (only the VIP
-// side's daily sweep), so A cannot come down to B instead.
+// Found 2026-11-27: A is on VIP (its Beta VIP program), B on standard. The move up (the Savings page's signed
+// 'vip-move') is checked on server 2, which could not check VIP at all ("VIP status cannot be checked here": no VIP check
+// address, fix b3ba88c2 not shipped there). So the wallet on standard, with nothing running there, is served by the VIP
+// executor directly: it signs its terms and key there itself and starts its leg there. It is still asked whether it is
+// VIP (the VIP side's daily sweep moves a wallet that is not back once its pair has ended, and VIP sets its bot fee): a
+// wallet that is not stops --go before anything is signed, with the one step the owner takes (a VIP program on the
+// admin suite's Fees page, signed by the builder wallet). There is no move back on request, so A cannot come down.
 const split = onVip[0] !== onVip[1];
 if (split) {
   const low = onVip[0] ? 1 : 0;
   const who = low ? 'B' : 'A';
   const addr = wallets[low]!.address.toLowerCase();
+  const busy = ((await targets[low]!.algos()) as Any[]).filter((v) => ACTIVE.has(v.algo.status));
+  if (busy.length) {
+    log(`STOP: wallet ${who} runs ${busy.length} bot(s) on the standard servers; stop them first (its pair leg must run on the VIP servers with wallet ${low ? 'A' : 'B'})`);
+    process.exit(1);
+  }
+  await targets[low]!.useVip();
   const v = (await (await fetch(`${VIP_CHECK}?address=${addr}`)).json()) as Any;
-  log(`wallet ${who} runs its bots on the standard servers, wallet ${low ? 'A' : 'B'} on the VIP servers: both legs of a pair must run on the same servers, so --go moves ${who} to VIP first`);
+  log(`wallet ${who} has nothing running on the standard servers and wallet ${low ? 'A' : 'B'} runs on the VIP servers: both legs of a pair must run on the same servers, so ${who}'s leg runs on the VIP servers too (no move needed)`);
   if (!v.ok || !v.eligible) {
     console.log([
       '',
@@ -119,16 +126,7 @@ if (split) {
     ].join('\n'));
     if (has('--go')) { log('STOP: nothing was signed or sent'); process.exit(1); }
   } else {
-    log(`wallet ${who} is VIP${v.promo ? ` (${v.promo.label})` : ''}, so the VIP servers take it`);
-  }
-  if (has('--go')) {
-    try {
-      const { ms } = await targets[low]!.moveToVip();
-      log(`wallet ${low ? 'B' : 'A'} moved to VIP in ${ms} ms`);
-    } catch (e) {
-      log(`STOP: VIP refused wallet ${low ? 'B' : 'A'} (${e instanceof Error ? e.message : String(e)}). Assign it VIP in the admin suite, then run --go again.`);
-      process.exit(1);
-    }
+    log(`wallet ${who} is VIP${v.promo ? ` (${v.promo.label})` : ''}, so the VIP servers keep it`);
   }
 }
 const [ta, tb] = targets;
@@ -216,17 +214,22 @@ log(`fees in and out at full size, both wallets: ${usd(fees)} (SoDEX's taker fee
 console.log([
   '',
   '  What --go signs, by itself with the two test wallets\' keys in .env.live (no wallet app, nothing for you to sign):',
-  ...(split ? ['    - the wallet on the standard servers: its move to the VIP servers (the Savings page\'s move)'] : []),
+  ...(split ? ['    - the wallet that ran on the standard servers: nothing moves; it signs its terms and key on the VIP servers, beside the other wallet'] : []),
   `    - each wallet, if not done yet: the copy terms ${COPY_TERMS_VERSION}, a 30-day executor trading key on SoDEX, the builder fee approval`,
   '    - then each pair\'s two legs start: the executor opens the positions with market (IOC) orders in slices',
   '  None of these is a blockchain transaction: SoDEX takes them as signed API requests, so there is no gas.',
   '',
 ].join('\n'));
-if (!has('--go')) { log('plan only: nothing signed, nothing sent (to start: START-HEDGE-PAIR.cmd go, or add --go)'); process.exit(0); }
+// The copy terms are accepted by the owner, never by the tool: LIVE_ACCEPT_TERMS in .env.live, or --accept-terms typed
+// on the command line (START-HEDGE-PAIR.cmd go accept-terms) - the current version only.
+const termsOk = (env.LIVE_ACCEPT_TERMS ?? '').trim() === COPY_TERMS_VERSION || has('--accept-terms');
+const termsNeed = [meA, meB].some((m) => m.terms?.termsVersion !== COPY_TERMS_VERSION);
+if (termsNeed && !termsOk) log(`the copy terms are at ${COPY_TERMS_VERSION} (that version: one signature counts for every later one; the values are shown in the app) and a wallet has not signed it: --go signs it for the test wallets only when you accept it - START-HEDGE-PAIR.cmd go accept-terms`);
+if (!has('--go')) { log('plan only: nothing signed, nothing sent (to start: START-HEDGE-PAIR.cmd go' + (termsNeed && !termsOk ? ' accept-terms' : '') + ')'); process.exit(0); }
 
 /* ---------------------------------------------------------------- go ----- */
 
-if (env.LIVE_ACCEPT_TERMS !== COPY_TERMS_VERSION) throw new Error(`--go signs the copy terms ${COPY_TERMS_VERSION} for both wallets: set LIVE_ACCEPT_TERMS=${COPY_TERMS_VERSION} in ${envFile} after reading them.`);
+if (termsNeed && !termsOk) { log(`STOP: nothing was signed or sent. The copy terms ${COPY_TERMS_VERSION} are not accepted yet: START-HEDGE-PAIR.cmd go accept-terms (or LIVE_ACCEPT_TERMS=${COPY_TERMS_VERSION} in .env.live)`); process.exit(1); }
 const country = (env.LIVE_COUNTRY ?? '').trim().toUpperCase();
 if (!country) throw new Error(`LIVE_COUNTRY is needed in ${envFile}`);
 const th = await termsHash();

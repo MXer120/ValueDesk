@@ -374,6 +374,18 @@ export class HostedTarget extends ExecutorClient implements ExecutorTarget {
   }
 
   /**
+   * Talk to the VIP executor from now on without a move: for a wallet with nothing running on standard, which signs
+   * its terms and key there itself (hedge-pair's second leg, 2026-11-27: server 2 could not check VIP, so no move up).
+   */
+  async useVip(vipBase = HOSTED_VIP_BASE): Promise<void> {
+    if (this.base === vipBase) return;
+    this.base = vipBase;
+    this.rebase(vipBase);
+    const i = await this.info();
+    if ((i as { vip?: { tier?: string } }).vip?.tier !== 'vip') throw new Error(`${vipBase} does not answer as the VIP executor`);
+  }
+
+  /**
    * A wallet whose bots already moved to VIP (an earlier run's move) is sent there by the standard executor (409 moved):
    * this target follows it, so the bot scenarios start, read and stop on VIP. Whether it moved now.
    */
