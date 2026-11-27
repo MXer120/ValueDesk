@@ -834,7 +834,7 @@ function AppShell({ onGate }: { onGate: (g: GateProps) => void }) {
         )}
 
         {shown === 'scan' && (
-          <Guarded name="Scan"><ScanDashboard {...ctx} /></Guarded>
+          <Guarded name="Scan"><ScanDashboard {...ctx} provider={provider} onOpenMarket={openMarket} onOpenTab={setTab} /></Guarded>
         )}
 
         {shown === 'explore' && (

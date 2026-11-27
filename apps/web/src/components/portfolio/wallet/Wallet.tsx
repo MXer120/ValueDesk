@@ -15,7 +15,7 @@
  * Wealth is a view of its own, opened from its account and left with Back. On localhost the page before this one is
  * still a click away (DevVersions.tsx, "Previous").
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button, Panel, Shell, ShellHeader, StatusPill } from '../../bots/kit/kit';
 import { PortfolioMargin } from '../../bots/Allocation';
 import { BrandMark } from '../../BrandMark';
@@ -29,7 +29,7 @@ import { Private } from '../../../privacy';
 import { usePfData, type Bucket, type PfData } from './data';
 import {
   AllocBar, AllocLegend, AllocationNote, ApyFig, Band, EngineSwitch, EvmList, Exposure, FeeRates, Fig, Identity, ManageCopies, MarginMeter,
-  MoneyKeys, RangeSwitch, SECTIONS, SectionTabs, SharePnl, SpotList, TradeSummary, CopiesPanel, BotsPanel,
+  MoneyKeys, RangeSwitch, SECTIONS, SectionTabs, Standing, SharePnl, SpotList, TradeSummary, CopiesPanel, BotsPanel,
   health, signedUsd, tone, useMasks, useOffers, type Section,
 } from './blocks';
 import { Holdings, WealthArea } from './WealthArea';
@@ -41,15 +41,23 @@ import '../../bots/botsPages.css';
 import '../../vip.css';
 import './wallet.css';
 
-export type WalletProps = { c: PortfolioContext } & PortfolioPageLinks;
+export type WalletProps = { c: PortfolioContext } & PortfolioPageLinks & {
+  /**
+   * Scan (owner 2026-11-27: "Scan page, i want the same layout as portfolio page, just without the earn & angepasste
+   * componenents for scan"): another wallet, read-only. Its keys replace the money keys; Trading takes Earn's place
+   * beside the chart; Standing (SoDEX's board) sits beside Fees; the band has no Copy trading or Bots (they are the
+   * viewer's, not the wallet's), and no fund tiles are offered.
+   */
+  scan?: { keys: ReactNode };
+};
 
 type View = 'home' | 'wealth';
 /** How many rows an account's drawer shows before "View all". */
 const ROWS = 4;
 
 /** What one account holds, in the drawer under its row: a few rows, then the way to all of them. */
-function Inside({ k, d, c, onWealth, onAll, onOpenMarket, provider }: {
-  k: Bucket; d: PfData; c: PortfolioContext; onWealth: () => void; onAll: (s: Section, tab?: string) => void;
+function Inside({ k, d, c, onWealth, onAll, onOpenMarket, provider, scan }: {
+  k: Bucket; d: PfData; c: PortfolioContext; onWealth: () => void; onAll: (s: Section, tab?: string) => void; scan: boolean;
 } & Pick<WalletProps, 'onOpenMarket' | 'provider'>) {
   const m = useMasks();
   const h = health(c);
@@ -70,7 +78,7 @@ function Inside({ k, d, c, onWealth, onAll, onOpenMarket, provider }: {
   if (k === 'evm') return <div className="pfv3-in"><EvmList d={d} limit={ROWS} onAll={() => onAll('onchain')} /></div>;
   return (
     <div className="pfv3-in">
-      <Holdings w={d.w} address={c.address} provider={provider} onOpenMarket={onOpenMarket} onDone={c.onChanged} readOnly={c.readOnly} compact limit={ROWS - 1} picks={2} onAll={onWealth} />
+      <Holdings w={d.w} address={c.address} provider={provider} onOpenMarket={onOpenMarket} onDone={c.onChanged} readOnly={c.readOnly} compact limit={ROWS - 1} picks={scan ? undefined : 2} onAll={onWealth} />
     </div>
   );
 }
@@ -81,7 +89,7 @@ function Inside({ k, d, c, onWealth, onAll, onOpenMarket, provider }: {
  * the first one, drawn as measured (straight segments, no smoothing) on a scale that always holds 0; the part above 0 is
  * green, below it red, with a faint line at 0.
  */
-function ValueMove({ values, w = 160, h = 44 }: { values: number[]; w?: number; h?: number }) {
+export function ValueMove({ values, w = 160, h = 44 }: { values: number[]; w?: number; h?: number }) {
   const geo = useMemo(() => {
     const ys = values.map((v) => v - values[0]!);
     const lo = Math.min(0, ...ys);
@@ -143,14 +151,14 @@ function Card({ c, d }: { c: PortfolioContext; d: PfData }) {
   );
 }
 
-export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab }: WalletProps) {
+export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab, scan }: WalletProps) {
   const d = usePfData(c);
   const [view, setView] = useState<View>('home');
   const [open, setOpen] = useStored<Bucket | null>('vs.pfv3.open', 'perps');
   const [engine, setEngine] = useStored<'perps' | 'spot'>('vs.pfv.sum.engine', 'perps');
   const [sumRange, setSumRange] = useStored<Period>('vs.pfv.sum.period', '30D');
   // All first (owner 2026-11-27): a new key, so a pick stored before the tabs changed does not hold.
-  const [storedSection, setSection] = useStored<Section>('vs.pfv.section2', 'all');
+  const [storedSection, setSection] = useStored<Section>(scan ? 'vs.scan.section' : 'vs.pfv.section2', 'all');
   const section: Section = SECTIONS.includes(storedSection) ? storedSection : 'all';
   // A "View all" picks the band's account and one of its tables (positions, balances), then brings the band into view.
   const [select, setSelect] = useState<{ key: string; n: number } | null>(null);
@@ -189,7 +197,7 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab }: Wallet
   }
 
   const card = <Card c={c} d={d} />;
-  const keys = <div className="pfv3-keys"><MoneyKeys c={c} onSwap={() => setSwap(true)} /></div>;
+  const keys = <div className="pfv3-keys">{scan ? scan.keys : <MoneyKeys c={c} onSwap={() => setSwap(true)} />}</div>;
   // In the Original page's own wrapper (`pf pfx`): its controls' styles start there (the timeframe's sliding mark).
   const chart = <div className="pf pfx pfv3-chart"><ChartCard c={c} h24={d.h24} /></div>;
   const accounts = (
@@ -200,7 +208,7 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab }: Wallet
           d={d}
           open={open}
           onPick={(k) => setOpen(open === k ? null : k)}
-          drawer={(k) => <Inside k={k} d={d} c={c} onWealth={goWealth} onAll={viewAll} onOpenMarket={onOpenMarket} provider={provider} />}
+          drawer={(k) => <Inside k={k} d={d} c={c} onWealth={goWealth} onAll={viewAll} onOpenMarket={onOpenMarket} provider={provider} scan={!!scan} />}
         />
       </Panel>
     </Shell>
@@ -209,6 +217,12 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab }: Wallet
     <Shell className="pfv3-fees">
       <ShellHeader title="Fees" />
       <Panel className="pfv-pad"><FeeRates c={c} fees={d.fees} /></Panel>
+    </Shell>
+  );
+  const standing = (
+    <Shell className="pfv3-standing">
+      <ShellHeader title="Standing" subtitle="SoDEX's own leaderboard" />
+      <Panel className="pfv-pad"><Standing d={d} /></Panel>
     </Shell>
   );
   const margin = !c.readOnly ? <div className="pfv3-margin"><PortfolioMargin address={c.address} provider={provider} /></div> : null;
@@ -242,11 +256,11 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab }: Wallet
   const band = (
     <Shell className="pfv3-band" ref={bandRef}>
       <div className="pfv3-band__bar">
-        <SectionTabs value={section} onChange={(s) => { setSelect(null); setSection(s); }} />
+        <SectionTabs value={section} onChange={(s) => { setSelect(null); setSection(s); }} auto={!scan} />
       </div>
       {(section === 'copy' || section === 'bots') && <div className="pfv3-band__note"><AllocationNote /></div>}
       <Panel className={`pfv3-band__body${section === 'all' || section === 'onchain' ? ' is-grow' : ''}`}>
-        {section === 'all' ? <div className="pfv-pad"><AllView d={d} onSection={(s) => { setSelect(null); setSection(s); }} /></div>
+        {section === 'all' ? <div className="pfv-pad"><AllView d={d} onSection={(s) => { setSelect(null); setSection(s); }} automation={!scan} /></div>
           : section === 'onchain' ? <div className="pfv-pad"><OnchainPanel o={d.onchain} /></div>
           : section === 'perps' || section === 'spot' ? <Band c={c} engine={section} select={select} />
           : section === 'wealth' ? <div className="pfv-scroll pfv-pad"><Holdings w={d.w} address={c.address} provider={provider} onOpenMarket={onOpenMarket} onDone={c.onChanged} readOnly={c.readOnly} picks={4} onAll={goWealth} /></div>
@@ -258,20 +272,20 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab }: Wallet
 
   return (
     <div className="tf bots-page pfv pfv3">
-      <h1 className="pfv-h1">Portfolio</h1>
+      <h1 className="pfv-h1">{scan ? 'Scan' : 'Portfolio'}</h1>
       <div className="bots-col pfv3-col">
         {/* The two columns end together (the chart takes up the difference); Fees and Trading then share one row, same
             top and height (owner 2026-11-26: "a slight misalignment between fees and trading"). */}
         <div className="pfv3-split">
           <div className="pfv3-left">{card}{keys}{accounts}</div>
-          <div className="pfv3-right">{chart}{earn}</div>
+          <div className="pfv3-right">{chart}{scan ? trading : earn}</div>
         </div>
-        <div className="pfv3-pair">{fees}{trading}</div>
+        <div className="pfv3-pair">{scan ? <>{standing}{fees}</> : <>{fees}{trading}</>}</div>
         {margin}
         {band}
       </div>
-      <SwapSheet open={swap} onClose={() => setSwap(false)} address={c.address} unlocked={c.unlocked} onChanged={c.onChanged} />
-      <ManageCopies open={copies} onClose={() => setCopies(false)} />
+      {!scan && <SwapSheet open={swap} onClose={() => setSwap(false)} address={c.address} unlocked={c.unlocked} onChanged={c.onChanged} />}
+      {!scan && <ManageCopies open={copies} onClose={() => setCopies(false)} />}
     </div>
   );
 }

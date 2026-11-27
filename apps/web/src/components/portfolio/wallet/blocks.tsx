@@ -143,7 +143,8 @@ export function AllocBar({ parts, size = 'md' }: { parts: Part[]; size?: 'sm' | 
  * stays, so it can slide shut with its rows still in it; a shut drawer is inert.
  */
 export function AllocLegend({ d, onPick, open, drawer }: {
-  d: PfData;
+  /** The parts and whether the chains are still read (Scan's venue page passes its own). */
+  d: Pick<PfData, 'parts' | 'evmLoading'>;
   onPick?: (k: Bucket) => void;
   /** The account shown open. */
   open?: Bucket | null;
@@ -613,11 +614,44 @@ export function Band({ c, engine, select }: { c: PortfolioContext; engine: 'perp
 }
 
 /** Two groups: the accounts on the left, copy trading and bots on the right (one row; they wrap under on a phone). */
-export function SectionTabs({ value, onChange }: { value: Section; onChange: (s: Section) => void }) {
+export function SectionTabs({ value, onChange, auto = true }: { value: Section; onChange: (s: Section) => void; auto?: boolean }) {
   return (
     <div className="pfv-sectabs2">
       <Tabs tabs={SECTION_TABS} value={value} onChange={onChange} label="Accounts" className="pfv-sectabs" />
-      <Tabs tabs={AUTO_TABS} value={value} onChange={onChange} label="Automation" className="pfv-sectabs is-auto" />
+      {auto && <Tabs tabs={AUTO_TABS} value={value} onChange={onChange} label="Automation" className="pfv-sectabs is-auto" />}
+    </div>
+  );
+}
+
+/**
+ * Where a wallet stands on SoDEX's own leaderboard (Scan, beside Fees): its 30-day rank, PnL and volume, and all time.
+ * The same reads as the card's ranking; a wallet the board does not rank says so.
+ */
+export function Standing({ d }: { d: PfData }) {
+  const m = useMasks();
+  const wait = <Skeleton className="pfv-skel-num" />;
+  const rank = (s: PfData['month']) => (s === null ? wait : s.rank ? `#${fmt(s.rank, 0)}` : 'Not ranked');
+  return (
+    <div className="pfv-sum is-grid">
+      <div className="pfv-sum__cell">
+        <span className="pfv-sum__k">Rank, 30 days</span>
+        <b className="pfv-sum__v">{rank(d.month)}</b>
+        {d.ranked !== null && <span className="pfv-sum__s">of {m.counts(fmt(d.ranked, 0))} wallets</span>}
+      </div>
+      <div className="pfv-sum__cell">
+        <span className="pfv-sum__k">PnL, 30 days</span>
+        <b className={cx('pfv-sum__v', tone(d.month?.pnl))}>{d.month === null ? wait : m.pnl(signedUsd(d.month.pnl))}</b>
+        <span className="pfv-sum__s">Volume {d.month === null || d.month.volume === null ? DASH : m.funds(fmtCompactUsd(d.month.volume))}</span>
+      </div>
+      <div className="pfv-sum__cell">
+        <span className="pfv-sum__k">Rank, all time</span>
+        <b className="pfv-sum__v">{rank(d.ever)}</b>
+      </div>
+      <div className="pfv-sum__cell">
+        <span className="pfv-sum__k">PnL, all time</span>
+        <b className={cx('pfv-sum__v', tone(d.ever?.pnl))}>{d.ever === null ? wait : m.pnl(signedUsd(d.ever.pnl))}</b>
+        <span className="pfv-sum__s">Volume {d.ever === null || d.ever.volume === null ? DASH : m.funds(fmtCompactUsd(d.ever.volume))}</span>
+      </div>
     </div>
   );
 }

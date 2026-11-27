@@ -35,6 +35,8 @@ export interface ScanHeaderProps {
   /** The scanned trader's open positions on `venue` and when they were read (their profile, which the page reads anyway). */
   positions?: ReadonlyArray<{ symbol: string; markPx: number | null }> | null;
   positionsAt?: number | null;
+  /** The Copy and Counter-trade buttons; off where the page has them as its keys (ScanKeys.tsx). */
+  copyButtons?: boolean;
 }
 
 /** The sentence beside the tabs, or null when there is nothing worth saying. */
@@ -60,7 +62,7 @@ const TITLE: Record<Presence, string> = {
   loading: 'Checking…',
 };
 
-export function ScanHeader({ venue, onVenue, presence, scanned, onNewSearch, positions = null, positionsAt = null }: ScanHeaderProps) {
+export function ScanHeader({ venue, onVenue, presence, scanned, onNewSearch, positions = null, positionsAt = null, copyButtons = true }: ScanHeaderProps) {
   const note = scanned ? presenceNote(venue, presence) : null;
   const copyVenue = venue === 'sodex' || venue === 'hyperliquid' ? venue : null;
   const notCopyable = useNotCopyable({ enabled: !!scanned && copyVenue !== null, venue: copyVenue ?? 'hyperliquid', positions, positionsAt, fills: null });
@@ -104,14 +106,16 @@ export function ScanHeader({ venue, onVenue, presence, scanned, onNewSearch, pos
           {scanned && (isCopyable(venue) ? (
             <>
               <NotCopyableNote n={notCopyable} className="scan-head__uncopyable" />
-              <span className="scan-head__copy">
-                <CopyButton kind="counter" label="Counter-trade" title="Take the other side of every trade" onClick={() => copy('counter')} />
-                <CopyButton kind="copy" label="Copy trader" title={`Set up copying ${VENUE_LABEL[venue]} trades from this address`} onClick={() => copy('copy')} />
-              </span>
+              {copyButtons && (
+                <span className="scan-head__copy">
+                  <CopyButton kind="counter" label="Counter-trade" title="Take the other side of every trade" onClick={() => copy('counter')} />
+                  <CopyButton kind="copy" label="Copy trader" title={`Set up copying ${VENUE_LABEL[venue]} trades from this address`} onClick={() => copy('copy')} />
+                </span>
+              )}
             </>
-          ) : (
+          ) : copyButtons ? (
             <span className="scan-head__nocopy">Copying {VENUE_LABEL[venue]} traders is not supported yet</span>
-          ))}
+          ) : null)}
         </div>
       </div>
     </div>

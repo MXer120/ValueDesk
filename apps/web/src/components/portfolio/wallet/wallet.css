@@ -688,3 +688,21 @@ html[data-theme='light'] .pfv-pick img { background: #17181a; border-radius: 50%
   .pfo-add { animation: none; }
   .pfo-nft a { transition: none; }
 }
+
+
+/* --- Scan in this layout (owner 2026-11-27): ScanKeys' name field, the venue cards in the layout's slots ------------ */
+.pfv-name { display: flex; align-items: center; gap: 8px; padding: 10px 8px 0; animation: pfo-in 200ms var(--ease-view, ease-out); }
+.pfv-name .tf-input, .pfv-name input { flex: 1 1 auto; min-width: 0; }
+/* A venue's own cards (HlCards.tsx) where the Portfolio has its panels: their card chrome, the layout's spacing. */
+.pfv .pfv3-hlcard.pf.pfx { display: flex; flex-direction: column; align-items: stretch; max-width: none; margin: 0; padding: 0; gap: 0; min-width: 0; }
+.pfv3-hlcard > .pf-card { flex: 1 1 auto; height: auto; margin: 0; }
+.pfv3-pair > .pfv3-hlcard { min-width: 0; }
+.pfv .pfv3-hlband.pf.pfx { display: flex; flex-direction: column; align-items: stretch; height: 100%; max-width: none; margin: 0; padding: 0; }
+.pfv3-hlband > .pf-card { height: 100%; margin: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+/* The header above the layout: the page's own width and side margin. */
+.scanv--pf { display: flex; flex-direction: column; min-height: 0; }
+.scanv--pf > .scan-head { width: min(1480px, calc(100% - 48px)); margin: 16px auto 0; }
+.scanv--pf > .pfv.bots-page { padding-top: 14px; }
+@media (max-width: 760px) {
+  .scanv--pf > .scan-head { width: calc(100% - 20px); margin-top: 10px; }
+}

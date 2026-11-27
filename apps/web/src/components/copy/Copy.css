@@ -237,3 +237,35 @@
   .cpk__panel, .cpk.is-in .cpk__panel, .cpk__veil, .cpk.is-in .cpk__veil { transition-property: opacity; transition-duration: 120ms; }
   .cpk .cpk__panel { transform: none !important; }
 }
+
+
+/* Scan in the Portfolio's layout, inside this window (TraderPeek.tsx): the layout answers to the window's width, not
+   the screen's, so docked (about 600px) it is the phone's one column and as a window it is the tablet's two. The same
+   rules as wallet.css's 1040px and 760px steps. */
+@container cpk (max-width: 1040px) {
+  .cpk__body .pfv3-split { grid-template-columns: minmax(0, 1fr); }
+  .cpk__body .pfv3-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .cpk__body .pfv3-left { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .cpk__body .pfv3-left > .pfv3-accounts { grid-column: 2; grid-row: 1 / span 2; }
+  .cpk__body .pfv-sum.is-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 16px; }
+  .cpk__body .pfv-sum.is-grid .pfv-sum__cell:nth-child(3) { padding-left: 0; border-left: 0; }
+  .cpk__body .pfv-sum.is-grid .pfv-sum__cell:nth-child(2) { padding-right: 0; }
+}
+@container cpk (max-width: 760px) {
+  .cpk__body .pfv.bots-page { padding: 10px 10px 24px; }
+  .cpk__body .pfv3-split { display: flex; flex-direction: column; align-items: stretch; }
+  .cpk__body .pfv3-left, .cpk__body .pfv3-right { display: contents; }
+  .cpk__body .pfv3-card { order: 1; } .cpk__body .pfv3-keys { order: 2; } .cpk__body .pfv3-accounts { order: 3; }
+  .cpk__body .pfv3-chart { order: 4; } .cpk__body .pfv3-trading { order: 5; }
+  .cpk__body .pfv3-pair { grid-template-columns: minmax(0, 1fr); }
+  .cpk__body .pfv3-card { padding: 18px 18px 20px; border-radius: 24px; }
+  .cpk__body .pfv3-card__v { font-size: 36px; line-height: 42px; }
+  .cpk__body .pfv3-card .pfv-id__n { display: none; }
+  .cpk__body .pfv3-band__body { height: 440px; min-height: 0; }
+  .cpk__body .pfv3-band__body.is-grow { height: auto; }
+  .cpk__body .scanv--pf > .scan-head { width: calc(100% - 20px); margin-top: 10px; }
+  .cpk__body .pfa-parts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cpk__body .pfo-tbl__px, .cpk__body .pfo-tbl__chain { display: none; }
+  .cpk__body .pfo-tbl__onchain { display: inline; }
+  .cpk__body .pfo-top { grid-template-columns: minmax(0, 1fr); }
+}

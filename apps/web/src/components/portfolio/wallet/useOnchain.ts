@@ -61,7 +61,7 @@ const REFRESH_MS = 60_000;
 /** Below a cent a row is dust: not listed, not counted. */
 const DUST = 0.01;
 
-export function useOnchain(c: PortfolioContext): OnchainState {
+export function useOnchain(c: Pick<PortfolioContext, 'address' | 'readOnly'>): OnchainState {
   const owner = c.address ? c.address.toLowerCase() : null;
   const canAdd = !!owner && !c.readOnly;
   const [stored, setStored] = useStored<Watched[]>(`vs.pf.chains.${owner ?? 'none'}`, []);

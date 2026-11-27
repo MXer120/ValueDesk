@@ -18,15 +18,9 @@
  * There is no path from this page to a signed request.
  */
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Dashboard } from './Dashboard';
-import { PORTFOLIO_DASHBOARD } from './layout';
-import {
-  PORTFOLIO_PANELS, usePortfolioContext, type PortfolioContext, type PortfolioProps,
-} from '../components/Portfolio';
-import { SCAN_ACCOUNT_PANEL, SCAN_PANELS } from '../components/ScanPanels';
+import { usePortfolioContext, type PortfolioContext, type PortfolioProps } from '../components/Portfolio';
 import { SCAN_VENUES, type Venue } from '../vsApi';
 import { ScanHeader } from '../components/scan/ScanHeader';
-import { HL_SCAN_PANELS, type HlScanContext } from '../components/scan/HlPanels';
 import { useHlState } from '../components/scan/HlCards';
 import { analyticsSuspectNote, chartValueIsPnl } from '../components/scan/hlModel';
 import { useVsTrader, type Presence } from '../components/scan/useVs';
@@ -38,6 +32,12 @@ import { ScanVenueCard } from '../components/scan/ScanVenueCard';
 import { VenueLogo } from '../components/VenueLogo';
 import '../components/scan/scan.css';
 import { resolveTarget } from './scanAliases';
+import { PortfolioWallet } from '../components/portfolio/wallet/Wallet';
+import { VenueWallet } from '../components/scan/VenueWallet';
+import { ScanKeys } from '../components/scan/ScanKeys';
+import { openPath } from '../nav';
+import { pathForTab, type Tab } from '../router';
+import type { Eip1193Provider } from '../wallet';
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -85,7 +85,8 @@ const VERSION_KEY = 'vs.dev.scan.version';
 const ScanVersions = DEV ? lazy(() => import('../components/scan/versions/ScanVersions')) : null;
 // The pill's own look, also while the original is on screen (the versions' stylesheet comes with their chunk).
 if (DEV) void import('../components/scan/versions/switch.css');
-const VERSION_NAMES = ['Original', 'Profile', 'Venues', 'Desk'] as const;
+// 'Scan' is the page in the Portfolio's layout (owner 2026-11-27); the others are the earlier localhost drafts.
+const VERSION_NAMES = ['Scan', 'Profile', 'Venues', 'Desk'] as const;
 
 function storedVersion(): number {
   if (!DEV) return 0;
@@ -97,7 +98,14 @@ function storedVersion(): number {
   }
 }
 
-export function ScanDashboard(props: Omit<PortfolioProps, 'address'> & { address: string | null }) {
+/** Where Scan's links go (App passes the app's own; the Copy page's window falls back to plain navigation). */
+export interface ScanLinks {
+  provider?: Eip1193Provider | null;
+  onOpenMarket?: (symbol: string, engine: 'spot' | 'perps') => void;
+  onOpenTab?: (tab: Tab) => void;
+}
+
+export function ScanDashboard(props: Omit<PortfolioProps, 'address'> & { address: string | null } & ScanLinks) {
   const [version, setVersion] = useState(storedVersion);
   if (!DEV || !ScanVersions) return <ScanOriginal {...props} />;
   const choose = (n: number) => {
@@ -112,7 +120,7 @@ export function ScanDashboard(props: Omit<PortfolioProps, 'address'> & { address
       <nav className="rf-switch sx-switch" aria-label="Scan page versions" data-no-i18n="">
         {VERSION_NAMES.map((name, i) => (
           <button key={name} type="button" aria-pressed={version === i} className={version === i ? 'is-on' : ''} onClick={() => choose(i)}>
-            <b>{i === 0 ? 'O' : i}</b><span>{name}</span>
+            <b>{i === 0 ? 'S' : i}</b><span>{name}</span>
           </button>
         ))}
       </nav>
@@ -120,17 +128,16 @@ export function ScanDashboard(props: Omit<PortfolioProps, 'address'> & { address
   );
 }
 
-/** The page as it is live: unchanged, the switch's first entry. */
 /** Scan inside another page (the Copy page's trader popup, owner 2026-11-27): this wallet and venue to start with, and
  * the browser's address bar left alone (no pushState, no popstate, no `?find=`). */
 export interface ScanEmbedTarget { address: string; venue: Venue }
 
 /** The Scan page for one wallet, inside another page (copy/TraderPeek.tsx). */
-export function ScanEmbed(props: Omit<PortfolioProps, 'address'> & { address: string | null; embed: ScanEmbedTarget }) {
+export function ScanEmbed(props: Omit<PortfolioProps, 'address'> & { address: string | null; embed: ScanEmbedTarget } & ScanLinks) {
   return <ScanOriginal {...props} key={`${props.embed.venue}:${props.embed.address}`} />;
 }
 
-function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string | null; embed?: ScanEmbedTarget }) {
+function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string | null; embed?: ScanEmbedTarget } & ScanLinks) {
   const connected = props.address;
   const embed = props.embed ?? null;
   // Embedded, the page keeps its state to itself: the host page owns the URL.
@@ -302,37 +309,7 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
   /* The Hyperliquid view's data, read only while it is the venue on screen. */
   // Every venue but SoDEX is drawn by the Hyperliquid cards over its own profile + fills.
   const hl = useHlState(venue !== 'sodex' ? scanned : null, venue === 'sodex' ? 'hyperliquid' : venue);
-  const hlContext: HlScanContext = { scanned, connected, onScan, scanError, hl };
 
-  /*
-   * The portfolio's panels, with the ACCOUNT card swapped for the scan variant
-   * that carries the address input. Swapped rather than appended: two panels
-   * with the same id would both render, and the layout only has one slot for it.
-   */
-  const panels = [
-    ...PORTFOLIO_PANELS.map((p) => (p.id === 'account' ? SCAN_ACCOUNT_PANEL : p)),
-    ...SCAN_PANELS,
-  ];
-
-  /*
-   * WITH NOTHING SCANNED, EVERY OTHER PANEL IS A GRID OF EM-DASHES.
-   *
-   * They used to render at full contrast, which made an idle page look like a
-   * page reporting that this wallet holds nothing. Dimming and softening them
-   * says "waiting for an address" without removing them - you can still see the
-   * shape of what you are about to get - and the account card stays sharp
-   * because it is the one you are meant to be looking at.
-   *
-   * `pointer-events: none` goes with it: a period toggle you can click but whose
-   * result you cannot read is a control that appears broken.
-   */
-  /*
-   * THE HEADER IS ADDED ABOVE THE GRID, NOT INTO IT. The SoDEX dashboard below
-   * is the element it always was - same config, same panels, same context - so
-   * the venue switch cannot change a pixel of what SoDEX shows. The Hyperliquid
-   * view is a second Dashboard over the SAME config and panel ids (see
-   * HlPanels.tsx), keyed apart so switching remounts it cleanly.
-   */
   const backToSearch = () => {
     setChoice(null);
     setChecking(false);
@@ -358,29 +335,25 @@ function ScanOriginal(props: Omit<PortfolioProps, 'address'> & { address: string
     );
   }
 
+  /*
+   * THE PORTFOLIO'S LAYOUT (owner 2026-11-27: "Scan page, i want the same layout as portfolio page, just without the
+   * earn & angepasste componenents for scan. Use for copy trading pop up AND actual scan page."). SoDEX: the Portfolio
+   * page itself in its scan mode, over the same context the grid had (read-only). The other venues: the same layout
+   * over the venue's profile and fills (VenueWallet.tsx). The header keeps the venue switch and the note on what a copy
+   * could not follow; Copy and Counter-trade are the page's keys now.
+   */
+  const keys = <ScanKeys address={scanned} venue={venue} />;
+  const openTab = props.onOpenTab ?? ((t: Tab) => openPath(pathForTab(t)));
+  const openMarket = props.onOpenMarket ?? (() => openPath(pathForTab('trade')));
   return (
-    <div className="scanv">
+    <div className="scanv scanv--pf">
       <ScanHeader
         venue={venue} onVenue={onVenue} presence={presence} scanned={scanned} onNewSearch={embed ? undefined : backToSearch}
-        positions={copyProfile?.positions ?? null} positionsAt={copyProfile?.updatedAt ?? null}
+        positions={copyProfile?.positions ?? null} positionsAt={copyProfile?.updatedAt ?? null} copyButtons={false}
       />
-      {venue === 'sodex' ? (
-        <Dashboard
-          key="sodex"
-          config={PORTFOLIO_DASHBOARD}
-          panels={panels as never[]}
-          context={context as never}
-          className={`pf scan ${scanned ? '' : 'scan--idle'}`}
-        />
-      ) : (
-        <Dashboard
-          key={venue}
-          config={PORTFOLIO_DASHBOARD}
-          panels={HL_SCAN_PANELS}
-          context={hlContext}
-          className={`pf scan scan--hl ${scanned ? '' : 'scan--idle'}`}
-        />
-      )}
+      {venue === 'sodex'
+        ? <PortfolioWallet key={`sodex:${scanned}`} c={context} provider={props.provider ?? null} onOpenMarket={openMarket} onOpenTab={openTab} scan={{ keys }} />
+        : <VenueWallet key={`${venue}:${scanned}`} hl={hl} venue={venue} address={scanned} keys={keys} />}
     </div>
   );
 }

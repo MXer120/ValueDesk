@@ -79,7 +79,7 @@ function Automation({ d, onSection }: { d: PfData; onSection: (s: Section) => vo
   );
 }
 
-export function AllView({ d, onSection }: { d: PfData; onSection: (s: Section) => void }) {
+export function AllView({ d, onSection, automation = true }: { d: PfData; onSection: (s: Section) => void; automation?: boolean }) {
   const m = useMasks();
   const rows = useMemo(() => assetRows(d), [d]);
   const [all, setAll] = useState(false);
@@ -105,7 +105,7 @@ export function AllView({ d, onSection }: { d: PfData; onSection: (s: Section) =
           ))}
         </ul>
       </div>
-      <Automation d={d} onSection={onSection} />
+      {automation && <Automation d={d} onSection={onSection} />}
       {rows.length > 0 && (
         <div className="pfa-assets">
           <div className="pfv-scroll">
