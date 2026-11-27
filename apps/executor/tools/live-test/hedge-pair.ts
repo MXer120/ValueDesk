@@ -14,7 +14,8 @@
  *
  * Without --go nothing is signed and nothing is sent. Buffers are the app's own (web bots/hedge.ts buffersFor,
  * 'balanced'), so the run tests what a user gets by default. Fees are SoDEX's taker fee from its symbols list plus
- * the bot fee the executor reports for the wallet (me().bots.feeTenths); SoDEX charges no gas per order.
+ * the bot fee the executor reports for the wallet (me().bots.feeTenths); orders go as signed API requests, not wallet
+ * transactions, so the wallets pay no gas.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { hexToBytes } from '../../../../packages/sodex-core/src/index.ts';
@@ -87,9 +88,22 @@ for (const t of targets) await t.start();
 const onVip = [await targets[0].followVip(), await targets[1].followVip()];
 const [A, B] = wallets.map((w) => w.address) as [string, string];
 log(`wallet A ${A} (main legs)${onVip[0] ? ' on VIP' : ''}, wallet B ${B} (partner legs)${onVip[1] ? ' on VIP' : ''}`);
-if (onVip[0] !== onVip[1]) {
-  log(`STOP: wallet ${onVip[0] ? 'A' : 'B'} runs its bots on the VIP executor and the other on the standard one; a pair's legs must share one executor.`);
-  process.exit(1);
+// Found 2026-11-27: A is on VIP, B on standard. With --go, the wallet still on standard moves to VIP with its own signed
+// 'vip-move' (the Savings page's move); VIP refuses a wallet that is not VIP (not listed, under the volume): then the
+// owner assigns it VIP in the admin suite, or the run cannot pair. Without --go the plan is printed either way.
+const split = onVip[0] !== onVip[1];
+if (split) {
+  const low = onVip[0] ? 1 : 0;
+  log(`wallet ${low ? 'B' : 'A'} runs its bots on the standard executor, the other on VIP: a pair's legs must share one executor${has('--go') ? '; moving it to VIP' : '; --go moves it to VIP first (needs it to be VIP)'}`);
+  if (has('--go')) {
+    try {
+      const { ms } = await targets[low]!.moveToVip();
+      log(`wallet ${low ? 'B' : 'A'} moved to VIP in ${ms} ms`);
+    } catch (e) {
+      log(`STOP: VIP refused wallet ${low ? 'B' : 'A'} (${e instanceof Error ? e.message : String(e)}). Assign it VIP in the admin suite, then run --go again.`);
+      process.exit(1);
+    }
+  }
 }
 const [ta, tb] = targets;
 
@@ -164,13 +178,13 @@ for (const r of RUNS) {
   imA += r.sizeUsd / lev;
   notional += r.sizeUsd;
   fees += r.sizeUsd * 2 * 2 * ((taker + botFee) / 1e4);
-  log(`${r.symbol} ${lev}x (max ${maxLev}x) at ${mark}: $${r.sizeUsd}/leg in $${r.sliceUsd} steps, A ${r.side === 'buy' ? 'long' : 'short'} / B ${r.side === 'buy' ? 'short' : 'long'}; liquidation starts ${b.startPct.toFixed(2)}% away, legs shrink under ${b.minLiqPct}%, grow back above ${b.growLiqPct}%; loss limit $${r.maxLossUsd}; taker ${taker} bp + bot ${botFee} bp`);
+  log(`${r.symbol} ${lev}x (max ${maxLev}x) at ${mark}: $${r.sizeUsd}/leg in $${r.sliceUsd} steps, A ${r.side === 'buy' ? 'long' : 'short'} / B ${r.side === 'buy' ? 'short' : 'long'}; the app's buffers at ${lev}x (a leg at full leverage starts ${b.startPct.toFixed(2)}% from its liquidation): legs shrink under ${b.minLiqPct}%, grow back above ${b.growLiqPct}%; loss limit $${r.maxLossUsd}; taker ${taker} bp + bot ${botFee} bp`);
 }
 for (const [i, a] of accounts.entries()) {
   const eq = Number(a?.av ?? 0);
   log(`wallet ${i ? 'B' : 'A'}: equity ${usd(eq)}, open positions ${(a?.P ?? []).length}; the plan holds ${usd(notional)} notional (${eq > 0 ? (notional / eq).toFixed(1) : '-'}x the equity), initial margin ${usd(imA)}`);
 }
-log(`fees in and out at full size, both wallets: ${usd(fees)} (taker + bot fee; each trim and grow-back adds its own); SoDEX charges no gas per order`);
+log(`fees in and out at full size, both wallets: ${usd(fees)} (SoDEX's taker fee + the bot fee the executor reports; each trim and grow-back adds its own); the wallets send no transactions, so no gas`);
 if (!has('--go')) { log('plan only: nothing signed, nothing sent (add --go to start)'); process.exit(0); }
 
 /* ---------------------------------------------------------------- go ----- */
