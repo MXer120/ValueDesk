@@ -186,22 +186,68 @@ function pointsOf(series: EquityPoint[] | undefined, s: Series): Array<{ t: numb
 
 const dayText = (t: number, long: boolean) => new Date(t).toLocaleString(undefined, long ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' });
 
+// The curves draw on a 600 x 200 box that stretches to the plot; the dot is HTML over it, so it stays round.
+const W = 600;
+const H = 200;
+
+function curveScale(vals: number[], kind: Series) {
+  const lo = kind === 'pnl' ? Math.min(0, ...vals) : Math.min(...vals);
+  const hi = kind === 'pnl' ? Math.max(0, ...vals) : Math.max(...vals);
+  const span = hi - lo || 1;
+  return { lo, hi, y: (v: number) => 8 + (1 - (v - lo) / span) * (H - 16) };
+}
+
+/** The curve's drawing: grid, zero line, fill and line, in the colour of the box (`currentColor`). */
+function CurveArt({ id, line, zero, children }: { id: string; line: string; zero: number | null; children?: ReactNode }) {
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id={`${id}-f`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="currentColor" stopOpacity="0.26" />
+          <stop offset="1" stopColor="currentColor" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {[0.25, 0.5, 0.75].map((f) => <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} className="lbv-curve__grid" />)}
+      {zero !== null && <line x1="0" x2={W} y1={zero} y2={zero} className="lbv-curve__zero" />}
+      <path d={`${line}L${W},${H}L0,${H}Z`} fill={`url(#${id}-f)`} />
+      <path d={line} className="lbv-curve__line" />
+      {children}
+    </svg>
+  );
+}
+
+/**
+ * The panel's curve without its readout, for the podium's cards (owner 2026-11-27: "make them look like the preview on
+ * the right"): the board's PnL line for the window, evenly spaced, with the same fill and round end dot.
+ */
+export function MiniCurve({ values, className }: { values: number[] | null | undefined; className?: string }) {
+  const id = useId().replace(/:/g, '');
+  if (!values || values.length < 2) return <div className={`lbv-curve is-mini is-empty ${className ?? ''}`}><span>No curve for this window</span></div>;
+  const { y } = curveScale(values, 'pnl');
+  const n = values.length - 1;
+  const line = values.map((v, i) => `${i ? 'L' : 'M'}${((i / n) * W).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  const last = values[n]!;
+  return (
+    <div className={`lbv-curve is-mini ${last >= 0 ? 'is-up' : 'is-down'} ${className ?? ''}`} aria-hidden="true">
+      <div className="lbv-curve__plot">
+        <CurveArt id={id} line={line} zero={y(0)} />
+        <span className="lbv-curve__dot" style={{ left: '100%', top: `${(y(last) / H) * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
 /** A trader's curve with a pointer readout: the series' value at the time under the pointer. */
 export function Curve({ pts, kind, height = 150, compact }: { pts: Array<{ t: number; v: number }>; kind: Series; height?: number; compact?: boolean }) {
   const id = useId().replace(/:/g, '');
   const box = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState<number | null>(null);
   if (pts.length < 2) return <div className="lbv-curve is-empty" style={{ height }}><span>No curve for this window</span></div>;
-  const W = 600;
-  const H = 200;
   const vals = pts.map((p) => p.v);
-  const lo = kind === 'pnl' ? Math.min(0, ...vals) : Math.min(...vals);
-  const hi = kind === 'pnl' ? Math.max(0, ...vals) : Math.max(...vals);
-  const span = hi - lo || 1;
+  const { lo, hi, y } = curveScale(vals, kind);
   const t0 = pts[0]!.t;
   const t1 = pts[pts.length - 1]!.t;
   const x = (t: number) => ((t - t0) / (t1 - t0 || 1)) * W;
-  const y = (v: number) => 8 + (1 - (v - lo) / span) * (H - 16);
   const line = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
   const last = pts[pts.length - 1]!;
   const up = kind === 'pnl' ? last.v >= 0 : last.v >= pts[0]!.v;
@@ -231,19 +277,9 @@ export function Curve({ pts, kind, height = 150, compact }: { pts: Array<{ t: nu
         role="img"
         aria-label={`${kind === 'pnl' ? 'PnL' : 'Account value'} from ${dayText(t0, false)} to ${dayText(t1, false)}, now ${kind === 'pnl' ? usdSigned(last.v) : fmtUsd(last.v)}`}
       >
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <linearGradient id={`${id}-f`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="currentColor" stopOpacity="0.26" />
-              <stop offset="1" stopColor="currentColor" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          {[0.25, 0.5, 0.75].map((f) => <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} className="lbv-curve__grid" />)}
-          {zero !== null && <line x1="0" x2={W} y1={zero} y2={zero} className="lbv-curve__zero" />}
-          <path d={`${line}L${W},${H}L0,${H}Z`} fill={`url(#${id}-f)`} />
-          <path d={line} className="lbv-curve__line" />
+        <CurveArt id={id} line={line} zero={zero}>
           {at !== null && <line x1={x(shown.t)} x2={x(shown.t)} y1="0" y2={H} className="lbv-curve__x" />}
-        </svg>
+        </CurveArt>
         <span className="lbv-curve__dot" style={{ left: `${(x(shown.t) / W) * 100}%`, top: `${(y(shown.v) / H) * 100}%` }} />
         <span className="lbv-curve__hi">{kind === 'pnl' ? usdShort(hi, true) : usdShort(hi)}</span>
         <span className="lbv-curve__lo">{kind === 'pnl' ? usdShort(lo, true) : usdShort(lo)}</span>

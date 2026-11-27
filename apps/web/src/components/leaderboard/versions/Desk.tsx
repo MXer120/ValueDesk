@@ -9,7 +9,6 @@
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { fmtNum } from '../../../numStyle';
-import { VENUE_LABEL } from '../../../vsApi';
 import { Skeleton } from '../../bots/kit/kit';
 import { WinRate } from '../../copy/TraderCard';
 import { ActiveChips, FilterButton, Search, SideTabs, Venues, WindowSeg, type Narrow } from './controls';
@@ -77,7 +76,6 @@ export function Desk({ address, onScan, onCopy, embedded }: VersionProps) {
     const el = list.current?.querySelector<HTMLButtonElement>(`[data-k="${CSS.escape(keyOf(next))}"]`);
     el?.focus();
   };
-  const venuesText = view.venues.length === 1 ? VENUE_LABEL[view.venues[0]!] : `${view.venues.length} platforms${board.mode === 'net' ? ', netted per address' : ''}`;
   const head = (col: SortKey) => (
     <button type="button" className={`lbv-th${sort === col ? ' is-on' : ''}`} onClick={() => pickSort(col)} title={SORT_HINT[col]} aria-pressed={sort === col}>
       {SORT_LABEL[col]}
@@ -95,7 +93,6 @@ export function Desk({ address, onScan, onCopy, embedded }: VersionProps) {
             <div className="lbv-bar-row">
               <Venues board={board} noMode={width > 0 && width < 560} />
               <FilterButton board={board} narrow={narrow} sort={sort} onSort={pickSort} mode={width > 0 && width < 560} iconOnly={width > 0 && width < 560} />
-              <span className="lbv-desk__count">{venuesText}</span>
             </div>
             <Search board={board} />
           </div>

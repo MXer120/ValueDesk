@@ -9,12 +9,12 @@ import { DASH } from '../../../format';
 import { fmtNum } from '../../../numStyle';
 import { VENUE_LABEL, type BoardWindow, type TraderRow, type Venue } from '../../../vsApi';
 import { VENUE_BRAND } from '../../venueBrand';
-import { CopyButton, Spark, ViewButton, WinRate } from '../../copy/TraderCard';
+import { CopyButton, ViewButton, WinRate } from '../../copy/TraderCard';
 import { isCopyable } from '../../copy/gridModel';
 import { Button, Icon, IconButton, Segmented, Skeleton, Switch } from '../../bots/kit/kit';
 import { LB_VENUES } from '../lbState';
 import { Search, SideTabs, Venues, WindowSeg } from './controls';
-import { Assets, BoardState, Move, Notes, Place, SizePill, TraderDetail, VenueMarks, Who, bps, toneOf, tradesText, useMasks, usdShort, useWidth } from './parts';
+import { Assets, BoardState, MiniCurve, Move, Notes, Place, SizePill, TraderDetail, VenueMarks, Who, bps, toneOf, tradesText, useMasks, usdShort, useWidth } from './parts';
 import {
   ASSET_GROUPS, SIZE_BANDS, SORT_HINT, SORT_LABEL, WINDOW_LONG, WINDOW_WORD, dirOf, edgeOf, hasVolume, metricOf, shape, usableSort, useBoard,
   type AssetGroup, type Board, type Row, type SizeBand, type SortKey,
@@ -63,7 +63,7 @@ function Podium({ rows, w, side, me, since, onOpen, onScan, onCopy }: {
                 <b className={toneOf(pnl)}>{masks.pnl(r, usdShort(pnl, true))}</b>
                 <span>PnL {WINDOW_WORD[w]}</span>
               </div>
-              <Spark values={r.spark && r.spark.length > 1 ? r.spark : null} className="lbv-pod__spark" />
+              <MiniCurve values={r.spark} className="lbv-pod__curve" />
               <dl className="lbv-pod__kv">
                 <div><dt>Account</dt><dd>{masks.equity(r, usdShort(r.accountValue))}</dd></div>
                 <div><dt>Edge</dt><dd className={toneOf(edgeOf(r, w))}>{bps(edgeOf(r, w))}</dd></div>

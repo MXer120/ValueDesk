@@ -146,7 +146,7 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab }: Wallet
   const [view, setView] = useState<View>('home');
   const [open, setOpen] = useStored<Bucket | null>('vs.pfv3.open', 'perps');
   const [engine, setEngine] = useStored<'perps' | 'spot'>('vs.pfv.sum.engine', 'perps');
-  const [sumRange, setSumRange] = useStored<Period>('vs.pfv.sum.range', '7D');
+  const [sumRange, setSumRange] = useStored<Period>('vs.pfv.sum.period', '30D');
   const [section, setSection] = useStored<Section>('vs.pfv.section', 'perps');
   // A "View all" picks the band's account and one of its tables (positions, balances), then brings the band into view.
   const [select, setSelect] = useState<{ key: string; n: number } | null>(null);

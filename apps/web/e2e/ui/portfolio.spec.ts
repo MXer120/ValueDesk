@@ -236,8 +236,11 @@ h.test('Total Value counts each dollar once, and copies and bots have no bucket'
   assert.match(sum, /Fees paid \$0,12/);
   assert.match(sum, /Funding \S*\$1,50 \S*\$0,00 received · \S*\$1,50 paid/);
   await shot(p, 'trading');
-  await p.locator('.pfv3-range').getByRole('radio', { name: '30d' }).click();
+  // 30 days by default (owner 2026-11-27), on the summary and on the chart.
   assert.equal(await p.locator('.pfv3-range').getByRole('radio', { name: '30d' }).getAttribute('aria-checked'), 'true');
+  assert.equal(await p.locator('.pfx-chart').getByRole('radio', { name: '30d' }).getAttribute('aria-checked'), 'true');
+  await p.locator('.pfv3-range').getByRole('radio', { name: '7d' }).click();
+  assert.equal(await p.locator('.pfv3-range').getByRole('radio', { name: '7d' }).getAttribute('aria-checked'), 'true');
 
   // The chart: hours on 24h, days on 7d; the view is a dropdown; the line morphs between them (chart/lineMorph.ts).
   const labels = () => p.locator('.pfx-chart .pf-chart__xlabel').allTextContents();

@@ -186,7 +186,8 @@ export function Spark({ values, className, loading }: { values: number[] | null;
       <line x1="0" x2={W} y1={zero} y2={zero} className="cpy-spark__zero" />
       <path d={line} className="cpy-spark__line cpy-spark__line--pos" clipPath={`url(#${id}-a)`} />
       <path d={line} className="cpy-spark__line cpy-spark__line--neg" clipPath={`url(#${id}-b)`} />
-      <circle cx={x(values.length - 1)} cy={y(values[values.length - 1]!)} r="2.5" className={up ? 'cpy-spark__dot--pos' : 'cpy-spark__dot--neg'} />
+      {/* The end dot as a round cap drawn in screen pixels: a circle would stretch with the box (preserveAspectRatio none). */}
+      <path d={`M${x(values.length - 1).toFixed(1)},${y(values[values.length - 1]!).toFixed(1)}h0`} className={`cpy-spark__dot ${up ? 'cpy-spark__dot--pos' : 'cpy-spark__dot--neg'}`} />
     </svg>
   );
 }

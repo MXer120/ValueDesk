@@ -217,7 +217,8 @@ export type ChartView = 'value' | 'pnl' | 'calendar';
 /** The value / PnL / calendar chart with its timeframe and share (the portfolio versions use it as it is). */
 export function ChartCard({ c, h24 }: { c: PortfolioContext; h24: ChartPoint[] | null }) {
   const [view, setView] = useStored<ChartView>('vs.pf.chart.view', 'value');
-  const [range, setRange] = useStored<Period>('vs.pf.chart.range', '7D');
+  // 30 days by default (owner 2026-11-27); a new key, so an earlier pick of 7 days does not hold it.
+  const [range, setRange] = useStored<Period>('vs.pf.chart.period', '30D');
   const win = view === 'calendar' ? null : curveFor(c, h24, range, view === 'value' ? (p) => p.accountValue : (p) => pnlAt('pnl-total', p));
   const empty = (body: ReactNode) => <div className="pf-chart pf-chart--empty"><p>{body}</p></div>;
   const mask = useMask(view === 'value' ? 'funds' : 'pnl');

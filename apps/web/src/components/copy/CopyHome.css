@@ -337,8 +337,9 @@ html[data-glass] .cpy-card--ghost::after { content: none; }
 .cpy-spark__line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .cpy-spark__line--pos { stroke: var(--pos); }
 .cpy-spark__line--neg { stroke: var(--neg); }
-.cpy-spark__dot--pos { fill: var(--pos); }
-.cpy-spark__dot--neg { fill: var(--neg); }
+.cpy-spark__dot { fill: none; stroke-width: 5; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.cpy-spark__dot--pos { stroke: var(--pos); }
+.cpy-spark__dot--neg { stroke: var(--neg); }
 
 .cpy-score { display: inline-flex; align-items: center; gap: 10px; cursor: help; }
 .cpy-score__n { color: var(--muted); font-family: var(--font-num); font-size: var(--fs-xs); white-space: nowrap; }
