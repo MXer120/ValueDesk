@@ -27,6 +27,17 @@ const EXEMPT = new Set([
   'components/landing/site/appDesk.css',
   'components/landing/v4/v4.css',
   'legal/legal.css', // loads with the legal pages; only `.legal*` selectors (see below)
+  // The other pages' versions (localhost only, merged for 5180 on 2026-11-26): each imported by a version module that
+  // its page loads behind `import.meta.env.DEV` (WealthPage, PortfolioPage, BlindBoxPage, SoPointsPage, ScanDashboard,
+  // LeaderboardPage), so a build never emits them. A version the owner keeps moves its sheet into cssOrder.ts.
+  'components/sodex/wealth/wealth.css',
+  'components/sodex/versions/versions.css',
+  'components/sodex/versions/boxes/boxes.css',
+  'components/sodex/versions/points/points.css',
+  'components/scan/versions/versions.css',
+  'components/leaderboard/versions/versions.css',
+  'components/leaderboard/versions/stage.css',
+  'components/leaderboard/versions/map.css',
 ]);
 
 test('legal.css only styles the legal pages, so it may load with them', () => {

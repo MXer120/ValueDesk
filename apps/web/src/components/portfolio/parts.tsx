@@ -11,6 +11,8 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Private, safeText, useMask, usePrivacy, type PrivacyKey, type PrivacyMode } from '../../privacy';
 import { DASH, MINUS, fmtUsd, signClass } from '../../format';
 import { dotGrid, timeTicks } from './timeTicks';
+import { pathOf, sampleLine, samplesFor, yExtent, type LineShape } from '../../chart/lineMorph';
+import { useLineMorph } from '../../chart/useLineMorph';
 import '../Portfolio.css';
 import { fmtFixed, fmtNum } from '../../numStyle';
 
@@ -468,8 +470,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   const uid = useId().replace(/:/g, '');
   const ID = { fillUp: `${uid}-fu`, fillDown: `${uid}-fd`, dotUp: `${uid}-du`, dotDown: `${uid}-dd`, dotGround: `${uid}-dg`, clipUp: `${uid}-cu`, clipDown: `${uid}-cd`, washUp: `${uid}-wu`, washDown: `${uid}-wd`, fadeUp: `${uid}-au`, fadeDown: `${uid}-ad`, maskUp: `${uid}-mu`, maskDown: `${uid}-md` };
 
-  if (pts.length < 2) return null;
-
+  const geo = pts.length < 2 ? null : (() => {
   const W = box.w || 600;
   const H = box.h || 110;
   /** Room for the y labels on the right, the x labels below, and headroom so
@@ -575,7 +576,73 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
       if (fits(cand)) { xTicks = cand; break; }
     }
   }
+  return { W, H, PAD_T, PLOT_W, PLOT_H, ys, y, tFrom, tTo, byTime, x, zeroY, runs, last, baseV, baseY, line, sideOf, dots, fmtV, niceStep, shown, lastIdx, xTicks };
+  })();
 
+  /*
+   * THE SWITCH (owner 2026-11-26: "make switching between all charts like type and timeframe ... smooth like the main
+   * chart on trade"). Another range, Value to PnL, another wallet: the line on screen reshapes into the new one on the
+   * trading chart's clock, its start level and fill with it, while the axis labels cross-fade (chart/lineMorph.ts).
+   * A new point or a resize redraws at once.
+   */
+  const target: LineShape | null = geo
+    ? { pts: sampleLine(pts.map((p, i) => [geo.x(i), geo.y(p.v)] as const), samplesFor(geo.PLOT_W), clean), base: clean ? geo.baseY : geo.zeroY }
+    : null;
+  const labelsOf = (g: NonNullable<typeof geo>): ReactNode => (
+    <>
+      {g.shown.map((t) => {
+        const label = clean && unit === 'usd' && g.niceStep >= 1 ? wholeUsd(t) : compactAxis && unit === 'usd' ? fmtCompactUsd(t) : g.fmtV(t);
+        return (
+          <g key={t}>
+            {!clean && (
+              <line
+                x1="0" y1={g.y(t)} x2={g.PLOT_W} y2={g.y(t)}
+                className={t === 0 && !level ? 'pf-chart__zero' : 'pf-chart__grid'}
+              />
+            )}
+            {hidden
+              ? <MaskedTick x={g.PLOT_W + 5} y={g.y(t) + 3} sample={label} mode={priv.mode} mosaic={`${uid}-mz`} />
+              : <text x={g.PLOT_W + 5} y={g.y(t) + 3} className="pf-chart__ylabel">{label}</text>}
+          </g>
+        );
+      })}
+      {/* One label per ~88px past the first: a week reads in days, not half days, on the page's wide chart, and a
+          phone's 250px still gets three (as at 72px a label before). */}
+      {g.byTime && timeTicks(g.tFrom, g.tTo, Math.max(2, Math.floor(g.PLOT_W / 88) + 1)).map((tick) => {
+        const px = ((tick.t - g.tFrom) / (g.tTo - g.tFrom)) * g.PLOT_W;
+        return (
+          <text key={`x${tick.t}`} x={px} y={g.PLOT_H + 11} className="pf-chart__xlabel" textAnchor={px < 24 ? 'start' : px > g.PLOT_W - 24 ? 'end' : 'middle'}>
+            {tick.label}
+          </text>
+        );
+      })}
+      {!g.byTime && g.xTicks.map((i) => (
+        <text
+          key={`i${i}`}
+          x={Math.min(g.PLOT_W, Math.max(0, g.x(i)))}
+          /* Just under the plot, not at the very bottom of the box - the rest
+             of PAD_B is the margin below the axis. */
+          y={g.PLOT_H + 11}
+          className="pf-chart__xlabel"
+          textAnchor={i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}
+        >
+          {fmtDay(pts[i]!.t)}
+        </text>
+      ))}
+    </>
+  );
+  const labels = geo ? labelsOf(geo) : null;
+  const morph = useLineMorph(target, `${pts[0]?.t ?? ''}|${level}|${clean}|${unit}|${tone}`, labels);
+  const frame = morph.frame;
+
+  if (!geo) return null;
+  const { W, H, PAD_T, PLOT_W, PLOT_H, ys, y, tFrom, tTo, byTime, x, zeroY, runs, last, lastIdx, sideOf, dots, fmtV } = geo;
+  // While morphing, the frame's line and start level stand in for the settled ones.
+  const baseY = frame ? frame.base : geo.baseY;
+  const line = frame ? pathOf(frame.pts) : geo.line;
+  const reach = frame ? yExtent(frame.pts) : { top: y(Math.max(...ys)), foot: y(Math.min(...ys)) };
+
+  // The pointer is followed during a morph too; its readout shows once the line has landed.
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - r.left;
@@ -590,7 +657,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
     setHover(Math.min(pts.length - 1, Math.max(0, i)));
   };
 
-  const h = hover === null ? null : pts[hover]!;
+  const h = hover === null || frame || hover >= pts.length ? null : pts[hover]!;
 
   return (
     <div className="pf-chart" ref={boxRef}>
@@ -628,19 +695,19 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
                 </pattern>
               ))}
               {/* The fill is strongest at the line's furthest reach and fades towards the start level. */}
-              <linearGradient id={ID.washUp} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.max(...ys))} x2="0" y2={baseY}>
+              <linearGradient id={ID.washUp} gradientUnits="userSpaceOnUse" x1="0" y1={reach.top} x2="0" y2={baseY}>
                 <stop offset="0%" stopColor="var(--pos)" stopOpacity="0.26" />
                 <stop offset="100%" stopColor="var(--pos)" stopOpacity="0.02" />
               </linearGradient>
-              <linearGradient id={ID.washDown} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.min(...ys))} x2="0" y2={baseY}>
+              <linearGradient id={ID.washDown} gradientUnits="userSpaceOnUse" x1="0" y1={reach.foot} x2="0" y2={baseY}>
                 <stop offset="0%" stopColor="var(--neg)" stopOpacity="0.26" />
                 <stop offset="100%" stopColor="var(--neg)" stopOpacity="0.02" />
               </linearGradient>
-              <linearGradient id={ID.fadeUp} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.max(...ys))} x2="0" y2={baseY}>
+              <linearGradient id={ID.fadeUp} gradientUnits="userSpaceOnUse" x1="0" y1={reach.top} x2="0" y2={baseY}>
                 <stop offset="0%" stopColor="#fff" stopOpacity="0.9" />
                 <stop offset="100%" stopColor="#fff" stopOpacity="0.2" />
               </linearGradient>
-              <linearGradient id={ID.fadeDown} gradientUnits="userSpaceOnUse" x1="0" y1={y(Math.min(...ys))} x2="0" y2={baseY}>
+              <linearGradient id={ID.fadeDown} gradientUnits="userSpaceOnUse" x1="0" y1={reach.foot} x2="0" y2={baseY}>
                 <stop offset="0%" stopColor="#fff" stopOpacity="0.9" />
                 <stop offset="100%" stopColor="#fff" stopOpacity="0.2" />
               </linearGradient>
@@ -648,6 +715,12 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
               <mask id={ID.maskDown} maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}><rect x="0" y="0" width={W} height={H} fill={`url(#${ID.fadeDown})`} /></mask>
               <clipPath id={ID.clipUp}><rect x="-4" y="-4" width={PLOT_W + 8} height={Math.max(0, baseY + 4)} /></clipPath>
               <clipPath id={ID.clipDown}><rect x="-4" y={baseY} width={PLOT_W + 8} height={Math.max(0, PLOT_H - baseY + 4)} /></clipPath>
+            </>
+          )}
+          {!clean && frame && (
+            <>
+              <clipPath id={ID.clipUp}><rect x="-4" y="-4" width={PLOT_W + 8} height={Math.max(0, frame.base + 4)} /></clipPath>
+              <clipPath id={ID.clipDown}><rect x="-4" y={frame.base} width={PLOT_W + 8} height={Math.max(0, H - frame.base + 4)} /></clipPath>
             </>
           )}
         </defs>
@@ -665,33 +738,27 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           </>
         )}
 
-        {shown.map((t) => {
-          const label = clean && unit === 'usd' && niceStep >= 1 ? wholeUsd(t) : compactAxis && unit === 'usd' ? fmtCompactUsd(t) : fmtV(t);
-          return (
-            <g key={t}>
-              {!clean && (
-                <line
-                  x1="0" y1={y(t)} x2={PLOT_W} y2={y(t)}
-                  className={t === 0 && !level ? 'pf-chart__zero' : 'pf-chart__grid'}
-                />
-              )}
-              {hidden
-                ? <MaskedTick x={PLOT_W + 5} y={y(t) + 3} sample={label} mode={priv.mode} mosaic={`${uid}-mz`} />
-                : <text x={PLOT_W + 5} y={y(t) + 3} className="pf-chart__ylabel">{label}</text>}
-            </g>
-          );
-        })}
+        {morph.prev && <g opacity={1 - morph.e}>{morph.prev}</g>}
+        <g opacity={morph.prev ? morph.e : undefined}>{labels}</g>
 
         {/* Fills first, then the strokes on top, so a run's own line is never
             dimmed by the next run's translucent area. */}
-        {!clean && runs.map((r, i) => (
+        {!clean && frame && (
+          <>
+            <path d={`${line} L${PLOT_W},${frame.base.toFixed(1)} L0,${frame.base.toFixed(1)} Z`} fill={`url(#${ID.fillUp})`} clipPath={`url(#${ID.clipUp})`} />
+            <path d={`${line} L${PLOT_W},${frame.base.toFixed(1)} L0,${frame.base.toFixed(1)} Z`} fill={`url(#${ID.fillDown})`} clipPath={`url(#${ID.clipDown})`} />
+            <path d={line} className={`pf-chart__line ${tone === 'equity' ? 'neutral' : 'pos'}`} clipPath={`url(#${ID.clipUp})`} />
+            <path d={line} className="pf-chart__line neg" clipPath={`url(#${ID.clipDown})`} />
+          </>
+        )}
+        {!clean && !frame && runs.map((r, i) => (
           <path
             key={`f${i}`}
             d={`${r.d} L${r.x1.toFixed(1)},${zeroY.toFixed(1)} L${r.x0.toFixed(1)},${zeroY.toFixed(1)} Z`}
             fill={`url(#${r.up ? ID.fillUp : ID.fillDown})`}
           />
         ))}
-        {!clean && runs.map((r, i) => (
+        {!clean && !frame && runs.map((r, i) => (
           <path
             key={`l${i}`}
             d={r.d}
@@ -699,31 +766,9 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
           />
         ))}
 
-        {byTime && timeTicks(tFrom, tTo, Math.max(2, Math.floor(PLOT_W / 72))).map((tick) => {
-          const px = ((tick.t - tFrom) / (tTo - tFrom)) * PLOT_W;
-          return (
-            <text key={tick.t} x={px} y={PLOT_H + 11} className="pf-chart__xlabel" textAnchor={px < 24 ? 'start' : px > PLOT_W - 24 ? 'end' : 'middle'}>
-              {tick.label}
-            </text>
-          );
-        })}
-        {!byTime && xTicks.map((i) => (
-          <text
-            key={i}
-            x={Math.min(PLOT_W, Math.max(0, x(i)))}
-            /* Just under the plot, not at the very bottom of the box - the rest
-               of PAD_B is the margin below the axis. */
-            y={PLOT_H + 11}
-            className="pf-chart__xlabel"
-            textAnchor={i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}
-          >
-            {fmtDay(pts[i]!.t)}
-          </text>
-        ))}
-
         {clean && !h && lastIdx > 0 && (
           <circle
-            cx={x(lastIdx)} cy={y(last)} r="3"
+            cx={frame ? frame.pts[frame.pts.length - 1]![0] : x(lastIdx)} cy={frame ? frame.pts[frame.pts.length - 1]![1] : y(last)} r="3"
             className={`pf-chart__dot ${sideOf(last)}`}
           />
         )}

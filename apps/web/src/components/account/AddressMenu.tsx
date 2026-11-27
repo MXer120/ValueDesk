@@ -9,6 +9,7 @@ import { useAccountTotals } from './useAccountTotals';
 import { NO_ACCOUNT_TRANSFER, useAccountExists } from './useAccountExists';
 import { openConnectDialog } from './connect';
 import { requestDeposit, requestSignOut, requestTransfer, requestWithdrawFrom } from './actions';
+import { DepositIcon, TransferIcon, WithdrawIcon } from './moneyIcons';
 import { useMask } from '../../privacy';
 import { fmtUsd } from '../../format';
 import { fmtDecimalString } from '../../numStyle';
@@ -158,7 +159,7 @@ export function AddressMenu({ address, onClose, closing = false, onExited, onPor
             disabled={noAccount}
             onClick={run(() => requestTransfer({ from: 'spot', to: 'perps' }))}
           >
-            <SwapIcon />
+            <TransferIcon />
           </button>
           <div className="acct-menu__acct">
             <div className="acct-menu__acct-main">
@@ -173,7 +174,7 @@ export function AddressMenu({ address, onClose, closing = false, onExited, onPor
               title="Withdraw"
               onClick={run(() => requestWithdrawFrom('spot'))}
             >
-              <UploadIcon />
+              <WithdrawIcon />
             </button>
           </div>
         </div>
@@ -200,7 +201,7 @@ export function AddressMenu({ address, onClose, closing = false, onExited, onPor
             title="Deposit"
             onClick={run(requestDeposit)}
           >
-            <DownloadIcon />
+            <DepositIcon />
           </button>
           <Collapse open={evmOpen}>
             <ul className="acct-menu__holdings">
@@ -280,11 +281,6 @@ const glyph = (d: string, size = 16) => () => (
     <path d={d} />
   </svg>
 );
-/** Out of the account: an arrow leaving a tray. */
-const UploadIcon = glyph('M8 10.5V2.5M5 5.5l3-3 3 3M2.5 10v2.2c0 .7.6 1.3 1.3 1.3h8.4c.7 0 1.3-.6 1.3-1.3V10');
-/** Into the account: the same tray, arrow turned round. */
-const DownloadIcon = glyph('M8 2.5v8M5 7.5l3 3 3-3M2.5 10v2.2c0 .7.6 1.3 1.3 1.3h8.4c.7 0 1.3-.6 1.3-1.3V10');
-const SwapIcon = glyph('M5 2.5v11M2.5 5 5 2.5 7.5 5M11 13.5v-11M8.5 11 11 13.5 13.5 11');
 const CopyIcon = glyph('M5.5 5.5V3.8c0-.7.6-1.3 1.3-1.3h5.4c.7 0 1.3.6 1.3 1.3v5.4c0 .7-.6 1.3-1.3 1.3h-1.7M3.8 5.5h5.4c.7 0 1.3.6 1.3 1.3v5.4c0 .7-.6 1.3-1.3 1.3H3.8c-.7 0-1.3-.6-1.3-1.3V6.8c0-.7.6-1.3 1.3-1.3Z');
 /** Portfolio: a small bar chart. */
 const PortfolioIcon = glyph('M2.5 13.5h11M4.5 11V7.5M8 11V4.5M11.5 11V8');

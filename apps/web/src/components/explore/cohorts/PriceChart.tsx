@@ -14,6 +14,8 @@
  * previous close - never grey.
  */
 import { useMemo, useRef, useState, type PointerEvent } from 'react';
+import { pathOf, sampleLine, samplesFor, type LineShape } from '../../../chart/lineMorph';
+import { useLineMorph } from '../../../chart/useLineMorph';
 import { DASH } from '../../../format';
 import { fmtPx } from '../model';
 import { fmtFixed } from '../../../numStyle';
@@ -87,6 +89,15 @@ export function PriceChart({
     const pad = (hi - lo) * 0.08 || hi * 0.01;
     return { t0, t1, step, lo, hi, y0: lo - pad, y1: hi + pad, up: candleUp(candles) };
   }, [candles, n]);
+  // Another range or asset: the line reshapes into the new one, as the trade chart switches (chart/lineMorph.ts,
+  // owner 2026-11-26); the candles fade in on the new range (Cohorts.css).
+  const target = useMemo((): LineShape | null => {
+    if (!geo) return null;
+    const sx = (t: number) => ((t - geo.t0) / (geo.t1 - geo.t0)) * plotW + ((geo.step / (geo.t1 - geo.t0)) * plotW) / 2;
+    const sy = (v: number) => padT + (1 - (v - geo.y0) / (geo.y1 - geo.y0 || 1)) * (H - padT - padB);
+    return { pts: sampleLine(candles.map(([t, , , , c]) => [sx(t), sy(c)] as const), samplesFor(plotW), false), base: H - padB };
+  }, [geo, candles, plotW, H]);
+  const morph = useLineMorph(target, `${candles[0]?.[0] ?? ''}|${candles[n - 1]?.[0] ?? ''}`, null);
   if (!geo) return null;
 
   const { t0, t1, step, lo, hi, y0, y1, up } = geo;
@@ -96,7 +107,11 @@ export function PriceChart({
   const body = Math.max(0.6, slot * 0.62);
   const mid = (t: number) => x(t) + slot / 2;
 
-  const line = candles.map(([t, , , , c], i) => `${i ? 'L' : 'M'}${mid(t).toFixed(1)} ${y(c).toFixed(1)}`).join(' ');
+  const settled = candles.map(([t, , , , c], i) => `${i ? 'L' : 'M'}${mid(t).toFixed(1)} ${y(c).toFixed(1)}`).join(' ');
+  const fr = morph.frame;
+  const line = fr ? pathOf(fr.pts) : settled;
+  const lineX0 = fr ? fr.pts[0]![0] : mid(candles[0]![0]);
+  const lineX1 = fr ? fr.pts[fr.pts.length - 1]![0] : mid(candles[n - 1]![0]);
   const first = candles[0]!;
   const last = candles[n - 1]!;
   const rising = last[4] >= first[1];
@@ -133,7 +148,7 @@ export function PriceChart({
           const yy = padT + f * (H - padT - padB);
           return <line key={f} x1="0" x2={plotW} y1={yy} y2={yy} className="coh-lean__grid" vectorEffect="non-scaling-stroke" />;
         })}
-        <g className={`coh-price__candles${kind === 'candles' ? ' is-on' : ''}`} aria-hidden={kind !== 'candles'}>
+        <g key={`c${t0}`} className={`coh-price__candles${kind === 'candles' ? ' is-on' : ''}`} aria-hidden={kind !== 'candles'}>
           {candles.map(([t, o, hh, l, c], i) => {
             const cx = mid(t);
             const top = y(Math.max(o, c));
@@ -148,7 +163,7 @@ export function PriceChart({
           })}
         </g>
         <g className={`coh-price__lineg${kind === 'line' ? ' is-on' : ''}`} aria-hidden={kind !== 'line'}>
-          <path d={`${line} L${mid(last[0])} ${H - padB} L${mid(first[0])} ${H - padB} Z`} fill="url(#coh-price-fill)" />
+          <path d={`${line} L${lineX1} ${H - padB} L${lineX0} ${H - padB} Z`} fill="url(#coh-price-fill)" />
           <path d={line} className={`coh-price__line ${rising ? 'pos' : 'neg'}`} vectorEffect="non-scaling-stroke" />
         </g>
         {h && <line x1={mid(h[0])} x2={mid(h[0])} y1={padT} y2={H - padB} className="coh-lean__cross" vectorEffect="non-scaling-stroke" />}

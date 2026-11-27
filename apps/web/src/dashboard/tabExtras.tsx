@@ -2,8 +2,8 @@
  * Extra tabs a trader adds to a tabbed panel - the bottom account band and the
  * chart card on the trade page.
  *
- * The + opens the widget sidebar edit mode uses (the same window, cards and
- * sketches, EditMode.tsx), listing every widget of the catalog (bar the panel
+ * The + opens a widget sidebar (its window, cards and sketches drawn by
+ * editMode.css, the first layout editor's sheet), listing every widget of the catalog (bar the panel
  * itself) by group, and on the chart every market for another chart, starred
  * ones first; one search narrows both, and a card adds its tab. A right-click
  * on a tab offers Close tab, Add widget and Duplicate. Kept per panel on this

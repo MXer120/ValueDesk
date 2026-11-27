@@ -59,6 +59,11 @@
 /* Drawn to the measured box, out of the flow, so its rounded size cannot push the card by a fraction of a pixel. */
 .pf.pfx .pfx-chart .pf-chart__svg { position: absolute; top: 0; left: 0; }
 .pf.pfx .pfx-chart .pf-chart__line { stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; }
+/* Line to calendar and back is two different charts: the one arriving fades in, on the trade chart's ease (owner
+   2026-11-26: switching charts "smooth like the main chart on trade"; line to line morphs, parts.tsx). */
+.pfx-chart .pf-card__body > :is(.pf-chart, .pfc), .pfx-chart .pf-card__body > .private-scope > .pf-chart { animation: pfx-chart-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+@keyframes pfx-chart-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .pfx-chart .pf-card__body > :is(.pf-chart, .pfc), .pfx-chart .pf-card__body > .private-scope > .pf-chart { animation: none; } }
 /* The dotted ground: gray on the whole plot; only the fill between the line and the start level colours its dots. */
 .pf-chart__dots.pos { fill: var(--pos); }
 .pf-chart__dots.neg { fill: var(--neg); }

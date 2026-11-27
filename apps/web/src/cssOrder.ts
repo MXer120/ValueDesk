@@ -35,6 +35,7 @@ import 'react-resizable/css/styles.css';
 import './dashboard/dashboard.css';
 import './dashboard/sketches.css';
 import './dashboard/editMode.css';
+import './dashboard/dock/dock.css';
 import './dashboard/responsive.css';
 import './components/Leaderboard.css';
 import './components/FeeTier.css';
@@ -74,6 +75,8 @@ import './components/referrals/referrals.css';
 // Last: VIP is gold over every pill, button and row it marks (owner 2026-11-14).
 import './components/vip.css';
 import './components/portfolio/PortfolioPage.css';
+// The Portfolio page (the wallet, 2026-11-26): after the page before it, whose chart card it reuses and restyles.
+import './components/portfolio/wallet/wallet.css';
 import './components/explore/cohorts/Cohorts.css';
 import './components/explore/markets/Markets.css';
 import './components/copy/Copy.css';
