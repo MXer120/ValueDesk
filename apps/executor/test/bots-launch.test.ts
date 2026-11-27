@@ -732,6 +732,40 @@ test('VIP both ways: a failed read of VIP status moves nobody back; without EXEC
   await p.cleanup();
 });
 
+test('VIP check found live 2026-11-27: server 2 names server 1 only by EXECUTOR_BETA_URL (volume from its ledger copy) - the VIP check and the calendar come from it; with no way to check, the sweep moves nobody back', async () => {
+  // Production server 2: EXECUTOR_BUILDER_DB + EXECUTOR_BETA_URL, no EXECUTOR_BUILDER_URL / _VIP_CHECK_URL / _CALENDAR_URL.
+  const s2 = loadConfig({ EXECUTOR_EDGE: 'none', EXECUTOR_BUILDER_DB: '/x/builder.db', EXECUTOR_BETA_URL: 'https://s1.test/api/vs/builder/beta' });
+  assert.equal(s2.vipCheckUrl, 'https://s1.test/api/vs/bots/vip');
+  assert.equal(s2.calendarUrl, 'https://s1.test/api/vs/calendar');
+  // The builder URL still wins, and an explicit one wins over both.
+  const both1 = loadConfig({ EXECUTOR_EDGE: 'none', EXECUTOR_BUILDER_URL: 'https://api.test/api/vs/builder/volume', EXECUTOR_BETA_URL: 'https://s1.test/api/vs/builder/beta' });
+  assert.equal(both1.vipCheckUrl, 'https://api.test/api/vs/bots/vip');
+  assert.equal(loadConfig({ EXECUTOR_EDGE: 'none', EXECUTOR_VIP_CHECK_URL: 'https://c.test/v', EXECUTOR_BETA_URL: 'https://s1.test/b' }).vipCheckUrl, 'https://c.test/v');
+  assert.equal(loadConfig({ EXECUTOR_EDGE: 'none' }).vipCheckUrl, null);
+  // The VIP box as it was: no check address at all. Its sweep used to read that as "not VIP" and move every wallet
+  // not on EXECUTOR_VIP_WALLETS back; now it is a failed read - nobody moves.
+  const w = new Wallet();
+  const p = both();
+  p.std.svc.acceptTerms(w.sign(p.std.svc.executorId, 'accept-terms', TERMS()), ctx);
+  const b = await start(p.std, w, { ...MM, paper: true });
+  p.std.svc.vipMove(w.sign(p.std.svc.executorId, 'vip-move', {}), ctx);
+  await until(() => p.std.svc.vipJob(w.address)?.state !== 'running');
+  assert.equal(p.std.svc.vipJob(w.address)!.state, 'done', p.std.svc.vipJob(w.address)!.error ?? '');
+  (p.vip.svc as unknown as { cfg: ExecutorConfig }).cfg.vipCheckUrl = null;
+  assert.deepEqual(await p.vip.svc.sweepVip(), [], 'no check address: nobody moved back');
+  assert.equal(p.vip.svc.algos.get(b.algo.id)!.status, 'scheduled');
+  // And a move up with no check address says so, rather than "not VIP".
+  const v = new Wallet();
+  (p.std.svc as unknown as { cfg: ExecutorConfig }).cfg.vipCheckUrl = null;
+  p.std.svc.acceptTerms(v.sign(p.std.svc.executorId, 'accept-terms', TERMS()), ctx);
+  await start(p.std, v, { ...MM, paper: true });
+  p.std.svc.vipMove(v.sign(p.std.svc.executorId, 'vip-move', {}), ctx);
+  await until(() => p.std.svc.vipJob(v.address)?.state !== 'running');
+  assert.equal(p.std.svc.vipJob(v.address)!.state, 'failed');
+  assert.match(p.std.svc.vipJob(v.address)!.error ?? '', /cannot be checked here/);
+  await p.cleanup();
+});
+
 test('infra stats (owner 2026-11-08): live bots against the cap of 20, practice apart, the SoDEX budget, bot totals per market', async () => {
   const w = new Wallet();
   const h = make({ EXECUTOR_LIVE_ALGOS_WALLETS: w.address });

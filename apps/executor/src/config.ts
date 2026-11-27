@@ -180,26 +180,31 @@ export function betaUrlFrom(raw: string | undefined, builderRaw: string | undefi
   return u.toString();
 }
 
-/** EXECUTOR_CALENDAR_URL, else the builder URL's server with /api/vs/calendar. */
-export function calendarUrlFrom(raw: string | undefined, builderRaw: string | undefined): string | null {
-  if (raw?.trim()) return builderUrl(raw);
-  const b = builderUrl(builderRaw);
+/**
+ * A path on the API server (server 1), found from EXECUTOR_BUILDER_URL, else EXECUTOR_BETA_URL (both name that server).
+ * Found live 2026-11-27: server 2 reads the volume from its copy of the ledger (EXECUTOR_BUILDER_DB) and names server 1
+ * only by EXECUTOR_BETA_URL, so with the builder URL alone it had no VIP check (every VIP move failed "VIP status cannot
+ * be checked here", every wallet not on EXECUTOR_VIP_WALLETS) and no calendar (news gates stayed open).
+ */
+function apiPath(path: string, builderRaw: string | undefined, betaRaw: string | undefined): string | null {
+  const b = builderUrl(builderRaw) ?? builderUrl(betaRaw);
   if (!b) return null;
   const u = new URL(b);
-  u.pathname = '/api/vs/calendar';
+  u.pathname = path;
   u.search = '';
   return u.toString();
 }
 
-/** EXECUTOR_VIP_CHECK_URL, else the builder URL's server with /api/vs/bots/vip. */
-export function vipCheckUrlFrom(raw: string | undefined, builderRaw: string | undefined): string | null {
+/** EXECUTOR_CALENDAR_URL, else the API server's /api/vs/calendar (from the builder URL, else the beta URL). */
+export function calendarUrlFrom(raw: string | undefined, builderRaw: string | undefined, betaRaw?: string): string | null {
   if (raw?.trim()) return builderUrl(raw);
-  const b = builderUrl(builderRaw);
-  if (!b) return null;
-  const u = new URL(b);
-  u.pathname = '/api/vs/bots/vip';
-  u.search = '';
-  return u.toString();
+  return apiPath('/api/vs/calendar', builderRaw, betaRaw);
+}
+
+/** EXECUTOR_VIP_CHECK_URL, else the API server's /api/vs/bots/vip (from the builder URL, else the beta URL). */
+export function vipCheckUrlFrom(raw: string | undefined, builderRaw: string | undefined, betaRaw?: string): string | null {
+  if (raw?.trim()) return builderUrl(raw);
+  return apiPath('/api/vs/bots/vip', builderRaw, betaRaw);
 }
 
 /** EXECUTOR_VIP_PUBKEY: a base64url SPKI (a P-256 public key is 91 bytes, ~122 characters); unset: null. */
@@ -282,11 +287,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
     builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,
     betaUrl: betaUrlFrom(env.EXECUTOR_BETA_URL, env.EXECUTOR_BUILDER_URL),
-    calendarUrl: calendarUrlFrom(env.EXECUTOR_CALENDAR_URL, env.EXECUTOR_BUILDER_URL),
+    calendarUrl: calendarUrlFrom(env.EXECUTOR_CALENDAR_URL, env.EXECUTOR_BUILDER_URL, env.EXECUTOR_BETA_URL),
     tier: env.EXECUTOR_TIER?.trim() === 'vip' ? 'vip' : 'standard',
     vipToken: env.EXECUTOR_VIP_TOKEN?.trim() || null,
     vipUrl: env.EXECUTOR_VIP_URL?.trim() ? builderUrl(env.EXECUTOR_VIP_URL) : null,
-    vipCheckUrl: vipCheckUrlFrom(env.EXECUTOR_VIP_CHECK_URL, env.EXECUTOR_BUILDER_URL),
+    vipCheckUrl: vipCheckUrlFrom(env.EXECUTOR_VIP_CHECK_URL, env.EXECUTOR_BUILDER_URL, env.EXECUTOR_BETA_URL),
     vipOpen: env.EXECUTOR_VIP_OPEN?.trim() === '1',
     vipWallets: vipWalletsFrom(env.EXECUTOR_VIP_WALLETS),
     vipPubkey: vipPubkeyFrom(env.EXECUTOR_VIP_PUBKEY),

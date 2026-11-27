@@ -1182,7 +1182,8 @@ export class ExecutorService {
   private async vipEligible(owner: string): Promise<{ ok: boolean; why: string }> {
     if (this.cfg.vipOpen) return { ok: true, why: 'open' };
     if (this.vipListed(owner)) return { ok: true, why: 'listed' };
-    if (!this.cfg.vipCheckUrl) return { ok: false, why: 'VIP status cannot be checked here.' };
+    // Not knowing is not "not VIP": a read failure (the sweep moves nobody back, a move up says it cannot check).
+    if (!this.cfg.vipCheckUrl) throw new Error('VIP status cannot be checked here.');
     const u = new URL(this.cfg.vipCheckUrl);
     u.searchParams.set('address', owner);
     const res = await this.deps.fetch(u.toString(), { headers: this.peerHeaders({ Accept: 'application/json' }), signal: AbortSignal.timeout(5_000) });
