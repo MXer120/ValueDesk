@@ -95,8 +95,9 @@ test('Top traders mixes both kinds, each read its own way; the Copy and Counter-
   assert.deepEqual(new Set(wr), new Set([addr(1), addr(11)]));
   // Won or lost: the 80k loss ranks above the 20k win, below nothing smaller.
   assert.equal(shapeGrid(all, { ...top, sort: 'pnl' })[0]!.row.address, addr(11));
-  // Ranked by score, both kinds are dealt in: two to copy, then one to counter.
-  assert.deepEqual(shapeGrid(all, top).map((s) => s.score.kind), ['copy', 'copy', 'counter', 'counter']);
+  // Ranked by score: highest first, whatever the kind.
+  const scores = shapeGrid(all, top).map((s) => s.score.score);
+  assert.deepEqual(scores, [...scores].sort((a, b) => b - a));
   assert.equal(winRateLabel('mixed', 0.6), '≥ 60% to copy, ≤ 40% to counter');
   assert.equal(winRateLabel('counter', 0.7), '≤ 30%');
 });

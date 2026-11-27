@@ -225,23 +225,9 @@ export function shapeGrid(
     if (va !== null && vb !== null && va !== vb) return vb - va;
     return b.score.score - a.score.score;
   });
-  return kind === 'mixed' && o.sort === 'score' ? interleave(sorted) : sorted;
-}
-
-/** In a mixed grid ranked by score, two traders to copy for every one to counter. */
-const MIX_WEIGHT: Record<ScoreKind, number> = { copy: 2, counter: 1 };
-
-/**
- * A mixed grid ranked by score, dealt by rank within each kind (copy, copy,
- * counter, ...): copy scores run higher than counter scores, and a plain sort
- * put every counter-trade below the first row.
- */
-function interleave(sorted: readonly Scored[]): Scored[] {
-  const seen: Record<ScoreKind, number> = { copy: 0, counter: 0 };
-  const keyed = sorted.map((s) => ({ s, at: ++seen[s.score.kind] / MIX_WEIGHT[s.score.kind] }));
-  // A tie (the second copy and the first counter) goes to the copy: C C K C C K.
-  const first = (k: { s: Scored }) => (k.s.score.kind === 'copy' ? 0 : 1);
-  return keyed.sort((a, b) => a.at - b.at || first(a) - first(b) || b.s.score.score - a.s.score.score).map((k) => k.s);
+  // Highest score first, whatever the kind (owner 2026-11-27: "ensure default sorting is by highest score"); the grid no
+  // longer deals two to copy for every one to counter.
+  return sorted;
 }
 
 /**

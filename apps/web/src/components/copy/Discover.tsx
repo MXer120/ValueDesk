@@ -38,6 +38,8 @@ interface GridPrefs {
   filters: Filters;
   /** The platforms whose traders the grid shows (the cohorts' venue chips). */
   venues: Venue[];
+  /** 2 once the sort was reset to the highest score (2026-11-27); a choice made after that is kept. */
+  sortV?: number;
 }
 
 const DEFAULT_PREFS: GridPrefs = { category: 'top', sort: 'score', window: GRID_DEFAULT_WINDOW, unit: 'usd', view: 'grid', filters: NO_FILTERS, venues: [...GRID_VENUES] };
@@ -65,8 +67,11 @@ export function Discover({ onOpen, onCopy, copying, onAddress, onScan }: Discove
   if (legacy === 'sodex' || legacy === 'hyperliquid') { prefs.category = 'top'; prefs.venues = [legacy]; }
   if (!CATEGORIES.some((c) => c.id === prefs.category)) prefs.category = 'top';
   if (!SORTS[kindOf(prefs.category)].some((o) => o.id === prefs.sort)) prefs.sort = 'score';
+  // Once for every browser (owner 2026-11-27: the default is the highest score): a sort kept from before is reset; a
+  // sort picked after this is kept (sortV 2).
+  if (stored?.sortV !== 2) prefs.sort = 'score';
   const kind: GridKind = kindOf(prefs.category);
-  const patch = (p: Partial<GridPrefs>) => setStored({ ...prefs, ...p });
+  const patch = (p: Partial<GridPrefs>) => setStored({ ...prefs, ...p, sortV: 2 });
   const [q, setQ] = useState('');
   const [shown, setShown] = useState(PAGE);
   const w = prefs.window;

@@ -175,14 +175,21 @@ export function Spark({ values, className, loading }: { values: number[] | null;
   return (
     <svg className={`cpy-spark ${className ?? ''}`} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
       <defs>
-        <linearGradient id={`${id}-f`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor={up ? 'var(--pos)' : 'var(--neg)'} stopOpacity="0.28" />
-          <stop offset="1" stopColor={up ? 'var(--pos)' : 'var(--neg)'} stopOpacity="0" />
+        {/* The glow takes the line's colour where it is (owner 2026-11-27): green above the zero line, fading down to it;
+            red below it, fading up to it. */}
+        <linearGradient id={`${id}-fp`} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2={zero}>
+          <stop offset="0" stopColor="var(--pos)" stopOpacity="0.32" />
+          <stop offset="1" stopColor="var(--pos)" stopOpacity="0.04" />
+        </linearGradient>
+        <linearGradient id={`${id}-fn`} gradientUnits="userSpaceOnUse" x1="0" y1={H} x2="0" y2={zero}>
+          <stop offset="0" stopColor="var(--neg)" stopOpacity="0.42" />
+          <stop offset="1" stopColor="var(--neg)" stopOpacity="0.08" />
         </linearGradient>
         <clipPath id={`${id}-a`}><rect x="0" y="0" width={W} height={zero} /></clipPath>
         <clipPath id={`${id}-b`}><rect x="0" y={zero} width={W} height={H - zero} /></clipPath>
       </defs>
-      <path d={`${line}L${W},${H}L0,${H}Z`} fill={`url(#${id}-f)`} />
+      <path d={`${line}L${W},${zero}L0,${zero}Z`} fill={`url(#${id}-fp)`} clipPath={`url(#${id}-a)`} />
+      <path d={`${line}L${W},${zero}L0,${zero}Z`} fill={`url(#${id}-fn)`} clipPath={`url(#${id}-b)`} />
       <line x1="0" x2={W} y1={zero} y2={zero} className="cpy-spark__zero" />
       <path d={line} className="cpy-spark__line cpy-spark__line--pos" clipPath={`url(#${id}-a)`} />
       <path d={line} className="cpy-spark__line cpy-spark__line--neg" clipPath={`url(#${id}-b)`} />
