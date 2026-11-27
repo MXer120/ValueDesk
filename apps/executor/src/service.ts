@@ -614,7 +614,11 @@ export class ExecutorService {
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
     // The Binance-led maker's reference: the box's shared Binance feed (valuescan-feed), own sockets while it is down. Hosted only.
     this.reference = cfg.kind === 'hosted' ? new BinanceReference({ path: process.env.EXECUTOR_FEED_PATH || DEFAULT_FEED_PATH, factory: plainSockets, log: deps.log, fetch: deps.fetch as never }) : null;
-    this.calendar = cfg.calendarUrl ? new CalendarFeed({ url: cfg.calendarUrl, fetch: deps.fetch, log: deps.log }) : null;
+    // The origin secret goes with it only to the server the builder or beta URL names (server 1 behind its edge gate:
+    // 403 without it, found 2026-11-27), never to an EXECUTOR_CALENDAR_URL elsewhere.
+    const sameHost = (a: string, b: string | null) => { try { return !!b && new URL(a).host === new URL(b).host; } catch { return false; } };
+    const calHeaders = cfg.calendarUrl && cfg.originSecrets[0] && (sameHost(cfg.calendarUrl, cfg.builderUrl) || sameHost(cfg.calendarUrl, cfg.betaUrl)) ? { 'X-Origin-Verify': cfg.originSecrets[0] } : undefined;
+    this.calendar = cfg.calendarUrl ? new CalendarFeed({ url: cfg.calendarUrl, fetch: deps.fetch, log: deps.log, headers: calHeaders }) : null;
     // Host calls the engine reads when it has them (A1, 2026-11-08): the active key's expiry (a bot pulls its quotes
     // before it), the wallet's own SoDEX maker fee in bp for booked fees (null: the market's base rate). Spread, so an
     // engine without them still compiles.
