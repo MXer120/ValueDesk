@@ -210,7 +210,11 @@ export function IndexConstituents({ ix, w, focus, setFocus }: { ix: VdIndex; w: 
   const targets = useRecurringTargets(w.funds);
   return (
     <Shell className="wp-sec">
-      <ShellHeader title="Constituents" subtitle={`${ix.legs.length} SoDEX Wealth funds, held as bought`} />
+      <ShellHeader
+        title="Constituents"
+        subtitle={`${ix.legs.length} SoDEX Wealth funds, held as bought`}
+        aside={<StatusPill size="sm" tone="neutral" icon="layers" title="Weights are fixed when bought and held as bought: nothing rebalances.">Fixed</StatusPill>}
+      />
       <Panel className="wp-sec__p wp-legs">
         <div className="wp-legs__h" aria-hidden="true"><span>Fund</span><span>Weight</span><span>1 month</span><span>1 year</span><span>Now</span></div>
         {ix.legs.map((l, i) => {

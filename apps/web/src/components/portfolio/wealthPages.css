@@ -388,10 +388,6 @@ html[data-theme='light'] .wp {
 .oe.it { display: flex; flex-direction: column; gap: 0; height: auto; min-height: 0; padding: 0; background: none; border: 0; box-shadow: none; }
 .oe.it .oe-tabs { margin: 0 0 var(--sp-3); border-bottom: 1px solid var(--line); }
 .it-body { display: flex; flex-direction: column; gap: 10px; }
-.it-pcts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-.it-pct { height: 26px; border: 1px solid var(--line); border-radius: var(--radius-sm, 6px); background: none; color: var(--muted); font: 500 var(--fs-xs) var(--font-num); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
-.it-pct:hover:not(:disabled), .it-pct.is-on { border-color: var(--accent); color: var(--text); }
-.it-pct:disabled { opacity: 0.45; cursor: not-allowed; }
 .it-slider { margin-top: 2px; }
 .it-legs { display: flex; flex-direction: column; margin: 2px 0; padding: 0; list-style: none; }
 .it-leg { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-height: 40px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-xs); }
@@ -478,3 +474,10 @@ html[data-theme='light'] .wp {
   .wp-hold__r--lt .wp-hold__n { flex-direction: column; align-items: flex-start; gap: 1px; }
   .wp-hold__r--lt .wp-hold__via { gap: 2px; }
 }
+
+/* The index ticket's unit: the trade page's unit label with the coin's mark, not a switch (USDC only). */
+.it-unit { display: inline-flex; align-items: center; gap: 5px; padding-left: 8px; color: var(--muted); }
+/* The trade page's slider and fee colours come from its panel (--oe-tint on .dash-panel__body > .panel.oe); the index
+   ticket sets them itself: green on Buy, red on Sell, as the trade ticket does. */
+.oe.it { --oe-tint: var(--pos); --oe-wash: 10%; --oe-edge: 35%; }
+.oe.it:has(.oe-side__btn.is-sell) { --oe-tint: var(--neg); }

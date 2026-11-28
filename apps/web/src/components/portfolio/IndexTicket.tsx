@@ -15,7 +15,14 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { CoinIcon } from '../CoinIcon';
 import { NoWallet } from '../EmptyState';
-import { decimalInput } from '../numberInput';
+import { DraftInput, decimalInput, integerInput } from '../numberInput';
+import { toInputText } from '../../numStyle';
+import { useVenueFees } from '../useVenueFees';
+import { FeeSchedule } from '../FeeSchedule';
+import { useBuilderFee } from '../account/useBuilderFee';
+import { fmtRate, withBuilder } from '../../fees';
+import { readInfo } from './FundAbout';
+import { useLanguage } from '../../i18n/store';
 import { Spinner, useStepLabel } from '../funds/ui';
 import { DASH, fmtUsd, num } from '../../format';
 import { useMask } from '../../privacy';
@@ -88,6 +95,66 @@ function EnableButton({ state, side }: { state: 'restoring' | 'off'; side: 'buy'
     <button type="button" className={`oe-side__btn is-${side}${state === 'restoring' ? ' is-wait' : ''}`} disabled={state === 'restoring'} onClick={() => requestEnableTrading()}>
       {state === 'restoring' ? <Spinner label="Checking trading" /> : 'Enable trading'}
     </button>
+  );
+}
+
+/** The trade page's size slider (OrderEntry.tsx): rail, striped fill, notches at 0/25/50/75/100 and a % box. */
+const NOTCHES = [0, 25, 50, 75, 100];
+function PctSlider({ pct, onPct, label, disabled }: { pct: number; onPct: (p: number) => void; label: string; disabled?: boolean }) {
+  return (
+    <div className="oe-slider">
+      <div className="oe-slider__rail" style={{ ['--oe-p' as string]: pct / 100 }}>
+        <div className="oe-slider__fill" />
+        {NOTCHES.map((n) => <i key={n} className={`oe-slider__notch${pct >= n ? ' is-past' : ''}`} style={{ left: `${n}%` }} aria-hidden="true" />)}
+        <input className="oe-slider__input" type="range" min={0} max={100} step={1} value={pct} aria-label={label} disabled={disabled}
+          onChange={(e) => { e.currentTarget.parentElement?.style.setProperty('--oe-p', String(Number(e.currentTarget.value) / 100)); onPct(Number(e.currentTarget.value)); }} />
+      </div>
+      <div className="oe-inputrow oe-pctbox">
+        <DraftInput className="oe-input" value={pct > 0 ? String(pct) : ''} onDraft={(t) => onPct(t === '' ? 0 : Math.min(100, Number(t)))} sanitize={(raw) => integerInput(raw)} inputMode="numeric" aria-label={label} placeholder="0" disabled={disabled} />
+        <span className="oe-suffix">%</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Fees as the trade page shows them (owner 2026-11-28: "also fees if they're documented from sodex side"): the
+ * order-book legs at this account's SoDEX spot taker rate with ValueDesk's builder fee in it, the row opening the
+ * same fee schedule; subscription legs at the management fee their vault states on chain (SoDEX's fund details), or
+ * "Not stated" where SoDEX states none. Nothing is assumed.
+ */
+function FeeRows({ legs, side, address }: { legs: ReadonlyArray<{ fundId: string; route: 'spot' | 'sub' }>; side: 'buy' | 'sell'; address: string }) {
+  const [open, setOpen] = useState(false);
+  const venue = useVenueFees(address);
+  const builder = useBuilderFee('spot', side, address);
+  const lang = useLanguage();
+  const subs = legs.filter((l) => l.route === 'sub').map((l) => l.fundId);
+  const [mgmt, setMgmt] = useState<Array<{ fundId: string; fee: number | null }> | null>(null);
+  const subKey = subs.join(',');
+  useEffect(() => {
+    if (!subs.length) { setMgmt([]); return; }
+    let off = false;
+    void Promise.allSettled(subs.map((id) => readInfo(id, lang))).then((rs) => {
+      if (!off) setMgmt(rs.map((r, i) => ({ fundId: subs[i]!, fee: r.status === 'fulfilled' ? r.value?.vault?.managementFee ?? null : null })));
+    });
+    return () => { off = true; };
+  }, [subKey, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+  const book = legs.some((l) => l.route === 'spot');
+  const taker = venue.spot?.taker ?? null;
+  const bookFee = taker !== null ? fmtRate(withBuilder(taker, builder?.charged ? builder.fraction : 0)) : null;
+  const known = (mgmt ?? []).filter((m) => m.fee !== null && m.fee > 0);
+  const subFee = !subs.length ? null : mgmt === null ? '…' : known.length ? `${known.map((m) => `${(m.fee! * 100).toFixed(2)}%`).filter((v, i, a) => a.indexOf(v) === i).join(' / ')} a year` : 'Not stated';
+  return (
+    <>
+      {book && (
+        <div className="oe-out__row">
+          <dt className="oe-out__k"><button type="button" className="oe-feebtn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} title="Fee schedule">Fees, order book</button></dt>
+          <dd className="oe-out__v"><button type="button" className="oe-feebtn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} title="Fee schedule">{bookFee ?? DASH}</button></dd>
+        </div>
+      )}
+      {subFee !== null && <Row k="Fund fee, on chain" v={subFee} />}
+      <FeeSchedule open={open} onClose={() => setOpen(false)} engine="spot" address={address} rates={venue} />
+    </>
   );
 }
 
@@ -208,17 +275,19 @@ function BuyTab({ ix, w, address, provider, onDone }: { ix: VdIndex; w: WealthSt
     setFinished(true);
   };
 
-  const pick = (p: number) => { if (spendable) setAmount(String(Math.floor(spendable * p * 100) / 100)); };
+  const pick = (p: number) => { if (spendable) { setAmount(p > 0 ? String(Math.floor(spendable * (p / 100) * 100) / 100) : ''); setStates({}); setFinished(false); } };
+  const pct = spendable && spendable > 0 && usd > 0 ? Math.min(100, Math.round((usd / spendable) * 100)) : 0;
   return (
     <div className="it-body">
-      <div className={`oe-inputrow${problem && usd ? ' is-bad' : ''}`}>
-        <label className="oe-inlabel" htmlFor="it-amt">Amount</label>
-        <input id="it-amt" className="oe-input" value={amount} onChange={(e) => { setAmount(decimalInput(e.target.value, { prev: amount })); setStates({}); setFinished(false); }} inputMode="decimal" placeholder="0.00" autoComplete="off" disabled={busy} />
-        <span className="oe-suffix"><CoinIcon coin="USDC" size={14} />&nbsp;USDC</span>
+      <div className="oe-field">
+        <div className={`oe-inputrow${problem && usd ? ' is-bad' : ''}`}>
+          <label className="oe-inlabel" htmlFor="it-amt">Amount</label>
+          <button type="button" className="oe-chip" title="The most this wallet can put in" disabled={!spendable || busy} onClick={() => pick(100)}>MAX</button>
+          <input id="it-amt" className="oe-input" value={toInputText(amount)} onChange={(e) => { setAmount(decimalInput(e.target.value, { prev: amount })); setStates({}); setFinished(false); }} inputMode="decimal" placeholder={toInputText('0.00')} autoComplete="off" disabled={busy} />
+          <span className="oe-unitlabel it-unit"><CoinIcon coin="USDC" size={14} />USDC</span>
+        </div>
       </div>
-      <div className="it-pcts" role="group" aria-label="Part of what you can spend">
-        {[0.25, 0.5, 0.75, 1].map((p) => <button key={p} type="button" className="it-pct" disabled={!spendable || busy} onClick={() => pick(p)}>{p === 1 ? 'Max' : `${p * 100}%`}</button>)}
-      </div>
+      <PctSlider pct={pct} onPct={pick} label="Amount as a percentage of what you can spend" disabled={!spendable || busy} />
       <ul className="it-legs">
         {legs.map((l) => (
           <LegLine key={l.fundId} f={l.fund} id={l.fundId} st={states[l.fundId]} step={step ? label(step) : 'Sending'}
@@ -231,6 +300,7 @@ function BuyTab({ ix, w, address, provider, onDone }: { ix: VdIndex; w: WealthSt
         <Row k="From Spot" v={`${fmtUsd(needSpot)} of ${bal ? fmtUsd(bal.spot) : '…'}`} cls={bal && needSpot > bal.spot ? 'is-neg' : undefined} />
         <Row k="From your wallet" v={`${fmtUsd(needWallet)} of ${bal ? fmtUsd(bal.wallet) : '…'}`} cls={bal && needWallet > bal.wallet ? 'is-neg' : undefined} />
         <Row k="Confirmations" v={`${legs.length} at most`} />
+        <FeeRows legs={legs.filter((l) => l.route !== 'closed').map((l) => ({ fundId: l.fundId, route: l.route === 'spot' ? 'spot' as const : 'sub' as const }))} side="buy" address={address} />
       </dl>
       {problem && !busy && <p className="it-err" role="alert">{problem}</p>}
       {error && <p className="it-err" role="alert">{error}</p>}
@@ -240,7 +310,6 @@ function BuyTab({ ix, w, address, provider, onDone }: { ix: VdIndex; w: WealthSt
           {busy ? <Spinner label="Sending" /> : !provider ? 'Reconnect your wallet' : `Buy ${ix.legs.length} funds`}
         </button>}
       </div>
-      <p className="it-note">Weights fixed when bought, then held as bought; nothing rebalances. Order-book legs carry ValueDesk’s builder fee; subscriptions carry none.</p>
     </div>
   );
 }
@@ -313,15 +382,7 @@ function SellTab({ ix, w, address, provider, onDone }: { ix: VdIndex; w: WealthS
 
   return (
     <div className="it-body">
-      <div className="oe-slider it-slider">
-        <div className="oe-slider__rail" style={{ ['--oe-p' as string]: pct / 100 }}>
-          <div className="oe-slider__fill" />
-          <input className="oe-slider__input" type="range" min={0} max={100} step={1} value={pct} aria-label="Part of each holding to sell" onChange={(e) => setPct(Number(e.target.value))} disabled={busy} />
-        </div>
-      </div>
-      <div className="it-pcts" role="group" aria-label="Part of each holding">
-        {[25, 50, 75, 100].map((p) => <button key={p} type="button" className={`it-pct${pct === p ? ' is-on' : ''}`} disabled={busy} onClick={() => setPct(p)}>{p === 100 ? 'All' : `${p}%`}</button>)}
-      </div>
+      <PctSlider pct={pct} onPct={setPct} label="Part of each holding to sell" disabled={busy} />
       <ul className="it-legs">
         {rows.map((r) => (
           <LegLine key={r.l.fundId} f={r.f} id={r.l.fundId} st={states[r.l.fundId]} step={step ? label(step) : 'Sending'}
@@ -332,6 +393,7 @@ function SellTab({ ix, w, address, provider, onDone }: { ix: VdIndex; w: WealthS
       <dl className="oe-out">
         <Row k="Part of each holding" v={`${pct}%`} />
         <Row k="Value, about" v={any ? maskFunds(fmtUsd(total)) : DASH} />
+        <FeeRows legs={rows.filter((r) => r.how !== 'none').map((r) => ({ fundId: r.l.fundId, route: r.how === 'book' ? 'spot' as const : 'sub' as const }))} side="sell" address={address} />
       </dl>
       {!any && <p className="it-note">You hold none of these funds in this wallet.</p>}
       {error && <p className="it-err" role="alert">{error}</p>}

@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { EmptyState, Icon, Panel, Shell, ShellHeader, Skeleton, StatusPill } from '../bots/kit/kit';
 import { useLanguage } from '../../i18n/store';
 import type { FundView } from '../sodex/wealth/data';
+import { tidyHoldings } from './holdingRows';
 import { CoinIcon } from '../CoinIcon';
 
 export interface FundInfo {
@@ -24,7 +25,7 @@ export interface FundInfo {
   faq: Array<{ q: string; a: string[]; links: Array<{ label: string; href: string }> }>;
   curator: string | null;
   social: Array<{ type: string; url: string; name: string | null }>;
-  holdings: { source: 'live' | 'sodex' | 'chain'; asOf: string | null; total: number | null; stale: boolean; rows: Array<{ name: string; ticker: string | null; weight: number }>; unpriced?: string[] } | null;
+  holdings: { source: 'live' | 'sodex' | 'chain'; asOf: string | null; total: number | null; stale: boolean; rows: Array<{ name: string; ticker: string | null; weight: number }>; unpriced?: string[]; netted?: number } | null;
   holdingsNote?: string | null;
   underlyingQuote: { since: string | null; marketCap: number | null; high52w: number | null; low52w: number | null; currency: string | null; kind: string | null; pe: number | null } | null;
   vault: { issuer: string | null; launched: string | null; managementFee: number | null; performanceFee: number | null; minDeposit: string | null; minRedeemShares: string | null } | null;
@@ -54,6 +55,11 @@ export function readInfo(fundId: string, lang: string): Promise<FundInfo | null>
       if (r.status === 404) return null;
       const b = (await r.json().catch(() => ({}))) as { ok?: boolean; info?: FundInfo; error?: string };
       if (!r.ok || !b.ok || !b.info) throw new Error(b.error || `SoDEX's fund details answered ${r.status}.`);
+      // Option legs and cash lines grouped, no 0% or negative rows (holdingRows.ts).
+      if (b.info.holdings?.rows.length) {
+        const t = tidyHoldings(b.info.holdings.rows);
+        return { ...b.info, holdings: { ...b.info.holdings, rows: t.rows, netted: t.netted } };
+      }
       return b.info;
     });
   cache.set(key, { at: Date.now(), p });
@@ -167,6 +173,8 @@ export function FundAbout({ v }: { v: FundView }) {
             title="Holdings"
             subtitle={h.source === 'chain'
               ? `${h.rows.length} in the token’s basket, from its own contract, at SoDEX’s prices`
+              : h.source === 'live' && h.rows.some((r) => r.ticker === null && /^(Box spreads|Cash and money market)/.test(r.name))
+              ? `The underlying fund’s holdings, option legs and cash grouped${h.asOf ? `, as of ${day(h.asOf)}` : ''}`
               : h.source === 'live'
               ? `${h.total && h.total > Math.min(15, h.rows.length) ? `Top ${Math.min(15, h.rows.length)} of ${h.total}` : `${h.rows.length}`} of the underlying fund${h.asOf ? `, as of ${day(h.asOf)}` : ''}`
               : 'As SoDEX lists them'}
@@ -181,6 +189,7 @@ export function FundAbout({ v }: { v: FundView }) {
               </div>
             ))}
             {h.stale && <p className="wp-note">These holdings are more than a week old: the data source has not updated them since.</p>}
+            {h.netted !== undefined && Math.abs(h.netted) >= 0.0001 && <p className="wp-note">{`Small and offsetting positions net to ${(h.netted * 100).toFixed(2)}% and are not listed.`}</p>}
             {h.unpriced && h.unpriced.length > 0 && <p className="wp-note">{`Not priced on SoDEX: ${h.unpriced.join(', ')}. The weights are of the rest of the basket.`}</p>}
           </Panel>
         </Shell>

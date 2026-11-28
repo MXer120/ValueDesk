@@ -9468,5 +9468,15 @@
 "Bought through an index on ValueDesk. Each leg is held as the fund itself; sell it there.":"Über einen Index auf ValueDesk gekauft. Jeder Teil wird als der Fonds selbst gehalten; verkaufe ihn dort.",
 "Draft":"Entwurf",
 "Macro data: rates, Fed and market clocks":"Makrodaten: Zinsen, Fed und Marktzeiten",
-"In about a minute, at the vault’s price":"In etwa einer Minute, zum Preis des Vaults"
+"In about a minute, at the vault’s price":"In etwa einer Minute, zum Preis des Vaults",
+"Fixed":"Fest",
+"Weights are fixed when bought and held as bought: nothing rebalances.":"Gewichte werden beim Kauf festgelegt und wie gekauft gehalten: nichts wird umgeschichtet.",
+"The most this wallet can put in":"Das Meiste, das diese Wallet einsetzen kann",
+"Amount as a percentage of what you can spend":"Betrag als Anteil dessen, was du ausgeben kannst",
+"Fees, order book":"Gebühren, Orderbuch",
+"Fund fee, on chain":"Fondsgebühr, on-chain",
+"Not stated":"Nicht angegeben",
+"Small and offsetting positions net to {0}% and are not listed.":"Kleine und sich ausgleichende Positionen ergeben netto {0} % und sind nicht aufgeführt.",
+"The underlying fund’s holdings, option legs and cash grouped, as of {0}":"Bestände des zugrunde liegenden Fonds, Optionen und Barmittel zusammengefasst, Stand {0}",
+"The underlying fund’s holdings, option legs and cash grouped":"Bestände des zugrunde liegenden Fonds, Optionen und Barmittel zusammengefasst"
 }
