@@ -6,7 +6,7 @@
  */
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import type { Eip1193Provider } from '../../../../wallet';
-import { BoxHistory, PfpLinks, ProgressCard, Vault, type VaultDemo } from '../../vault/Vault';
+import { BoxHistory, MergeMath, PfpLinks, ProgressCard, Vault, type VaultDemo } from '../../vault/Vault';
 import { sampleVault } from './sample';
 import { bpsToPct, mergeLadder, type LotteryRules } from '../../../../blindBox';
 import { Skeleton } from '../../../bots/kit/kit';
@@ -26,6 +26,7 @@ export function BoxStage({ address, provider, sample }: { address: string | null
         {d.meta.error && !d.meta.data ? <ReadError what="The programme's rules" error={d.meta.error} retry={d.meta.retry} />
           : <Stage rules={rules} hero={<ProgressCard address={address} provider={provider} rules={rules} demo={demo} />} />}
         <div id="vault" className="sxb-vault"><Vault address={address} provider={provider} meta={d.meta.data} demo={demo} /></div>
+        <MergeMath rules={rules} />
         <div className="sxb-desk is-two">
           <BoxHistory address={address} provider={provider} demo={demo} />
           <section className="sxb-desk__inside" aria-label="What is inside">
@@ -65,9 +66,12 @@ function Stage({ rules, hero }: { rules: LotteryRules | null; hero: ReactNode })
             ) : (
               <><Skeleton className="sxb-stage__skel is-h" /><Skeleton className="sxb-stage__skel" /></>
             )}
-            {hero}
+            <div className="sxb-stage__acts">
+              <a className="rf-cta" href="/trade">Trade</a>
+              <a className="rf-howbtn" href="#vault">Open your boxes</a>
+            </div>
           </div>
-          <Shelf />
+          <div className="sxb-stage__side"><Shelf />{hero}</div>
         </div>
         <div className="sxb-stage__how" id={id} aria-hidden={!how} {...(how ? {} : { inert: '' })}>{rules && <HowSteps rules={rules} />}</div>
       </div>

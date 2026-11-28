@@ -228,7 +228,6 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
             />
           ))}
         </div>
-        {rules && <Advice rewards={rewards.data} error={rewards.error} ladder={mergeLadder(rules)} market={market.data} sosoUsd={sosoUsd} />}
       </>
     );
 
@@ -311,8 +310,6 @@ function TierCard(p: {
   const { level, ids } = p;
   const held = ids.length;
   const merges = p.mergeSize > 0 ? Math.floor(held / p.mergeSize) : 0;
-  const tier = p.market?.collections[TREASURE_BOX.address]?.tiers[level];
-  const floorUsd = tier && p.sosoUsd ? tier.floor * p.sosoUsd : null;
   const to = nextLevel(level);
   return (
     <article className={`bv-tier is-${level}${held ? '' : ' is-none'}`}>
@@ -326,17 +323,6 @@ function TierCard(p: {
         <BoxArt level={level} size={112} />
       </div>
       <div className="bv-tier__name"><b>{LEVEL_LABEL[level]}</b><span className="bv-num">{fmt(held, 0)}</span></div>
-      <dl className="bv-kv">
-        {p.stats ? (
-          <>
-            <div><dt>Paid, average</dt><dd className="bv-num">{usd(p.stats.avg)}</dd></div>
-            <div><dt>Median</dt><dd className="bv-num">{usd(p.stats.median)}</dd></div>
-            <div><dt>Low to high</dt><dd className="bv-num">{usd(p.stats.low)} – {usd(p.stats.high, 0)}</dd></div>
-            <div className="bv-kv__n"><dt>Boxes opened</dt><dd className="bv-num">{fmt(p.stats.n, 0)}</dd></div>
-          </>
-        ) : <div><dt>Paid</dt><dd>{DASH}</dd></div>}
-        <div className="bv-kv__mk"><dt>Floor on valuemint</dt><dd className="bv-num">{tier ? <>{soso(tier.floor)}{floorUsd != null && <small> {usd(floorUsd)}</small>}</> : 'None listed'}</dd></div>
-      </dl>
       {p.action === null ? (
         <div className="bv-tier__acts">
           <Button variant="primary" disabled={!p.canAct || held === 0} onClick={() => p.setAction('open')} title={p.canAct ? undefined : 'Sign in to SoDEX first'}>Open boxes</Button>
@@ -466,33 +452,74 @@ function Result({ o }: { o: OpenedBox }) {
   );
 }
 
-/** Merge or open, by what boxes paid (NFT drops left out); the floor on valuemint.store beside it, an ask. */
-function Advice({ rewards, error, ladder, market, sosoUsd }: { rewards: RewardsDoc | null; error: string | null; ladder: ReturnType<typeof mergeLadder>; market: MarketDoc | null; sosoUsd: number | null }) {
-  if (!rewards) return <p className="bv-note">{error ? `What boxes paid could not be read: ${error}` : 'Reading what boxes paid…'}</p>;
-  const tiers = market?.collections[TREASURE_BOX.address]?.tiers;
-  const rows = ladder.map((s) => ({ s, a: mergeAdvice(rewards, s.from, s.to, s.consume), sellFrom: tiers?.[s.from] && sosoUsd ? tiers[s.from]!.floor * sosoUsd * s.consume : null })).filter((r) => r.a);
-  if (!rows.length) return null;
+/**
+ * Merge math (owner 2026-11-28, his slide "Merge math"): for each merge step, what the boxes put in paid on average
+ * against what the box out paid, a bar of the difference, and a verdict: Merge when the box out pays more on average and
+ * at the median, Lottery when only its average is higher (a few large wins), Keep when it pays less. From what opened
+ * boxes paid on ValueChain, NFT drops left out: an estimate.
+ */
+export function MergeMath({ rules }: { rules: LotteryRules | null }) {
+  const rewards = usePolled('vault-rewards', (s) => fetchRewards(s), 300_000);
+  const doc = rewards.data;
+  const rows = rules && doc ? mergeLadder(rules).map((s) => ({ s, a: mergeAdvice(doc, s.from, s.to, s.consume) })).filter((r) => r.a) : [];
+  const top = Math.max(0.01, ...rows.map((r) => Math.abs(r.a!.gain / r.a!.openAvg)));
   return (
-    <section className="bv-advice" aria-label="Merge or open">
-      <h3>Merge or open?</h3>
-      <p className="bv-note">{`By what ${fmt(rewards.boxes, 0)} opened boxes paid on ValueChain, on average. A Cybereator a box may drop is not counted, which is part of why boxes list above what they pay. Past results, not a promise.`}</p>
-      <ul>
-        {rows.map(({ s, a, sellFrom }) => {
-          const pick = a!.mergeAvg > a!.openAvg ? 'merge' : 'open';
-          const thin = a!.n[1] < 30;
-          return (
-            <li key={s.from}>
-              <span className="bv-advice__step"><BoxArt level={s.from} size={22} />{s.consume}<i aria-hidden="true">→</i><BoxArt level={s.to} size={22} />1</span>
-              <span className={pick === 'open' ? 'is-best' : ''}><small>{`Open ${s.consume} ${LEVEL_LABEL[s.from]}`}</small><b className="bv-num">{usd(a!.openAvg)}</b><em>{`median ${usd(a!.openMedian)}`}</em></span>
-              <span className={pick === 'merge' ? 'is-best' : ''}><small>{`Merge into 1 ${LEVEL_LABEL[s.to]}`}</small><b className="bv-num">{usd(a!.mergeAvg)}</b><em>{`median ${usd(a!.mergeMedian)}`}</em></span>
-              <span><small>{`${s.consume} listed from`}</small><b className="bv-num">{usd(sellFrom)}</b><em>valuemint floor, an ask</em></span>
-              <StatusPill size="sm" tone={pick === 'merge' ? 'positive' : 'neutral'}>{pick === 'merge' ? `Merge, ${usd(a!.gain)} more` : `Open, ${usd(-a!.gain)} more`}{thin ? ` · ${fmt(a!.n[1], 0)} ${LEVEL_LABEL[s.to]} seen` : ''}</StatusPill>
-            </li>
-          );
-        })}
-      </ul>
+    <section className="tf bv-math" aria-label="Merge math">
+      <header className="bv-math__h">
+        <h2>Merge math</h2>
+        <StatusPill size="sm" tone="neutral">Estimated</StatusPill>
+      </header>
+      {!doc ? (rewards.error ? <p className="bv-note">{rewards.error}</p> : <div className="bv-math__rows">{[0, 1, 2].map((i) => <Skeleton key={i} className="bv-math__skel" />)}</div>) : (
+        <>
+          <div className="bv-math__cols" aria-hidden="true"><span>In</span><span>Out</span><span>Average paid, out vs in</span></div>
+          <ul className="bv-math__rows">
+            {rows.map(({ s, a }) => {
+              const pct = a!.gain / a!.openAvg;
+              const verdict = pct <= 0 ? 'keep' : a!.mergeMedian > a!.openMedian ? 'merge' : 'lottery';
+              const w = `${Math.min(100, (Math.abs(pct) / top) * 100).toFixed(1)}%`;
+              return (
+                <li key={s.from} className={`bv-math__row is-${verdict}`}>
+                  <span className="bv-math__in">
+                    <span className="bv-math__stack"><BoxArt level={s.from} size={48} /><BoxArt level={s.from} size={48} /><BoxArt level={s.from} size={48} /><em>×{s.consume}</em></span>
+                    <span><b>{LEVEL_LABEL[s.from]}</b><small className="bv-num">{usd(a!.openAvg)}</small></span>
+                  </span>
+                  <i className="bv-math__arrow" aria-hidden="true">→</i>
+                  <span className="bv-math__out"><BoxArt level={s.to} size={48} /><span><b>{LEVEL_LABEL[s.to]}</b><small className="bv-num">{usd(a!.mergeAvg)}</small></span></span>
+                  <span className="bv-math__bar">
+                    <span className="bv-math__neg">{pct < 0 && <><em className="bv-num">{`${(pct * 100).toFixed(0)}%`}</em><i style={{ width: w }} /></>}</span>
+                    <span className="bv-math__axis" />
+                    <span className="bv-math__pos">{pct > 0 && <><i style={{ width: w }} /><em className="bv-num">{`+${(pct * 100).toFixed(0)}%`}</em></>}</span>
+                  </span>
+                  <StatusPill size="sm" tone={verdict === 'merge' ? 'positive' : verdict === 'lottery' ? 'warning' : 'negative'}>{verdict === 'merge' ? 'Merge' : verdict === 'lottery' ? 'Lottery' : 'Keep'}</StatusPill>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="bv-note">{`On-chain payouts · ${fmt(doc.boxes, 0)} boxes`}</p>
+        </>
+      )}
     </section>
   );
+}
+
+const rarityOf = (c: Cybereator): string | null => c.traits.find((t) => /^(rarity|tier|grade)$/i.test(t.type))?.value ?? null;
+
+/** A revealed Cybereator's foil by its rarity trait, if it has one; none without (the card still tilts). */
+function foilOf(c: Cybereator): 'normal' | 'strong' | 'gold' | false {
+  const r = rarityOf(c)?.toLowerCase();
+  if (!r) return false;
+  return /legend|mythic|super|epic/.test(r) ? 'gold' : /rare/.test(r) ? 'strong' : 'normal';
+}
+
+/** Sealed ones sell as the collection's common floor; revealed ones at their rarity's floor when one is listed. */
+function floorOf(c: Cybereator, col: MarketDoc['collections'][string] | undefined): number | null {
+  if (!col) return null;
+  const r = rarityOf(c);
+  return (!c.sealed && r && col.tiers[r]?.floor) || col.floor;
+}
+
+function Pic({ c }: { c: Cybereator }) {
+  return c.image ? <img src={c.image} alt={c.name} loading="lazy" decoding="async" draggable={false} /> : <span className="bv-card__none"><Icon name="star" size={28} /></span>;
 }
 
 function Cybereators({ address, list, error, retry, market, sosoUsd, canGift, onGift }: {
@@ -504,8 +531,6 @@ function Cybereators({ address, list, error, retry, market, sosoUsd, canGift, on
     <div className="bv-cyhead">
       <span>Floor <b className="bv-num">{soso(col?.floor)}</b>{col?.floor != null && sosoUsd ? <small> {usd(col.floor * sosoUsd)}</small> : null}</span>
       <span>Best offer <b className="bv-num">{soso(col?.bestOffer)}</b></span>
-      <a className="tf-btn is-secondary is-sm" href={valuemintCollection(CYBEREATOR)} target="_blank" rel="noopener noreferrer">Trade on valuemint</a>
-      <a className="tf-btn is-quiet is-sm" href={CYBEREATOR_SITE} target="_blank" rel="noopener noreferrer">cybereator.com</a>
     </div>
   );
   if (!address) return <>{head}<ConnectPrompt line="Connect a wallet to see its Cybereators." /></>;
@@ -520,12 +545,13 @@ function Cybereators({ address, list, error, retry, market, sosoUsd, canGift, on
           const [ask, bid] = prices[c.id] ?? [null, null];
           return (
             <article key={c.id} className="bv-card">
-              <Holo foil="strong" className="bv-card__art">
-                {c.image ? <img src={c.image} alt={c.name} loading="lazy" decoding="async" draggable={false} /> : <span className="bv-card__none"><Icon name="star" size={28} /></span>}
-              </Holo>
+              {c.sealed
+                ? <div className="bv-card__art"><Pic c={c} /></div>
+                : <Holo foil={foilOf(c)} className="bv-card__art"><Pic c={c} /></Holo>}
               <div className="bv-card__t"><b>{c.name}</b>{c.sealed && <StatusPill size="sm" tone="warning">Sealed</StatusPill>}</div>
               {c.traits.length > 0 && !c.sealed && <ul className="bv-traits">{c.traits.filter((t) => t.value !== 'None').slice(0, 4).map((t) => <li key={t.type}><small>{t.type}</small>{t.value}</li>)}</ul>}
               <dl className="bv-kv">
+                <div><dt>Floor</dt><dd className="bv-num">{soso(floorOf(c, col))}</dd></div>
                 <div><dt>Listed at</dt><dd className="bv-num">{ask != null ? soso(ask) : 'Not listed'}</dd></div>
                 <div><dt>Best offer</dt><dd className="bv-num">{bid != null ? soso(bid) : col?.bestOffer != null ? `${soso(col.bestOffer)} (any)` : DASH}</dd></div>
               </dl>
@@ -568,7 +594,7 @@ export function BoxHistory({ address, provider, demo }: { address: string | null
       )
       : h.error && !rows ? <EmptyState icon="warning" title="Your history could not be read" description={h.error} actions={<Button onClick={h.retry}>Try again</Button>} compact />
       : !rows ? <div className="bv-results is-list">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="bv-result__skel" />)}</div>
-      : <HistoryList rows={rows} filter={filter} limit={all ? Infinity : 8} />
+      : <HistoryList rows={rows} filter={filter} capped={!all} />
   );
   return (
     <section className="bv-hist tf" aria-label="History">
@@ -605,29 +631,29 @@ function HistorySummary({ rows }: { rows: RecordRow[] }) {
   );
 }
 
-function HistoryList({ rows, filter, limit }: { rows: RecordRow[]; filter: HFilter; limit: number }) {
+function HistoryList({ rows, filter, capped }: { rows: RecordRow[]; filter: HFilter; capped: boolean }) {
   const now = useNow(30_000);
   const shown = rows.filter((r) => filter === 'all' || r.kind === filter);
   if (!shown.length) return <EmptyState icon="clock" title="Nothing here yet" description="What this wallet does with its boxes shows here." compact />;
+  const box = (r: RecordRow) => (r.tokenIds.length ? (r.tokenIds.length > 1 ? `${fmt(r.tokenIds.length, 0)} boxes` : `#${r.tokenIds[0]}`) : r.count ? plural(r.count, 'box', 'boxes') : '');
+  const detail = (r: RecordRow): ReactNode => (r.pfpTokenId ? <StatusPill tone="brand" size="sm">{`Cybereator #${r.pfpTokenId}`}</StatusPill>
+    : r.other ? `${r.direction === 'out' ? 'To' : r.direction === 'in' ? 'From' : 'Friend'} ${r.other.slice(0, 6)}…${r.other.slice(-4)}` : DASH);
   return (
-    <ul className="bv-results is-list">
-      {shown.slice(0, limit).map((r, i) => (
-        <li key={`${r.kind}:${r.tokenIds.join(',')}:${r.at}:${i}`} className={`bv-result${r.pfpTokenId ? ' is-pfp' : ''}`}>
-          <BoxArt level={r.level ?? 'Common'} size={36} />
-          <span>
-            <b>{KIND_LABEL[r.kind]}{r.kind === 'transfer' && r.direction ? (r.direction === 'out' ? ' out' : ' in') : ''}{r.level ? ` · ${r.level}` : ''}</b>
-            <small>
-              {r.tokenIds.length ? (r.tokenIds.length > 1 ? `${fmt(r.tokenIds.length, 0)} boxes` : `#${r.tokenIds[0]}`) : r.count ? plural(r.count, 'box', 'boxes') : DASH}
-              {r.other ? ` · ${r.direction === 'out' ? 'to' : r.direction === 'in' ? 'from' : 'friend'} ${r.other.slice(0, 6)}…${r.other.slice(-4)}` : ''}
-              {r.reward?.amount && r.reward.asset?.symbol ? ` · ${fmtTokens(r.reward.amount)} ${r.reward.asset.symbol}` : ''}
-            </small>
-          </span>
-          {r.pfpTokenId && <StatusPill tone="brand" size="sm">Cybereator #{r.pfpTokenId}</StatusPill>}
-          {r.usd != null && <b className="bv-num bv-result__usd">{usd(r.usd)}</b>}
-          <span className="bv-result__ago">{r.at ? fmtAgo(r.at, now) : ''}</span>
-        </li>
+    <div className={`bv-htable${capped ? ' is-capped' : ''}`} role="table" aria-label="History">
+      <div className="bv-htable__row is-head" role="row">
+        <span role="columnheader">Type</span><span role="columnheader">Box</span><span role="columnheader">Detail</span>
+        <span role="columnheader" className="is-num">Reward</span><span role="columnheader" className="is-num">When</span>
+      </div>
+      {shown.map((r, i) => (
+        <div key={`${r.kind}:${r.tokenIds.join(',')}:${r.at}:${i}`} className="bv-htable__row" role="row">
+          <span role="cell" className="bv-htable__type"><BoxArt level={r.level ?? 'Common'} size={26} /><b>{`${KIND_LABEL[r.kind]}${r.kind === 'transfer' && r.direction ? (r.direction === 'out' ? ' out' : ' in') : ''}`}</b></span>
+          <span role="cell" className="bv-htable__two"><b>{r.level ?? DASH}</b><small>{box(r)}</small></span>
+          <span role="cell">{detail(r)}</span>
+          <span role="cell" className="bv-htable__two is-num">{r.usd != null ? <><b className="bv-num">{usd(r.usd)}</b><small className="bv-num">{r.reward?.amount && r.reward.asset?.symbol ? `${fmtTokens(r.reward.amount)} ${r.reward.asset.symbol}` : ''}</small></> : <b>{DASH}</b>}</span>
+          <span role="cell" className="bv-htable__when is-num">{r.at ? fmtAgo(r.at, now) : DASH}</span>
+        </div>
       ))}
-    </ul>
+    </div>
   );
 }
 
