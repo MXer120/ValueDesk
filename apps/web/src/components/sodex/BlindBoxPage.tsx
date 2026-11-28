@@ -7,7 +7,7 @@
  * The wallet's vault (vault/Vault.tsx, owner 2026-11-28): its boxes and Cybereators, opening, merging, claiming and
  * gifting them, with SoDEX's sign-in through our relay, so this page can stand in for SoDEX's own.
  */
-import { Suspense, lazy, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { CoinIcon } from '../CoinIcon';
 import { EmptyState } from '../EmptyState';
 import { usePolled } from '../explore/cohorts/parts';
@@ -18,6 +18,7 @@ import {
 import { DASH } from '../../format';
 import type { Eip1193Provider } from '../../wallet';
 import { BoxArt } from './BoxArt';
+import { BoxStage } from './versions/boxes/Stage';
 import { BoxHistory, MergeMath, PfpLinks, ProgressCard, Vault } from './vault/Vault';
 import { DrawTab } from './vault/Draw';
 import { Pill, ProgrammeHero, ProgrammePage, ReadFailed, SegSwitch, SkelRows, SkelTiles, fmtAgo, fmtTokens, fmtUsdTight, useNow } from './parts';
@@ -25,18 +26,21 @@ import { Pill, ProgrammeHero, ProgrammePage, ReadFailed, SegSwitch, SkelRows, Sk
 const FEED_SIZE = LOTTERY_FEED_SIZE;
 
 /*
- * Localhost only (owner 2026-11-26): the page's versions behind a switch (versions/boxes/BoxVersions.tsx), Original
- * among them. A build never loads that file: `import.meta.env.DEV` is false there, so the import is dropped and
- * production renders BlindBoxOriginal, today's page, unchanged.
+ * The page is the Stage version since 2026-11-28 (owner: "the blind box page is wrong, the stage versions shouldve been
+ * shipped"; versions/boxes/Stage.tsx, where the vault rounds of 2026-11-28 were built), with no versions switch, as
+ * SoPoints. On localhost only, `localStorage['vs.dev.blindbox.sample'] = 'on'` draws it on made-up boxes
+ * (versions/boxes/sample.ts) to check the layout; a build never turns that on.
  */
-const BoxVersions = import.meta.env.DEV ? lazy(() => import('./versions/boxes/BoxVersions')) : null;
+const devSample = (): boolean => {
+  if (!import.meta.env.DEV) return false;
+  try { return localStorage.getItem('vs.dev.blindbox.sample') === 'on'; } catch { return false; }
+};
 
 export function BlindBoxPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
-  if (BoxVersions) return <Suspense fallback={null}><BoxVersions address={address} provider={provider} Original={BlindBoxOriginal} /></Suspense>;
-  return <BlindBoxOriginal address={address} provider={provider} />;
+  return <BoxStage address={address} provider={provider} sample={devSample()} />;
 }
 
-/** Today's page, as it was: the "Original" of the switch, and the only one a build has. */
+/** The page before Stage, no longer shown anywhere; kept until the owner says it can go. */
 export function BlindBoxOriginal({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
   const meta = usePolled('lottery-meta', (signal) => fetchLotteryMeta(signal), 60_000);
   const rules = meta.data?.rules ?? null;

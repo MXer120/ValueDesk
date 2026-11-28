@@ -1,3 +1,11 @@
+/* The versions frame's spacing as the page had it on localhost (versions.css, which a build does not load). */
+.sx-boxes .sx-sec__h { margin-bottom: 14px; }
+.sx-boxes .sx-sec__h p { margin: 2px 0 0; line-height: inherit; }
+@media (max-width: 720px) {
+  .sx-boxes { --sx-gap: 28px; }
+  .sx-boxes .sx-sec__h h2 { font-size: 18px; line-height: 24px; }
+}
+
 /*
  * Blind Box versions (localhost only): Stage, Path, Floor. On the Referrals ground (.rf-page) and the versions' frame
  * (.sx); the tier colours (sodex.css .is-Common … --tier) sit on the box art's glow, a dot and a range bar only. No
