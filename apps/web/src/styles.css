@@ -1334,6 +1334,9 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
 .navmore__btn.is-open .navmore__chev { transform: rotate(180deg); }
 .navmore__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
 .navmore__dot.is-down { background: var(--neg); }
+/* Not visited yet (components/navSeen.ts): our green, on More and on the page's row. */
+.navmore__dot.is-new { background: var(--pos); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pos) 22%, transparent); }
+.navmore__new { width: 7px; height: 7px; margin-left: auto; border-radius: 50%; background: var(--pos); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pos) 22%, transparent); }
 .navmore__dot.is-maintenance { background: var(--accent); }
 .navmore__btn.is-here { color: var(--text); }
 /* Two labelled columns of icon + label rows (owner 2026-11-05). */

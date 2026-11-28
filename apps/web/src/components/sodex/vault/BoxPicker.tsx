@@ -12,17 +12,19 @@ import { BoxArt } from '../BoxArt';
 import { Popup } from './Vault';
 
 const n0 = (n: number) => fmt(n, 0);
+/** At most this many boxes in one go (owner 2026-11-28: "Limit to 100 boxes at once"). */
+export const MAX_BOXES = 100;
 
 export function BoxPicker({ kind, level, ids, mergeSize, perOpen, onGo, onClose }: {
   kind: 'open' | 'merge'; level: Level; ids: string[]; mergeSize: number; perOpen: number; onGo: (ids: string[]) => void; onClose: () => void;
 }) {
   const size = kind === 'open' ? 1 : mergeSize;
-  const maxUnits = Math.floor(ids.length / Math.max(1, size));
+  const maxUnits = Math.floor(Math.min(ids.length, MAX_BOXES) / Math.max(1, size));
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set(ids.slice(0, maxUnits * size)));
   const units = Math.floor(picked.size / Math.max(1, size));
   const extra = picked.size - units * size;
   const setUnits = (u: number) => setPicked(new Set(ids.slice(0, Math.max(0, Math.min(maxUnits, u)) * size)));
-  const toggle = (id: string) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggle = (id: string) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else if (n.size < maxUnits * size || (kind === 'merge' && n.size < MAX_BOXES)) n.add(id); return n; });
   const chosen = useMemo(() => ids.filter((id) => picked.has(id)).slice(0, units * size), [ids, picked, units, size]);
   const requests = kind === 'open' ? Math.ceil(units / perOpen) : units;
   const to = nextLevel(level);
@@ -35,7 +37,7 @@ export function BoxPicker({ kind, level, ids, mergeSize, perOpen, onGo, onClose 
           {kind === 'merge' && to && <><i className="bv-pick__arrow" aria-hidden="true">→</i><BoxArt level={to} size={52} /></>}
           <span>
             <b><i className="bv-dot" aria-hidden="true" />{kind === 'open' ? name : `${mergeSize} ${name} → 1 ${to ? LEVEL_LABEL[to] : ''}`}</b>
-            <small>{`${n0(ids.length)} in this wallet`}</small>
+            <small>{ids.length > MAX_BOXES ? `${n0(ids.length)} in this wallet, up to ${n0(MAX_BOXES)} at once` : `${n0(ids.length)} in this wallet`}</small>
           </span>
         </div>
 

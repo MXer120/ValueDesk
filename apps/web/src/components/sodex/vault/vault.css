@@ -330,3 +330,7 @@
 .bv-htable__row:not(.is-head):hover { background: rgb(var(--ink) / 0.035); }
 .bv-htable__row.is-head { margin-bottom: 4px; padding-top: 8px; padding-bottom: 8px; border-radius: 10px; background: rgb(var(--ink) / 0.045); color: var(--tf-muted); font-size: 11.5px; font-weight: 500; letter-spacing: 0.01em; }
 .bv-draw__list li > span.tf-pill { flex: none; }
+
+/* The box lists stay short (about three rows) and scroll. */
+.bv-pick__ids { max-height: 96px; overscroll-behavior: contain; }
+.bv-tier__ids { max-height: 92px; overscroll-behavior: contain; }

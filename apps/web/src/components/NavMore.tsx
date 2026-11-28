@@ -14,6 +14,7 @@
  * out of the status bar, which is gone). One row; the legal page lists all the documents beside it.
  */
 import { useEffect, useLayoutEffect, useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { markSeen, useUnseen, type NewPage } from './navSeen';
 import { EXCLUDED_PATH, LIMITS_PATH, SODEX_LABELS, SODEX_VIEWS, STATUS_PATH, pathForLegal, pathForSodexView, pathForTab, type LegalPage, type SodexView, type Tab } from '../router';
 import { applyForBeta } from '../beta/access';
 import { FeedbackIcon, FEEDBACK_LABEL, openFeedback } from '../feedback/FeedbackButton';
@@ -50,6 +51,8 @@ const SODEX_ICONS: Record<SodexView, ReactNode> = {
 };
 
 /** A page of the app: a link with its href, opened in place by a plain click. */
+const NewDot = () => <span className="navmore__new" aria-label="Not visited yet" />;
+
 function PageRow({ href, icon, label, current, onOpen, children }: { href: string; icon: ReactNode; label: ReactNode; current?: boolean; onOpen?: () => void; children?: ReactNode }) {
   const go = (e: ReactMouseEvent) => {
     if (!onOpen || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
@@ -106,6 +109,11 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
     shut();
     then?.();
   };
+  const unseen = useUnseen();
+  useEffect(() => {
+    if (sodexOn) markSeen(sodexOn as NewPage);
+    if (tab === 'referrals') markSeen('referrals');
+  }, [sodexOn, tab]);
   const here = tab === 'leaderboard' || tab === 'referrals' || limits || status || excluded || legalOn || sodexOn !== null;
 
   /* The button sits mid-bar, so the menu steps left by what would run off the window. On a phone CSS places it. */
@@ -139,7 +147,7 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
         onClick={press}
       >
         More
-        {alert && <span className={`navmore__dot is-${alert}`} aria-hidden="true" />}
+        {alert ? <span className={`navmore__dot is-${alert}`} aria-hidden="true" /> : unseen.size > 0 && <span className="navmore__dot is-new" aria-hidden="true" />}
         <svg className="navmore__chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
       {pres.mounted && (
@@ -168,6 +176,7 @@ export function NavMoreBody({ alert = null, tab = null, limits = false, status =
   /** The language picker as a row: the phone's bar has no globe (NavBar.tsx). */
   languageRow?: boolean;
 }) {
+  const unseen = useUnseen();
   return (
     <>
           <div className="navmore__col">
@@ -179,13 +188,6 @@ export function NavMoreBody({ alert = null, tab = null, limits = false, status =
                 current={tab === 'leaderboard'}
                 onOpen={onNavigate && close(() => onNavigate('leaderboard'))}
                 icon={<Icon><path d="M7.5 17v-6.5h5V17M2.5 17v-4h5M12.5 17v-8h5v8M1.5 17h17" /><path d="M10 3.2 10.8 5l1.9.2-1.4 1.3.4 1.9-1.7-1-1.7 1 .4-1.9-1.4-1.3L9.2 5 10 3.2Z" /></Icon>}
-              />
-              <PageRow
-                href={pathForTab('referrals')}
-                label="Referrals"
-                current={tab === 'referrals'}
-                onOpen={onNavigate && close(() => onNavigate('referrals'))}
-                icon={<Icon><circle cx="10" cy="5" r="2.2" /><circle cx="4.8" cy="14.6" r="2.2" /><circle cx="15.2" cy="14.6" r="2.2" /><path d="M8.9 6.9 5.9 12.7M11.1 6.9l3 5.8M7 14.6h6" /></Icon>}
               />
               <PageRow
                 href={LIMITS_PATH}
@@ -206,7 +208,7 @@ export function NavMoreBody({ alert = null, tab = null, limits = false, status =
               <div className="navmore__group is-sodex" role="group" aria-label="SoDEX">
                 <div className="menu-group-label" aria-hidden="true">SoDEX</div>
                 {SODEX_VIEWS.map((v) => sodexOpen ? (
-                  <PageRow key={v} href={pathForSodexView(v)} label={SODEX_LABELS[v]} current={sodexOn === v} onOpen={close(() => onOpenSodex(v))} icon={SODEX_ICONS[v]} />
+                  <PageRow key={v} href={pathForSodexView(v)} label={SODEX_LABELS[v]} current={sodexOn === v} onOpen={close(() => onOpenSodex(v))} icon={SODEX_ICONS[v]}>{unseen.has(v as NewPage) && <NewDot />}</PageRow>
                 ) : (
                   <button key={v} type="button" role="menuitem" className="menu-row navmore__row is-access" title="In beta: apply for access on our Discord" onClick={close(applyForBeta)}>
                     <span className="menu-row__ic">{SODEX_ICONS[v]}</span>
@@ -214,6 +216,15 @@ export function NavMoreBody({ alert = null, tab = null, limits = false, status =
                     <span className="dv-devtag dv-devtag--beta navmore__access">Get access</span>
                   </button>
                 ))}
+              <PageRow
+                href={pathForTab('referrals')}
+                label="Referrals"
+                current={tab === 'referrals'}
+                onOpen={onNavigate && close(() => onNavigate('referrals'))}
+                icon={<Icon><circle cx="10" cy="5" r="2.2" /><circle cx="4.8" cy="14.6" r="2.2" /><circle cx="15.2" cy="14.6" r="2.2" /><path d="M8.9 6.9 5.9 12.7M11.1 6.9l3 5.8M7 14.6h6" /></Icon>}
+              >
+                {unseen.has('referrals') && <NewDot />}
+              </PageRow>
               </div>
             )}
             </div>
