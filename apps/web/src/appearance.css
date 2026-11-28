@@ -7,12 +7,11 @@
   --stg-blur: 20px; --stg-sat: 1; --stg-glow: #f4f4f2; --stg-glow-a: 5%;
   --stg-lift: 5%; --stg-inner-glow: 9%;
   --pn-a: 62%; --pn-blur: 25px;
-  --pg-glow: #440154; --pg-glow-a: 20%; --pg-glow2: #3b528b; --pg-glow2-a: 20%;
+  --pg-glow2: #3b528b; --pg-glow2-a: 20%;
 }
 
 html[data-glass] body {
   background:
-    radial-gradient(55% 60% at 12% 8%, color-mix(in srgb, var(--pg-glow) var(--pg-glow-a), transparent), transparent 70%),
     radial-gradient(50% 55% at 92% 95%, color-mix(in srgb, var(--pg-glow2) var(--pg-glow2-a), transparent), transparent 70%),
     var(--bg);
   background-attachment: fixed;

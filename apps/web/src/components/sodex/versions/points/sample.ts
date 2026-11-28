@@ -16,30 +16,48 @@ const L1: ReadonlyArray<readonly [number, number, number, number, number, number
 const RANKS = [9_210, 1_740, 15_800, 38_200, 1_100, 5_200, 8_900, 210, 4_700, 1_900, 3_300, 6_100];
 const S1_POINTS = [8, 14, 0, 22, 35, 18, 40, 52, 0, 31];
 
+/*
+ * The launch film's wallet (localStorage vs.dev.sopoints.sample = 'film', 2026-11-27): a trader ramping up, Gold heading for
+ * Diamond. Own points = the live model's figure for each week's activity (POST /api/vs/sopoints/estimate, calib
+ * 'explained', 2026-11-27) plus 8-44 points of loyalty, so "Loyalty & other" and the projection read as on a real wallet.
+ * [futures, spot, open position, Wealth, referral points, own points, squad %, rank]
+ */
+const FILM: ReadonlyArray<readonly [number, number, number, number, number, number, number, number]> = [
+  [51_000, 1_000, 700, 0, 3, 204, 20, 6_400], [80_000, 2_000, 1_100, 0, 5, 253, 20, 4_900], [39_000, 0, 500, 100, 6, 151, 25, 8_800],
+  [109_000, 4_000, 1_400, 200, 13, 269, 25, 3_600], [149_000, 6_000, 2_000, 500, 20, 337, 30, 2_100], [101_000, 3_000, 1_300, 400, 22, 315, 30, 2_500],
+  [202_000, 8_000, 2_700, 800, 34, 399, 30, 1_500], [277_000, 12_000, 3_400, 1_000, 49, 532, 35, 840], [182_000, 6_000, 2_400, 1_100, 45, 307, 35, 2_300],
+  [357_000, 17_000, 4_600, 1_500, 72, 585, 35, 620], [447_000, 22_000, 5_700, 2_200, 95, 692, 35, 410], [526_000, 28_000, 6_800, 2_400, 117, 785, 35, 330],
+];
+/** The film wallet's live week so far: futures, spot, open position, Wealth. */
+const FILM_LIVE = [236_000, 12_000, 6_200, 2_400] as const;
+const filmSet = (): boolean => { try { return localStorage.getItem('vs.dev.sopoints.sample') === 'film'; } catch { return false; } };
+
 export function samplePoints(week: WeekInfo | null, boost: BoostConfig | null, now = Date.now()): S2State {
   const liveNo = Math.max(2, week?.weekNo ?? 13);
   const liveEnd = week?.nextWeekStartTime ?? Math.floor(now / 1000) + 4 * 86_400;
   const start = (n: number) => liveEnd - (liveNo - n + 1) * WEEK_S;
-  const joinedVol = 1_840_000;
-  const builtVol = 462_000;
+  const film = filmSet();
+  const joinedVol = film ? 5_640_000 : 1_840_000;
+  const builtVol = film ? 1_910_000 : 462_000;
   const squad = boost ? stepPct(joinedVol, boost) + stepPct(builtVol, boost) : 25;
   const users = (n: number) => 217_000 + n * 760;
   const weeks: S2Week[] = [];
   for (let n = 1; n < liveNo; n++) {
-    const [futures, spot, oi, wealth, ref, own] = L1[(n - 1) % L1.length]!;
-    const bonus = squad + (n <= 4 ? 20 : 0);
+    const f = film ? FILM[(n - 1) % FILM.length]! : null;
+    const [futures, spot, oi, wealth, ref, own] = f ?? L1[(n - 1) % L1.length]!;
+    const bonus = f ? f[6] : squad + (n <= 4 ? 20 : 0);
     const points = Math.round((own + ref) * (1 + bonus / 100));
     weeks.push({
       weekNo: n, weekName: `Week ${n}`, status: 'COMPLETED', weekStartTime: start(n), weekEndTime: start(n) + WEEK_S, distributionTime: start(n) + WEEK_S + 3 * 86_400,
       isLive: false, spotVolume: spot, futuresVolume: futures, futuresVolumeWeightDetails: futures ? [{ marketType: 'PERP', symbol: 'NVDA-USD', coefficient: '1.2', rawVolumeU: String(futures * 0.2), weightedVolumeU: String(futures * 0.24) }] : [],
-      vaultHolding: 0, wealthTvl: wealth, oi, accountValue: 2_400, teamWeekVolume: 0, teamWindowVolume: 0, totalBonusPct: bonus,
-      points, referralPoints: ref, pointsStatus: 'CONFIRMED', rank: RANKS[(n - 1) % RANKS.length]!, totalUser: users(n), rankPercentile: '',
+      vaultHolding: 0, wealthTvl: wealth, oi, accountValue: f ? 4_000 + n * 1_150 : 2_400, teamWeekVolume: 0, teamWindowVolume: 0, totalBonusPct: bonus,
+      points, referralPoints: ref, pointsStatus: 'CONFIRMED', rank: f ? f[7] : RANKS[(n - 1) % RANKS.length]!, totalUser: users(n), rankPercentile: '',
     });
   }
   weeks.push({
     weekNo: liveNo, weekName: `Week ${liveNo}`, status: 'LIVE', weekStartTime: start(liveNo), weekEndTime: liveEnd, distributionTime: liveEnd + 3 * 86_400,
-    isLive: true, spotVolume: 0, futuresVolume: 58_000, vaultHolding: 0, wealthTvl: 500, oi: 900, accountValue: 2_400, teamWeekVolume: 0, teamWindowVolume: 0,
-    totalBonusPct: squad, points: 0, referralPoints: 0, pointsStatus: 'TBD', rank: 0, totalUser: users(liveNo), rankPercentile: '',
+    isLive: true, spotVolume: film ? FILM_LIVE[1] : 0, futuresVolume: film ? FILM_LIVE[0] : 58_000, vaultHolding: 0, wealthTvl: film ? FILM_LIVE[3] : 500, oi: film ? FILM_LIVE[2] : 900, accountValue: film ? 19_300 : 2_400, teamWeekVolume: 0, teamWindowVolume: 0,
+    totalBonusPct: film ? 35 : squad, points: 0, referralPoints: 0, pointsStatus: 'TBD', rank: 0, totalUser: users(liveNo), rankPercentile: '',
   });
   const s1Start = start(1) - (S1_POINTS.length + 1) * WEEK_S;
   const s1: S1Week[] = S1_POINTS.map((p, i) => ({

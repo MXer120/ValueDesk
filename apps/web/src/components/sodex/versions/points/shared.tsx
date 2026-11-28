@@ -492,6 +492,7 @@ export type OtherByWeek = ReadonlyMap<number, number> | null;
 
 const OTHER_INFO = 'Part of Own. From ValueDesk’s estimate: own points beyond what the week’s trading, positions and holdings explain. '
   + 'Loyalty and consistency rewards, bug reports, campaigns, or the estimate’s own error: points SoDEX does not itemise.';
+const UNWEEKLY_INFO = 'Your SoPoints balance less the points of every week SoDEX scored (Closed Alpha and Season 1 included): points paid outside the weeks, such as loyalty and campaigns. Exact, from SoDEX’s figures.';
 const BOOST_INFO = 'What the squad boost added: (own + invited) times the week’s squad %. Own + Invited + Squad boost = Points.';
 
 /**
@@ -518,6 +519,16 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
   const hasS1 = v.all.some((r) => r.season === 'S1');
   const detailed = view === 'detailed' && !phone;
   const oth = (r: AnyWeek) => (r.season === 'L1' && other ? other.get(r.split.week.weekNo) ?? null : null);
+  // Points in the balance that no week holds (owner 2026-11-28, wallet 0xc5f7…: "loyalty & other ... says 0 everywhere
+  // although there are many points missing"): the balance less every week SoDEX scored, Closed Alpha included. A week's
+  // own points can hold no loyalty when the week had no own points, so what loyalty and campaigns paid shows here.
+  const unweekly = useMemo(() => {
+    if (!v.mine || v.total === null || v.s.loading) return null;
+    const ok = (x: { pointsStatus: string }) => x.pointsStatus === 'CONFIRMED';
+    const sum = (v.s.s1 ?? []).filter(ok).reduce((a, w) => a + (w.points || 0), 0) + (v.s.weeks ?? []).filter((w) => ok(w) && !w.isLive).reduce((a, w) => a + (w.points || 0), 0);
+    const gap = Math.round(v.total - sum);
+    return gap >= 1 ? gap : null;
+  }, [v.mine, v.total, v.s.loading, v.s.s1, v.s.weeks]);
   if (v.s.loading && !v.all.length) return <div className="spx-skelrows">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="rf-skel-row" />)}</div>;
   return (
     <div className="spx-weeks">
@@ -552,15 +563,17 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
                   <th />
                   <th colSpan={6} className="spx-tbl__group">Activity</th>
                   <th />
-                  <th colSpan={season === 'L1' ? 4 : 3} className="spx-tbl__group is-points"><span className="spx-tbl__info" title={BOOST_INFO} tabIndex={0} aria-label={`Points. ${BOOST_INFO}`}>Points: own + invited{season === 'L1' ? ' + squad boost' : ''}<Icon name="info" size={12} /></span></th>
+                  <th colSpan={season === 'L1' ? 5 : 3} className="spx-tbl__group is-points"><span className="spx-tbl__info" title={BOOST_INFO} tabIndex={0} aria-label={`Points. ${BOOST_INFO}`}>Points<Icon name="info" size={12} /></span></th>
                 </tr>
                 <tr>
                   <th>Week</th><th className="right">Futures</th><th className="right">Spot</th><th className="right">Open interest</th><th className="right">Wealth</th><th className="right">Vault</th><th className="right">Account</th>
                   <th className="right">Rank</th>
-                  <th className="right"><span className="spx-tbl__info" title={OTHER_INFO} tabIndex={0} aria-label={`Own. ${OTHER_INFO}`}>Own<Icon name="info" size={12} /></span></th>
-                  <th className="right">Invited</th>
-                  {season === 'L1' && <th className="right">Squad boost</th>}
-                  <th className="right">Total</th>
+                  <th className="right">Own</th>
+                  {/* Owner 2026-11-27: "loyalty & others need to come back also in the blue it was": its own column, part of Own. */}
+                  {season === 'L1' && <th className="right"><span className="spx-tbl__info is-est" title={OTHER_INFO} tabIndex={0} aria-label={`Loyalty and other, part of Own. ${OTHER_INFO}`}>Loyalty &amp; other<Icon name="info" size={12} /></span></th>}
+                  <th className="right"><i className="spx-op">+</i>Invited</th>
+                  {season === 'L1' && <th className="right"><i className="spx-op">+</i>Squad boost</th>}
+                  <th className="right"><i className="spx-op">=</i>Total</th>
                 </tr>
               </>) : <tr><th>Week</th><th className="right">Rank</th><th className="right">Place</th><th className="right">Points</th></tr>}
             </thead>
@@ -595,20 +608,34 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
                     <td className="right num">{usd(w.vaultHolding)}</td>
                     <td className="right num">{usd(w.accountValue)}</td>
                     <td className="right num">{w.rank ? `#${pts(w.rank)}` : DASH}</td>
-                    <td className="right num">{tbd ? DASH : <span className="spx-tbl__cell">{pts(parts.own)}{other > 0 && <small className="spx-other" title={OTHER_INFO}>≈ {ptsEst(other)} other</small>}</span>}</td>
+                    <td className="right num">{tbd ? DASH : pts(parts.own)}</td>
+                    {season === 'L1' && <td className="right num">{tbd || o === null ? DASH : other > 0 ? <span className="spx-other" title={OTHER_INFO}>≈ {ptsEst(other)}</span> : '0'}</td>}
                     <td className="right num">{tbd ? DASH : pts(parts.invited)}</td>
-                    {season === 'L1' && <td className="right num">{tbd ? DASH : <span className="spx-tbl__cell">{parts.boost ? `+${pts(parts.boost)}` : '0'}<small className={w.totalBonusPct ? 'pos' : undefined}>{plusPct(w.totalBonusPct ?? 0)}</small></span>}</td>}
+                    {season === 'L1' && <td className="right num">{tbd ? DASH : <span className="spx-tbl__boost">{parts.boost ? `+${pts(parts.boost)}` : '0'}<small className={w.totalBonusPct ? 'pos' : undefined}>/ {plusPct(w.totalBonusPct ?? 0)}</small></span>}</td>}
                     {pointsCell}
                   </tr>
                 );
               })}
             </tbody>
+            {detailed && season === 'L1' && unweekly !== null && (
+              <tfoot>
+                <tr className="spx-tbl__unweekly">
+                  <td><span className="spx-tbl__wk"><b>In no week</b><small>Balance less every scored week</small></span></td>
+                  <td colSpan={7} />
+                  <td className="right num">{DASH}</td>
+                  <td className="right num"><span className="spx-other" title={UNWEEKLY_INFO}>{pts(unweekly)}</span></td>
+                  <td className="right num">{DASH}</td>
+                  <td className="right num">{DASH}</td>
+                  <td className="right num spx-tbl__pts"><span className="spx-rk">{pts(unweekly)}</span></td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       )}
       <div className="spx-weeks__foot">
         <RankLegend />
-        {detailed && <small className="spx-weeks__note"><Icon name="info" size={12} />Own + invited{season === 'L1' ? ' + squad boost' : ''} = total. “Other” under Own: the part the week’s activity does not explain (loyalty, campaigns and the like), an estimate.</small>}
+        {detailed && <small className="spx-weeks__note"><Icon name="info" size={12} />Own + invited{season === 'L1' ? ' + squad boost' : ''} = total.{season === 'L1' ? ' Loyalty & other is the part of Own the week’s activity does not explain (loyalty, campaigns and the like), an estimate.' : ''}{season === 'L1' && unweekly !== null ? ' “In no week” is what your balance holds beyond every scored week.' : ''}</small>}
       </div>
     </div>
   );

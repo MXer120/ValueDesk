@@ -30,13 +30,15 @@ export interface Appearance {
   trade: boolean;
   panelAlpha: number;
   panelBlur: number;
-  pageGlow: string;
-  pageGlowAlpha: number;
   pageGlow2: string;
   pageGlow2Alpha: number;
 }
 
-/** The home page's ink and heat (owner 2026-11-25; before: the owner's settings of 2026-10-26). */
+/**
+ * The home page's ink (owner 2026-11-25; before: the owner's settings of 2026-10-26). No light in the page's top left
+ * any more (owner 2026-11-26: first "purple isnt our color and its too much", then "remove the green glow in the bg top
+ * left everywhere"); the faint blue in the bottom right stays.
+ */
 export const APPEARANCE_DEFAULT: Appearance = {
   tint: '#101012',
   tintAlpha: 78,
@@ -51,8 +53,6 @@ export const APPEARANCE_DEFAULT: Appearance = {
   trade: true,
   panelAlpha: 62,
   panelBlur: 25,
-  pageGlow: '#440154',
-  pageGlowAlpha: 20,
   pageGlow2: '#3b528b',
   pageGlow2Alpha: 20,
 };
@@ -75,8 +75,6 @@ const LIGHT_GLASS: Appearance = {
   trade: true,
   panelAlpha: 58,
   panelBlur: 30,
-  pageGlow: '#ddcfe6',
-  pageGlowAlpha: 60,
   pageGlow2: '#cdd7ec',
   pageGlow2Alpha: 55,
 };
@@ -117,8 +115,6 @@ function apply(shown: Appearance): void {
   s.setProperty('--stg-inner-glow', `${a.innerGlow}%`);
   s.setProperty('--pn-a', `${a.panelAlpha}%`);
   s.setProperty('--pn-blur', `${a.panelBlur}px`);
-  s.setProperty('--pg-glow', a.pageGlow);
-  s.setProperty('--pg-glow-a', `${a.pageGlowAlpha}%`);
   s.setProperty('--pg-glow2', a.pageGlow2);
   s.setProperty('--pg-glow2-a', `${a.pageGlow2Alpha}%`);
   document.documentElement.toggleAttribute('data-glass', a.trade);
