@@ -8797,4 +8797,6 @@
 "Waiting for a calm market: the oracle moved {0} bp in the last {1} s (limit {2} bp{3}":"잔잔한 시장을 기다리는 중: 오라클이 최근 {1}초 동안 {0} bp 움직였어요 (한도 {2} bp{3}",
 "wave {0}":"웨이브 {0}",
 "Your {0} position {1}":"내 {0} 포지션 {1}",
-"Your {0} position is about {1}{2}":"내 {0} 포지션은 약 {1}{2}"}
+"Your {0} position is about {1}{2}":"내 {0} 포지션은 약 {1}{2}",
+"The sign-in did not go through. Try again. Code: {0}":"로그인이 완료되지 않았어요. 다시 시도하세요. 코드: {0}"
+}

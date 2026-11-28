@@ -8797,4 +8797,6 @@
 "Waiting for a calm market: the oracle moved {0} bp in the last {1} s (limit {2} bp{3}":"Esperando um mercado calmo: o oráculo se moveu {0} bp nos últimos {1} s (limite {2} bp{3}",
 "wave {0}":"onda {0}",
 "Your {0} position {1}":"Sua posição em {0} {1}",
-"Your {0} position is about {1}{2}":"Sua posição em {0} é de cerca de {1}{2}"}
+"Your {0} position is about {1}{2}":"Sua posição em {0} é de cerca de {1}{2}",
+"The sign-in did not go through. Try again. Code: {0}":"O login não foi concluído. Tente de novo. Código: {0}"
+}

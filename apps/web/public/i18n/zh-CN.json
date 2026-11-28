@@ -8797,4 +8797,6 @@
 "Waiting for a calm market: the oracle moved {0} bp in the last {1} s (limit {2} bp{3}":"等待平静行情：预言机在过去 {1} 秒内变动了 {0} bp (上限 {2} bp{3}",
 "wave {0}":"波次 {0}",
 "Your {0} position {1}":"你的 {0} 仓位{1}",
-"Your {0} position is about {1}{2}":"你的 {0} 仓位约为 {1}{2}"}
+"Your {0} position is about {1}{2}":"你的 {0} 仓位约为 {1}{2}",
+"The sign-in did not go through. Try again. Code: {0}":"登录未成功。请重试。代码：{0}"
+}

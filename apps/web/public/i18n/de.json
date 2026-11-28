@@ -9500,5 +9500,6 @@
 "For the subscriptions, first; no wallet prompt":"Für die Zeichnungen, zuerst; ohne Wallet-Abfrage",
 "Not enough USDC in Spot and your wallet together.":"Nicht genug USDC in Spot und deiner Wallet zusammen.",
 "Nothing was bought: {0}":"Nichts wurde gekauft: {0}",
-"The USDC moved from Spot has not reached your wallet yet. It is on its way; buy again once it shows.":"Die aus Spot verschobenen USDC sind noch nicht in deiner Wallet. Sie sind unterwegs; kaufe erneut, sobald sie angezeigt werden."
+"The USDC moved from Spot has not reached your wallet yet. It is on its way; buy again once it shows.":"Die aus Spot verschobenen USDC sind noch nicht in deiner Wallet. Sie sind unterwegs; kaufe erneut, sobald sie angezeigt werden.",
+"The sign-in did not go through. Try again. Code: {0}":"Die Anmeldung hat nicht geklappt. Versuch es noch einmal. Code: {0}"
 }

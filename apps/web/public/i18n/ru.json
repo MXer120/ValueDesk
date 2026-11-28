@@ -8797,4 +8797,6 @@
 "Waiting for a calm market: the oracle moved {0} bp in the last {1} s (limit {2} bp{3}":"Ждёт спокойного рынка: оракул сдвинулся на {0} bp за последние {1} с (лимит {2} bp{3}",
 "wave {0}":"волна {0}",
 "Your {0} position {1}":"Ваша позиция {0} {1}",
-"Your {0} position is about {1}{2}":"Ваша позиция {0} составляет около {1}{2}"}
+"Your {0} position is about {1}{2}":"Ваша позиция {0} составляет около {1}{2}",
+"The sign-in did not go through. Try again. Code: {0}":"Вход не прошёл. Попробуйте снова. Код: {0}"
+}

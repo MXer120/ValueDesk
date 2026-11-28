@@ -378,6 +378,34 @@ test('audit: HTTP - body limit, CORS only for allowed origins, the write rate li
   await cleanup();
 });
 
+test('a refused sign-in is logged with its exact reason and the wallet, and its audit row keeps the reason (owner 2026-11-28)', async () => {
+  const warns: Array<{ msg: string; data: Record<string, unknown> }> = [];
+  const log = { ...silent, warn: (msg: string, data?: Record<string, unknown>) => { warns.push({ msg, data: data ?? {} }); } };
+  const { cfg, svc, db, cleanup } = make({ EXECUTOR_KIND: 'hosted' });
+  await svc.start();
+  const server = createExecutorServer(svc, cfg, log as never);
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/copy/v1`;
+  try {
+  const w = new Wallet();
+  // Signed 20 minutes ago by the device's clock: refused for its time.
+  const res = await fetch(`${base}/session`, { method: 'POST', body: JSON.stringify({ request: strip(w.sign(svc.executorId, 'session', {}, Date.now() - 20 * 60_000)) }) });
+  assert.equal(res.status, 401);
+  const warn = warns.find((x) => x.msg === 'executor: refused');
+  assert.ok(warn, 'the refusal is in the log');
+  assert.equal(warn!.data.owner, w.address.toLowerCase());
+  assert.equal(warn!.data.code, 'signature');
+  assert.match(String(warn!.data.error), /expired|too far/);
+  const row = db.auditRows({ kind: 'request' }).map((r) => JSON.parse(r.data) as { path?: string; refusal?: { code: string; error: string } }).find((d) => d.path?.endsWith('/session'));
+  assert.ok(row, 'the request is audited');
+  assert.equal(row!.refusal?.code, 'signature');
+  assert.match(row!.refusal!.error, /expired|too far/);
+  } finally {
+    server.close();
+    await cleanup();
+  }
+});
+
 /* --------------------------------------------- the shipped artefacts (static) ----- */
 
 test('the site offers no self-hosted copier (owner 2026-11-10: only the browser and the executor)', () => {

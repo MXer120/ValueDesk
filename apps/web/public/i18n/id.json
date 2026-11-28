@@ -8797,4 +8797,6 @@
 "Waiting for a calm market: the oracle moved {0} bp in the last {1} s (limit {2} bp{3}":"Menunggu pasar tenang: oracle bergerak {0} bp dalam {1} dtk terakhir (batas {2} bp{3}",
 "wave {0}":"gelombang {0}",
 "Your {0} position {1}":"Posisi {0} Anda {1}",
-"Your {0} position is about {1}{2}":"Posisi {0} Anda sekitar {1}{2}"}
+"Your {0} position is about {1}{2}":"Posisi {0} Anda sekitar {1}{2}",
+"The sign-in did not go through. Try again. Code: {0}":"Masuk tidak berhasil. Coba lagi. Kode: {0}"
+}

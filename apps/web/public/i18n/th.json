@@ -8797,4 +8797,6 @@
 "Waiting for a calm market: the oracle moved {0} bp in the last {1} s (limit {2} bp{3}":"รอตลาดสงบ: ออราเคิลขยับ {0} bp ใน {1} วินาทีที่ผ่านมา (ขีดจำกัด {2} bp{3}",
 "wave {0}":"ระลอก {0}",
 "Your {0} position {1}":"สถานะ {0} ของคุณ {1}",
-"Your {0} position is about {1}{2}":"สถานะ {0} ของคุณประมาณ {1}{2}"}
+"Your {0} position is about {1}{2}":"สถานะ {0} ของคุณประมาณ {1}{2}",
+"The sign-in did not go through. Try again. Code: {0}":"ลงชื่อเข้าใช้ไม่สำเร็จ ลองอีกครั้ง รหัส: {0}"
+}
