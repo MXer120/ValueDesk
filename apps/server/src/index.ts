@@ -42,6 +42,9 @@ import { BetaList, BetaTokens, channelFrom, installBetaGate } from './beta/gate.
 import { AdminStore } from './admin/store.js';
 import { reportRoutes } from './routes/reports.js';
 import { sodexLotteryRoutes } from './routes/sodexLottery.js';
+import { sodexLotteryUserRoutes } from './routes/sodexLotteryUser.js';
+import { boxRewardsRoutes } from './routes/boxRewards.js';
+import { join as joinPath } from 'node:path';
 import { statusRoutes } from './routes/status.js';
 import { adminRoutes } from './routes/admin.js';
 import { analyticsRoutes, analyticsStore } from './routes/analytics.js';
@@ -282,6 +285,10 @@ if (betaLock) await app.register(betaRoutes, betaLock);
 // and the public status page's data (routes/status.ts).
 // SoDEX's Blind Box programme, its public rules and opens feed only (routes/sodexLottery.ts).
 await app.register(sodexLotteryRoutes);
+// The signed-in half (routes/sodexLotteryUser.ts, owner 2026-11-28): a wallet's boxes, opening and merging them with its
+// own signature, its SoDEX token passed through and never kept; and what boxes paid per tier, from the chain.
+await app.register(sodexLotteryUserRoutes());
+await app.register(boxRewardsRoutes({ file: joinPath(dataDir(), 'box-rewards.json') }));
 await app.register(reportRoutes);
 await app.register(statusRoutes);
 // The app's own analytics, after consent (routes/analytics.ts), and the owner's admin suite on

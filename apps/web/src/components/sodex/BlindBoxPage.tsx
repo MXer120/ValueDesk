@@ -4,8 +4,8 @@
  * the opens as they happen. Tiers, bands, sizes and thresholds all come from `/meta`; what `/meta` does not
  * hold (burned boxes, the draw's clock, the PFP drop) is SoDEX's page text.
  *
- * Opening and merging stay on SoDEX's page. A wallet's boxes are read off the chain from this browser; what
- * only SoDEX's sign-in can read sits behind SODEX_SIGNIN_LIVE (BoxVault.tsx).
+ * The wallet's vault (vault/Vault.tsx, owner 2026-11-28): its boxes and Cybereators, opening, merging, claiming and
+ * gifting them, with SoDEX's sign-in through our relay, so this page can stand in for SoDEX's own.
  */
 import { Suspense, lazy, useState, type ReactNode } from 'react';
 import { CoinIcon } from '../CoinIcon';
@@ -16,11 +16,10 @@ import {
   type FeedItem, type Level, type LotteryMeta, type LotteryRules,
 } from '../../blindBox';
 import { DASH } from '../../format';
-import { SODEX_SIGNIN_LIVE, SODEX_SITE } from '../../sodexProgrammes';
 import type { Eip1193Provider } from '../../wallet';
 import { BoxArt } from './BoxArt';
-import { OnChainBoxes, OpenOnSodex, ProgressPanel } from './BoxVault';
-import { LockedSection, Pill, ProgrammeHero, ProgrammePage, ReadFailed, SegSwitch, SkelRows, SkelTiles, fmtAgo, fmtTokens, fmtUsdTight, useNow } from './parts';
+import { PfpLinks, Vault } from './vault/Vault';
+import { Pill, ProgrammeHero, ProgrammePage, ReadFailed, SegSwitch, SkelRows, SkelTiles, fmtAgo, fmtTokens, fmtUsdTight, useNow } from './parts';
 
 const FEED_SIZE = LOTTERY_FEED_SIZE;
 
@@ -37,7 +36,7 @@ export function BlindBoxPage({ address, provider }: { address: string | null; pr
 }
 
 /** Today's page, as it was: the "Original" of the switch, and the only one a build has. */
-export function BlindBoxOriginal({ address }: { address: string | null; provider: Eip1193Provider | null }) {
+export function BlindBoxOriginal({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
   const meta = usePolled('lottery-meta', (signal) => fetchLotteryMeta(signal), 60_000);
   const rules = meta.data?.rules ?? null;
 
@@ -47,7 +46,7 @@ export function BlindBoxOriginal({ address }: { address: string | null; provider
         big
         title="Trade to win Blind Boxes"
         line={rules ? <>Every <b>{fmtUsdTight(rules.volumePerBoxU)}</b> of effective volume wins 1 box.</> : 'Trade to earn boxes, merge them, open them.'}
-        aside={<><OpenOnSodex /><a className="pf-btn pf-btn--primary" href="/trade">Trade</a></>}
+        aside={<><a className="pf-btn" href="#vault">Open your boxes</a><a className="pf-btn pf-btn--primary" href="/trade">Trade</a></>}
       />
 
       {meta.error && !meta.data ? (
@@ -60,7 +59,7 @@ export function BlindBoxOriginal({ address }: { address: string | null; provider
       ) : (
         <>
           <Tiers rules={rules} meta={meta.data as LotteryMeta} />
-          <Mine address={address} meta={meta.data as LotteryMeta} />
+          <div id="vault"><Vault address={address} provider={provider} meta={meta.data as LotteryMeta} /></div>
           <PfpDrop />
           <Section title="How boxes are earned"><Earned rules={rules} /></Section>
           <Section title="Invite friends, both get boxes" note={rules.newcomerMaxUAtBound != null ? `The friend's own volume must be under ${fmtUsdTight(rules.newcomerMaxUAtBound)} when they bind.` : undefined}>
@@ -128,22 +127,6 @@ function Tiers({ rules, meta }: { rules: LotteryRules; meta: LotteryMeta }) {
   );
 }
 
-function Mine({ address, meta }: { address: string | null; meta: LotteryMeta }) {
-  return (
-    <>
-      <OnChainBoxes address={address} box={meta.contracts?.treasureBox} />
-      {SODEX_SIGNIN_LIVE ? <ProgressPanel address={address} /> : (
-        <LockedSection
-          title="Your progress"
-          items={['Effective volume and the next box', 'Boxes waiting to be claimed', 'Draw tickets and history']}
-          href={SODEX_SITE.blindBox}
-          hrefLabel="Open on SoDEX"
-        />
-      )}
-    </>
-  );
-}
-
 /** SoDEX's page text for the PFP drop (shared with the localhost versions). */
 export const PFP_DROP = {
   title: 'Exclusive drop: Cybereator PFP',
@@ -156,6 +139,7 @@ function PfpDrop() {
       <div className="sdx-pfp__text">
         <h2>{PFP_DROP.title}</h2>
         <p>{PFP_DROP.line}</p>
+        <PfpLinks />
       </div>
       <img className="sdx-pfp__cat" src="/sodex-art/cyber-cat.webp" alt="" loading="lazy" decoding="async" draggable={false} onError={(e) => { e.currentTarget.hidden = true; }} />
     </section>

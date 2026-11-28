@@ -205,6 +205,9 @@ const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/a
 const isInvitesPath = (p) => p === '/api/vs/invites/check' || p === '/api/vs/invites/me' || p === '/api/vs/invites/join'
   // The SoPoints sign-in relay (apps/server/src/routes/pointsAuth.ts): POST, never cached, the small body limit.
   || p === '/api/vs/sodex-auth/nonce' || p === '/api/vs/sodex-auth/verify'
+  // The signed-in Blind Box (apps/server/src/routes/sodexLotteryUser.ts): the wallet's SoDEX token (Authorization) to
+  // its reads, and an open, a merge or a claim (POST, the wallet's own signature), never cached, the small body limit.
+  || p.startsWith('/api/vs/sodex/lottery/u/')
   // The SoPoints week log (apps/server/src/routes/sopointsLog.ts): one wallet's weeks, up to 64 KiB.
   || p === '/api/vs/sopoints/log'
   // The SoPoints estimate (apps/server/src/routes/sopointsEstimate.ts): weeks to price and the wallet's scored weeks,

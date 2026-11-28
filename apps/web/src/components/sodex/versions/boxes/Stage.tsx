@@ -5,18 +5,20 @@
  * tier's reward range with where the latest opens landed, and the opens themselves.
  */
 import { useId, useState } from 'react';
+import type { Eip1193Provider } from '../../../../wallet';
+import { PfpLinks, Vault } from '../../vault/Vault';
+import { DEMO_NFT_OWNER } from '../../../portfolio/devDemo';
 import { bpsToPct, mergeLadder, type LotteryRules } from '../../../../blindBox';
-import { SODEX_SITE } from '../../../../sodexProgrammes';
 import { Skeleton } from '../../../bots/kit/kit';
 import { BoxArt } from '../../BoxArt';
 import { PFP_DROP } from '../../BlindBoxPage';
 import { useNow } from '../../parts';
 import {
-  BoxesCard, DrawRail, LEVELS, MergePlan, OpensList, ProgressLocked, RangeChart, ReadError, RewardTokens, count, feedStats, levelName, milestoneText, spanText, usd, useBoxData,
+  BoxesCard, DrawRail, LEVELS, OpensList, RangeChart, ReadError, RewardTokens, count, feedStats, levelName, milestoneText, spanText, usd, useBoxData,
   type BoxData,
 } from './shared';
 
-export function BoxStage({ address, sample }: { address: string | null; sample: boolean }) {
+export function BoxStage({ address, provider, sample }: { address: string | null; provider: Eip1193Provider | null; sample: boolean }) {
   const d = useBoxData(address, sample);
   const now = useNow(30_000);
   const rules = d.rules;
@@ -25,11 +27,10 @@ export function BoxStage({ address, sample }: { address: string | null; sample: 
       <div className="bots-col">
         {d.meta.error && !d.meta.data ? <ReadError what="The programme's rules" error={d.meta.error} retry={d.meta.retry} />
           : <Stage rules={rules} />}
+        <div id="vault" className="sxb-vault"><Vault address={address} provider={provider} meta={d.meta.data} {...(sample ? { cybrOwner: DEMO_NFT_OWNER } : {})} /></div>
         <div className="sxb-desk">
           <div className="sxb-desk__mine">
             <BoxesCard w={d.wallet} />
-            {rules && <MergePlan w={d.wallet} rules={rules} />}
-            <ProgressLocked />
           </div>
           <section className="sxb-desk__inside" aria-label="What is inside">
             <div className="sxb-h3"><h3>What is inside</h3>{d.meta.data && <RewardTokens meta={d.meta.data} />}</div>
@@ -64,14 +65,14 @@ function Stage({ rules }: { rules: LotteryRules | null }) {
             {rules ? (
               <>
                 <h2>Trade <span className="sx-num">{usd(rules.volumePerBoxU)}</span>.<br />Win a box.</h2>
-                <p>Every taker fill counts {taker}%, every maker fill {maker}%. Merge boxes to climb a tier; open them on SoDEX.</p>
+                <p>Every taker fill counts {taker}%, every maker fill {maker}%. Merge boxes to climb a tier, open them right here.</p>
               </>
             ) : (
               <><Skeleton className="sxb-stage__skel is-h" /><Skeleton className="sxb-stage__skel" /></>
             )}
             <div className="sxb-stage__acts">
               <a className="rf-cta" href="/trade">Trade</a>
-              <a className="rf-howbtn" href={SODEX_SITE.blindBox} target="_blank" rel="noopener noreferrer">Open on SoDEX</a>
+              <a className="rf-howbtn" href="#vault">Open your boxes</a>
             </div>
           </div>
           <Shelf />
@@ -156,6 +157,7 @@ function Extras({ d, now }: { d: BoxData; now: number }) {
         <div>
           <h3>{PFP_DROP.title}</h3>
           <p>{PFP_DROP.line}</p>
+          <PfpLinks />
           {st.n > 0 && <span className="sxb-pfp__stat"><b className="sx-num">{count(st.pfp)}</b> of the latest {count(st.n)} opens dropped one{spanText(st.from, now) ? `, ${spanText(st.from, now)}` : ''}</span>}
         </div>
         <img src="/sodex-art/cyber-cat.webp" alt="" loading="lazy" decoding="async" draggable={false} onError={(e) => { e.currentTarget.hidden = true; }} />

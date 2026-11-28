@@ -105,6 +105,15 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // visitor costs no upstream call beyond the route's one a minute and one per 10 s (routes/sodexLottery.ts).
   { method: 'GET', url: '/api/vs/sodex/lottery/meta', cls: 'read' },
   { method: 'GET', url: '/api/vs/sodex/lottery/feed', cls: 'read' },
+  // What boxes paid per tier, from the chain (routes/boxRewards.ts): one document, refreshed in the route.
+  { method: 'GET', url: '/api/vs/sodex/lottery/rewards', cls: 'read' },
+  // The signed-in Blind Box (routes/sodexLotteryUser.ts): the user's SoDEX token passed to SoDEX's box host, which sends
+  // no CORS. Its reads by allow-list; an open or a merge only with the wallet's own EIP-712 signature; a claim of earned
+  // boxes. Nothing kept. Its own limits in the route.
+  { method: 'GET', url: '/api/vs/sodex/lottery/u/*', cls: 'upstream' },
+  { method: 'POST', url: '/api/vs/sodex/lottery/u/box/open', cls: 'write' },
+  { method: 'POST', url: '/api/vs/sodex/lottery/u/box/merge', cls: 'write' },
+  { method: 'POST', url: '/api/vs/sodex/lottery/u/treasure/open', cls: 'write' },
   // Wealth's maintenance flag: same reason, same route file, read once every 30 s.
   { method: 'GET', url: '/api/vs/sodex/wealth/maintenance', cls: 'read' },
   { method: 'GET', url: '/api/vs/sodex/oi-excluded', cls: 'read' },

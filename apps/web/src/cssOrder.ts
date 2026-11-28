@@ -63,6 +63,7 @@ import './onboarding/onboarding.css';
 import './components/explore/Explore.css';
 import './components/excluded/excluded.css';
 import './components/sodex/sodex.css';
+import './components/sodex/vault/vault.css';
 import './components/limits/limits.css';
 import './components/leaderboard/LeaderboardPage.css';
 import './components/bots/bots.css';

@@ -25,7 +25,7 @@ export default function BoxVersions({ address, provider, Original }: Props & { O
   const [v, setV] = useDevChoice<Version>('vs.dev.blindbox.version', KEYS, 'original');
   const [s, setS] = useDevChoice<'off' | 'on'>('vs.dev.blindbox.sample', ['off', 'on'], 'off');
   const sample = s === 'on' && v !== 'original';
-  const page = v === 'stage' ? <BoxStage address={address} sample={sample} />
+  const page = v === 'stage' ? <BoxStage address={address} provider={provider} sample={sample} />
     : v === 'path' ? <BoxPath address={address} sample={sample} />
     : v === 'floor' ? <BoxFloor address={address} sample={sample} />
     : <><Original address={address} provider={provider} /><div className="sx-switch-room" aria-hidden="true" /></>;

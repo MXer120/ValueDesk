@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
-import { buildFloors, listingOf, tierOf } from '../src/valuedesk/nftFloors.js';
+import { buildFloors, listingOf, offerOf, priceTokens, tierOf } from '../src/valuedesk/nftFloors.js';
 import { nftFloorsRoutes } from '../src/routes/nftFloors.js';
 
 const BOX = '0x371c4F7F68bE3e558b89cC1f0fB113851C76E750';
@@ -66,4 +66,22 @@ test('the route answers the document, or 503 without one', async () => {
   const none = Fastify();
   await none.register(nftFloorsRoutes({ read: async () => null }));
   assert.equal((await none.inject({ method: 'GET', url: '/api/vs/nft/floors' })).statusCode, 503);
+});
+
+test('offers: wrapped SOSO for any NFT of a collection or for one; per NFT its ask and its own best offer', () => {
+  const now = 1_764_300_000;
+  const off = (kind: 2 | 4, id: string, amount: string) => ({ params: { offer: [{ token: '0x5050505050505050505050505050505050505050', itemType: 1, startAmount: amount }], consideration: [{ token: BOX, itemType: kind, identifierOrCriteria: id, startAmount: '1' }], startTime: '0', endTime: '1803637294' } });
+  assert.deepEqual(offerOf(off(4, '0', '6000000000000000000'), now), { collection: BOX.toLowerCase(), tokenId: null, price: 6 });
+  assert.deepEqual(offerOf(off(2, '42', '9500000000000000000'), now), { collection: BOX.toLowerCase(), tokenId: '42', price: 9.5 });
+  assert.equal(offerOf(off(4, '0xabc', '1'), now), null, 'a criteria list is not read');
+  const five = off(4, '0', '225000000000000000000');
+  five.params.consideration[0]!.startAmount = '5';
+  assert.equal(offerOf(five, now)?.price, 45, 'an offer for five NFTs is priced per NFT');
+  const doc = buildFloors({ collections: [{ address: BOX, name: 'Box', floorWei: '7200000000000000000' }] }, [], () => null, 1);
+  const t = priceTokens(doc, [{ collection: BOX.toLowerCase(), tokenId: '42', price: 12 }, { collection: BOX.toLowerCase(), tokenId: '42', price: 11 }], [
+    { collection: BOX.toLowerCase(), tokenId: null, price: 6 }, { collection: BOX.toLowerCase(), tokenId: null, price: 6.5 }, { collection: BOX.toLowerCase(), tokenId: '42', price: 9.5 },
+  ]);
+  assert.deepEqual(t[BOX.toLowerCase()]!['42'], [11, 9.5]);
+  assert.equal(doc.collections[BOX.toLowerCase()]!.bestOffer, 6.5);
+  assert.equal(doc.collections[BOX.toLowerCase()]!.offers, 3);
 });

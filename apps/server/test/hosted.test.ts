@@ -293,6 +293,8 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/screener read',
       'GET /api/vs/sodex/lottery/feed read',
       'GET /api/vs/sodex/lottery/meta read',
+      'GET /api/vs/sodex/lottery/rewards read',
+      'GET /api/vs/sodex/lottery/u/* upstream',
       'GET /api/vs/sodex/mm-daily upstream',
       'GET /api/vs/sodex/oi-excluded read',
       'GET /api/vs/sodex/wealth/maintenance read',
@@ -347,6 +349,9 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/vs/invites/join write',
       'POST /api/vs/sodex-auth/nonce auth',
       'POST /api/vs/sodex-auth/verify auth',
+      'POST /api/vs/sodex/lottery/u/box/merge write',
+      'POST /api/vs/sodex/lottery/u/box/open write',
+      'POST /api/vs/sodex/lottery/u/treasure/open write',
       'POST /api/vs/sopoints/estimate write',
       'POST /api/vs/sopoints/log write',
       'POST /api/vs/username write',
@@ -378,6 +383,8 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
     else if (r.url === '/api/beta/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
     // The SoPoints sign-in relay (routes/pointsAuth.ts): SoDEX's sign-in text only, cls auth.
     else if (r.url.startsWith('/api/vs/sodex-auth/')) assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
+    // The signed-in Blind Box (routes/sodexLotteryUser.ts): an open or a merge with the wallet's own signature, a claim; cls write.
+    else if (r.url.startsWith('/api/vs/sodex/lottery/u/') && r.method === 'POST') assert.ok(r.cls === 'write', r.url);
     else assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
   }
   // HEAD follows GET; nothing else is implied.

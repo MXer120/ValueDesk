@@ -404,6 +404,18 @@ Against this inventory, HOSTED_ROUTES should be:
   summary and open listings every ten minutes, and once per listed token its tier (a SoDEX box's token URI on ValueChain's RPC, any other
   token's metadata on ValueChain's explorer), kept. No address is sent; the answer is the same for everyone.
 - **Add**: `GET /api/vs/sodex/mm-daily?from=` (cls `upstream`, cached an hour): per UTC day, SoDEX accounts 1002 + 23342's volume (from 2026-11-06, our index) and SoDEX's internal pair's open interest (its sizes now x each day's mark close), for the SoPoints difficulty (valuedesk/sodex/mmDaily.ts). Upstream: one mark-candle read per market the pair holds (>= 0.2% of its USD) and one positions read, per hour.
+- **Add**: `GET /api/vs/sodex/lottery/rewards` (cls `read`, refreshed every ten minutes in the route, five in the browser): what
+  SoDEX Blind Boxes paid per tier, NFT drops left out (routes/boxRewards.ts, valuedesk/boxRewards.ts). Upstream: ValueChain's RPC
+  only, the box contract's OpenRequested and the distribute contract's Distributed logs since the last read (19k-block steps; the
+  whole history once, then only new blocks, the state in `box-rewards.json` in the data dir) and `boxLevels` for the boxes paid.
+- **Add**: `GET /api/vs/sodex/lottery/u/*` (cls `upstream`, 120 a minute per client in the route) and `POST
+  /api/vs/sodex/lottery/u/box/open`, `.../box/merge`, `.../treasure/open` (cls `write`: the site Origin exactly, 20 a minute per
+  client in the route): the signed-in Blind Box relay (routes/sodexLotteryUser.ts, owner 2026-11-28). mainnet-lottery.sodex.dev
+  sends no CORS, so the wallet's SoDEX token (Authorization, from the SoPoints sign-in) passes here to it: reads by allow-list
+  (boxes, pfps, progress, treasures, history, ledger, jobs, one job, draw entries, the sign params), their query keys checked;
+  an open or a merge rebuilt from its four fields and carried only with the wallet's own EIP-712 signature (RequestOpen /
+  RequestMerge on SoDEXTreasureBox, chain 286623), which names the owner; a claim of earned boxes. Nothing stored or logged, no
+  header set but Accept, Content-Type and the user's own Authorization. The edge passes Authorization and POST for this prefix.
 - **Add**: `POST /api/vs/sodex-auth/nonce` and `POST /api/vs/sodex-auth/verify` (cls `auth`: the site Origin exactly,
   capped per client and overall): the SoPoints sign-in relay (routes/pointsAuth.ts, owner 2026-11-16). SoDEX's two
   sign-in calls only, its own sign-in text only, `type` sign_in and `autoSign` false fixed, no forged headers, nothing

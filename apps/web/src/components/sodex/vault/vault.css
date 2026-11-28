@@ -1,0 +1,131 @@
+/*
+ * The Blind Box vault (vault/): the wallet's boxes and NFTs, opening, merging, gifting, prices from valuemint.store.
+ * No card or row has a coloured edge on one side: kind and state are pills, dots and icons.
+ */
+
+/* --- the NFT glare (Holo.tsx): cybereator.com's card effect, its numbers ----------------------------------------- */
+.vh-tilt { --vh-ease: cubic-bezier(.22, .61, .36, 1); position: relative; overflow: hidden; transform: perspective(900px) rotateX(var(--ry, 0deg)) rotateY(var(--rx, 0deg)); will-change: transform; backface-visibility: hidden; }
+.vh-foil, .vh-glare { position: absolute; left: 0; top: 0; width: 200%; height: 200%; pointer-events: none; will-change: transform; }
+.vh-glare { z-index: 5; background: radial-gradient(circle at center, rgb(255 255 255 / .16), transparent 32%); /* white on the picture in both themes, as cybereator.com */ transform: translate(calc((var(--mxn, .5) - 1) * 50%), calc((var(--myn, .5) - 1) * 50%)); opacity: 0; transition: opacity .4s var(--vh-ease); }
+.vh-tilt.is-hover .vh-glare { opacity: 1; }
+.vh-foil { z-index: 4; left: -50%; top: -50%; mix-blend-mode: color-dodge; opacity: .16; background: linear-gradient(115deg, transparent 30%, rgba(255, 0, 170, .55) 40%, rgba(0, 255, 230, .55) 46%, rgba(255, 230, 0, .55) 52%, rgba(140, 90, 255, .55) 58%, transparent 68%); transform: translate(calc((var(--mxn, .5) - .5) * -40%), calc((var(--myn, .5) - .5) * -40%)); animation: vh-idle 7s ease-in-out infinite alternate; transition: opacity .3s var(--vh-ease); }
+.vh-holo.is-hover .vh-foil { opacity: .45; animation-play-state: paused; }
+.vh-holo.is-strong .vh-foil { opacity: .3; }
+.vh-holo.is-strong.is-hover .vh-foil { opacity: .65; }
+.vh-holo.is-gold .vh-foil { opacity: .34; background: linear-gradient(115deg, transparent 30%, rgba(255, 170, 0, .6) 40%, rgba(255, 212, 0, .7) 46%, rgba(255, 244, 190, .7) 52%, rgba(255, 190, 40, .6) 58%, transparent 68%); }
+.vh-holo.is-gold.is-hover .vh-foil { opacity: .7; }
+@keyframes vh-idle { 0% { translate: -12% -8%; } to { translate: 12% 8%; } }
+@media (prefers-reduced-motion: reduce) {
+  .vh-tilt { transform: none; }
+  .vh-foil { animation: none; }
+  .vh-glare { display: none; }
+}
+
+/* --- the vault (Vault.tsx) ------------------------------------------------------------------------------------------ */
+.bv { display: flex; flex-direction: column; gap: 14px; padding: 20px; border: 1px solid var(--panel-line); border-radius: 22px; background: var(--bg-panel, var(--tf-surface)); }
+.bv-num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.bv-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 20px; }
+.bv-head__t h2 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+.bv-head__t p { margin: 4px 0 0; max-width: 60ch; color: var(--tf-muted); font-size: 13px; }
+.bv-head__c { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.bv-note { margin: 0; color: var(--tf-muted); font-size: 12.5px; }
+.bv-err { color: var(--tf-neg); font-size: 12.5px; }
+.bv-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 28px 12px; color: var(--tf-muted); text-align: center; }
+.bv-empty p { margin: 0; }
+
+/* Sign-in and claim: one calm row each. */
+.bv-signin, .bv-claim { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 14px; border-radius: 14px; background: rgb(var(--ink) / 0.045); font-size: 13px; }
+.bv-signin > span, .bv-claim > span { flex: 1 1 280px; color: var(--tf-muted); }
+.bv-signin b, .bv-claim b { color: var(--tf-fg); font-weight: 600; }
+.bv-signin > svg { color: var(--tf-brand); }
+.bv-signin .bv-err { flex-basis: 100%; }
+
+/* The four tiers. */
+.bv-tiers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1100px) { .bv-tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .bv-tiers { grid-template-columns: minmax(0, 1fr); } }
+.bv-tier { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--panel-line); border-radius: 18px; background: radial-gradient(90% 55% at 50% 0%, color-mix(in srgb, var(--tier, #8a8f98) 16%, transparent), transparent 72%), rgb(var(--ink) / 0.02); }
+.bv-tier.is-none { opacity: 0.72; }
+.bv-tier__art { display: grid; place-items: center; height: 136px; border-radius: 14px; background: radial-gradient(50% 50% at 50% 55%, color-mix(in srgb, var(--tier, #8a8f98) 34%, transparent), transparent 72%); }
+.bv-tier__skel { height: 330px; border-radius: 18px; }
+.bv-tier__name { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.bv-tier__name b { font-size: 15px; }
+.bv-tier__name .bv-num { font-size: 22px; font-weight: 600; }
+.bv-tier__acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+.bv-kv { display: flex; flex-direction: column; gap: 4px; margin: 0; font-size: 12.5px; }
+.bv-kv > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.bv-kv dt { color: var(--tf-muted); }
+.bv-kv dd { margin: 0; text-align: right; }
+.bv-kv dd small { color: var(--tf-muted); }
+.bv-kv__n dd, .bv-kv__n dt { color: var(--tf-faint, var(--tf-muted)); font-size: 11.5px; }
+.bv-kv__mk { padding-top: 6px; border-top: 1px solid var(--panel-line); }
+
+/* Count, gift: inline in the card. */
+.bv-form { display: flex; flex-direction: column; gap: 8px; margin-top: auto; }
+.bv-form__row { display: flex; align-items: center; gap: 6px; }
+.bv-form__row input { flex: 1 1 auto; min-width: 0; }
+.bv-form > small { color: var(--tf-muted); font-size: 11.5px; line-height: 1.4; }
+
+/* The running queue and what it won. */
+.bv-queue { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--panel-line); border-radius: 16px; background: var(--bg-elevated); }
+.bv-queue__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.bv-queue__head > b { font-size: 14px; }
+.bv-queue__n { margin-left: auto; color: var(--tf-muted); font-size: 12.5px; }
+.bv-won { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13.5px; }
+.bv-won b { font-size: 16px; color: var(--tf-pos, var(--pos)); }
+.bv-results { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
+.bv-results.is-list { grid-template-columns: minmax(0, 1fr); }
+.bv-result { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 10px 6px 6px; border-radius: 12px; background: rgb(var(--ink) / 0.04); animation: bv-in 320ms var(--tf-ease, ease-out) both; }
+.bv-result > span { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.bv-result small { overflow: hidden; color: var(--tf-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.bv-result.is-pfp { background: color-mix(in srgb, var(--tf-brand) 12%, rgb(var(--ink) / 0.04)); }
+.bv-result__ago { flex: none; color: var(--tf-muted); font-size: 11.5px; }
+.bv-result__skel { height: 48px; border-radius: 12px; }
+@keyframes bv-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
+
+/* Merge or open. */
+.bv-advice { display: flex; flex-direction: column; gap: 8px; }
+.bv-advice h3 { margin: 4px 0 0; font-size: 15px; }
+.bv-advice ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.bv-advice li { display: grid; grid-template-columns: 120px repeat(3, minmax(0, 1fr)) auto; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; background: rgb(var(--ink) / 0.035); }
+.bv-advice li > span:not(.bv-advice__step) { display: flex; flex-direction: column; gap: 1px; padding: 4px 8px; border-radius: 10px; }
+.bv-advice li > span.is-best { background: rgb(var(--ink) / 0.07); }
+.bv-advice li small { color: var(--tf-muted); font-size: 11.5px; }
+.bv-advice li em { color: var(--tf-muted); font-size: 11px; font-style: normal; }
+.bv-advice__step { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-num); font-size: 12.5px; }
+.bv-advice__step i { color: var(--tf-muted); font-style: normal; }
+@media (max-width: 760px) {
+  .bv-advice li { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .bv-advice__step { grid-column: 1 / -1; }
+  .bv-advice li > .tf-pill { grid-column: 1 / -1; justify-self: start; }
+}
+
+/* Cybereators. */
+.bv-cyhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-size: 13px; }
+.bv-cyhead > span:first-child { font-weight: 600; }
+.bv-cyhead small { color: var(--tf-muted); }
+.bv-cyhead > a:first-of-type { margin-left: auto; }
+.bv-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.bv-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px 10px 12px; border: 1px solid var(--panel-line); border-radius: 18px; background: rgb(var(--ink) / 0.02); }
+.bv-card__art { aspect-ratio: 1; border-radius: 12px; background: #0d0e10; }
+.bv-card__art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.bv-card__none { display: grid; place-items: center; width: 100%; height: 100%; color: var(--tf-muted); }
+.bv-card__skel { aspect-ratio: 0.72; border-radius: 18px; }
+.bv-card__t { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bv-card__t b { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.bv-traits { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.bv-traits li { display: inline-flex; gap: 4px; padding: 2px 8px; border-radius: 999px; background: rgb(var(--ink) / 0.06); font-size: 11.5px; }
+.bv-traits small { color: var(--tf-muted); }
+
+/* The PFP drop's links. */
+.bv-pfplinks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+@media (prefers-reduced-motion: reduce) { .bv-result { animation: none; } }
+
+/* The wallet's count toward the next box. */
+.bv-progress { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.bv-progress > div { padding: 10px 12px; border-radius: 12px; background: rgb(var(--ink) / 0.035); }
+.bv-progress dt { color: var(--tf-muted); font-size: 11.5px; }
+.bv-progress dd { margin: 2px 0 0; font-size: 16px; font-weight: 600; }
+
+/* Links styled as buttons keep the button look on every page (Original underlines links). */
+.bv a.tf-btn { text-decoration: none; }

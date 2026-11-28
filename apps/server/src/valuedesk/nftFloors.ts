@@ -34,15 +34,36 @@ export interface CollectionFloor {
   /** The trait the tiers come from ("Tier", "Level"), null when the collection has none. */
   trait: string | null;
   tiers: Record<string, TierFloor>;
+  /** The best open offer for any NFT of the collection (a collection offer), SOSO; null with none. */
+  bestOffer: number | null;
+  offers: number;
 }
 export interface FloorsDoc {
   ok: true; at: number; source: 'valuemint.store'; currency: 'SOSO'; collections: Record<string, CollectionFloor>;
   /** SoDEX boxes: the level of each token-URI number (`.../sobox/<n>`), so a page can tell a held box's tier. */
   soboxLevels?: Record<string, string>;
+  /** Per NFT: its lowest asking price and its best offer made for it alone, SOSO ([ask, bid], either null). */
+  tokens?: Record<string, Record<string, [number | null, number | null]>>;
+}
+
+/** An open offer (wrapped SOSO for an NFT): for any NFT of a collection, or for one token. Null for anything else. */
+export function offerOf(o: Order, nowSec: number): { collection: string; tokenId: string | null; price: number } | null {
+  const p = o.params;
+  const pay = p?.offer?.[0];
+  const want = p?.consideration?.[0];
+  if (!p || !pay || pay.itemType !== 1 || !want?.token || (want.itemType !== 2 && want.itemType !== 4)) return null;
+  if (Number(p.startTime ?? 0) > nowSec || (p.endTime && Number(p.endTime) <= nowSec)) return null;
+  /* An offer can ask for several NFTs at once (225 SOSO for 5 Cybereators, 2026-11-28): its price is per NFT. */
+  const units = /^\d{1,6}$/.test(want.startAmount ?? '1') ? Math.max(1, Number(want.startAmount ?? '1')) : 1;
+  const price = wei(pay.startAmount) / units;
+  if (!(price > 0)) return null;
+  const any = want.itemType === 4 && (want.identifierOrCriteria ?? '0') === '0';
+  if (want.itemType === 4 && !any) return null; // a criteria list (some tokens): not read
+  return { collection: want.token.toLowerCase(), tokenId: any ? null : String(want.identifierOrCriteria), price };
 }
 
 interface Summary { collections?: Array<{ address?: string; name?: string; symbol?: string; floorWei?: string | null; listed?: number }> }
-interface Order { params?: { offer?: Array<{ token?: string; itemType?: number; identifierOrCriteria?: string; startAmount?: string }>; consideration?: Array<{ token?: string; itemType?: number; startAmount?: string }>; startTime?: string; endTime?: string } }
+interface Order { params?: { offer?: Array<{ token?: string; itemType?: number; identifierOrCriteria?: string; startAmount?: string }>; consideration?: Array<{ token?: string; itemType?: number; identifierOrCriteria?: string; startAmount?: string }>; startTime?: string; endTime?: string } }
 
 const ZERO = /^0x0{40}$/i;
 const wei = (s: string | null | undefined): number => {
@@ -85,7 +106,7 @@ export function buildFloors(summary: Summary, listings: Array<{ collection: stri
   for (const c of summary.collections ?? []) {
     if (!c.address) continue;
     const f = wei(c.floorWei ?? null);
-    collections[c.address.toLowerCase()] = { name: c.name ?? c.address, symbol: c.symbol ?? null, floor: f > 0 ? f : null, listed: c.listed ?? 0, trait: null, tiers: {} };
+    collections[c.address.toLowerCase()] = { name: c.name ?? c.address, symbol: c.symbol ?? null, floor: f > 0 ? f : null, listed: c.listed ?? 0, trait: null, tiers: {}, bestOffer: null, offers: 0 };
   }
   for (const l of listings) {
     const col = collections[l.collection];
@@ -97,6 +118,23 @@ export function buildFloors(summary: Summary, listings: Array<{ collection: stri
     col.tiers[t.value] = cur ? { floor: Math.min(cur.floor, l.price), listed: cur.listed + 1 } : { floor: l.price, listed: 1 };
   }
   return { ok: true, at, source: 'valuemint.store', currency: 'SOSO', collections };
+}
+
+/** Per NFT asks and token offers, and each collection's best collection offer (written into `doc`). */
+export function priceTokens(doc: FloorsDoc, listings: Array<{ collection: string; tokenId: string; price: number }>, offers: Array<{ collection: string; tokenId: string | null; price: number }>): NonNullable<FloorsDoc['tokens']> {
+  const t: NonNullable<FloorsDoc['tokens']> = {};
+  const at = (c: string, id: string) => ((t[c] ??= {})[id] ??= [null, null]);
+  for (const l of listings) { const x = at(l.collection, l.tokenId); x[0] = x[0] === null ? l.price : Math.min(x[0], l.price); }
+  for (const o of offers) {
+    const col = doc.collections[o.collection];
+    if (o.tokenId === null) {
+      if (col) { col.offers += 1; col.bestOffer = col.bestOffer === null ? o.price : Math.max(col.bestOffer, o.price); }
+    } else {
+      if (col) col.offers += 1;
+      const x = at(o.collection, o.tokenId); x[1] = x[1] === null ? o.price : Math.max(x[1], o.price);
+    }
+  }
+  return t;
 }
 
 /* ------------------------------------------------------------------------------------------- reading ----- */
@@ -185,7 +223,8 @@ async function refresh(): Promise<FloorsDoc> {
   const unknown = listings.filter((l) => !tierCache.has(`${l.collection}:${l.tokenId}`) && !noTiers.has(l.collection));
   await resolveSobox(unknown.filter((l) => l.collection === SOBOX).map((l) => l.tokenId));
   await resolveExplorer(unknown.filter((l) => l.collection !== SOBOX));
-  doc = { ...buildFloors(summary, listings, (c, id) => tierCache.get(`${c}:${id}`), Date.now()), soboxLevels: Object.fromEntries(await readSoboxLevels()) };
+  const base = buildFloors(summary, listings, (c, id) => tierCache.get(`${c}:${id}`), Date.now());
+  doc = { ...base, soboxLevels: Object.fromEntries(await readSoboxLevels()), tokens: priceTokens(base, listings, (orders.orders ?? []).map((o) => offerOf(o, now)).filter((x): x is NonNullable<typeof x> => x !== null)) };
   return doc;
 }
 

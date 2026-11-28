@@ -20,7 +20,9 @@ export const SODEX_SIGNIN_LIVE: boolean = false;
  * The SoPoints sign-in, ON (owner 2026-11-16: "do server relay if that works without putting user funds at risk at
  * all"). The two sign-in calls go through our server's relay (server routes/pointsAuth.ts: SoDEX's own sign-in text
  * only, no forged headers, nothing kept); the points are then read with the token straight from alpha-biz.sodex.dev,
- * which allows this site. The Blind Box stays behind SODEX_SIGNIN_LIVE: its host still refuses this site.
+ * which allows this site. The Blind Box uses the same token since 2026-11-28 (owner: "we fixed that for sopoints too so
+ * fix"): its host sends no CORS, so its calls pass our relay (server routes/sodexLotteryUser.ts; web boxVault.ts), the
+ * token passed through and never kept. SODEX_SIGNIN_LIVE below stays off for the old direct-from-browser reads.
  */
 export const SODEX_POINTS_SIGNIN_LIVE: boolean = true;
 

@@ -282,6 +282,37 @@ function devNftFloors(): Plugin {
 }
 
 /**
+ * Dev only: the Blind Box routes answered here by the server's own code (apps/server/tools/lottery-dev.ts): the
+ * signed-in relay (GET /api/vs/sodex/lottery/u/*, POST .../u/box/open|merge, .../u/treasure/open, the user's own
+ * Authorization passed) and the reward history (GET /api/vs/sodex/lottery/rewards), so localhost opens and merges
+ * before they are released. Never in a build.
+ */
+function devLottery(): Plugin {
+  return {
+    name: 'vs-dev-lottery',
+    apply: 'serve',
+    configureServer(server) {
+      const file = fileURLToPath(new URL('../server/tools/lottery-dev.ts', import.meta.url));
+      type Dev = { handle: (m: string, u: string, b: string, a: string | undefined, ip: string) => Promise<{ status: number; body: string; cache: string }> };
+      server.middlewares.use((req, res, next) => {
+        const u = req.url ?? '';
+        const mine = (req.method === 'GET' && (u.startsWith('/api/vs/sodex/lottery/u/') || u === '/api/vs/sodex/lottery/rewards'))
+          || (req.method === 'POST' && /^\/api\/vs\/sodex\/lottery\/u\/(box\/open|box\/merge|treasure\/open)$/.test(u));
+        if (!mine) return next();
+        let body = '';
+        req.on('data', (c: Buffer) => { body += c; if (body.length > 65_536) req.destroy(); });
+        req.on('end', () => {
+          const auth = typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined;
+          void server.ssrLoadModule(file).then((m) => (m as Dev).handle(req.method!, u, body, auth, req.socket.remoteAddress ?? '127.0.0.1'))
+            .then((r) => { res.statusCode = r.status; res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', r.cache); res.end(r.body); })
+            .catch((e: Error) => { res.statusCode = 502; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ code: -1, msg: `local lottery: ${e.message}` })); });
+        });
+      });
+    },
+  };
+}
+
+/**
  * Dev only: POST /api/vs/sopoints/estimate answered here by the server's own route (apps/server/tools/
  * sopointsEstimate-dev.ts -> src/routes/sopointsEstimate.ts) with the private model file on this laptop, so localhost
  * has SoPoints estimates before the route is released. Without the file the request goes on to the usual proxy.
@@ -369,7 +400,7 @@ function siteBuildPlugins(): Plugin[] {
 export default defineConfig({
   customLogger: logger,
   // bootShell after routePreload: it rewrites the theme-boot.js tag routePreload places its own script after.
-  plugins: [react(), trackAppOrigin(), ...(ADMIN_PAGE ? [] : siteBuildPlugins()), bootShell({ webRoot: fileURLToPath(new URL('.', import.meta.url)) }), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), devSopointsEstimate(), devNftFloors(), botsFixtures()],
+  plugins: [react(), trackAppOrigin(), ...(ADMIN_PAGE ? [] : siteBuildPlugins()), bootShell({ webRoot: fileURLToPath(new URL('.', import.meta.url)) }), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), devSopointsEstimate(), devNftFloors(), devLottery(), botsFixtures()],
   define: { __VS_BUILD__: JSON.stringify(buildId()) },
   /* No sticky hover on a touch screen: every rule styling a hovered element is behind @media (hover: hover)
      (tools/hover-media.mjs says which are left as they are, and why). Identical wherever a pointer can hover. */
