@@ -750,8 +750,58 @@ test('feedback and error reports: POST and the thread token pass, a screenshot u
       assert.equal(proxy.isReportsPath('/api/vs/sopoints/log'), true);
       assert.equal(proxy.isReportsPath('/api/vs/sopoints/estimate'), true);
       assert.equal(proxy.bodyLimitFor('/api/vs/sopoints/estimate'), 16 * 1024);
+      // Published indexes and the SSI quote: signed or per-wallet POSTs, never cached.
+      assert.equal(proxy.isReportsPath('/api/vs/indexes/publish'), true);
+      assert.equal(proxy.isReportsPath('/api/vs/indexes/unpublish'), true);
+      assert.equal(proxy.isReportsPath('/api/vs/indexes'), false, 'the list is a public GET');
+      assert.equal(proxy.isReportsPath('/api/vs/wealth/ssi-quote'), true);
+      assert.equal(proxy.isReportsPath('/api/vs/wealth/info'), false, 'fund info is a public GET');
       assert.equal(proxy.bodyLimitFor('/api/vs/inbox/add'), 64 * 1024);
       assert.equal((await request(port, '/api/vs/leaderboard', { method: 'POST', body: '{}' })).status, 405, 'other index paths stay GET only');
+    });
+  } finally {
+    await origin.close();
+  }
+});
+
+test('published indexes: a publish with its picture up to 160 KiB passes, the picture GET keeps its headers', async () => {
+  const seen = [];
+  const pic = Buffer.from('89504e470d0a1a0a', 'hex');
+  const hash = 'ab'.repeat(32);
+  const imageHeaders = {
+    'content-type': 'image/png', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox",
+    'content-disposition': 'inline; filename="index.png"', 'cache-control': 'public, max-age=31536000, immutable',
+  };
+  const origin = await listen((req, res) => {
+    let size = 0;
+    req.on('data', (c) => { size += c.length; });
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, size });
+      if (req.url.startsWith('/api/vs/indexes/image/')) { res.writeHead(200, imageHeaders); res.end(pic); return; }
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end('{"ok":true}');
+    });
+  });
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (port) => {
+      assert.equal(proxy.bodyLimitFor('/api/vs/indexes/publish'), 160 * 1024);
+      assert.equal(proxy.bodyLimitFor('/api/vs/indexes/unpublish'), 16 * 1024, 'a take-down carries no picture');
+      const body = Buffer.alloc(160 * 1024, 0x41);
+      const ok = await request(port, '/api/vs/indexes/publish', { method: 'POST', body, headers: { 'content-type': 'application/json' } });
+      assert.equal(ok.status, 200);
+      assert.equal(ok.headers['cache-control'], 'no-store');
+      assert.equal(seen.at(-1).size, body.length, 'the whole publish reaches the origin');
+      const before = seen.length;
+      assert.equal((await request(port, '/api/vs/indexes/publish', { method: 'POST', body: Buffer.alloc(160 * 1024 + 1, 0x41) })).status, 413);
+      assert.equal((await request(port, '/api/vs/indexes/unpublish', { method: 'POST', body: Buffer.alloc(16 * 1024 + 1, 0x41) })).status, 413);
+      assert.equal(seen.length, before, 'neither reached the origin');
+
+      const img = await request(port, `/api/vs/indexes/image/${hash}`);
+      assert.equal(img.status, 200);
+      assert.deepEqual(img.body, pic);
+      for (const [k, v] of Object.entries(imageHeaders)) assert.equal(img.headers[k], v, k);
+      assert.equal(img.headers['vercel-cdn-cache-control'], 'max-age=60', 'the edge keeps a picture a minute at most');
+      assert.equal(seen.at(-1).url, `/api/vs/indexes/image/${hash}`);
     });
   } finally {
     await origin.close();

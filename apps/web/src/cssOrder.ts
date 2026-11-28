@@ -79,6 +79,13 @@ import './components/vip.css';
 import './components/portfolio/PortfolioPage.css';
 // The Portfolio page (the wallet, 2026-11-26): after the page before it, whose chart card it reuses and restyles.
 import './components/portfolio/wallet/wallet.css';
+// The Wealth page (2026-11-28): the Desk version's fund list and preview (kept by the owner, so its sheet left the
+// localhost-only list), then the page's own sheets, top, macro row and indexes, which restyle the Portfolio's chart card.
+import './components/sodex/wealth/wealth.css';
+import './components/portfolio/recurring.css';
+import './components/portfolio/wealthHero.css';
+import './components/portfolio/vdIndexes.css';
+import './components/portfolio/wealthPages.css';
 import './components/explore/cohorts/Cohorts.css';
 import './components/explore/markets/Markets.css';
 import './components/copy/Copy.css';

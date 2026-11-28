@@ -3,9 +3,10 @@
  * what is on its way. Reads and routes: trading/wealth.ts. Every yield and return on the page
  * is SoDEX's own live figure, and a missing one is a dash.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Card, EquityCurve, type CurveWindow } from './parts';
 import { CoinIcon } from '../CoinIcon';
+import { Button, StatusPill } from '../bots/kit/kit';
 import { EmptyState, NoWallet } from '../EmptyState';
 import { ReadFailed } from '../AccountHistory';
 import { PanelTabs, type PanelTab } from '../../dashboard/Panel';
@@ -13,12 +14,20 @@ import { useAsync } from '../../hooks';
 import { DASH, MINUS, fmt, fmtUsd, num, signClass } from '../../format';
 import { useMask } from '../../privacy';
 import {
-  fundAction, fundLabel, readPnlHistory, sodexFundUrl,
+  fundAction, fundLabel, readPnlHistory,
   type FundAction, type FundShelf, type JoinedHolding, type PnlRange, type WealthEntry, type WealthFund,
 } from '../../trading/wealth';
 import { RangePicker, ViewSeg } from './RangePicker';
 import { useLedger, useTradingStatuses, type WealthState } from './useWealth';
 import { WealthSheet, type WealthSheetTarget } from './WealthSheet';
+import { EarnSheet, type EarnSheetTarget } from './EarnSheet';
+import { RecurringPanel, RecurringSheet, useRecurring, type RecurringSheetTarget, type RecurringState } from './RecurringBuys';
+import { EARN_FUND } from '../../trading/wealthEarn';
+import { WEALTH_OPEN_EVENT, type WealthOpen } from './WealthHero';
+import { closedLine, readTradingStatus } from '../../trading/wealth';
+import { claimEntry } from '../../trading/claims';
+import { isUserRejection } from '../../wallet';
+import { Spinner } from '../funds/ui';
 import type { Eip1193Provider } from '../../wallet';
 
 const signedUsd = (v: number): string => `${v > 0 ? '+' : v < 0 ? MINUS : ''}${fmtUsd(Math.abs(v))}`;
@@ -37,9 +46,6 @@ const dayTime = (at: string | number | undefined): string => {
 /** USDC Earn's share has no logo of its own here; it is USDC in a vault. */
 const fundIcon = (coin: string): string => (/^v?soUSDC$/i.test(coin) ? 'USDC' : coin);
 
-const SodexLink = ({ href, children }: { href: string; children: ReactNode }) => (
-  <a className="acct-act" href={href} target="_blank" rel="noopener noreferrer">{children}</a>
-);
 
 // --- the left card ----------------------------------------------------------------------
 
@@ -132,18 +138,22 @@ function channelWords(a: FundAction | null, fundType: WealthFund['fundType']): s
   switch (a.kind) {
     case 'trade': return 'Order book';
     case 'batch': return 'Batch';
-    case 'rfq': return 'Maker quote';
-    case 'external': return 'On sodex.com';
+    case 'rfq': return a.protocol === 'ssi' ? 'Maker quote, settled at once' : 'Maker quote';
+    case 'external': return fundType === 'bridged_vault' ? 'Bridge, about a minute' : 'Not open';
     case 'closed': return a.why;
   }
 }
 
-function FundBoard({ w, address, provider, onOpenMarket, onDone }: {
+function FundBoard({ w, address, provider, onOpenMarket, onDone, recurring, onRecurring, onEarn }: {
   w: WealthState;
   address: string | null;
   provider: Eip1193Provider | null;
   onOpenMarket: (symbol: string, engine: 'spot') => void;
   onDone: () => void;
+  /** The funds SoDEX's recurring-buy contract takes. */
+  recurring: ReadonlySet<string>;
+  onRecurring: (fundId: string) => void;
+  onEarn: (t: EarnSheetTarget) => void;
 }) {
   const statuses = useTradingStatuses(w.funds);
   const [shelf, setShelf] = useState<FundShelf | 'All'>('All');
@@ -197,8 +207,11 @@ function FundBoard({ w, address, provider, onOpenMarket, onDone }: {
                     {(action?.kind === 'batch' || action?.kind === 'rfq') && (
                       <button type="button" className="acct-act" onClick={() => setTarget({ fund: f, name: label.name, action, side: 'buy' })}>Invest</button>
                     )}
-                    {action?.kind === 'external' && <SodexLink href={sodexFundUrl(f.fundId)}>On SoDEX</SodexLink>}
-                    {action?.kind === 'closed' && <span className="pfx-dim" title={action.nextAt ? `Next open ${dayTime(action.nextAt)}` : undefined}>{action.why}</span>}
+                    {action?.kind === 'external' && (f.fundId === EARN_FUND
+                      ? <button type="button" className="acct-act" onClick={() => onEarn({ side: 'buy' })}>Invest</button>
+                      : <span className="pfx-dim">{action.why.startsWith('In subscription') ? 'In subscription' : 'Not open'}</span>)}
+                    {action?.kind === 'closed' && <span className="pfx-dim" title={action.nextAt ? `${action.why} · next open ${dayTime(action.nextAt)}` : action.why}>{closedLine(action.nextAt)}</span>}
+                    {recurring.has(f.fundId) && <button type="button" className="acct-act" onClick={() => onRecurring(f.fundId)}>Recurring</button>}
                   </td>
                 </tr>
               );
@@ -213,14 +226,19 @@ function FundBoard({ w, address, provider, onOpenMarket, onDone }: {
 
 // --- holdings, in progress, history -----------------------------------------------------
 
-const held = (h: JoinedHolding): string[] => [
-  ...(h.spotShares > 0 ? ['Spot'] : []),
-  ...(h.perpShares > 0 ? ['Perps margin'] : []),
-  ...(h.evmShares > 0 ? ['Wallet'] : []),
-  ...(h.source === 'bridge' ? ['Bridged'] : []),
+/**
+ * Where the shares sit (owner 2026-11-28: "what is bridged by held in?"). Only places, each with its shares: "Bridged"
+ * was the fund's route (USDC Earn reaches its Morpho vault over a bridge), not a place, so it is no longer shown here.
+ */
+const PLACES: ReadonlyArray<{ key: 'spotShares' | 'perpShares' | 'evmShares'; label: string; why: string }> = [
+  { key: 'spotShares', label: 'Spot', why: 'In your SoDEX spot account.' },
+  { key: 'perpShares', label: 'Perps margin', why: 'Pledged as margin in your perps account. It keeps earning and counts as collateral.' },
+  { key: 'evmShares', label: 'Wallet', why: 'In your own wallet on ValueChain.' },
 ];
+const held = (h: JoinedHolding): Array<{ label: string; why: string; shares: number }> =>
+  PLACES.filter((p) => h[p.key] > 0).map((p) => ({ label: p.label, why: p.why, shares: h[p.key] }));
 
-export function WealthHoldings({ w, address, onOpenMarket, onOpenWealth, provider, onDone }: {
+export function WealthHoldings({ w, address, onOpenMarket, onOpenWealth, provider, onDone, onEarn }: {
   w: WealthState;
   address: string | null;
   onOpenMarket: (symbol: string, engine: 'spot') => void;
@@ -228,6 +246,8 @@ export function WealthHoldings({ w, address, onOpenMarket, onOpenWealth, provide
   onOpenWealth?: () => void;
   provider: Eip1193Provider | null;
   onDone: () => void;
+  /** USDC Earn's sheet, where the tab has one (the Portfolio's tab without it shows no action for USDC Earn). */
+  onEarn?: (t: EarnSheetTarget) => void;
 }) {
   const maskFunds = useMask('funds');
   const maskPnl = useMask('pnl');
@@ -248,48 +268,51 @@ export function WealthHoldings({ w, address, onOpenMarket, onOpenWealth, provide
     );
   }
   return (
-    <div className="pfx-tablewrap">
-      <table className="acct-table acct-t pfx-table">
-        <thead>
-          <tr>
-            <th>Fund</th>
-            <th className="pfx-hide-phone">Held in</th>
-            <th className="num pfx-hide-phone">Shares</th>
-            <th className="num">Value</th>
-            <th className="num pfx-hide-phone">In progress</th>
-            <th className="num">PnL</th>
-            <th className="num pfx-hide-phone">24h</th>
-            <th className="acct-actions" aria-label="Actions" />
-          </tr>
-        </thead>
-        <tbody>
-          {w.holdings.map((h) => {
-            const pnl = h.pnl?.priced ? num(h.pnl.unrealizedPnl) + num(h.pnl.realizedPnl) : null;
-            const d = h.pnl?.pnl24h !== undefined ? num(h.pnl.pnl24h) : null;
-            const action = h.fund ? fundAction(h.fund, statuses.get(h.fundId) ?? null) : null;
-            return (
-              <tr key={h.fundId}>
-                <td>
-                  <span className="acct-mkt"><CoinIcon coin={fundIcon(h.coin)} size={18} /><span className="acct-mkt__n">{h.name}</span></span>
-                </td>
-                <td className="pfx-hide-phone"><span className="bal-tags pfx-tags">{held(h).map((t) => <span key={t} className="bal-tag">{t}</span>)}</span></td>
-                <td className="num pfx-hide-phone">{maskFunds(fmt(h.shares, 4))}</td>
-                <td className="num">{maskFunds(h.marketValue === null ? DASH : fmtUsd(h.marketValue))}</td>
-                <td className="num pfx-hide-phone">{maskFunds(h.inFlight > 0 ? fmtUsd(h.inFlight) : DASH)}</td>
-                <td className={`num ${pnl === null ? '' : signClass(pnl)}`}>{maskPnl(pnl === null ? DASH : signedUsd(pnl))}</td>
-                <td className={`num pfx-hide-phone ${d === null ? '' : signClass(d)}`}>{maskPnl(d === null ? DASH : signedUsd(d))}</td>
-                <td className="acct-actions">
-                  {action?.kind === 'trade' && <button type="button" className="acct-act" onClick={() => onOpenMarket(action.symbol, 'spot')}>Trade</button>}
-                  {(action?.kind === 'batch' || action?.kind === 'rfq') && h.fund && (
-                    <button type="button" className="acct-act" onClick={() => setTarget({ fund: h.fund!, name: h.name, action, side: 'sell' })}>Redeem</button>
-                  )}
-                  {action?.kind === 'external' && <SodexLink href={sodexFundUrl(h.fundId)}>On SoDEX</SodexLink>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="tf wo">
+      <div className="wo__head" aria-hidden="true">
+        <span>Fund</span><span className="wo-hide">Held in</span><span className="num">Value</span><span className="num">PnL</span><span className="num wo-hide">24h</span><span />
+      </div>
+      <ul className="wo__list">
+        {w.holdings.map((h) => {
+          const pnl = h.pnl?.priced ? num(h.pnl.unrealizedPnl) + num(h.pnl.realizedPnl) : null;
+          const d = h.pnl?.pnl24h !== undefined ? num(h.pnl.pnl24h) : null;
+          const action = h.fund ? fundAction(h.fund, statuses.get(h.fundId) ?? null) : null;
+          const places = held(h);
+          return (
+            <li key={h.fundId} className="wo__r">
+              <span className="wo__fund">
+                <CoinIcon coin={fundIcon(h.coin)} size={28} />
+                <span><b>{h.name}</b><small>{`${maskFunds(fmt(h.shares, 4))} shares`}</small></span>
+              </span>
+              <span className="wo__in wo-hide">
+                {places.length ? places.map((p) => (
+                  <StatusPill key={p.label} size="sm" title={p.why}>{p.label}<span className="wo__in-n">{maskFunds(fmt(p.shares, 2))}</span></StatusPill>
+                )) : <span className="pfx-dim">{DASH}</span>}
+              </span>
+              <span className="wo__v num">
+                <b>{maskFunds(h.marketValue === null ? DASH : fmtUsd(h.marketValue))}</b>
+                {h.inFlight > 0 && <small>{`${maskFunds(fmtUsd(h.inFlight))} in progress`}</small>}
+              </span>
+              <span className={`wo__v num ${pnl === null ? '' : signClass(pnl)}`}><b>{maskPnl(pnl === null ? DASH : signedUsd(pnl))}</b></span>
+              <span className={`wo__v num wo-hide ${d === null ? '' : signClass(d)}`}><b>{maskPnl(d === null ? DASH : signedUsd(d))}</b></span>
+              <span className="wo__acts">
+                {action?.kind === 'trade' && <Button size="sm" variant="secondary" onClick={() => onOpenMarket(action.symbol, 'spot')}>Trade</Button>}
+                {(action?.kind === 'batch' || action?.kind === 'rfq') && h.fund && (
+                  <Button size="sm" variant="secondary" onClick={() => setTarget({ fund: h.fund!, name: h.name, action, side: 'sell' })}>Redeem</Button>
+                )}
+                {action?.kind === 'external' && (h.fundId === EARN_FUND && onEarn
+                  ? (
+                    <>
+                      <Button size="sm" variant="primary" onClick={() => onEarn({ side: 'buy' })}>Subscribe</Button>
+                      <Button size="sm" variant="secondary" onClick={() => onEarn({ side: 'sell', away: { perps: h.perpShares, spot: h.spotShares } })}>Redeem</Button>
+                    </>
+                  )
+                  : h.fundId === EARN_FUND ? <a className="tf-btn is-secondary is-sm" href="/wealth?open=earn-redeem">Redeem</a> : <StatusPill size="sm">Not open</StatusPill>)}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
       <WealthSheet target={target} onClose={() => setTarget(null)} address={address} provider={provider} onDone={onDone} />
     </div>
   );
@@ -300,7 +323,32 @@ const KIND: Readonly<Record<string, string>> = {
 };
 const STATUS_TONE: Readonly<Record<string, string>> = { completed: 'pos', failed: 'neg', rejected: 'neg' };
 
-function LedgerTable({ entries, names }: { entries: WealthEntry[]; names: Map<string, string> }) {
+/** Claim a result that did not arrive by itself, here: the request id from its own receipt (trading/claims.ts). */
+function ClaimButton({ e, address, provider, onDone }: { e: WealthEntry; address: string | null; provider: Eip1193Provider | null; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (msg) return <span className="pfx-dim" title={msg}>{msg.length > 40 ? 'See note' : msg}</span>;
+  return (
+    <button
+      type="button"
+      className="acct-act"
+      disabled={busy || !provider || !address}
+      title={!provider ? 'Reconnect your wallet: a claim is a wallet transaction on ValueChain.' : undefined}
+      onClick={() => {
+        if (!provider || !address) return;
+        setBusy(true);
+        claimEntry({ provider, owner: address, entry: e })
+          .then(() => { setMsg('Claimed'); onDone(); })
+          .catch((err) => { if (!isUserRejection(err)) setMsg((err as Error).message); })
+          .finally(() => setBusy(false));
+      }}
+    >
+      {busy ? <Spinner label="Claiming" /> : 'Claim'}
+    </button>
+  );
+}
+
+function LedgerTable({ entries, names, address, provider, onDone }: { entries: WealthEntry[]; names: Map<string, string>; address: string | null; provider: Eip1193Provider | null; onDone: () => void }) {
   const maskFunds = useMask('funds');
   return (
     <div className="pfx-tablewrap">
@@ -329,7 +377,7 @@ function LedgerTable({ entries, names }: { entries: WealthEntry[]; names: Map<st
                 <td className="num acct-time pfx-hide-phone">{dayTime(e.requestedAt ?? e.at)}</td>
                 <td className="acct-actions">
                   {/* A claim needs the on-chain request id, which the API does not return. */}
-                  {e.claimable === true && <SodexLink href={sodexFundUrl(e.fundId)}>Claim on SoDEX</SodexLink>}
+                  {e.claimable === true && <ClaimButton e={e} address={address} provider={provider} onDone={onDone} />}
                   {e.txHash && <a className="acct-act" href={`https://main-scan.valuechain.xyz/tx/${e.txHash}`} target="_blank" rel="noopener noreferrer">Tx</a>}
                 </td>
               </tr>
@@ -341,15 +389,20 @@ function LedgerTable({ entries, names }: { entries: WealthEntry[]; names: Map<st
   );
 }
 
-function History({ address, refreshToken, w, onOpenMarket, provider, onDone }: {
+function History({ address, refreshToken, w, onOpenMarket, provider, onDone, rec, onRecurringSheet, endedPlans, setEndedPlans, onEarn }: {
   address: string | null;
   refreshToken: number;
   w: WealthState;
   onOpenMarket: (symbol: string, engine: 'spot') => void;
   provider: Eip1193Provider | null;
   onDone: () => void;
+  rec: RecurringState;
+  onRecurringSheet: (t: RecurringSheetTarget) => void;
+  endedPlans: boolean;
+  setEndedPlans: (v: boolean) => void;
+  onEarn: (t: EarnSheetTarget) => void;
 }) {
-  const { entries, plans, error } = useLedger(address, refreshToken);
+  const { entries, error } = useLedger(address, refreshToken);
   const names = useMemo(() => new Map((w.funds ?? []).map((f) => [f.fundId, fundLabel(f).name])), [w.funds]);
   const moving = (entries ?? []).filter((e) => e.status === 'processing' || e.claimable === true || e.delayedPending === true);
   const list = (rows: WealthEntry[] | null, none: string) => (
@@ -357,43 +410,82 @@ function History({ address, refreshToken, w, onOpenMarket, provider, onDone }: {
       : error && !rows ? <ReadFailed what="Wealth history" error={error} />
       : !rows ? <div className="pfx-bones" aria-busy="true">{[0, 1, 2].map((i) => <span key={i} className="pfx-bone" />)}</div>
       : rows.length === 0 ? <EmptyState icon="history" title={none} compact />
-      : <LedgerTable entries={rows} names={names} />
+      : <LedgerTable entries={rows} names={names} address={address} provider={provider} onDone={onDone} />
   );
   const tabs: PanelTab[] = [
-    { key: 'holdings', label: 'Holdings', content: <WealthHoldings w={w} address={address} onOpenMarket={onOpenMarket} provider={provider} onDone={onDone} /> },
+    { key: 'holdings', label: 'Holdings', content: <WealthHoldings w={w} address={address} onOpenMarket={onOpenMarket} provider={provider} onDone={onDone} onEarn={onEarn} /> },
     { key: 'moving', label: `In progress${moving.length ? ` (${moving.length})` : ''}`, content: list(entries ? moving : null, 'Nothing in progress') },
     { key: 'history', label: 'History', content: list(entries, 'No Wealth history yet') },
     {
       key: 'plans',
-      label: 'Recurring buys',
-      content: !address ? <NoWallet line="Connect a wallet to see your recurring buys." compact />
-        : !plans ? <div className="pfx-bones" aria-busy="true"><span className="pfx-bone" /></div>
-        : plans.length === 0 ? <EmptyState icon="history" title="No recurring buys" line="SoDEX lets you set these up on its Wealth pages. They show here once they exist." compact action={<a className="empty-state__cta" href="https://sodex.com/wealth" target="_blank" rel="noopener noreferrer">Open SoDEX Wealth</a>} />
-        : (
-          <div className="pfx-tablewrap">
-            <table className="acct-table acct-t pfx-table">
-              <thead><tr><th>Fund</th><th>Every</th><th className="num">Amount</th><th className="num pfx-hide-phone">Buys</th><th className="num pfx-hide-phone">Next</th><th>Status</th></tr></thead>
-              <tbody>
-                {plans.map((p) => (
-                  <tr key={p.planIndex}>
-                    <td>{names.get(p.fundId ?? '') ?? p.share?.coin ?? p.target}</td>
-                    <td>{p.planType.replace('_', '-').toLowerCase()}</td>
-                    <td className="num">{fmtUsd(num(p.amount))}</td>
-                    <td className="num pfx-hide-phone">{p.successfulExecutionCount}</td>
-                    <td className="num pfx-hide-phone">{dayTime(p.nextScheduledAt)}</td>
-                    <td><span className="bal-tag">{p.status.toLowerCase()}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ),
+      label: `Recurring buys${rec.active?.plans.length ? ` (${rec.active.plans.length})` : ''}`,
+      content: <RecurringPanel rec={rec} funds={w.funds} address={address} onOpen={onRecurringSheet} ended={endedPlans} setEnded={setEndedPlans} />,
     },
   ];
   return <div className="dash pfx-plain"><PanelTabs tabs={tabs.map((t) => ({ ...t, content: <Card className="pf-card--band pfx-band">{t.content}</Card> }))} /></div>;
 }
 
-export function WealthTab({ w, value, slp, address, provider, refreshToken, onOpenMarket, onDone }: {
+/**
+ * The page's sheets (USDC Earn, a vault's Invest or Redeem, a recurring plan), opened from anywhere on the Wealth page
+ * by openWealth (WealthHero.tsx) and by the Holdings' own buttons. Shared by the overview and the fund and index pages.
+ */
+function useWealthSheets({ w, address, provider, onDone, rec }: {
+  w: WealthState; address: string | null; provider: Eip1193Provider | null; onDone: () => void; rec: RecurringState;
+}) {
+  const [rcTarget, setRcTarget] = useState<RecurringSheetTarget | null>(null);
+  const [earnTarget, setEarnTarget] = useState<EarnSheetTarget | null>(null);
+  const [vaultTarget, setVaultTarget] = useState<WealthSheetTarget | null>(null);
+  // The SoPoints page's "Keep margin in USDC Earn" lands here as /wealth?open=earn (and ?open=recurring).
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const open = q.get('open');
+    if (open !== 'earn' && open !== 'earn-redeem' && open !== 'recurring') return;
+    if (open === 'earn') setEarnTarget({ side: 'buy' });
+    else if (open === 'earn-redeem') setEarnTarget({ side: 'sell' });
+    else setRcTarget({ kind: 'create' });
+    q.delete('open');
+    const rest = q.toString();
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
+  }, []);
+  // The page's other parts (the stage's Invest, an index's legs, a fund page) open the same sheets.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const o = (e as CustomEvent<WealthOpen>).detail;
+      if (o?.kind === 'earn') setEarnTarget({ side: o.side });
+      else if (o?.kind === 'recurring') setRcTarget({ kind: 'create', fundId: o.fundId });
+      else if (o?.kind === 'recurring-sheet') setRcTarget(o.target);
+      else if (o?.kind === 'vault') {
+        const fund = w.funds?.find((f) => f.fundId === o.fundId);
+        if (fund) {
+          void readTradingStatus(fund.fundId).then((st) => {
+            const a = fundAction(fund, st);
+            if (a && (a.kind === 'batch' || a.kind === 'rfq')) setVaultTarget({ fund, name: fundLabel(fund).name, action: a, side: o.side });
+          }).catch(() => undefined);
+        }
+      }
+    };
+    window.addEventListener(WEALTH_OPEN_EVENT, on);
+    return () => window.removeEventListener(WEALTH_OPEN_EVENT, on);
+  }, [w.funds]);
+  const sheets = (
+    <>
+      <RecurringSheet target={rcTarget} onClose={() => setRcTarget(null)} rec={rec} funds={w.funds} address={address} provider={provider} onDone={onDone} />
+      <WealthSheet target={vaultTarget} onClose={() => setVaultTarget(null)} address={address} provider={provider} onDone={onDone} />
+      <EarnSheet target={earnTarget} onClose={() => setEarnTarget(null)} address={address} provider={provider} onDone={() => { w.refresh(); onDone(); }} apy={w.quotes.get(EARN_FUND)?.apy7d} />
+    </>
+  );
+  return { sheets, setRcTarget, setEarnTarget };
+}
+
+/** The sheets alone, for the Wealth page's fund and index pages. */
+export function WealthSheets({ w, address, provider, refreshToken, onDone }: {
+  w: WealthState; address: string | null; provider: Eip1193Provider | null; refreshToken: number; onDone: () => void;
+}) {
+  const rec = useRecurring(address, refreshToken, w.funds, false);
+  return useWealthSheets({ w, address, provider, onDone, rec }).sheets;
+}
+
+export function WealthTab({ w, value, slp, address, provider, refreshToken, onOpenMarket, onDone, lead, middle, board, tail }: {
   w: WealthState;
   /** The Wealth bucket from summary.ts, so the tab and the Trade tab's breakdown cannot disagree. */
   value: number | null;
@@ -403,15 +495,42 @@ export function WealthTab({ w, value, slp, address, provider, refreshToken, onOp
   refreshToken: number;
   onOpenMarket: (symbol: string, engine: 'spot') => void;
   onDone: () => void;
+  /** The Wealth page's own top (stage, portfolio card, macro) in place of the tab's value card and chart. */
+  lead?: ReactNode;
+  /** Between the wallet's tabs and the fund board (the Wealth page's ValueDesk indexes). */
+  middle?: ReactNode;
+  /** The Wealth page's own fund list (the Desk version's list and preview) in place of the tab's board; given the
+   *  funds SoDEX's recurring-buy contract takes. */
+  board?: (recurring: ReadonlySet<string>) => ReactNode;
+  /** Under the holdings, above the indexes (the Wealth page's calendar and macro row). */
+  tail?: ReactNode;
 }) {
+  const [endedPlans, setEndedPlans] = useState(false);
+  const rec = useRecurring(address, refreshToken, w.funds, endedPlans);
+  const { sheets, setRcTarget, setEarnTarget } = useWealthSheets({ w, address, provider, onDone, rec });
+  const eligible = useMemo(() => new Set((rec.targets ?? []).map((t) => t.fund.fundId)), [rec.targets]);
   return (
     <div className="pfx-stack">
-      <div className="pfx-top">
-        <WealthValueCard w={w} value={value} slp={slp} />
-        <WealthChart address={address} />
-      </div>
-      <History address={address} refreshToken={refreshToken} w={w} onOpenMarket={onOpenMarket} provider={provider} onDone={onDone} />
-      <FundBoard w={w} address={address} provider={provider} onOpenMarket={onOpenMarket} onDone={onDone} />
+      {lead ?? (
+        <div className="pfx-top">
+          <WealthValueCard w={w} value={value} slp={slp} />
+          <WealthChart address={address} />
+        </div>
+      )}
+      <History
+        address={address} refreshToken={refreshToken} w={w} onOpenMarket={onOpenMarket} provider={provider} onDone={onDone}
+        rec={rec} onRecurringSheet={setRcTarget} endedPlans={endedPlans} setEndedPlans={setEndedPlans} onEarn={setEarnTarget}
+      />
+      {/* Calendar and macro sit under the holdings, above the indexes (owner 2026-11-28). */}
+      {tail}
+      {middle}
+      {board ? board(eligible) : (
+        <FundBoard
+          w={w} address={address} provider={provider} onOpenMarket={onOpenMarket} onDone={onDone}
+          recurring={eligible} onRecurring={(fundId) => setRcTarget({ kind: 'create', fundId })} onEarn={setEarnTarget}
+        />
+      )}
+      {sheets}
     </div>
   );
 }

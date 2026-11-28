@@ -269,6 +269,9 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/feedback/image read',
       'GET /api/vs/flow read',
       'GET /api/vs/flow/wallet read',
+      'GET /api/vs/indexes read',
+      'GET /api/vs/indexes/:id read',
+      'GET /api/vs/indexes/image/:hash read',
       'GET /api/vs/indicator read',
       'GET /api/vs/indicators read',
       'GET /api/vs/invites/check read',
@@ -303,6 +306,9 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/username/check read',
     'GET /api/vs/wallet-history read',
       'GET /api/vs/wallet/fills read',
+      'GET /api/vs/wealth/history read',
+      'GET /api/vs/wealth/info upstream',
+      'GET /api/vs/wealth/listing read',
       'GET /api/vs/whales read',
       'GET /ws/liq read',
       'POST /api/admin/analytics admin',
@@ -346,6 +352,8 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/vs/feedback/upload write',
       'POST /api/vs/inbox/add write',
       'POST /api/vs/inbox/list write',
+      'POST /api/vs/indexes/publish write',
+      'POST /api/vs/indexes/unpublish write',
       'POST /api/vs/invites/join write',
       'POST /api/vs/sodex-auth/nonce auth',
       'POST /api/vs/sodex-auth/verify auth',
@@ -356,6 +364,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/vs/sopoints/log write',
       'POST /api/vs/username write',
       'POST /api/vs/username/change write',
+      'POST /api/vs/wealth/ssi-quote upstream',
     ],
   );
   // Nothing is left marked provisional: the list is final.
@@ -376,13 +385,15 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
     // and a signed-in wallet keeps its own algos' and copies' notices in its inbox (ops/inbox.ts).
     if (r.url === '/api/vs/feedback/image') assert.ok(r.method === 'GET' && r.cls === 'read', r.url);
     else if (r.url === '/api/vs/feedback/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
-    else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors' || r.url === '/api/vs/a' || r.url === '/api/vs/username' || r.url === '/api/vs/username/change' || r.url === '/api/vs/invites/join' || r.url === '/api/vs/sopoints/log' || r.url === '/api/vs/sopoints/estimate') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
+    else if (r.url.startsWith('/api/vs/feedback') || r.url.startsWith('/api/vs/inbox/') || r.url === '/api/vs/client-errors' || r.url === '/api/vs/a' || r.url === '/api/vs/username' || r.url === '/api/vs/username/change' || r.url === '/api/vs/indexes/publish' || r.url === '/api/vs/indexes/unpublish' || r.url === '/api/vs/invites/join' || r.url === '/api/vs/sopoints/log' || r.url === '/api/vs/sopoints/estimate') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
     // The owner's admin suite (routes/admin.ts): POST only, its own class (the suite's Origin, its own limits).
     else if (r.url.startsWith('/api/admin/')) assert.ok(r.method === 'POST' && r.cls === 'admin', r.url);
     // The beta channel's sign-in (routes/beta.ts, beta API only): a wallet's free signature, cls auth.
     else if (r.url === '/api/beta/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
     // The SoPoints sign-in relay (routes/pointsAuth.ts): SoDEX's sign-in text only, cls auth.
     else if (r.url.startsWith('/api/vs/sodex-auth/')) assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
+    // The SSI index quote relay (routes/ssiQuote.ts): one call to SoDEX's Wealth host for a maker's order, cls upstream.
+    else if (r.url === '/api/vs/wealth/ssi-quote') assert.ok(r.method === 'POST' && r.cls === 'upstream', r.url);
     // The signed-in Blind Box (routes/sodexLotteryUser.ts): an open or a merge with the wallet's own signature, a claim; cls write.
     else if (r.url.startsWith('/api/vs/sodex/lottery/u/') && r.method === 'POST') assert.ok(r.cls === 'write', r.url);
     else assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);

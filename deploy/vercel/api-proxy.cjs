@@ -205,14 +205,20 @@ const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/a
 const isInvitesPath = (p) => p === '/api/vs/invites/check' || p === '/api/vs/invites/me' || p === '/api/vs/invites/join'
   // The SoPoints sign-in relay (apps/server/src/routes/pointsAuth.ts): POST, never cached, the small body limit.
   || p === '/api/vs/sodex-auth/nonce' || p === '/api/vs/sodex-auth/verify'
-  // The signed-in Blind Box (apps/server/src/routes/sodexLotteryUser.ts): the wallet's SoDEX token (Authorization) to
-  // its reads, and an open, a merge or a claim (POST, the wallet's own signature), never cached, the small body limit.
-  || p.startsWith('/api/vs/sodex/lottery/u/')
   // The SoPoints week log (apps/server/src/routes/sopointsLog.ts): one wallet's weeks, up to 64 KiB.
   || p === '/api/vs/sopoints/log'
   // The SoPoints estimate (apps/server/src/routes/sopointsEstimate.ts): weeks to price and the wallet's scored weeks,
   // a POST, never cached (the answer is one wallet's), the small body limit.
-  || p === '/api/vs/sopoints/estimate';
+  || p === '/api/vs/sopoints/estimate'
+  // Published indexes (apps/server/src/routes/vdIndexes.ts): a wallet's signed publish and take-down, POST, never
+  // cached; the take-down the small body limit (the API takes 8 KiB), the publish INDEX_PUBLISH_LIMIT (its picture).
+  // An index's picture (GET /api/vs/indexes/image/<hash>) is a public GET: not here, its headers passed as they are.
+  || p === '/api/vs/indexes/publish' || p === '/api/vs/indexes/unpublish'
+  // The SSI index quote relay (apps/server/src/routes/ssiQuote.ts): a maker's order for this wallet, POST, never cached.
+  || p === '/api/vs/wealth/ssi-quote'
+  // The signed-in Blind Box (apps/server/src/routes/sodexLotteryUser.ts): the wallet's SoDEX token (Authorization) to
+  // its reads, and an open, a merge or a claim (POST, the wallet's own signature), never cached, the small body limit.
+  || p.startsWith('/api/vs/sodex/lottery/u/');
 /** The app's own analytics (apps/server/src/routes/analytics.ts): a POST, the viewer's country and region added. */
 const ANALYTICS_PATH = '/api/vs/a';
 /**
@@ -250,6 +256,8 @@ function requestHost(headers) {
 const INBOX_ADD_LIMIT = 64 * 1024;
 /** A screenshot, one per request (apps/server src/ops/imageCheck.ts: 2 MiB, and the request around it). */
 const FEEDBACK_UPLOAD_LIMIT = 2 * 1024 * 1024 + 16 * 1024 + 1024;
+/** A published index with its picture as base64 (apps/server/src/routes/vdIndexes.ts INDEX_PUBLISH_BODY_LIMIT: 160 KiB). */
+const INDEX_PUBLISH_LIMIT = 160 * 1024;
 /** A feedback message, a thread read, an error report. */
 const REPORTS_BODY_LIMIT = 16 * 1024;
 /** One wallet's or one follower's: a token passes, a POST passes, nothing is cached. */
@@ -258,6 +266,7 @@ const isPrivatePath = (path) => isCopyPath(path) || isReportsPath(path) || isAdm
 function bodyLimitFor(path) {
   if (path === '/api/vs/feedback/upload') return FEEDBACK_UPLOAD_LIMIT;
   if (path === '/api/vs/inbox/add' || path === '/api/vs/sopoints/log') return INBOX_ADD_LIMIT;
+  if (path === '/api/vs/indexes/publish') return INDEX_PUBLISH_LIMIT;
   if (isAdminPath(path) || isBetaPath(path)) return ADMIN_BODY_LIMIT;
   if (isReportsPath(path)) return REPORTS_BODY_LIMIT;
   return BODY_LIMIT;

@@ -30,7 +30,6 @@ const EXEMPT = new Set([
   // The other pages' versions (localhost only, merged for 5180 on 2026-11-26): each imported by a version module that
   // its page loads behind `import.meta.env.DEV` (WealthPage, PortfolioPage, BlindBoxPage, SoPointsPage, ScanDashboard,
   // LeaderboardPage), so a build never emits them. A version the owner keeps moves its sheet into cssOrder.ts.
-  'components/sodex/wealth/wealth.css',
   'components/sodex/versions/versions.css',
   'components/sodex/versions/boxes/boxes.css',
   'components/scan/versions/versions.css',

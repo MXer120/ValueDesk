@@ -67,6 +67,14 @@ export const COIN_SITES = {
   CCL: 'carnival.com', CIFR: 'ciphermining.com', EBAY: 'ebay.com', MCD: 'mcdonalds.com', NKE: 'nike.com', F: 'ford.com', IONQ: 'ionq.com', MELI: 'mercadolibre.com',
   MRNA: 'modernatx.com', NBIS: 'nebius.com', QCOM: 'qualcomm.com', SMCI: 'supermicro.com', SOFI: 'sofi.com', TTWO: 'take2games.com',
   LITE: 'lumentum.com',
+  // The Wealth funds' holdings (QQQ, VOO, VGT, VYM, SMH, SCHD top holdings; owner 2026-11-28: logos for ALL)
+  ABBV: 'abbvie.com', ACN: 'accenture.com', ALAB: 'asteralabs.com', AMGN: 'amgen.com', ANET: 'arista.com', APH: 'amphenol.com',
+  'BRK.B': 'berkshirehathaway.com', CDNS: 'cadence.com', CRM: 'salesforce.com', CSCO: 'cisco.com', GILD: 'gilead.com',
+  GS: 'goldmansachs.com', HD: 'homedepot.com', JNJ: 'jnj.com', JPM: 'jpmorganchase.com', KLAC: 'kla.com', KO: 'coca-colacompany.com',
+  LIN: 'linde.com', MA: 'mastercard.com', MCHP: 'microchip.com', MPWR: 'monolithicpower.com', MRK: 'merck.com', MS: 'morganstanley.com',
+  NXPI: 'nxp.com', ON: 'onsemi.com', PANW: 'paloaltonetworks.com', PG: 'pg.com', PM: 'pmi.com', RTX: 'rtx.com', SKHYV: 'skhynix.com',
+  SNPS: 'synopsys.com', STM: 'st.com', TXN: 'ti.com', UNH: 'unitedhealthgroup.com', V: 'visa.com', WFC: 'wellsfargo.com',
+  WMT: 'walmart.com', XOM: 'exxonmobil.com', QQQ: 'invesco.com',
   // Other listings and pre-IPO
   BYD: 'byd.com', KIOXIA: 'kioxia.com', MINIMAX: 'minimax.io', ZHIPU: 'z.ai', SPACEX: 'spacex.com', UNITREE: 'unitree.com',
   // Funds: the issuer's mark

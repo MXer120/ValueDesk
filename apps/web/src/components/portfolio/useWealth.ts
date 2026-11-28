@@ -95,7 +95,7 @@ export function useWealth(address: string | null, refreshToken: number): WealthS
 /** What each fund allows right now. Only while the fund board is on screen. */
 export function useTradingStatuses(funds: readonly WealthFund[] | null): Map<string, TradingStatus> {
   const [statuses, setStatuses] = useState<Map<string, TradingStatus>>(new Map());
-  const ids = funds?.filter((f) => f.fundType !== 'bridged_vault').map((f) => f.fundId).join(',') ?? '';
+  const ids = funds?.filter((f) => f.fundType !== 'bridged_vault' && !f.spotOnly).map((f) => f.fundId).join(',') ?? '';
   useEffect(() => {
     if (!ids) return;
     let off = false;

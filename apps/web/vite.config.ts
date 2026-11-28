@@ -343,6 +343,59 @@ function devSopointsEstimate(): Plugin {
   };
 }
 
+/**
+ * Dev only: POST /api/vs/wealth/ssi-quote answered here by the server's own route (apps/server/tools/ssiQuote-dev.ts ->
+ * src/routes/ssiQuote.ts), so localhost on production's data can buy ANT Believers Index before the route is released.
+ * Never in a build.
+ */
+function devSsiQuote(): Plugin {
+  return {
+    name: 'vs-dev-ssi-quote',
+    apply: 'serve',
+    configureServer(server) {
+      const file = fileURLToPath(new URL('../server/tools/ssiQuote-dev.ts', import.meta.url));
+      type Dev = { handle: (u: string, b: string, ip: string) => Promise<{ status: number; body: string }> };
+      server.middlewares.use((req, res, next) => {
+        if (req.method !== 'POST' || req.url !== '/api/vs/wealth/ssi-quote') return next();
+        let body = '';
+        req.on('data', (c: Buffer) => { body += c; if (body.length > 4096) req.destroy(); });
+        req.on('end', () => {
+          void server.ssrLoadModule(file)
+            .then((m) => (m as Dev).handle(req.url!, body, req.socket.remoteAddress ?? '127.0.0.1'))
+            .then((r) => { res.statusCode = r.status; res.setHeader('Content-Type', 'application/json'); res.setHeader('x-vs-dev-ssi', 'local'); res.end(r.body); })
+            .catch((e: Error) => { res.statusCode = 502; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: false, error: `local ssi quote: ${e.message}` })); });
+        });
+      });
+    },
+  };
+}
+
+/**
+ * Dev only: the Wealth page's fund info relay and published indexes (apps/server/tools/wealthRoutes-dev.ts), served
+ * here because production does not have them yet; published indexes go to a laptop database of their own.
+ */
+function devWealthRoutes(): Plugin {
+  return {
+    name: 'vs-dev-wealth-routes',
+    apply: 'serve',
+    configureServer(server) {
+      const file = fileURLToPath(new URL('../server/tools/wealthRoutes-dev.ts', import.meta.url));
+      type Dev = { handle: (m: string, u: string, b: string, ip: string) => Promise<{ status: number; body: string | Buffer; headers: Record<string, string> }> };
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || !/^\/api\/vs\/(wealth\/(info|history|listing)|indexes)(\/|\?|$)/.test(req.url) || (req.method !== 'GET' && req.method !== 'POST')) return next();
+        let body = '';
+        req.on('data', (c: Buffer) => { body += c; if (body.length > 170_000) req.destroy(); }); // a publish carries its picture (160 KiB)
+        req.on('end', () => {
+          void server.ssrLoadModule(file)
+            .then((m) => (m as Dev).handle(req.method!, req.url!, body, req.socket.remoteAddress ?? '127.0.0.1'))
+            .then((r) => { res.statusCode = r.status; res.setHeader('Content-Type', 'application/json'); res.setHeader('x-vs-dev-wealth', 'local'); for (const [k, v] of Object.entries(r.headers)) res.setHeader(k, v); res.end(r.body); })
+            .catch((e: Error) => { res.statusCode = 502; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: false, error: `local wealth route: ${e.message}` })); });
+        });
+      });
+    },
+  };
+}
+
 function botsFixtures(): Plugin {
   const dir = process.env.VS_BOTS_FIXTURES?.trim();
   return {
@@ -400,7 +453,7 @@ function siteBuildPlugins(): Plugin[] {
 export default defineConfig({
   customLogger: logger,
   // bootShell after routePreload: it rewrites the theme-boot.js tag routePreload places its own script after.
-  plugins: [react(), trackAppOrigin(), ...(ADMIN_PAGE ? [] : siteBuildPlugins()), bootShell({ webRoot: fileURLToPath(new URL('.', import.meta.url)) }), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), devSopointsEstimate(), devNftFloors(), devLottery(), botsFixtures()],
+  plugins: [react(), trackAppOrigin(), ...(ADMIN_PAGE ? [] : siteBuildPlugins()), bootShell({ webRoot: fileURLToPath(new URL('.', import.meta.url)) }), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), devSopointsEstimate(), devNftFloors(), devLottery(), devSsiQuote(), devWealthRoutes(), botsFixtures()],
   define: { __VS_BUILD__: JSON.stringify(buildId()) },
   /* No sticky hover on a touch screen: every rule styling a hovered element is behind @media (hover: hover)
      (tools/hover-media.mjs says which are left as they are, and why). Identical wherever a pointer can hover. */

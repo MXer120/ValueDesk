@@ -390,6 +390,24 @@ Against this inventory, HOSTED_ROUTES should be:
 - **Add**: `GET /api/vs/profile?address=`, `GET /api/vs/username/check?name=` (cls `read`), `POST /api/vs/username` and
   `POST /api/vs/username/change` (cls `write`, 1 and 4 KB, one limit of 12 a minute per client): a wallet's username.
   The first needs no signature, a change is signed by the wallet (routes/profiles.ts, `profiles.db`).
+- **Add**: `GET /api/vs/indexes?owner=&limit=&before=`, `GET /api/vs/indexes/:id`, `GET /api/vs/indexes/image/:hash`
+  (cls `read`, one limit of 300 a minute per client), `POST /api/vs/indexes/publish` (cls `write`, 160 KiB: the picture)
+  and `POST /api/vs/indexes/unpublish` (cls `write`, 8 KiB), one limit of 12 a minute per client for both: published
+  ValueDesk indexes, a name, a line, an optional picture and 2 to 12 SoDEX Wealth funds with weights, for everyone to
+  browse (routes/vdIndexes.ts, `indexes.db`, owner 2026-11-28). Publishing, changing and taking one down are the owner's
+  free EIP-712 signature (indexes/claim.ts), never a transaction; a taken-down index is marked, never deleted. The list
+  carries each owner's username from `profiles.db`. Nothing about buying is sent or kept. No upstream.
+  The picture: the wallet signs its SHA-256 (`image`, '' for none), the publish body carries its bytes as base64
+  (`{action, image}`; an update keeping the index's current picture may leave them out). The server decodes strictly
+  (one spelling), takes at most 96 KiB, refuses bytes whose SHA-256 is not the signed one, and runs ops/imageCheck.ts:
+  a whole PNG, JPEG or WebP judged by its bytes (never a name or a Content-Type), nothing after the image's end, no
+  markup (`<script`, `<svg`, `<html`, ...) anywhere in it, at most 512 x 512. Kept once per hash (`index_images`) and
+  served only while an index that is up shows it, only as the checked type, with `X-Content-Type-Options: nosniff`,
+  `Content-Disposition: inline` and a `default-src 'none'; sandbox` CSP (hosted mode's deny-all CSP replaces it), so the
+  bytes can never run as a page or a script on the site's origin. Never a URL: a published index cannot point a viewer
+  anywhere. The answer is content-addressed and never changes: `public, max-age=31536000, immutable` for the browser;
+  the edge keeps it at most 60 s (api-proxy.cjs EDGE_MAX_TTL_S), so a taken-down picture leaves the edge within a minute
+  but stays in a browser that showed it.
 - **Add**: `GET /api/vs/invites/check?code=`, `GET /api/vs/invites/me?address=` (cls `read`)
   and `POST /api/vs/invites/join` (cls `write`, 4 KB, 12 a minute per client): invite codes, a signed join, a wallet's fee
   credits (routes/invites.ts, `invites.db`). Upstream: one SoDEX `checkEligibility` read per code never seen before (whose code it is, kept); the credits come from the builder ledger on this server.
@@ -420,6 +438,26 @@ Against this inventory, HOSTED_ROUTES should be:
   capped per client and overall): the SoPoints sign-in relay (routes/pointsAuth.ts, owner 2026-11-16). SoDEX's two
   sign-in calls only, its own sign-in text only, `type` sign_in and `autoSign` false fixed, no forged headers, nothing
   stored or logged, the token alone back. Upstream: one sodex.com/auth/v2 call per request.
+- **Add**: `POST /api/vs/wealth/ssi-quote` (cls `upstream`, 4 KiB, 30 a minute per client): the SSI index quote relay
+  (routes/ssiQuote.ts, owner 2026-11-28 "everything doable on valuedesk"). ANT Believers Index is bought against a
+  maker's signed order that SoDEX hands out only on wealth.sodex.dev, which answers no browser but sodex.com. Only that
+  quote call passes (fund id, side, address, base units, checked), SoDEX's `data` back as it is, nothing stored or
+  logged, no key involved: the browser checks and simulates the order before the wallet signs. Upstream: one
+  wealth.sodex.dev call per request.
+- **Add**: `GET /api/vs/wealth/listing` (cls `read`, 60 a minute per client): which Wealth funds sodex.com lists right
+  now (its CMS: visibility `listed` and on a homepage shelf), so ValueDesk offers only those and shows the rest as
+  coming soon (owner 2026-11-28). From the CMS file the fund info relay already keeps for 5 minutes; no extra upstream.
+- **Add**: `GET /api/vs/wealth/history?fund=Morpho-Earn` (cls `read`, 60 a minute per client): USDC Earn's daily
+  share price for the index lines (routes/wealthInfo.ts), which SoDEX's price-history does not send. From Morpho's
+  public API for the vault behind it (SoDEX's stable-earn identity, Base), one call an hour at most; Morpho retires
+  that API 2027-01-25. Only this fund; nothing about the asker is kept.
+- **Add**: `GET /api/vs/wealth/info?fund=&lang=` (cls `upstream`, 60 a minute per client): what SoDEX publishes about a
+  Wealth fund, for its page (routes/wealthInfo.ts, owner 2026-11-28 "a full info page for every asset"). SoDEX's CMS
+  (alpha-biz.sodex.dev, one file, kept 5 minutes like sodex.com keeps it), the underlying ETF's holdings and quote
+  (keystone.sosovalue.com, 30 and 10 minutes), a vault's facts (wealth.sodex.dev, 10 minutes), ANT Believers Index's
+  text (sodex.com's locale file, an hour); the answer per fund and language 5 minutes. FAQ HTML becomes text and https
+  links on the server. Relayed because keystone and wealth.sodex.dev answer only sodex.com, and a direct call would
+  hand the visitor's IP and Cloudflare cookies to SoDEX. Nothing about the asker is kept.
 - **Add**: `POST /api/vs/a` (cls `write`, 16 KB, `application/json` or `text/plain`): the app's own
   analytics, sent only after the visitor allowed analytics (ops/analyticsModel.ts says what one batch
   holds; routes/analytics.ts). The Vercel function lets POST + `Content-Type` through on this path and adds

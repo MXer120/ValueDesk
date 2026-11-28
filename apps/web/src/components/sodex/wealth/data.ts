@@ -6,6 +6,24 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { readGateway } from '../../../trading/gateway';
+import { readSsiCloses, ssiSpotOf } from '../../../trading/ssiSpot';
+
+/** USDC Earn's daily unit price and its APY (server routes/wealthInfo.ts, from the Morpho vault behind it), read once an hour. */
+let earnCache: { at: number; p: Promise<{ points: PricePoint[]; apy: PricePoint[] }> } | null = null;
+export function readEarnSeries(): Promise<{ points: PricePoint[]; apy: PricePoint[] }> {
+  if (earnCache && Date.now() - earnCache.at < 3_600_000) return earnCache.p;
+  const p = fetch('/api/vs/wealth/history?fund=Morpho-Earn', { signal: AbortSignal.timeout(15_000) })
+    .then(async (r) => {
+      const b = (await r.json().catch(() => ({}))) as { ok?: boolean; points?: Array<[number, number]>; apy?: Array<[number, number]>; error?: string };
+      if (!r.ok || !b.ok) throw new Error(b.error || `USDC Earn's history answered ${r.status}.`);
+      const pts = (rows: Array<[number, number]> | undefined) => (rows ?? []).map(([t, v]) => ({ t, v })).filter((x) => Number.isFinite(x.t) && Number.isFinite(x.v));
+      return { points: pts(b.points).filter((x) => x.v > 0), apy: pts(b.apy) };
+    });
+  earnCache = { at: Date.now(), p };
+  p.catch(() => { earnCache = null; });
+  return p;
+}
+const readEarnHistory = (): Promise<PricePoint[]> => readEarnSeries().then((s) => s.points);
 import {
   fundAction, fundLabel,
   type FundAction, type FundShelf, type JoinedHolding, type TradingStatus, type WealthEntry, type WealthFund, type WealthQuote,
@@ -119,6 +137,20 @@ export function readPriceHistory(fundId: string, range: HistRange): Promise<Pric
   if (hit && Date.now() - hit.at < TTL) return Promise.resolve(hit.points);
   const inFlight = pending.get(key);
   if (inFlight) return inFlight;
+  // An SSI token on the spot book: SoDEX's daily candles. USDC Earn: its vault's daily share price through ValueDesk's
+  // relay (SoDEX sends none for it). Both cut to the range here.
+  const special = ssiSpotOf(fundId) ? readSsiCloses(fundId) : fundId === 'Morpho-Earn' ? readEarnHistory() : null;
+  if (special) {
+    const days = range === '1W' ? 7 : range === '1M' ? 30 : range === '1Y' ? 365 : null;
+    const sp = special.then((all) => {
+      const from = days === null ? -Infinity : Date.now() - days * 86_400_000;
+      const points = all.filter((x) => x.t >= from);
+      done.set(key, { at: Date.now(), points });
+      return points;
+    }).finally(() => pending.delete(key));
+    pending.set(key, sp);
+    return sp;
+  }
   const p = readGateway<{ points?: Array<{ ts: string | number; close?: string }> }>(
     `/api/v1/wealth/funds/${encodeURIComponent(fundId)}/price-history?range=${range}`,
   ).then((d) => {
@@ -214,14 +246,19 @@ export interface Channel { label: string; tone: Tone; /** A cutoff or reopening,
 
 /** How the fund trades right now, in the reader's words (the Original's channel table). */
 export function channelOf(v: Pick<FundView, 'action' | 'fund'>): Channel {
+  if (v.fund.comingSoon) return { label: 'Coming soon', tone: 'brand', at: null, atLabel: null };
   const a = v.action;
   if (!a) return { label: v.fund.fundType === 'clob' ? 'Order book' : 'Reading', tone: 'neutral', at: null, atLabel: null };
   switch (a.kind) {
     case 'trade': return { label: 'Order book', tone: 'positive', at: null, atLabel: null };
     case 'batch': return { label: 'Batch', tone: 'brand', at: a.cutoffAt ? a.cutoffAt * 1000 : null, atLabel: 'Cutoff' };
     case 'rfq': return { label: 'Maker quote', tone: 'brand', at: null, atLabel: null };
-    case 'external': return { label: 'On sodex.com', tone: 'neutral', at: null, atLabel: null };
-    case 'closed': return { label: a.why, tone: 'warning', at: a.nextAt ? a.nextAt * 1000 : null, atLabel: 'Opens' };
+    // USDC Earn: ValueDesk sends the bridge order itself (trading/wealthEarn.ts, 2026-11-28); measured 0.8-1.3 min.
+    case 'external': return v.fund.fundType === 'bridged_vault'
+      ? { label: 'Bridge, about a minute', tone: 'positive', at: null, atLabel: null }
+      : { label: 'On sodex.com', tone: 'neutral', at: null, atLabel: null };
+    // sodex.com's words: "Trading temporarily unavailable", the countdown beside it; SoDEX's reason in the title.
+    case 'closed': return { label: 'Trading temporarily unavailable', tone: 'warning', at: a.nextAt ? a.nextAt * 1000 : null, atLabel: 'Opens' };
   }
 }
 

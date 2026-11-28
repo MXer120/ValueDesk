@@ -13,7 +13,7 @@ import { useAsync } from '../../../hooks';
 import { DASH, MINUS, fmt, fmtUsd, num } from '../../../format';
 import { fmtFixed } from '../../../numStyle';
 import {
-  fundAction, fundLabel, readPnlHistory, sodexFundUrl,
+  fundAction, fundLabel, readPnlHistory,
   type FundAction, type FundShelf, type JoinedHolding, type PnlRange, type WealthEntry, type WealthFund,
 } from '../../../trading/wealth';
 import { useLedger, useTradingStatuses, type WealthState } from '../useWealth';
@@ -129,14 +129,15 @@ export function WealthChart({ address }: { address: string | null }) {
 
 function Act({ a, f, name, side, onOpenMarket, setTarget, readOnly, link = 'quiet' }: {
   a: FundAction | null; f: WealthFund | null; name: string; side: 'buy' | 'sell'; readOnly?: boolean;
-  /** How the sodex.com link looks: quiet in a table row, a button on a fund tile. */
+  /** How the link to the Wealth page looks: quiet in a table row, a button on a fund tile. */
   link?: 'quiet' | 'secondary';
   onOpenMarket: (symbol: string, engine: 'spot') => void; setTarget: (t: WealthSheetTarget) => void;
 }) {
   if (!a || !f) return null;
   if (a.kind === 'trade') return <Button variant="secondary" onClick={() => onOpenMarket(a.symbol, 'spot')}>Trade</Button>;
   if (a.kind === 'batch' || a.kind === 'rfq') return <Button variant="secondary" disabled={readOnly} onClick={() => setTarget({ fund: f, name, action: a, side })}>{side === 'buy' ? 'Invest' : 'Redeem'}</Button>;
-  if (a.kind === 'external') return <a className={`tf-btn is-${link} is-sm`} href={sodexFundUrl(f.fundId)} target="_blank" rel="noopener noreferrer">On SoDEX</a>;
+  // USDC Earn is done on the Wealth page's own sheet (owner 2026-11-28: everything on ValueDesk, nothing on sodex.com).
+  if (a.kind === 'external') return <a className={`tf-btn is-${link} is-sm`} href={f.fundType === 'bridged_vault' ? `/wealth?open=${side === 'buy' ? 'earn' : 'earn-redeem'}` : '/wealth'}>{f.fundType === 'bridged_vault' ? (side === 'buy' ? 'Invest' : 'Redeem') : 'Open'}</a>;
   return <StatusPill size="sm" title={a.nextAt ? `Next open ${dayTime(a.nextAt)}` : undefined}>{a.why}</StatusPill>;
 }
 
@@ -233,7 +234,8 @@ function Entries({ entries, names }: { entries: WealthEntry[]; names: Map<string
             <span className="pfv-ledger__t">{dayTime(e.requestedAt ?? e.at)}</span>
             <span className="pfv-ledger__a">
               {/* A claim needs the on-chain request id, which the API does not return. */}
-              {e.claimable === true && <a className="tf-btn is-secondary is-sm" href={sodexFundUrl(e.fundId)} target="_blank" rel="noopener noreferrer">Claim on SoDEX</a>}
+              {/* Claimed on the Wealth page's history, in the app (trading/claims.ts). */}
+              {e.claimable === true && <a className="tf-btn is-secondary is-sm" href="/wealth">Claim</a>}
               {e.txHash && <a className="tf-btn is-quiet is-sm" href={`https://main-scan.valuechain.xyz/tx/${e.txHash}`} target="_blank" rel="noopener noreferrer">Tx</a>}
             </span>
           </li>
@@ -275,7 +277,7 @@ export function Ledger({ w, address, refreshToken }: { w: WealthState; address: 
         {tab === 'plans' && (
           !address ? <p className="pfv-quiet">Connect a wallet to see your recurring buys.</p>
             : !plans ? <Skeleton className="pfv-skel-row" />
-            : plans.length === 0 ? <EmptyState compact icon="clock" title="No recurring buys" description="SoDEX sets these up on its Wealth pages. They show here once they exist." actions={<a className="tf-btn is-secondary is-sm" href="https://sodex.com/wealth" target="_blank" rel="noopener noreferrer">Open SoDEX Wealth</a>} />
+            : plans.length === 0 ? <EmptyState compact icon="clock" title="No recurring buys" description="Set up a recurring buy to invest automatically on schedule." actions={<a className="tf-btn is-secondary is-sm" href="/wealth?open=recurring">Start a plan</a>} />
             : (
               <ul className="pfv-ledger">
                 {plans.map((p) => (
@@ -303,7 +305,7 @@ function channelWords(a: FundAction | null, fundType: WealthFund['fundType']): s
     case 'trade': return 'Order book';
     case 'batch': return 'Batch';
     case 'rfq': return 'Maker quote';
-    case 'external': return 'On sodex.com';
+    case 'external': return fundType === 'bridged_vault' ? 'Bridge, about a minute' : 'Not open';
     case 'closed': return a.why;
   }
 }

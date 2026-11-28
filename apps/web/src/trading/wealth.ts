@@ -8,15 +8,14 @@
  *   clob           a token on the Spot order book (vQQQ, vVOO, vBOXX...): an ordinary spot order
  *   escrow_vault   CXMT, UNITREE: asynchronous requests from the wallet on ValueChain, as a
  *                  batch (requestDeposit / requestRedeem) or at a maker's quote (RFQ)
- *   bridged_vault  USDC Earn (Morpho on Base): SoDEX documents reads only
+ *   bridged_vault  USDC Earn (Morpho on Base): SoDEX's bridge, trading/wealthEarn.ts
+ *   ssi-v2         ANT Believers Index: a maker's signed order on SoDEX's index issuer, trading/ssi.ts
  *
- * WHAT SODEX DOES NOT EXPOSE. There is no documented route to subscribe to or redeem from a
- * bridged vault, so USDC Earn opens sodex.com. Claiming a vault result needs the on-chain
- * request id, which the API does not return (and says not to take from `entryId`), so a
- * claimable entry also opens sodex.com; most results are delivered without a claim. Recurring
- * buys are read here and created there. There is no testnet Wealth API, so nothing on-chain
- * in this file has been run against the real contracts: the signatures were checked with
- * read-only eth_calls against ValueChain and the calldata against the documented ABI.
+ * Everything is done in the app (owner 2026-11-28): USDC Earn through the bridge SoDEX documented on
+ * 2026-11-17, recurring buys through its plan contracts (trading/recurring.ts), index funds through
+ * the issuer, claims with the request id read from the request's own receipt (trading/claims.ts).
+ * There is no testnet Wealth API, so nothing on-chain here has been run against the real contracts
+ * from this app: calldata is checked against the ABIs and by read-only eth_calls against ValueChain.
  *
  * Every amount from the API is a decimal string; money sent on-chain is integer base units.
  */
@@ -39,8 +38,8 @@ const BASE = '/api/v1/wealth';
 
 // --- what the API returns --------------------------------------------------------------
 
-export type FundType = 'clob' | 'escrow_vault' | 'bridged_vault';
-export type Channel = 'rfq' | 'batch' | 'closed' | 'subscription' | 'clob';
+export type FundType = 'clob' | 'escrow_vault' | 'bridged_vault' | 'ssi-v2';
+export type Channel = 'rfq' | 'batch' | 'closed' | 'subscription' | 'clob' | 'ssi-v2-rfq';
 
 export interface WealthFund {
   fundId: string;
@@ -52,6 +51,10 @@ export interface WealthFund {
   asOf?: string;
   share: { coin: string; address: string; decimals: number };
   spot?: { symbol: string; symbolId: number; displayName: string; quote: { coin: string; decimals: number } };
+  /** Not a SoDEX Wealth fund: a token on SoDEX's spot order book used as an index leg (trading/ssiSpot.ts). */
+  spotOnly?: boolean;
+  /** SoDEX does not offer it now (trading/listing.ts): why, in words. No way in on ValueDesk; selling stays. */
+  comingSoon?: string;
 }
 
 export interface WealthQuote {
@@ -266,6 +269,11 @@ export type FundShelf = 'Stable Earn' | 'Curated ETF' | 'Specialty';
 /** SoDEX's own product names and shelves. The API's `name` is an internal label ("QQQ Fund"). */
 const CATALOG: Readonly<Record<string, { name: string; shelf: FundShelf; yield?: boolean }>> = {
   'Morpho-Earn': { name: 'USDC Earn', shelf: 'Stable Earn', yield: true },
+  // SoSoValue's SSI tokens on SoDEX's spot book (ssiSpot.ts), for indexes only.
+  vMAG7ssi: { name: 'MAG7.ssi', shelf: 'Specialty' },
+  vDEFIssi: { name: 'DEFI.ssi', shelf: 'Specialty' },
+  vMEMEssi: { name: 'MEME.ssi', shelf: 'Specialty' },
+  vUSSI: { name: 'USSI', shelf: 'Specialty' },
   vBOXX: { name: 'US Cash Yield', shelf: 'Stable Earn', yield: true },
   vQQQ: { name: 'US Tech 100', shelf: 'Curated ETF' },
   vVOO: { name: 'US 500', shelf: 'Curated ETF' },
@@ -276,6 +284,7 @@ const CATALOG: Readonly<Record<string, { name: string; shelf: FundShelf; yield?:
   UNITREE: { name: 'Unitree Vault', shelf: 'Specialty' },
   vSMH: { name: 'US Semis 25', shelf: 'Specialty' },
   vSTRC: { name: 'Strategy Preferred Yield', shelf: 'Specialty' },
+  antb: { name: 'ANT Believers Index', shelf: 'Specialty' },
 };
 
 /** A fund listed tomorrow still shows, under its API name and a shelf by type. */
@@ -296,9 +305,28 @@ export function sodexFundUrl(fundId: string): string {
 export type FundAction =
   | { kind: 'trade'; symbol: string }
   | { kind: 'batch'; cutoffAt: number | null; deliveryAt: number | null }
-  | { kind: 'rfq'; rfq: string; deliveryAt: number | null; minBuy: string; minSell: string }
+  /** protocol 'ssi': an index fund's maker order on SoDEX's issuer (trading/ssi.ts), else TigrisRFQ. */
+  | { kind: 'rfq'; rfq: string; deliveryAt: number | null; minBuy: string; minSell: string; protocol?: 'ssi' }
   | { kind: 'external'; why: string }
   | { kind: 'closed'; why: string; nextAt: number | null };
+
+/**
+ * sodex.com's words for a fund it does not trade right now (owner 2026-11-28: "Trading temporarily unavailable ·
+ * Resuming in 1d 13h 56min ... sodex ui says this"): its locale keys trading_closed_temporarily_unavailable and
+ * trading_closed_resuming_in, the countdown to the status's nextChannelAt in days, hours and minutes.
+ */
+export const CLOSED_TITLE = 'Trading temporarily unavailable';
+export function resumingIn(nextAtSec: number | null | undefined, now = Date.now()): string | null {
+  if (!nextAtSec) return null;
+  const m = Math.max(1, Math.ceil((nextAtSec * 1000 - now) / 60_000));
+  const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60;
+  return `Resuming in ${[d ? `${d}d` : '', d || h ? `${h}h` : '', `${mm}min`].filter(Boolean).join(' ')}`;
+}
+/** "Trading temporarily unavailable · Resuming in 1d 13h 56min", or the first half when SoDEX names no time. */
+export const closedLine = (nextAtSec: number | null | undefined, now = Date.now()): string => {
+  const r = resumingIn(nextAtSec, now);
+  return r ? `${CLOSED_TITLE} · ${r}` : CLOSED_TITLE;
+};
 
 const CLOSED_WHY: Readonly<Record<string, string>> = {
   pre_open: 'Opens soon',
@@ -312,7 +340,9 @@ const CLOSED_WHY: Readonly<Record<string, string>> = {
  * The Quickstart's table. A bridged vault has no trading status (the route answers "not
  * found"), so `status` may be null for one; for any other fund null means not read yet.
  */
-export function fundAction(fund: Pick<WealthFund, 'fundType' | 'fundStatus' | 'spot'>, status: TradingStatus | null): FundAction | null {
+export function fundAction(fund: Pick<WealthFund, 'fundType' | 'fundStatus' | 'spot' | 'spotOnly'>, status: TradingStatus | null): FundAction | null {
+  // An SSI token on the spot order book (trading/ssiSpot.ts): always the book, no Wealth trading status.
+  if (fund.spotOnly && fund.spot) return { kind: 'trade', symbol: fund.spot.symbol };
   if (fund.fundType === 'bridged_vault') return { kind: 'external', why: 'Subscribed on sodex.com: SoDEX documents no route for this vault.' };
   if (!status) return null;
   if (status.channel === 'closed') {
@@ -323,6 +353,11 @@ export function fundAction(fund: Pick<WealthFund, 'fundType' | 'fundStatus' | 's
     return { kind: 'closed', why: 'Not trading', nextAt: status.nextChannelAt };
   }
   if (status.channel === 'batch') return { kind: 'batch', cutoffAt: status.batch?.cutoffAt ?? null, deliveryAt: status.batch?.expectedDeliveryAt ?? null };
+  // An index fund (ANT Believers Index): settles at once against a maker's signed order (sodex.com: "settles in real time").
+  if (status.channel === 'ssi-v2-rfq' && status.rfq) {
+    if (!status.rfq.quotable || status.rfq.pausedByMaker) return { kind: 'closed', why: 'Quotes paused', nextAt: status.nextChannelAt };
+    return { kind: 'rfq', protocol: 'ssi', rfq: status.rfq.address, deliveryAt: null, minBuy: status.rfq.minBuyAmount, minSell: status.rfq.minSellAmount };
+  }
   if (status.channel === 'rfq' && status.rfq) {
     if (!status.rfq.quotable || status.rfq.pausedByMaker) return { kind: 'closed', why: 'Quotes paused', nextAt: status.nextChannelAt };
     return { kind: 'rfq', rfq: status.rfq.address, deliveryAt: status.rfq.expectedDeliveryAt, minBuy: status.rfq.minBuyAmount, minSell: status.rfq.minSellAmount };
@@ -348,11 +383,11 @@ export const SELECTOR = {
 
 const ZERO32 = '0'.repeat(64);
 
-function addrWord(a: string): string {
+export function addrWord(a: string): string {
   if (!/^0x[0-9a-fA-F]{40}$/.test(a)) throw new RangeError('bad address');
   return a.slice(2).toLowerCase().padStart(64, '0');
 }
-function uintWord(v: bigint): string {
+export function uintWord(v: bigint): string {
   if (v < 0n) throw new RangeError('negative amount');
   return v.toString(16).padStart(64, '0');
 }
@@ -456,7 +491,7 @@ export function requestProblem(side: 'buy' | 'sell', amount: bigint, f: VaultFac
 // --- sending ---------------------------------------------------------------------------
 
 /** The checks every wallet-signed request passes. An exit (`sell`) is never refused by the terms. */
-async function preflight(owner: string, side: 'buy' | 'sell'): Promise<void> {
+export async function preflight(owner: string, side: 'buy' | 'sell'): Promise<void> {
   if (side === 'sell') return;
   if (!tradingConfig().writesAllowed) throw new TradingError('New positions are paused on ValueDesk right now. Nothing was sent.', 'writes-off');
   await requireTermsOrThrow({ owner, reason: 'invest in this fund' });
@@ -464,7 +499,7 @@ async function preflight(owner: string, side: 'buy' | 'sell'): Promise<void> {
   guardLegal({ type: 'newTwapOrder', engine: 'spot', params: {} } as unknown as SignableAction, owner);
 }
 
-async function send(provider: Eip1193Provider, owner: string, chainId: number, to: string, data: string, what: string): Promise<string> {
+export async function send(provider: Eip1193Provider, owner: string, chainId: number, to: string, data: string, what: string): Promise<string> {
   const hash = await sendTransaction(provider, { from: owner, to, data, value: '0x0', chainId });
   const receipt = await waitForReceipt(hash, 180_000);
   if (!receipt) throw new WalletError(`The ${what} was sent (${hash}) but is not confirmed yet. Check your wallet before sending again.`);
@@ -472,7 +507,7 @@ async function send(provider: Eip1193Provider, owner: string, chainId: number, t
   return hash;
 }
 
-async function ensureChain(provider: Eip1193Provider): Promise<{ chainId: number; switched: boolean }> {
+export async function ensureChain(provider: Eip1193Provider): Promise<{ chainId: number; switched: boolean }> {
   const chain = await valueChain();
   const switched = (await getChainId(provider)) !== chain.chainId;
   if (switched) {
@@ -484,7 +519,7 @@ async function ensureChain(provider: Eip1193Provider): Promise<{ chainId: number
   return { chainId: chain.chainId, switched };
 }
 
-async function allowanceOf(token: string, owner: string, spender: string): Promise<bigint> {
+export async function allowanceOf(token: string, owner: string, spender: string): Promise<bigint> {
   const r = await rpcCall<string>(VALUECHAIN_RPC, 'eth_call', [{ to: token, data: allowanceData(owner, spender) }, 'latest']);
   if (r.error) throw new WalletError('Could not read the token allowance from ValueChain. Nothing was sent.');
   return hexUnits(r.result) ?? 0n;

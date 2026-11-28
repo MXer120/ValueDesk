@@ -1,0 +1,569 @@
+{
+ "note": "Read-only from ValueChain 2026-11-27: SoDEX Caller 0x478fec6b6ead70d0e03beeba15027aa6d51180ab (verified ABI on main-scan.valuechain.xyz), getCallForById(190494) and one BridgeCallForCreated log.",
+ "callerAbi": [
+  {
+   "anonymous": false,
+   "inputs": [
+    {
+     "components": [
+      {
+       "internalType": "uint256",
+       "name": "callForId",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "chain",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "bridgeAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "address",
+       "name": "user",
+       "type": "address"
+      },
+      {
+       "internalType": "enum CallForType",
+       "name": "callForType",
+       "type": "uint8"
+      },
+      {
+       "internalType": "string",
+       "name": "inCoinSymbol",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "inCoinAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "uint256",
+       "name": "inAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "outCoinSymbol",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "outCoinAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "uint256",
+       "name": "minOutAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "uint256",
+       "name": "outAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "enum CallForStatus",
+       "name": "status",
+       "type": "uint8"
+      },
+      {
+       "internalType": "uint256",
+       "name": "createdTimestamp",
+       "type": "uint256"
+      },
+      {
+       "internalType": "uint256",
+       "name": "settledTimestamp",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "txHash",
+       "type": "string"
+      },
+      {
+       "internalType": "bool",
+       "name": "toClob",
+       "type": "bool"
+      },
+      {
+       "internalType": "uint256",
+       "name": "updatedTimestamp",
+       "type": "uint256"
+      }
+     ],
+     "indexed": false,
+     "internalType": "struct BridgeCallFor",
+     "name": "bridgeCallFor",
+     "type": "tuple"
+    }
+   ],
+   "name": "BridgeCallForCreated",
+   "type": "event"
+  },
+  {
+   "inputs": [
+    {
+     "internalType": "string",
+     "name": "chain",
+     "type": "string"
+    },
+    {
+     "internalType": "string",
+     "name": "coinSymbol",
+     "type": "string"
+    }
+   ],
+   "name": "callForMinAmounts",
+   "outputs": [
+    {
+     "internalType": "uint256",
+     "name": "minAmount",
+     "type": "uint256"
+    }
+   ],
+   "stateMutability": "view",
+   "type": "function"
+  },
+  {
+   "inputs": [
+    {
+     "internalType": "string",
+     "name": "chain",
+     "type": "string"
+    },
+    {
+     "internalType": "enum CallForType",
+     "name": "callForType",
+     "type": "uint8"
+    },
+    {
+     "internalType": "string",
+     "name": "inCoinSymbol",
+     "type": "string"
+    },
+    {
+     "internalType": "uint256",
+     "name": "inAmount",
+     "type": "uint256"
+    },
+    {
+     "internalType": "string",
+     "name": "outCoinSymbol",
+     "type": "string"
+    },
+    {
+     "internalType": "uint256",
+     "name": "minOutAmount",
+     "type": "uint256"
+    },
+    {
+     "internalType": "bool",
+     "name": "toClob",
+     "type": "bool"
+    },
+    {
+     "internalType": "address",
+     "name": "account",
+     "type": "address"
+    }
+   ],
+   "name": "createBridgeCallFor",
+   "outputs": [
+    {
+     "components": [
+      {
+       "internalType": "uint256",
+       "name": "callForId",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "chain",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "bridgeAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "address",
+       "name": "user",
+       "type": "address"
+      },
+      {
+       "internalType": "enum CallForType",
+       "name": "callForType",
+       "type": "uint8"
+      },
+      {
+       "internalType": "string",
+       "name": "inCoinSymbol",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "inCoinAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "uint256",
+       "name": "inAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "outCoinSymbol",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "outCoinAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "uint256",
+       "name": "minOutAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "uint256",
+       "name": "outAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "enum CallForStatus",
+       "name": "status",
+       "type": "uint8"
+      },
+      {
+       "internalType": "uint256",
+       "name": "createdTimestamp",
+       "type": "uint256"
+      },
+      {
+       "internalType": "uint256",
+       "name": "settledTimestamp",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "txHash",
+       "type": "string"
+      },
+      {
+       "internalType": "bool",
+       "name": "toClob",
+       "type": "bool"
+      },
+      {
+       "internalType": "uint256",
+       "name": "updatedTimestamp",
+       "type": "uint256"
+      }
+     ],
+     "internalType": "struct BridgeCallFor",
+     "name": "bridgeCallFor",
+     "type": "tuple"
+    }
+   ],
+   "stateMutability": "nonpayable",
+   "type": "function"
+  },
+  {
+   "inputs": [
+    {
+     "internalType": "string",
+     "name": "chain",
+     "type": "string"
+    },
+    {
+     "internalType": "enum CallForType",
+     "name": "callForType",
+     "type": "uint8"
+    },
+    {
+     "internalType": "string",
+     "name": "inCoinSymbol",
+     "type": "string"
+    },
+    {
+     "internalType": "uint256",
+     "name": "inAmount",
+     "type": "uint256"
+    },
+    {
+     "internalType": "string",
+     "name": "outCoinSymbol",
+     "type": "string"
+    },
+    {
+     "internalType": "uint256",
+     "name": "minOutAmount",
+     "type": "uint256"
+    },
+    {
+     "internalType": "bool",
+     "name": "toClob",
+     "type": "bool"
+    }
+   ],
+   "name": "createBridgeCallFor",
+   "outputs": [
+    {
+     "components": [
+      {
+       "internalType": "uint256",
+       "name": "callForId",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "chain",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "bridgeAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "address",
+       "name": "user",
+       "type": "address"
+      },
+      {
+       "internalType": "enum CallForType",
+       "name": "callForType",
+       "type": "uint8"
+      },
+      {
+       "internalType": "string",
+       "name": "inCoinSymbol",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "inCoinAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "uint256",
+       "name": "inAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "outCoinSymbol",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "outCoinAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "uint256",
+       "name": "minOutAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "uint256",
+       "name": "outAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "enum CallForStatus",
+       "name": "status",
+       "type": "uint8"
+      },
+      {
+       "internalType": "uint256",
+       "name": "createdTimestamp",
+       "type": "uint256"
+      },
+      {
+       "internalType": "uint256",
+       "name": "settledTimestamp",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "txHash",
+       "type": "string"
+      },
+      {
+       "internalType": "bool",
+       "name": "toClob",
+       "type": "bool"
+      },
+      {
+       "internalType": "uint256",
+       "name": "updatedTimestamp",
+       "type": "uint256"
+      }
+     ],
+     "internalType": "struct BridgeCallFor",
+     "name": "bridgeCallFor",
+     "type": "tuple"
+    }
+   ],
+   "stateMutability": "nonpayable",
+   "type": "function"
+  },
+  {
+   "inputs": [
+    {
+     "internalType": "uint256",
+     "name": "callForId",
+     "type": "uint256"
+    }
+   ],
+   "name": "getCallForById",
+   "outputs": [
+    {
+     "components": [
+      {
+       "internalType": "uint256",
+       "name": "callForId",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "chain",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "bridgeAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "address",
+       "name": "user",
+       "type": "address"
+      },
+      {
+       "internalType": "enum CallForType",
+       "name": "callForType",
+       "type": "uint8"
+      },
+      {
+       "internalType": "string",
+       "name": "inCoinSymbol",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "inCoinAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "uint256",
+       "name": "inAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "outCoinSymbol",
+       "type": "string"
+      },
+      {
+       "internalType": "string",
+       "name": "outCoinAddr",
+       "type": "string"
+      },
+      {
+       "internalType": "uint256",
+       "name": "minOutAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "uint256",
+       "name": "outAmount",
+       "type": "uint256"
+      },
+      {
+       "internalType": "enum CallForStatus",
+       "name": "status",
+       "type": "uint8"
+      },
+      {
+       "internalType": "uint256",
+       "name": "createdTimestamp",
+       "type": "uint256"
+      },
+      {
+       "internalType": "uint256",
+       "name": "settledTimestamp",
+       "type": "uint256"
+      },
+      {
+       "internalType": "string",
+       "name": "txHash",
+       "type": "string"
+      },
+      {
+       "internalType": "bool",
+       "name": "toClob",
+       "type": "bool"
+      },
+      {
+       "internalType": "uint256",
+       "name": "updatedTimestamp",
+       "type": "uint256"
+      }
+     ],
+     "internalType": "struct BridgeCallFor",
+     "name": "callFor",
+     "type": "tuple"
+    }
+   ],
+   "stateMutability": "view",
+   "type": "function"
+  },
+  {
+   "inputs": [
+    {
+     "internalType": "string",
+     "name": "chain",
+     "type": "string"
+    },
+    {
+     "internalType": "string",
+     "name": "inCoinSymbol",
+     "type": "string"
+    },
+    {
+     "internalType": "string",
+     "name": "outCoinSymbol",
+     "type": "string"
+    }
+   ],
+   "name": "isCallForCoinSymbolPair",
+   "outputs": [
+    {
+     "internalType": "bool",
+     "name": "",
+     "type": "bool"
+    }
+   ],
+   "stateMutability": "view",
+   "type": "function"
+  }
+ ],
+ "getCallForById190494": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000002e81e00000000000000000000000000000000000000000000000000000000000002400000000000000000000000000000000000000000000000000000000000000280000000000000000000000000e3eb2e7ded738b28043e445415c642affcc8dd1c000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000002e000000000000000000000000000000000000000000000000000000000000003200000000000000000000000000000000000000000000000000000000000626b50000000000000000000000000000000000000000000000000000000000000038000000000000000000000000000000000000000000000000000000000000003c000000000000000000000000000000000000000000000000057b4e55e9dc59d770000000000000000000000000000000000000000000000005897b0dfd94968340000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000006b09f5d2000000000000000000000000000000000000000000000000000000006b09f61300000000000000000000000000000000000000000000000000000000000004200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006b09f6130000000000000000000000000000000000000000000000000000000000000008424153455f455448000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a3078434337333232413266396638323235316441353135383442316138393931356442633032313835420000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000045553444300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a307838333335383966434436654462364530386634633743333244346637316235346264413032393133000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006736f555344430000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a307862383841303236394330623745363635463135444534364636333465303263453831453336316339000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042307834613938333263316130626261643461343438653537646331343761333433376264383936646164306437636530613738373462336266353965383530343133000000000000000000000000000000000000000000000000000000000000",
+ "createdLog": {
+  "address": "0x478fec6b6ead70d0e03beeba15027aa6d51180ab",
+  "topics": [
+   "0xee66fdf3605015adecc8fae2d15605aee8ee073bea64c34ba5547f744ff15060"
+  ],
+  "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000002e81a000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000002800000000000000000000000009c7f920ec59a5591f3d227929eb9fb9224d46094000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000002e0000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000006acfc0000000000000000000000000000000000000000000000000000000000000038000000000000000000000000000000000000000000000000000000000000003c00000000000000000000000000000000000000000000000005f2ff7690a012ca600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006b09bc87000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006b09bc870000000000000000000000000000000000000000000000000000000000000008424153455f455448000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a3078434337333232413266396638323235316441353135383442316138393931356442633032313835420000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000045553444300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a307838333335383966434436654462364530386634633743333244346637316235346264413032393133000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006736f555344430000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002a307862383841303236394330623745363635463135444534364636333465303263453831453336316339000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+ }
+}

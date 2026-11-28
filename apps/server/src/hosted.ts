@@ -209,6 +209,14 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/username/check', cls: 'read' },
   { method: 'POST', url: '/api/vs/username', cls: 'write' },
   { method: 'POST', url: '/api/vs/username/change', cls: 'write' },
+  // Published ValueDesk indexes (routes/vdIndexes.ts): the list, one index and an index's picture by its hash from
+  // indexes.db, a wallet's signed publish (with the picture's checked bytes) and take-down (tighter limit in the route).
+  // No upstream call.
+  { method: 'GET', url: '/api/vs/indexes', cls: 'read' },
+  { method: 'GET', url: '/api/vs/indexes/:id', cls: 'read' },
+  { method: 'GET', url: '/api/vs/indexes/image/:hash', cls: 'read' },
+  { method: 'POST', url: '/api/vs/indexes/publish', cls: 'write' },
+  { method: 'POST', url: '/api/vs/indexes/unpublish', cls: 'write' },
   // Referrals and fee credits (routes/invites.ts): a SoDEX code's check, a wallet's credits, a signed join.
   { method: 'GET', url: '/api/vs/invites/check', cls: 'read' },
   { method: 'GET', url: '/api/vs/invites/me', cls: 'read' },
@@ -222,6 +230,15 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/vs/sopoints/estimate', cls: 'write' },
   // ValueChain NFT floors (routes/nftFloors.ts): valuemint.store's summary and open listings, read every ten minutes.
   { method: 'GET', url: '/api/vs/nft/floors', cls: 'upstream' },
+  // SSI index quote (routes/ssiQuote.ts): one call to SoDEX's Wealth host for a maker's signed order.
+  { method: 'POST', url: '/api/vs/wealth/ssi-quote', cls: 'upstream' },
+  // Fund info (routes/wealthInfo.ts): SoDEX's CMS, keystone's holdings and quote, a vault's detail, each cached in the
+  // route (5 to 60 minutes), so most answers cost no upstream call; a new fund or language can.
+  { method: 'GET', url: '/api/vs/wealth/info', cls: 'upstream' },
+  // USDC Earn's daily share price (routes/wealthInfo.ts): one Morpho call an hour at most, cached in the route.
+  { method: 'GET', url: '/api/vs/wealth/history', cls: 'read' },
+  // What sodex.com lists (routes/wealthInfo.ts): from the same cached CMS file as the fund info.
+  { method: 'GET', url: '/api/vs/wealth/listing', cls: 'read' },
   // The builder fee a wallet owes, signed (routes/builder.ts, docs/BUILDER-TIERS.md §3). Asking is a
   // read of this server's own ledger and one signature. A hint is what later costs SoDEX reads from
   // this server's address, so a request that carries one counts as `upstream` too.

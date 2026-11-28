@@ -171,7 +171,7 @@ html[data-theme='light'] .wv { --wv-surface: rgb(255 255 255 / 0.75); --wv-raise
   --tf-button: linear-gradient(180deg, #fff 0%, #d9d9d6 100%); --tf-button-hover: linear-gradient(180deg, #fff 0%, #ececea 100%); --tf-button-fg: #111; --tf-button-edge: rgb(255 255 255 / 0.5);
   --tf-button-2: linear-gradient(180deg, #232324 0%, #1a1a1b 100%); --tf-button-2-hover: linear-gradient(180deg, #2b2b2c 0%, #212122 100%);
   color: var(--tf-fg); }
-.wv-stage__light { position: absolute; inset: 0; background: radial-gradient(44% 80% at 80% 40%, rgba(64, 104, 255, 0.42), transparent 70%), radial-gradient(40% 60% at 96% 100%, rgba(0, 180, 129, 0.34), transparent 70%), radial-gradient(50% 70% at 8% 0%, rgba(110, 30, 160, 0.42), transparent 70%); }
+.wv-stage__light { position: absolute; inset: 0; background: radial-gradient(44% 80% at 80% 40%, rgba(64, 104, 255, 0.42), transparent 70%), radial-gradient(40% 60% at 96% 100%, rgba(0, 180, 129, 0.34), transparent 70%); }
 .wv-stage__ribs { position: absolute; inset: 0; z-index: 1; background: repeating-linear-gradient(90deg, rgb(255 255 255 / 0.05) 0 1px, transparent 1px 22px, rgb(0 0 0 / 0.16) 34px 44px); mask-image: linear-gradient(90deg, transparent 38%, #000 66%); }
 .wv-stage > :not(.wv-stage__light):not(.wv-stage__ribs) { position: relative; z-index: 2; }
 .wv-stage h1, .wv-stage h2, .wv-stage b { color: var(--tf-fg); }

@@ -1,0 +1,72 @@
+/* Recurring Buy and USDC Earn on the Wealth page (RecurringBuys.tsx, EarnSheet.tsx). The panel sits in the Wealth tab's
+   band card; the sheets are the funds sheets (funds.css), so only what they do not have is here. */
+
+.rc { display: flex; flex-direction: column; min-height: 0; }
+.rc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--panel-line);
+}
+.rc-bal { display: grid; grid-template-columns: auto auto; align-items: baseline; column-gap: var(--sp-2); row-gap: 2px; }
+.rc-bal > span { color: var(--muted); font-size: var(--fs-xs); }
+.rc-bal > b { color: var(--text); font-family: var(--font-num); font-weight: 600; font-size: var(--fs-base); font-variant-numeric: tabular-nums; }
+.rc-bal > small { grid-column: 1 / -1; color: var(--dim); font-size: var(--fs-micro); }
+.rc-acts { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.rc-acts .acct-act:disabled { opacity: 0.4; cursor: not-allowed; }
+.rc-sched { color: var(--text); }
+.rc-sched::first-letter { text-transform: uppercase; }
+
+.rc-field { display: flex; flex-direction: column; gap: 6px; }
+.rc-field__k { color: var(--muted); font-size: var(--fs-xs); }
+.rc-field__sub { color: var(--dim); font-size: var(--fs-micro); line-height: 1.4; }
+.rc-asset { display: flex; align-items: center; gap: var(--sp-2); }
+.rc-asset b { color: var(--text); font-weight: 600; }
+.rc-asset small { color: var(--muted); font-size: var(--fs-xs); margin-left: auto; }
+
+.rc-rules { padding: 0 var(--sp-3) var(--sp-3); display: flex; flex-direction: column; gap: 8px; color: var(--muted); line-height: 1.45; }
+.rc-rules p { margin: 0; }
+.rc-rules b { color: var(--text); font-weight: 500; }
+
+.rc-confirm { margin: 0; color: var(--text); font-size: var(--fs-base); line-height: 1.5; }
+.rc-confirm__acts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+
+.rc-exec { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 320px; overflow: auto; }
+.rc-exec li {
+  display: grid;
+  grid-template-columns: 96px 1fr auto auto;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 8px 0;
+  border-top: 1px solid var(--panel-line);
+  font-size: var(--fs-xs);
+}
+.rc-exec li:first-child { border-top: 0; }
+.rc-exec__d { color: var(--muted); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.rc-exec__a { color: var(--text); font-family: var(--font-num); font-variant-numeric: tabular-nums; text-align: right; }
+.rc-exec__a small { color: var(--muted); font-family: inherit; }
+.rc-exec__why { grid-column: 1 / -1; color: var(--dim); font-size: var(--fs-micro); }
+
+/* USDC Earn: where the shares go. */
+.earn-then { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); color: var(--muted); font-size: var(--fs-xs); }
+
+@media (max-width: 640px) {
+  .rc-head { padding: var(--sp-3); }
+  .rc-acts { width: 100%; }
+  .rc-acts .pf-btn { margin-left: auto; }
+  .rc-exec li { grid-template-columns: 84px 1fr auto; }
+  .rc-exec li > a, .rc-exec li > span:empty { display: none; }
+}
+
+/* The period switch (RangePicker ViewSeg) in the sheets: the page scopes its sliding ink to .pf.pfx, which a portalled
+   sheet is outside of, so the same rules again for the two sheets. */
+:is(.rc-sheet, .earn-sheet) .pfx-slide { position: relative; border-radius: 8px; }
+:is(.rc-sheet, .earn-sheet) .pfx-slide > button,
+:is(.rc-sheet, .earn-sheet) .pfx-slide > button.is-on { border-color: transparent; background: none; transition: color var(--dur-fast) var(--ease-out); }
+
+/* Instant exit (WealthSheet.tsx): the hedge switch and its measured note. */
+.ie-box { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.ie-box .fx-note { margin: 0; }

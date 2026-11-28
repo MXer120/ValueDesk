@@ -35,6 +35,8 @@ import { pointsAuthRoutes } from './routes/pointsAuth.js';
 import { sopointsLogRoutes } from './routes/sopointsLog.js';
 import { sopointsEstimateRoutes } from './routes/sopointsEstimate.js';
 import { nftFloorsRoutes } from './routes/nftFloors.js';
+import { ssiQuoteRoutes } from './routes/ssiQuote.js';
+import { wealthInfoRoutes } from './routes/wealthInfo.js';
 import { keepValuedeskWarm, liveAskOf, valuedeskRoutes } from './routes/valuedesk.js';
 import { builderRoutes } from './routes/builder.js';
 import { betaRoutes } from './routes/beta.js';
@@ -49,6 +51,8 @@ import { statusRoutes } from './routes/status.js';
 import { adminRoutes } from './routes/admin.js';
 import { analyticsRoutes, analyticsStore } from './routes/analytics.js';
 import { profileRoutes } from './routes/profiles.js';
+import { ProfileStore } from './profiles/store.js';
+import { vdIndexRoutes } from './routes/vdIndexes.js';
 import { inviteRoutes } from './routes/invites.js';
 import { adminOriginsFrom } from './admin/auth.js';
 import { fetchExecutorHealth } from './admin/statusView.js';
@@ -274,6 +278,12 @@ await app.register(sopointsLogRoutes());
 await app.register(sopointsEstimateRoutes());
 // ValueChain NFT floors per collection and rarity tier, from valuemint.store (routes/nftFloors.ts), ten minutes cached.
 await app.register(nftFloorsRoutes());
+// SSI index quote relay (routes/ssiQuote.ts, owner 2026-11-28 "fully doable on valuedesk"): SoDEX's signed maker order
+// for ANT Believers Index, which wealth.sodex.dev answers to no browser but sodex.com. Nothing kept.
+await app.register(ssiQuoteRoutes());
+// Fund info relay (routes/wealthInfo.ts, owner 2026-11-28 "a full info page for every asset ... provided by sodex info"):
+// SoDEX's CMS text, the underlying ETF's holdings and a vault's facts, each source cached; a few KB per fund and language.
+await app.register(wealthInfoRoutes());
 // ValueDesk: multi-venue traders (SoDEX + Hyperliquid) for Explore,
 // Leaderboard, Scan and Copy. Read-only - see routes/valuedesk.ts.
 await app.register(valuedeskRoutes);
@@ -298,6 +308,12 @@ await app.register(analyticsRoutes, { trustGeo: HOSTED });
 await app.register(profileRoutes, {
   // An order counted through ValueDesk's builder: a returning user, whatever browser they are on.
   known: (address: string) => !!(adminLedger ??= openLedger(builderDbPath()))?.prepare('SELECT 1 FROM orders WHERE address = ? LIMIT 1').get(address),
+});
+// Published ValueDesk indexes (routes/vdIndexes.ts, owner 2026-11-28): wallet-signed, kept in indexes.db. Each owner's
+// username from profiles.db, on a connection of its own opened by the first index read (as routes/invites.ts does).
+let indexOwnerNames: ProfileStore | null = null;
+await app.register(vdIndexRoutes, {
+  nameOf: (address: string) => (indexOwnerNames ??= new ProfileStore()).byAddress(address)?.username ?? null,
 });
 // Invites and fee credits (routes/invites.ts): codes, signed joins, the credit job on the main API.
 await app.register(inviteRoutes);

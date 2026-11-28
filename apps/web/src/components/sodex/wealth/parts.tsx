@@ -11,7 +11,7 @@ import { openConnectDialog } from '../../account/connect';
 import { Button, EmptyState, Icon, IconTile, Segmented, Skeleton, Sparkline, StatusPill, Tabs, Tag, type ButtonVariant, type IconName } from '../../bots/kit/kit';
 import { DASH, fmt, fmtUsd, signClass } from '../../../format';
 import { useMask } from '../../../privacy';
-import { sodexFundUrl, type JoinedHolding, type WealthEntry, type WealthPlan } from '../../../trading/wealth';
+import { CLOSED_TITLE, resumingIn, sodexFundUrl, type JoinedHolding, type WealthEntry, type WealthPlan } from '../../../trading/wealth';
 import { useLedger, type WealthState } from '../../portfolio/useWealth';
 import type { WealthSheetTarget } from '../../portfolio/WealthSheet';
 import { SodexMark } from '../../funds/ui';
@@ -51,8 +51,8 @@ export function ChannelPill({ v, now, size = 'sm' }: { v: FundView; now: number;
   const c = channelOf(v);
   const left = c.at && c.at > now ? leftShort(c.at, now) : null;
   return (
-    <StatusPill tone={c.tone} size={size} dot className="wv-chan" title={c.at ? `${c.atLabel} ${dayTime(c.at)}` : undefined}>
-      {c.label}{left && <span className="wv-chan__t">{c.atLabel === 'Cutoff' ? `closes in ${left}` : `opens in ${left}`}</span>}
+    <StatusPill tone={c.tone} size={size} dot className="wv-chan" title={[v.action?.kind === 'closed' ? v.action.why : null, c.at ? `${c.atLabel} ${dayTime(c.at)}` : null].filter(Boolean).join(' · ') || undefined}>
+      {c.label}{c.at && c.at > now && <span className="wv-chan__t">{c.atLabel === 'Cutoff' ? `closes in ${left}` : resumingIn(c.at / 1000, now)}</span>}
     </StatusPill>
   );
 }
@@ -353,12 +353,18 @@ export function FundChannel({ v, now }: { v: FundView; now: number }) {
   } else if (a.kind === 'rfq') {
     rows.push(['bolt', 'Channel', 'A maker\'s quote, filled from your wallet']);
     if (a.deliveryAt) rows.push(['check', 'Expected delivery', dayTime(a.deliveryAt)]);
+  } else if (a.kind === 'external' && v.fund.fundType === 'bridged_vault') {
+    // ValueDesk sends USDC Earn's bridge order itself (trading/wealthEarn.ts); measured 0.8-1.3 min, at NAV. No fee claim:
+    // the bridge's cost was never measured (owner's shipping session 2026-11-28).
+    rows.push(['compass', 'Channel', 'A bridge order: USDC in, vault shares out']);
+    rows.push(['clock', 'Settles', 'In about a minute, at the vault’s price']);
   } else if (a.kind === 'external') {
     rows.push(['compass', 'Subscribe', 'On sodex.com']);
     rows.push(['shield', 'Why', 'SoDEX documents no route for it from other sites']);
   }
   else {
-    rows.push(['pause', 'Now', a.why]);
+    rows.push(['pause', 'Now', CLOSED_TITLE]);
+    rows.push(['info', 'Why', a.why]);
     if (a.nextAt) rows.push(['clock', 'Opens', <>{dayTime(a.nextAt)}{a.nextAt * 1000 > now && <em> · in {leftShort(a.nextAt * 1000, now)}</em>}</>]);
   }
   const m = marketState(v.quote);
@@ -401,7 +407,7 @@ export function FundActions({ v, ctx }: { v: FundView; ctx: WealthCtx }) {
 }
 
 /** The whole fund: what Shelves opens in a sheet and Desk shows beside its list. */
-export function FundDetail({ v, ctx, now, chartHeight = 240, head = true, actions = true }: { v: FundView; ctx: WealthCtx; now: number; chartHeight?: number; head?: boolean; actions?: boolean }) {
+export function FundDetail({ v, ctx, now, chartHeight = 240, head = true, actions = true, asOf = true }: { v: FundView; ctx: WealthCtx; now: number; chartHeight?: number; head?: boolean; actions?: boolean; asOf?: boolean }) {
   const holding = v.holding;
   return (
     <div className="wv-detail">
@@ -440,7 +446,7 @@ export function FundDetail({ v, ctx, now, chartHeight = 240, head = true, action
         </section>
       )}
       {actions && <FundActions v={v} ctx={ctx} />}
-      {v.quote?.asOf && <p className="wv-asof">Prices from SoDEX, as of {dayTime(v.quote.asOf)}</p>}
+      {asOf && v.quote?.asOf && <p className="wv-asof">Prices from SoDEX, as of {dayTime(v.quote.asOf)}</p>}
     </div>
   );
 }
