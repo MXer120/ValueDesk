@@ -66,7 +66,6 @@ export function DrawTab({ address, provider, demo }: { address: string | null; p
               <div><dt>Your tickets</dt><dd className="bv-num">{d?.tickets != null ? fmt(d.tickets, 0) : DASH}</dd></div>
               <div><dt>Wins</dt><dd className="bv-num">{d?.wins != null ? fmt(d.wins, 0) : DASH}</dd></div>
             </dl>
-            <p className="bv-note">Every box still unopened at the snapshot is a ticket. Prizes are boxes of all four tiers; winners and the random seed are published after the draw.</p>
             {!address && !demo ? <p className="bv-note">Connect a wallet to see its tickets.</p>
               : !session.signedIn ? <Button variant="primary" loading={session.busy} disabled={!provider} onClick={() => void session.signIn()}>Sign in to SoDEX to see your tickets</Button>
               : !d ? <p className="bv-note">{r.error ?? 'Reading your tickets…'}</p>
@@ -77,7 +76,7 @@ export function DrawTab({ address, provider, demo }: { address: string | null; p
                     ? <div className="bv-draw__none"><b>No wins this round</b><span>Your tickets stay in until the snapshot; the next draw starts fresh.</span></div>
                     : <div className="bv-draw__won"><b>{`You won ${fmt(d.entries.filter((e) => e.won).length, 0)}`}</b><span>Prizes go to the winning wallet.</span></div>}
                   <ul className="bv-draw__list">
-                    {[...d.entries].sort((a, b) => Number(b.won) - Number(a.won)).map((e, i) => (
+                    {d.entries.filter((e) => e.won).map((e, i) => (
                       <li key={`${e.tokenId}:${i}`} className={e.won ? 'is-won' : ''}>
                         <BoxArt level={e.level ?? 'Common'} size={30} />
                         <span><b>{e.level && isLevel(e.level) ? LEVEL_LABEL[e.level] : e.level ?? DASH}</b><small>{e.tokenId ? `#${e.tokenId}` : ''}</small></span>

@@ -334,3 +334,27 @@
 /* The box lists stay short (about three rows) and scroll. */
 .bv-pick__ids { max-height: 96px; overscroll-behavior: contain; }
 .bv-tier__ids { max-height: 92px; overscroll-behavior: contain; }
+
+/* 2026-11-28 round 5 ------------------------------------------------------------------------------------------------ */
+/* Every vault popup: see-through with the page blurred behind, no rule under the head (owner: "general rule for pop ups"). */
+.bv-pop .cpk__panel { background: color-mix(in srgb, var(--bg) 72%, transparent); -webkit-backdrop-filter: blur(22px) saturate(1.2); backdrop-filter: blur(22px) saturate(1.2); }
+.bv-pop .cpk__h { border-bottom: 0; }
+.bv-pop .cpk__veil { background: rgb(0 0 0 / 0.28); }
+.bv-gift__item { flex-direction: column; justify-content: center; text-align: center; }
+.bv-gift__item span { align-items: center; }
+/* The picker: the box in the middle, a small amount with Max inside, the slider beside it. */
+.bv-pick__hero { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0 10px; text-align: center; }
+.bv-pick__hero b { display: inline-flex; align-items: center; gap: 6px; color: var(--tier, var(--tf-fg)); }
+.bv-pick__hero small { color: var(--tf-muted); }
+.bv-pick__arts { display: inline-flex; align-items: center; gap: 10px; filter: drop-shadow(0 10px 24px color-mix(in srgb, var(--tier) 45%, transparent)); }
+.bv-pick__arts i { color: var(--tf-muted); font-style: normal; font-size: 20px; }
+.bv-pick__amount { display: flex; align-items: center; gap: 14px; }
+.bv-pick__merge { display: inline-flex; flex: none; align-items: center; gap: 6px; }
+.bv-pick__merge i { color: var(--tf-muted); font-style: normal; }
+.bv-pick__amount .tf-slider { flex: 1 1 auto; min-width: 0; }
+.bv-amt { position: relative; display: inline-flex; flex: none; width: 96px; }
+.bv-amt input { width: 100%; padding-right: 40px; font-family: var(--font-num); }
+.bv-amt__max { position: absolute; top: 50%; right: 6px; padding: 2px 6px; border: 0; border-radius: 6px; background: rgb(var(--ink) / 0.08); color: var(--tf-fg); font-size: 11px; font-weight: 600; cursor: pointer; transform: translateY(-50%); }
+.bv-amt__max:hover { background: rgb(var(--ink) / 0.14); }
+/* SuperRare: its outer glow purple too, the gold glare on the border. */
+.bv-tier.is-SuperRare:hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--tier) 40%, transparent), 0 0 44px -6px color-mix(in srgb, var(--tier) 75%, transparent), 0 0 18px -8px rgb(230 180 60 / 0.6), inset 0 1px 0 rgb(255 215 110 / 0.45); }

@@ -46,7 +46,8 @@ export const TABS = ['trade', 'explore', 'copy', 'leaderboard', 'portfolio', 'sc
  * The pages the bar lists. Leaderboard is a page like any other (its URL, its number key) but its
  * link lives under More since 2026-11-05 (owner: "move leaderboard under more"; NavMore.tsx).
  */
-export const NAV_TABS: readonly (typeof TABS)[number][] = TABS.filter((t) => t !== 'leaderboard' && t !== 'referrals');
+/** Referrals sits in the bar beside Portfolio, Scan and Bots (owner 2026-11-28: "move referrals outside, like portfolio scan bots"). */
+export const NAV_TABS: readonly (typeof TABS)[number][] = TABS.filter((t) => t !== 'leaderboard');
 
 /**
  * Pages that were removed, and where their old links now land (Account's

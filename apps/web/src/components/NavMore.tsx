@@ -147,7 +147,7 @@ export function NavMore({ alert = null, tab = null, limits = false, status = fal
         onClick={press}
       >
         More
-        {alert ? <span className={`navmore__dot is-${alert}`} aria-hidden="true" /> : unseen.size > 0 && <span className="navmore__dot is-new" aria-hidden="true" />}
+        {alert ? <span className={`navmore__dot is-${alert}`} aria-hidden="true" /> : [...unseen].some((p) => p !== 'referrals') && <span className="navmore__dot is-new" aria-hidden="true" />}
         <svg className="navmore__chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
       {pres.mounted && (
@@ -216,15 +216,6 @@ export function NavMoreBody({ alert = null, tab = null, limits = false, status =
                     <span className="dv-devtag dv-devtag--beta navmore__access">Get access</span>
                   </button>
                 ))}
-              <PageRow
-                href={pathForTab('referrals')}
-                label="Referrals"
-                current={tab === 'referrals'}
-                onOpen={onNavigate && close(() => onNavigate('referrals'))}
-                icon={<Icon><circle cx="10" cy="5" r="2.2" /><circle cx="4.8" cy="14.6" r="2.2" /><circle cx="15.2" cy="14.6" r="2.2" /><path d="M8.9 6.9 5.9 12.7M11.1 6.9l3 5.8M7 14.6h6" /></Icon>}
-              >
-                {unseen.has('referrals') && <NewDot />}
-              </PageRow>
               </div>
             )}
             </div>

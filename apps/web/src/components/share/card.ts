@@ -10,6 +10,7 @@
  */
 
 import { drawPointsArt, type PointsArt } from './pointsArt';
+import { drawBoxArt, loadShareImage, type BoxShareArt } from './boxShareArt';
 
 export type CardKind = 'trade' | 'position' | 'portfolio' | 'copy' | 'bot' | 'botvol' | 'points' | 'squad';
 export type Ratio = 'wide' | 'square';
@@ -65,7 +66,7 @@ export interface CardData {
   /** The wallet's address, shown only when the user turns it on. */
   wallet: string | null;
   /** A card drawn as the page's own (SoPoints: SoDEX's tier card, the week's estimate; pointsArt.ts) instead of the PnL layout. */
-  art?: PointsArt;
+  art?: PointsArt | BoxShareArt;
 }
 
 export interface CardOpts {
@@ -402,6 +403,7 @@ function factsList(c: Ctx, facts: CardFact[], x: number, y: number, w: number): 
 /** The card, drawn on `c` at its size times `k`. */
 export function drawCard(c: Ctx, d: CardData, o: CardOpts, k = 1): void {
   const [W, H] = SIZES[o.ratio];
+  if (d.art?.kind === 'box') { drawBoxArt(c, d.art, W, H, o.code, k); return; }
   if (d.art) { drawPointsArt(c, d.art, W, H, o.code, d.link, k); return; }
   const v = cardView(d, o);
   const wide = o.ratio === 'wide';
@@ -539,6 +541,7 @@ export async function cardFonts(): Promise<void> {
 
 export async function cardPng(d: CardData, o: CardOpts): Promise<Blob> {
   await cardFonts();
+  if (d.art?.kind === 'box') await loadShareImage(d.art.image);
   const [W, H] = SIZES[o.ratio];
   const cv = document.createElement('canvas');
   cv.width = W;

@@ -38,6 +38,7 @@ import { NAV_TABS, SOON_TABS, TAB_LABELS, pathForTab, type LegalPage, type Sodex
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
 import { NavMore, type NavAlert } from './NavMore';
+import { useUnseen } from './navSeen';
 import { NavTrade } from './NavTrade';
 import { LanguageGlobe } from './LanguageMenu';
 import { useHoverMenu } from './useHoverMenu';
@@ -108,6 +109,7 @@ export interface NavBarProps {
 export function NavBar({
   tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, connLabel = '', connOk = true, onOpenLegal, legalOn = false, engine, onEngine, alert = null, onOpenStatus, onOpenExcluded, onOpenLimits, statusOn = false, excludedOn = false, limitsOn = false, onOpenSodex, sodexOn = null,
 }: NavBarProps) {
+  const unseen = useUnseen();
   /*
    * Have the wallet modal's chunk in memory BEFORE the click.
    *
@@ -249,6 +251,7 @@ export function NavBar({
               }}
             >
               {TAB_LABELS[t]}
+              {t === 'referrals' && unseen.has('referrals') && <span className="navmore__new is-link" aria-label="Not visited yet" />}
             </a>
           ))}
         </nav>

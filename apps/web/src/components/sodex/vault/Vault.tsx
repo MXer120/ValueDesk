@@ -29,7 +29,7 @@ import { warmWalletModal } from '../../../walletconnect';
 import { openConnectDialog } from '../../account/connect';
 import { usePolled } from '../../explore/cohorts/parts';
 import { Button, EmptyState, Icon, IconButton, ProgressBar, Segmented, Skeleton, StatusPill, TextInput } from '../../bots/kit/kit';
-import { BoxArt } from '../BoxArt';
+import { BoxArt, boxArtSrc } from '../BoxArt';
 import { fmtAgo, fmtTokens, fmtUsdTight, useNow } from '../parts';
 import { Holo } from './Holo';
 import { BoxPicker } from './BoxPicker';
@@ -178,7 +178,7 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
   const [sosoUsd, setSosoUsd] = useState<number | null>(null);
   useEffect(() => { let off = false; void coinPrices().then((m) => { if (!off) setSosoUsd(priceOf(m, 'SOSO') ?? null); }).catch(() => undefined); return () => { off = true; }; }, []);
   const [tab, setTab] = useState<Tab>('all');
-  const [action, setAction] = useState<{ level: Level; kind: 'open' | 'merge' } | null>(null);
+  const [action, setAction] = useState<{ level: Level; kind: 'open' | 'merge' | 'gift' } | null>(null);
   const [openTier, setOpenTier] = useState<Level | null>(null);
   const [giving, setGiving] = useState<GiftTarget | null>(null);
   const refresh = useCallback(() => { chain.retry(); cybr.retry(); }, [chain, cybr]);
@@ -226,7 +226,7 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
               canAct={session.signedIn && !busy && (!!provider || !!demo)} canGift={!busy && (!!provider || !!demo)}
               setAction={(k) => setAction(k ? { level: l, kind: k } : null)}
               expanded={openTier === l} onToggle={() => setOpenTier(openTier === l ? null : l)} wallet={address}
-              onGift={() => setGiving({ contract: box, title: `${LEVEL_LABEL[l]} box`, level: l, image: null, ids: ids?.[l] ?? [] })}
+              onGift={() => setAction({ level: l, kind: 'gift' })}
             />
           ))}
         </div>
@@ -238,10 +238,7 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
       <header className="bv-head">
         <span className="bv-head__t">
           <h2>Your vault</h2>
-          {boxes && boxes.count > 0 && <ShareButton label="Share all your boxes" make={(b) => b.boxCard({
-            title: 'My SoDEX Blind Boxes', big: fmt(boxes.count, 0), bigLabel: 'Boxes', wallet: address,
-            facts: LEVELS.map((l) => ({ label: LEVEL_LABEL[l], value: fmt(boxes.byLevel[l].length, 0) })).concat(cybr.data?.length ? [{ label: 'Cybereators', value: fmt(cybr.data.length, 0) }] : []),
-          })} />}
+          {boxes && boxes.count > 0 && <ShareButton label="Share all your boxes" make={(b) => b.boxCard({ tier: [...LEVELS].reverse().find((l) => boxes.byLevel[l].length > 0) ?? 'Common', label: 'My Blind Boxes', title: `${fmt(boxes.count, 0)} boxes`, lines: [LEVELS.filter((l) => boxes.byLevel[l].length > 0).map((l) => `${fmt(boxes.byLevel[l].length, 0)} ${LEVEL_LABEL[l]}`).join(' · '), ...(cybr.data?.length ? [`${fmt(cybr.data.length, 0)} Cybereator${cybr.data.length === 1 ? '' : 's'}`] : [])], image: boxArtSrc([...LEVELS].reverse().find((l) => boxes.byLevel[l].length > 0) ?? 'Common') })} />}
         </span>
         <Segmented<Tab> label="Show" value={tab} onChange={setTab} options={[
           { value: 'all', label: 'All', ...(boxes && cybr.data ? { count: boxes.count + cybr.data.length } : {}) },
@@ -264,7 +261,7 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
       )}
       {action && ids && (
         <BoxPicker kind={action.kind} level={action.level} ids={ids[action.level]} mergeSize={rules?.mergeSize[action.level] ?? 0} perOpen={perOpen}
-          onClose={() => setAction(null)} onGo={(chosen) => start(action.kind, action.level, chosen)} />
+          onClose={() => setAction(null)} onGo={(chosen, to) => (action.kind === 'gift' ? (setAction(null), sendGift({ contract: box, title: `${LEVEL_LABEL[action.level]} box`, level: action.level, image: null, ids: chosen }, to)) : start(action.kind, action.level, chosen))} />
       )}
       {giving && <GiftPopup t={giving} onClose={() => setGiving(null)} onSend={(to, n) => sendGift({ ...giving, ids: giving.ids.slice(0, n) }, to)} />}
     </section>
@@ -346,7 +343,7 @@ function TierCard(p: {
       </button>
       <div className="bv-tier__name">
         <b>{name}</b>
-        {held > 0 && <ShareButton label={`Share your ${name} boxes`} make={(b) => b.boxCard({ title: `${fmt(held, 0)} ${name} ${held === 1 ? 'box' : 'boxes'}`, big: fmt(held, 0), bigLabel: `${name} boxes`, wallet: p.wallet, facts: facts(held) })} />}
+        {held > 0 && <ShareButton label={`Share your ${name} boxes`} make={(b) => b.boxCard({ tier: level, label: `${name} boxes`, title: `${fmt(held, 0)} ${name}`, lines: [held > 1 ? `Boxes #${ids[0]} … #${ids[held - 1]}` : `Box #${ids[0]}`], image: boxArtSrc(level) })} />}
         <span className="bv-num">{fmt(held, 0)}</span>
       </div>
       <div className="bv-tier__more" aria-hidden={!p.expanded}>
@@ -355,7 +352,7 @@ function TierCard(p: {
             {ids.map((id) => (
               <li key={id} className="bv-chip is-box">
                 <span>{`#${id}`}</span>
-                <ShareButton label={`Share box #${id}`} make={(b) => b.boxCard({ title: `${name} box #${id}`, big: `#${id}`, bigLabel: `${name} box`, wallet: p.wallet, facts: facts(1) })} />
+                <ShareButton label={`Share box #${id}`} make={(b) => b.boxCard({ tier: level, label: `${name} box`, title: `#${id}`, lines: ['SoDEX Blind Box'], image: boxArtSrc(level) })} />
               </li>
             ))}
           </ul>
@@ -555,10 +552,7 @@ function Cybereators({ address, list, error, retry, market, sosoUsd, canGift, on
               {c.sealed
                 ? <div className="bv-card__art"><Pic c={c} /></div>
                 : <Holo foil={foilOf(c)} className="bv-card__art"><Pic c={c} /></Holo>}
-              <div className="bv-card__t"><b>{c.name}</b>{c.sealed && <StatusPill size="sm" tone="warning">Sealed</StatusPill>}<ShareButton label={`Share ${c.name}`} make={(b) => b.boxCard({
-                title: c.name, big: c.sealed ? 'Sealed' : 'Revealed', bigLabel: 'Cybereator', wallet: null, label: 'Cybereator',
-                facts: [...(floorOf(c, col) != null ? [{ label: 'Floor', value: soso(floorOf(c, col)) }] : []), ...c.traits.filter((t) => t.value !== 'None').slice(0, 3).map((t) => ({ label: t.type, value: t.value }))],
-              })} /></div>
+              <div className="bv-card__t"><b>{c.name}</b>{c.sealed && <StatusPill size="sm" tone="warning">Sealed</StatusPill>}<ShareButton label={`Share ${c.name}`} make={(b) => b.boxCard({ tier: 'Cybereator', label: c.sealed ? 'Cybereator · sealed' : 'Cybereator', title: c.name, lines: c.traits.filter((t) => t.value !== 'None').slice(0, 3).map((t) => `${t.type}: ${t.value}`), image: c.image })} /></div>
               {c.traits.length > 0 && !c.sealed && <ul className="bv-traits">{c.traits.filter((t) => t.value !== 'None').slice(0, 4).map((t) => <li key={t.type}><small>{t.type}</small>{t.value}</li>)}</ul>}
               <dl className="bv-kv">
                 <div><dt>Floor</dt><dd className="bv-num">{soso(floorOf(c, col))}</dd></div>

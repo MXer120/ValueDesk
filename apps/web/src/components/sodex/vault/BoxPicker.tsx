@@ -1,79 +1,117 @@
 /**
- * Open or merge, as a popup (owner 2026-11-28: "Open boxes & merge make it a pop up ... amount can be selected, ENSURE
- * that >10 works but have like an info warning if >10 is selected. Needs a slider & it should be possible to select which
- * boxes exactly to open and merge"). The amount (field and slider) picks the lowest ids; each box can then be picked by
- * hand. Any amount works: it is cut into requests of SoDEX's size, each one signature.
+ * Open, merge or gift boxes, as a popup (owner 2026-11-28). The box in the middle; a small amount field with Max inside
+ * and a slider beside it (merge: two fields, boxes in and boxes out, "merge x to y"); one selected to start; each box
+ * pickable by its number; at most MAX_BOXES at once; above 10 a note. Gift adds the recipient and sends each box picked,
+ * one transfer each.
  */
 import { useMemo, useState } from 'react';
 import { LEVEL_LABEL, nextLevel, type Level } from '../../../blindBox';
+import { isAddress } from '../../../boxVault';
 import { fmt } from '../../../format';
-import { Button, Icon, TextInput } from '../../bots/kit/kit';
+import { Button, Icon, Slider, TextInput } from '../../bots/kit/kit';
 import { BoxArt } from '../BoxArt';
 import { Popup } from './Vault';
 
 const n0 = (n: number) => fmt(n, 0);
 /** At most this many boxes in one go (owner 2026-11-28: "Limit to 100 boxes at once"). */
 export const MAX_BOXES = 100;
+const digits = (v: string) => Number(v.replace(/[^0-9]/g, '')) || 0;
+
+/** A small number field with Max inside it. */
+function Amount({ id, value, max, onChange, label }: { id: string; value: number; max: number; onChange: (n: number) => void; label: string }) {
+  return (
+    <span className="bv-amt">
+      <TextInput id={id} inputMode="numeric" aria-label={label} value={String(value)} onChange={(e) => onChange(digits(e.target.value))} />
+      <button type="button" className="bv-amt__max" onClick={() => onChange(max)}>Max</button>
+    </span>
+  );
+}
 
 export function BoxPicker({ kind, level, ids, mergeSize, perOpen, onGo, onClose }: {
-  kind: 'open' | 'merge'; level: Level; ids: string[]; mergeSize: number; perOpen: number; onGo: (ids: string[]) => void; onClose: () => void;
+  kind: 'open' | 'merge' | 'gift'; level: Level; ids: string[]; mergeSize: number; perOpen: number;
+  onGo: (ids: string[], to: string) => void; onClose: () => void;
 }) {
-  const size = kind === 'open' ? 1 : mergeSize;
-  const maxUnits = Math.floor(Math.min(ids.length, MAX_BOXES) / Math.max(1, size));
-  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set(ids.slice(0, maxUnits * size)));
-  const units = Math.floor(picked.size / Math.max(1, size));
-  const extra = picked.size - units * size;
-  const setUnits = (u: number) => setPicked(new Set(ids.slice(0, Math.max(0, Math.min(maxUnits, u)) * size)));
-  const toggle = (id: string) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else if (n.size < maxUnits * size || (kind === 'merge' && n.size < MAX_BOXES)) n.add(id); return n; });
-  const chosen = useMemo(() => ids.filter((id) => picked.has(id)).slice(0, units * size), [ids, picked, units, size]);
+  const size = kind === 'merge' ? Math.max(1, mergeSize) : 1;
+  const maxUnits = Math.floor(Math.min(ids.length, MAX_BOXES) / size);
+  const [picked, setPicked] = useState<string[]>(() => ids.slice(0, Math.min(1, maxUnits) * size));
+  const [to, setTo] = useState('');
+  const units = Math.floor(picked.length / size);
+  const setUnits = (u: number) => {
+    const n = Math.max(0, Math.min(maxUnits, u)) * size;
+    /* Keep the boxes picked by hand first, then the lowest numbers. */
+    const keep = picked.slice(0, n);
+    const rest = ids.filter((id) => !keep.includes(id)).slice(0, n - keep.length);
+    setPicked([...keep, ...rest]);
+  };
+  const toggle = (id: string) => setPicked((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length < maxUnits * size ? [...s, id] : s));
+  const chosen = useMemo(() => picked.slice(0, units * size), [picked, units, size]);
   const requests = kind === 'open' ? Math.ceil(units / perOpen) : units;
-  const to = nextLevel(level);
+  const next = nextLevel(level);
   const name = LEVEL_LABEL[level];
+  const ok = units > 0 && (kind !== 'gift' || isAddress(to));
+  const title = kind === 'open' ? 'Open boxes' : kind === 'merge' ? 'Merge boxes' : 'Gift boxes';
   return (
-    <Popup label={kind === 'open' ? `Open ${name} boxes` : `Merge ${name} boxes`} size="small" onClose={onClose} head={<b>{kind === 'open' ? 'Open boxes' : 'Merge boxes'}</b>}>
-      <form className="bv-pick" onSubmit={(e) => { e.preventDefault(); if (units > 0) onGo(chosen); }}>
-        <div className={`bv-gift__item is-${level}`}>
-          <BoxArt level={level} size={52} />
-          {kind === 'merge' && to && <><i className="bv-pick__arrow" aria-hidden="true">→</i><BoxArt level={to} size={52} /></>}
-          <span>
-            <b><i className="bv-dot" aria-hidden="true" />{kind === 'open' ? name : `${mergeSize} ${name} → 1 ${to ? LEVEL_LABEL[to] : ''}`}</b>
-            <small>{ids.length > MAX_BOXES ? `${n0(ids.length)} in this wallet, up to ${n0(MAX_BOXES)} at once` : `${n0(ids.length)} in this wallet`}</small>
+    <Popup label={`${title}: ${name}`} size="small" onClose={onClose} head={<b>{title}</b>}>
+      <form className="bv-pick" onSubmit={(e) => { e.preventDefault(); if (ok) onGo(chosen, to.trim()); }}>
+        <div className={`bv-pick__hero is-${level}`}>
+          <span className="bv-pick__arts">
+            <BoxArt level={level} size={84} />
+            {kind === 'merge' && next && <><i aria-hidden="true">→</i><BoxArt level={next} size={84} /></>}
           </span>
+          <b><i className="bv-dot" aria-hidden="true" />{kind === 'merge' && next ? `${name} → ${LEVEL_LABEL[next]}` : name}</b>
+          <small>{ids.length > MAX_BOXES ? `${n0(ids.length)} in this wallet, up to ${n0(MAX_BOXES)} at once` : `${n0(ids.length)} in this wallet`}</small>
         </div>
 
-        <label className="bv-gift__l" htmlFor="bv-pick-n">{kind === 'open' ? 'Boxes to open' : 'Merges'}</label>
-        <div className="bv-form__row">
-          <TextInput id="bv-pick-n" inputMode="numeric" value={String(units)} onChange={(e) => setUnits(Number(e.target.value.replace(/[^0-9]/g, '')) || 0)} />
-          <Button variant="quiet" onClick={() => setUnits(maxUnits)}>{`All ${n0(maxUnits)}`}</Button>
+        {kind === 'gift' && (
+          <>
+            <label className="bv-gift__l" htmlFor="bv-pick-to">Recipient address</label>
+            <TextInput id="bv-pick-to" placeholder="0x…" value={to} onChange={(e) => setTo(e.target.value)} spellCheck={false} autoComplete="off" />
+            <small className={to && !isAddress(to) ? 'bv-err' : 'bv-gift__hint'}>{to && !isAddress(to) ? 'That is not an EVM address.' : "Enter the recipient's EVM address on ValueChain."}</small>
+          </>
+        )}
+
+        <label className="bv-gift__l" htmlFor="bv-pick-n">{kind === 'open' ? 'Boxes to open' : kind === 'merge' ? 'Merge' : 'Boxes to gift'}</label>
+        <div className="bv-pick__amount">
+          {kind === 'merge' ? (
+            <span className="bv-pick__merge">
+              <Amount id="bv-pick-n" label={`${name} boxes in`} value={units * size} max={maxUnits * size} onChange={(n) => setUnits(Math.floor(n / size))} />
+              <i aria-hidden="true">→</i>
+              <Amount id="bv-pick-out" label={`${next ? LEVEL_LABEL[next] : ''} boxes out`} value={units} max={maxUnits} onChange={setUnits} />
+            </span>
+          ) : (
+            <Amount id="bv-pick-n" label="How many" value={units} max={maxUnits} onChange={setUnits} />
+          )}
+          <Slider className="bv-pick__slider" label="How many" value={units} min={maxUnits > 0 ? 1 : 0} max={Math.max(1, maxUnits)} onChange={setUnits} />
         </div>
-        <input className="bv-pick__slider" type="range" min={maxUnits > 0 ? 1 : 0} max={maxUnits} step={1} value={units} aria-label="Amount" onChange={(e) => setUnits(Number(e.target.value))} style={{ '--p': `${maxUnits ? (units / maxUnits) * 100 : 0}%` } as React.CSSProperties} />
 
         {units > 10 && (
           <div className="bv-pick__warn" role="note">
             <Icon name="info" size={15} />
             <span>{kind === 'open'
-              ? (requests === 1 ? `More than 10 boxes at once: one request, one signature. Revealing them can take up to a few minutes; keep this page open until it is done.` : `More than 10 boxes: they open in ${n0(requests)} requests of up to ${n0(perOpen)}, one after another, each one signature in your wallet. Keep this page open until the last one is done.`)
-              : `More than 10 merges: ${n0(units)} requests, one after another, each one signature in your wallet. Keep this page open until the last one is done.`}</span>
+              ? (requests === 1 ? 'More than 10 boxes at once: one request, one signature. Revealing them can take up to a few minutes; keep this page open until it is done.' : `More than 10 boxes: ${n0(requests)} requests of up to ${n0(perOpen)}, one after another, each one signature. Keep this page open until the last one is done.`)
+              : kind === 'merge' ? `More than 10 merges: ${n0(units)} requests, one after another, each one signature. Keep this page open until the last one is done.`
+              : `More than 10 gifts: ${n0(units)} transfers, one after another, each confirmed in your wallet with its gas.`}</span>
           </div>
         )}
 
         <div className="bv-pick__head">
           <span className="bv-gift__l">Which boxes</span>
-          <small>{kind === 'merge' && extra > 0 ? `${n0(picked.size)} picked: ${n0(extra)} beyond whole merges stay` : `${n0(picked.size)} picked`}</small>
+          <small>{`${n0(picked.length)} picked`}</small>
         </div>
         <ul className="bv-pick__ids">
           {ids.map((id) => (
             <li key={id}>
-              <button type="button" className={`bv-chip${picked.has(id) ? ' is-on' : ''}`} aria-pressed={picked.has(id)} onClick={() => toggle(id)}>{`#${id}`}</button>
+              <button type="button" className={`bv-chip${picked.includes(id) ? ' is-on' : ''}`} aria-pressed={picked.includes(id)} onClick={() => toggle(id)}>{`#${id}`}</button>
             </li>
           ))}
         </ul>
 
         <small className="bv-gift__hint">{kind === 'open'
           ? `${n0(requests)} signature${requests === 1 ? '' : 's'}, no gas. What each box held shows as it opens.`
-          : `${n0(requests)} signature${requests === 1 ? '' : 's'}, no gas. The ${n0(units * mergeSize)} boxes used are burned.`}</small>
-        <Button variant="primary" size="md" type="submit" disabled={units === 0} className="bv-gift__go">
-          {kind === 'open' ? `Open ${n0(units)} ${units === 1 ? 'box' : 'boxes'}` : `Merge into ${n0(units)} ${to ? LEVEL_LABEL[to] : ''}`}
+          : kind === 'merge' ? `${n0(requests)} signature${requests === 1 ? '' : 's'}, no gas. The ${n0(units * size)} boxes used are burned.`
+          : `${n0(units)} transfer${units === 1 ? '' : 's'} on ValueChain, each shown in your wallet with its gas. It cannot be undone.`}</small>
+        <Button variant="primary" size="md" type="submit" disabled={!ok} className="bv-gift__go">
+          {kind === 'open' ? `Open ${n0(units)} ${units === 1 ? 'box' : 'boxes'}` : kind === 'merge' ? `Merge ${n0(units * size)} into ${n0(units)}` : `Gift ${n0(units)} ${units === 1 ? 'box' : 'boxes'}`}
         </Button>
       </form>
     </Popup>

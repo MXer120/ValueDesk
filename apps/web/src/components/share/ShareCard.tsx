@@ -115,7 +115,7 @@ export function ShareCard({ card, code, onClose, controls }: { card: CardData; c
   );
 
   return (
-    <Modal open size="md" title={`Share ${NOUN[card.kind]}`} className="fx share-dlg" onClose={onClose} footer={foot}>
+    <Modal open size="md" title={card.art?.kind === 'box' ? `Share ${card.art.tier === 'Cybereator' ? 'Cybereator' : 'Blind Box'}` : `Share ${NOUN[card.kind]}`} className="fx share-dlg" onClose={onClose} footer={foot}>
       <div className="dlg">
         <div className={`share-stage${busy ? ' is-busy' : ''}`}>
           {url && <img className={`share-preview${ratio === 'square' ? ' is-square' : ''}`} src={url} alt={`Share card: ${card.title}`} />}
@@ -129,7 +129,7 @@ export function ShareCard({ card, code, onClose, controls }: { card: CardData; c
             {controls}
           </div>
         ) : <div className="dlg-label"><span>Picture</span><DlgSeg label="Picture" value={ratio} onChange={setRatio} options={[{ value: 'wide', label: 'Wide' }, { value: 'square', label: 'Square' }]} /></div>}
-        {!controls && <div className="dlg-card">
+        {!controls && card.art?.kind !== 'box' && <div className="dlg-card">
           <DlgRow title="Dollar amounts" line="Hidden shows returns in % only">
             <DlgSwitch on={amounts} onChange={setAmounts} label="Dollar amounts" onWord="Shown" offWord="Hidden" />
           </DlgRow>

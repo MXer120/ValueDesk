@@ -1336,6 +1336,10 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
 .navmore__dot.is-down { background: var(--neg); }
 /* Not visited yet (components/navSeen.ts): our green, on More and on the page's row. */
 .navmore__dot.is-new { background: var(--pos); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pos) 22%, transparent); }
+.navmore__new.is-link { display: inline-block; margin: 0 0 0 6px; vertical-align: 2px; }
+.navmore__dot.is-new, .navmore__new { animation: vs-new-blink 1.8s ease-in-out infinite; }
+@keyframes vs-new-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .navmore__dot.is-new, .navmore__new { animation: none; } }
 .navmore__new { width: 7px; height: 7px; margin-left: auto; border-radius: 50%; background: var(--pos); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pos) 22%, transparent); }
 .navmore__dot.is-maintenance { background: var(--accent); }
 .navmore__btn.is-here { color: var(--text); }
