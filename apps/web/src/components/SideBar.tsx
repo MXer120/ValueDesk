@@ -28,8 +28,6 @@ import { activateTerminal, addTerminal, openLayouts, removeTerminal, restoreTerm
 import { historyLabel } from '../dashboard/storage';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../dashboard/tabExtras';
 import { useMoneyNotice } from './funds/moneyNotice';
-import { BOTS_ON, goBots, useBotsView, type BotsView } from '../bots/routes';
-import { useBotsAccess } from '../beta/access';
 
 export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onNavigate }: {
   address: string | null;
@@ -41,9 +39,6 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
   onNavigate: (tab: Tab) => void;
 }) {
   const terminals = useTerminals(TRADE_DASHBOARD);
-  // The Bots pages in the rail wherever the section is open to this wallet (a local build, or the beta list).
-  const botsListed = useBotsAccess(address);
-  const botsOpen = BOTS_ON || botsListed;
   const onTrade = tab === 'trade';
   const open = (id: string) => {
     activateTerminal(TRADE_DASHBOARD, id);
@@ -132,7 +127,6 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
           </SideButton>
         </div>
       </nav>
-      {botsOpen && <BotsGroup on={tab === 'bots'} />}
       <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} address={address} trigger={false} />
       <SideWallet address={address} onPortfolio={() => onNavigate('portfolio')} />
     </aside>
@@ -225,30 +219,6 @@ function SideWallet({ address, onPortfolio }: { address: string | null; onPortfo
   );
 }
 
-/**
- * The Bots section at the foot of the rail (owner, 2026-11-07: "for Bots use the bottom of the sidebar"): the
- * overview, a new bot, Explore and Savings, the one on screen marked. Only where BOTS_ON (bots/routes.ts).
- */
-function BotsGroup({ on }: { on: boolean }) {
-  const view = useBotsView();
-  const page = on ? (view.page === 'bot' ? 'overview' : view.page) : null;
-  const items: Array<{ id: BotsView['page']; label: string; go: BotsView; icon: ReactNode }> = [
-    { id: 'overview', label: 'Bots', go: { page: 'overview' }, icon: <><rect x="4" y="6" width="12" height="9" rx="2.4" /><path d="M10 3.2V6M7.5 10.2h.01M12.5 10.2h.01M7.8 12.8h4.4" /></> },
-    { id: 'new', label: 'New bot', go: { page: 'new', market: null, kind: null }, icon: <><rect x="3.5" y="3.5" width="13" height="13" rx="3" /><path d="M10 7v6M7 10h6" /></> },
-    { id: 'explore', label: 'Explore bot markets', go: { page: 'explore' }, icon: <><circle cx="10" cy="10" r="6.5" /><path d="m12.6 7.4-1.7 3.5-3.5 1.7 1.7-3.5z" /></> },
-    { id: 'savings', label: 'Bot savings', go: { page: 'savings' }, icon: <><path d="M4 14.5 8 10.5l2.6 2.6L16 7.5" /><path d="M12.5 7.5H16V11" /></> },
-  ];
-  return (
-    <div className="side__group side__bots" role="group" aria-label="Bots">
-      <span className="side__sep" aria-hidden="true" />
-      {items.map((it) => (
-        <SideButton key={it.id} label={it.label} current={page === it.id} pressed={page === it.id} onClick={() => goBots(it.go)}>
-          {it.icon}
-        </SideButton>
-      ))}
-    </div>
-  );
-}
 
 /** The rail's glyph per terminal (TerminalSeed.icon); `grid` for one the user added. */
 const TERMINAL_ICON: Record<string, ReactNode> = {

@@ -375,3 +375,9 @@
 /* The Bots section at the foot of the rail (SideBar.tsx BotsGroup): above Settings and the wallet. */
 .side__bots { margin-top: auto; padding-top: 4px; }
 .side__bots ~ .side__wallet { margin-top: 6px; }
+
+/* Short windows (owner 2026-11-28): the rail's groups scroll; the brand stays on top and the wallet at the foot is
+   always visible. Menus open in portals, so the scrolling box clips none of them. */
+.side__groups { flex: 1 1 auto; min-height: 0; width: 100%; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: 8px; }
+.side__groups::-webkit-scrollbar { display: none; }
+.side__wallet { flex: none; }

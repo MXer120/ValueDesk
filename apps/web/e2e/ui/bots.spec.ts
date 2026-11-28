@@ -111,14 +111,9 @@ h.test('before a wallet: the sidebar Bots group, Overview, latency, Explore and 
   assert.ok(await page.locator('.bots-latcard').getByText(/see how fast your orders reach SoDEX/).isVisible(), 'own bots only');
   assert.equal(await page.locator('.bots-lat__chart svg').count(), 0, 'nobody else\u2019s latency before a wallet');
   await shot(page, 'no-wallet');
-  if (!PHONE) {
-    // The rail's foot: Bots, New bot, Explore, Savings.
-    const rail = page.getByRole('group', { name: 'Bots' });
-    for (const name of ['Bots', 'New bot', 'Explore bot markets', 'Bot savings']) assert.ok(await rail.getByRole('button', { name, exact: true }).isVisible(), name);
-    await rail.getByRole('button', { name: 'Explore bot markets', exact: true }).click();
-    await page.getByRole('heading', { name: 'Explore', exact: true }).waitFor();
-    await page.waitForURL((u) => u.pathname === '/bots/explore');
-  } else await go(page, 'Explore', 'Explore');
+  // The rail carries no Bots group any more (owner 2026-11-28: "remove the icons of bots in the sidebar").
+  assert.equal(await page.locator('aside.side').getByRole('group', { name: 'Bots' }).count(), 0, 'no Bots group in the rail');
+  await go(page, 'Explore', 'Explore');
   await page.locator('.bots-xtable tbody tr').first().waitFor({ timeout: 20_000 });
   await shot(page, 'explore');
   await page.getByRole('radio', { name: 'Any activity', exact: true }).click();
