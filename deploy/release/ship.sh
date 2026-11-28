@@ -685,18 +685,41 @@ ship_executor() {
   # e. the brake over the restart: the new process sends nothing until it is checked. Planned work
   #    (--maintenance): neither brake.sh nor the executor tells Telegram of it - this ship's messages do.
   BRAKE0="$(remote "$S2" "cat $BRAKE_FILE 2>/dev/null || true")"
-  remote "$S2" "sudo bash /opt/valuescan/bin/brake.sh on --maintenance copies,algos 'Updating the copy executor: copies and algos go on within a minute.'" >&2
-  # f. switch and restart
-  remote "$S2" "sudo /opt/valuescan/bin/release.sh $TAG --units=executor --from=$tb && sudo rm -f $tb $tb.sha256" >&2 || exec_rollback "it did not come back healthy"
-  # g. the same copies and algos and its SoDEX feed up, then trading as it was
-  for i in $(seq 1 45); do
-    h1="$(exec_health)"
-    if [ "$(exec_healthy "$h1")" = 1 ] && [ "$(counts "$h1")" = "$(counts "$h")" ]; then ok=1; break; fi
-    sleep 2
-  done
-  [ -n "$ok" ] || exec_rollback "after 90 s it reports $(counts "$h1") (before: $(counts "$h")), healthy: $(exec_healthy "$h1")"
+  # e-g in ONE script on server 2 (owner 2026-11-28: "the restart should be a few seconds max impact on the bots"): the
+  # brake, the switch and restart, the check every 0.25 s on the box itself, and the brake off - with no laptop round
+  # trip between them (each was ~1-2 s from here: the hold was 17.5 s on 2026-11-27, the process away ~5 s of it).
+  # The checks are the same: healthy (db, SoDEX feed) and the same copies and algos as before, else the brake stays
+  # on and exec_rollback below takes over.
+  local want_c want_a off=0 out held=""
+  want_c="$(printf '%s' "$h" | json 'v ? v.copies : ""')"; want_a="$(printf '%s' "$h" | json 'v ? v.algos : ""')"
+  [ -z "$BRAKE0" ] && off=1
+  out="$(remote "$S2" "sudo TAG='$TAG' TB='$tb' WANT_C='$want_c' WANT_A='$want_a' OFF='$off' bash -s" <<'HOLD'
+set -u
+ms() { date +%s%3N; }
+t0=$(ms)
+bash /opt/valuescan/bin/brake.sh on --maintenance copies,algos 'Updating the copy executor: copies and algos go on within a minute.' >&2 || { echo "fail=brake"; exit 2; }
+/opt/valuescan/bin/release.sh "$TAG" --units=executor --from="$TB" >&2 || { echo "fail=release"; exit 3; }
+rm -f "$TB" "$TB.sha256"
+ok=""
+for _ in $(seq 1 360); do
+  h="$(curl --limit-rate 2M -fsS --max-time 2 http://127.0.0.1:8799/api/copy/v1/health 2>/dev/null || true)"
+  if printf '%s' "$h" | grep -q '"ok":true' && printf '%s' "$h" | grep -q '"db":true' && printf '%s' "$h" | grep -q '"sodex":true' \
+     && printf '%s' "$h" | grep -Eq "\"copies\":$WANT_C[,}]" && printf '%s' "$h" | grep -Eq "\"algos\":$WANT_A[,}]"; then ok=1; break; fi
+  sleep 0.25
+done
+[ -n "$ok" ] || { echo "fail=check"; exit 4; }
+[ "$OFF" = 1 ] && { bash /opt/valuescan/bin/brake.sh off >&2 || { echo "fail=brake-off"; exit 5; }; }
+echo "held_ms=$(( $(ms) - t0 ))"
+HOLD
+)" || true
+  held="$(printf '%s' "$out" | sed -n 's/^held_ms=//p' | tail -1)"
+  h1="$(exec_health)"
+  # Healthy and the same, only the brake would not go off: the executor stays, the brake is set back as it was.
+  if [ -z "$held" ] && printf '%s' "$out" | grep -q 'fail=brake-off'; then restore_brake; held="?"; fi
+  [ -n "$held" ] || exec_rollback "the switch on server 2 ended with '$(printf '%s' "$out" | tail -1)': it reports $(counts "$h1") (before: $(counts "$h")), healthy: $(exec_healthy "$h1")"
+  note "executor: copies and algos held ${held} ms over the restart"
   EXEC_SWITCHED=1
-  restore_brake
+  [ "$off" = 1 ] || restore_brake
   note "executor on $TAG: $(counts "$h1"), the brake back as it was"
   done_note "executor: $(counts "$h1") as before, the brake back as it was$([ -n "$BRAKE0" ] && echo " (ON: it was on before)")"
 }
