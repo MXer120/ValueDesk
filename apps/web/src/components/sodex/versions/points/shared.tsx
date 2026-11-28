@@ -635,7 +635,7 @@ export function WeeksTable({ v, other }: { v: PointsView; other?: OtherByWeek })
       )}
       <div className="spx-weeks__foot">
         <RankLegend />
-        {detailed && <small className="spx-weeks__note"><Icon name="info" size={12} />Own + invited{season === 'L1' ? ' + squad boost' : ''} = total.{season === 'L1' ? ' Loyalty & other is the part of Own the week’s activity does not explain (loyalty, campaigns and the like), an estimate; “In no week” is what your balance holds beyond every scored week.' : ''}</small>}
+        {detailed && <small className="spx-weeks__note"><Icon name="info" size={12} />Own + invited{season === 'L1' ? ' + squad boost' : ''} = total.{season === 'L1' ? ' Loyalty & other is the part of Own the week’s activity does not explain (loyalty, campaigns and the like), an estimate.' : ''}{season === 'L1' && unweekly !== null ? ' “In no week” is what your balance holds beyond every scored week.' : ''}</small>}
       </div>
     </div>
   );
