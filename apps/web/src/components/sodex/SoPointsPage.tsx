@@ -47,7 +47,7 @@ const fmtEnergy = (raw: string): string => {
  */
 const devSample = (): boolean => {
   if (!import.meta.env.DEV) return false;
-  try { return localStorage.getItem('vs.dev.sopoints.sample') === 'on'; } catch { return false; }
+  try { const x = localStorage.getItem('vs.dev.sopoints.sample'); return x === 'on' || x === 'film'; } catch { return false; }
 };
 
 export function SoPointsPage({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {

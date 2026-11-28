@@ -36,6 +36,7 @@ import { StopMenu } from './StopMenu';
 import { Watchdog } from './Watchdog';
 import { Term } from './Term';
 import { BotAllocation } from './Allocation';
+import { BotPoints } from './BotPoints';
 import { TAKER_COLORS, effectiveDraft } from './BotNewPage';
 import { estimate, feeAdjOf, ownRuns } from '../../bots/estimate';
 import { FleetChart, LatencyCard, costTone, fmtCost } from './BotsOverview';
@@ -406,6 +407,10 @@ export function BotDetail({ ctx, view, id }: { ctx: BotsCtx; view: BotsView; id:
                 </Panel>
               </Shell>
             )}
+            <Shell className="bots-sidecard is-plain">
+              <ShellHeader icon="star" title="SoPoints from this bot" subtitle="Estimated from its volume" aside={<Button variant="quiet" onClick={() => { window.location.href = '/points'; }}>SoPoints</Button>} />
+              <Panel className="bots-sidepanel"><BotPoints v={v} /></Panel>
+            </Shell>
           </aside>
         </div>
       )}

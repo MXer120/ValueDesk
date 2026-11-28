@@ -554,7 +554,7 @@ html[data-theme='light'] .spx { --spx-est: #2f6fb3; --spx-gold: #a87a12; --spx-a
 .spx-live .spx-live__skel { width: 150px; height: 50px; border-radius: 12px; background: rgb(255 255 255 / 0.08); }
 .spx-live__past { display: block; margin-top: 10px; font-size: 12px; line-height: 17px; color: rgba(244, 244, 242, 0.56); }
 
-.spx-range { position: relative; margin-top: 16px; padding-right: 30px; }
+.spx-range { position: relative; margin-top: 20px; padding-right: 30px; }
 .spx-range.is-wait { height: 52px; }
 .spx-range__plot { position: relative; height: 14px; }
 .spx-range__axis { position: absolute; left: 0; right: 0; top: 6px; height: 2px; border-radius: 1px; background: rgb(255 255 255 / 0.1); }
@@ -853,7 +853,8 @@ html[data-theme='light'] .spx-rk.is-r0 { color: #8a5a00; text-shadow: 0 0 8px rg
 .spx-pager button:focus-visible { outline: 2px solid var(--tf-brand); outline-offset: 2px; }
 
 /* The live card's inputs (the activity it prices), and its locked face before the sign-in. */
-ul.spx-live__src { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
+/* One row (owner 2026-11-28: "no reason for futures, position, squad to be over one another"), wrapping only when the card is too narrow. */
+ul.spx-live__src { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: 6px 18px; margin: 0; padding: 0; list-style: none; }
 ul.spx-live__src li { display: flex; flex-direction: column; }
 .spx-live__lock { display: flex; flex: 1; flex-direction: column; align-items: flex-start; justify-content: center; gap: 12px; margin-top: 14px; }
 .spx-live__lock p { margin: 0; max-width: 30ch; font-size: 13px; line-height: 19px; color: rgba(244, 244, 242, 0.62); }
@@ -871,4 +872,12 @@ ul.spx-live__src li { display: flex; flex-direction: column; }
 .spx-tbl__cell small.pos { color: var(--tf-pos, var(--pos)); }
 .spx-tbl__cell .spx-other { margin-top: 2px; padding: 0 6px; font-size: 10.5px; }
 .spx-tblwrap.is-detailed .spx-tbl { font-size: 12.5px; }
+/* Squad boost: the points and the week's % on one line (owner 2026-11-27: "not below one another"). */
+.spx-tbl__boost { display: inline-flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.spx-tbl__boost small { font-size: 11px; color: var(--tf-faint); }
+.spx-tbl__boost small.pos { color: var(--tf-pos, var(--pos)); }
+/* The points' sum read across the header: Own + Invited + Squad boost = Total. */
+.spx-op { margin-right: 5px; font-style: normal; font-weight: 500; color: var(--tf-faint); }
+.spx-tbl__info.is-est { color: var(--spx-est); }
 .spx-tblwrap.is-detailed .spx-tbl th, .spx-tblwrap.is-detailed .spx-tbl td { padding-left: 8px; padding-right: 8px; }
+.spx-tbl tfoot .spx-tbl__unweekly td { border-top: 1px dashed rgb(var(--ink) / 0.14); }
