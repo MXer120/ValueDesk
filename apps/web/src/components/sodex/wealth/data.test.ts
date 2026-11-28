@@ -38,8 +38,10 @@ test('channel: what the fund allows now, with the batch cutoff in ms', () => {
   const batch = channelOf({ action: { kind: 'batch', cutoffAt: 1795653000, deliveryAt: 1795676400 }, fund: fund('escrow_vault') });
   assert.equal(batch.at, 1795653000_000);
   assert.equal(batch.atLabel, 'Cutoff');
-  assert.equal(channelOf({ action: { kind: 'external', why: '' }, fund: fund('bridged_vault') }).label, 'On sodex.com');
-  assert.equal(channelOf({ action: { kind: 'closed', why: 'Market closed', nextAt: null }, fund: fund('clob') }).label, 'Market closed');
+  // USDC Earn (bridged vault): ValueDesk sends the bridge order itself since 2026-11-28; other external funds stay on sodex.com.
+  assert.equal(channelOf({ action: { kind: 'external', why: '' }, fund: fund('bridged_vault') }).label, 'Bridge, about a minute');
+  assert.equal(channelOf({ action: { kind: 'external', why: '' }, fund: fund('escrow_vault') }).label, 'On sodex.com');
+  assert.equal(channelOf({ action: { kind: 'closed', why: 'Market closed', nextAt: null }, fund: fund('clob') }).label, 'Trading temporarily unavailable');
 });
 
 test('expected delivery: only for a request inside the current batch window, never a guess', () => {
