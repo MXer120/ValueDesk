@@ -4,47 +4,42 @@
  * programme (trade, invite, merge, draw). Under it the wallet's boxes as a card with what they can merge into now, every
  * tier's reward range with where the latest opens landed, and the opens themselves.
  */
-import { useId, useState } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import type { Eip1193Provider } from '../../../../wallet';
-import { PfpLinks, Vault } from '../../vault/Vault';
-import { DEMO_NFT_OWNER } from '../../../portfolio/devDemo';
+import { BoxHistory, PfpLinks, ProgressCard, Vault, type VaultDemo } from '../../vault/Vault';
+import { sampleVault } from './sample';
 import { bpsToPct, mergeLadder, type LotteryRules } from '../../../../blindBox';
 import { Skeleton } from '../../../bots/kit/kit';
 import { BoxArt } from '../../BoxArt';
 import { PFP_DROP } from '../../BlindBoxPage';
-import { useNow } from '../../parts';
 import {
-  BoxesCard, DrawRail, LEVELS, OpensList, RangeChart, ReadError, RewardTokens, count, feedStats, levelName, milestoneText, spanText, usd, useBoxData,
-  type BoxData,
+  DrawRail, LEVELS, RangeChart, ReadError, RewardTokens, levelName, milestoneText, usd, useBoxData,
 } from './shared';
 
 export function BoxStage({ address, provider, sample }: { address: string | null; provider: Eip1193Provider | null; sample: boolean }) {
   const d = useBoxData(address, sample);
-  const now = useNow(30_000);
   const rules = d.rules;
+  const demo = useMemo<VaultDemo | null>(() => (sample ? sampleVault() : null), [sample]);
   return (
     <div className="tf bots-page rf-page sx sx-boxes">
       <div className="bots-col">
         {d.meta.error && !d.meta.data ? <ReadError what="The programme's rules" error={d.meta.error} retry={d.meta.retry} />
-          : <Stage rules={rules} />}
-        <div id="vault" className="sxb-vault"><Vault address={address} provider={provider} meta={d.meta.data} {...(sample ? { cybrOwner: DEMO_NFT_OWNER } : {})} /></div>
-        <div className="sxb-desk">
-          <div className="sxb-desk__mine">
-            <BoxesCard w={d.wallet} />
-          </div>
+          : <Stage rules={rules} hero={<ProgressCard address={address} provider={provider} rules={rules} demo={demo} />} />}
+        <div id="vault" className="sxb-vault"><Vault address={address} provider={provider} meta={d.meta.data} demo={demo} /></div>
+        <div className="sxb-desk is-two">
+          <BoxHistory address={address} provider={provider} demo={demo} />
           <section className="sxb-desk__inside" aria-label="What is inside">
             <div className="sxb-h3"><h3>What is inside</h3>{d.meta.data && <RewardTokens meta={d.meta.data} />}</div>
             {rules ? <RangeChart rules={rules} opens={d.opens} /> : <div className="sxb-skel">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="sxb-skel__row is-tall" />)}</div>}
           </section>
-          <OpensList data={d} now={now} fold={7} />
         </div>
-        <Extras d={d} now={now} />
+        <Extras />
       </div>
     </div>
   );
 }
 
-function Stage({ rules }: { rules: LotteryRules | null }) {
+function Stage({ rules, hero }: { rules: LotteryRules | null; hero: ReactNode }) {
   const [how, setHow] = useState(false);
   const [toggled, setToggled] = useState(false);
   const id = useId();
@@ -70,10 +65,7 @@ function Stage({ rules }: { rules: LotteryRules | null }) {
             ) : (
               <><Skeleton className="sxb-stage__skel is-h" /><Skeleton className="sxb-stage__skel" /></>
             )}
-            <div className="sxb-stage__acts">
-              <a className="rf-cta" href="/trade">Trade</a>
-              <a className="rf-howbtn" href="#vault">Open your boxes</a>
-            </div>
+            {hero}
           </div>
           <Shelf />
         </div>
@@ -149,8 +141,7 @@ function HowSteps({ rules }: { rules: LotteryRules }) {
   );
 }
 
-function Extras({ d, now }: { d: BoxData; now: number }) {
-  const st = feedStats(d.opens);
+function Extras() {
   return (
     <div className="sxb-extras">
       <section className="rf-dark sxb-pfp" aria-label="PFP drop">
@@ -158,7 +149,6 @@ function Extras({ d, now }: { d: BoxData; now: number }) {
           <h3>{PFP_DROP.title}</h3>
           <p>{PFP_DROP.line}</p>
           <PfpLinks />
-          {st.n > 0 && <span className="sxb-pfp__stat"><b className="sx-num">{count(st.pfp)}</b> of the latest {count(st.n)} opens dropped one{spanText(st.from, now) ? `, ${spanText(st.from, now)}` : ''}</span>}
         </div>
         <img src="/sodex-art/cyber-cat.webp" alt="" loading="lazy" decoding="async" draggable={false} onError={(e) => { e.currentTarget.hidden = true; }} />
       </section>

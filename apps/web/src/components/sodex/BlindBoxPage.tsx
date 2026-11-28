@@ -18,7 +18,7 @@ import {
 import { DASH } from '../../format';
 import type { Eip1193Provider } from '../../wallet';
 import { BoxArt } from './BoxArt';
-import { PfpLinks, Vault } from './vault/Vault';
+import { BoxHistory, PfpLinks, ProgressCard, Vault } from './vault/Vault';
 import { Pill, ProgrammeHero, ProgrammePage, ReadFailed, SegSwitch, SkelRows, SkelTiles, fmtAgo, fmtTokens, fmtUsdTight, useNow } from './parts';
 
 const FEED_SIZE = LOTTERY_FEED_SIZE;
@@ -49,6 +49,7 @@ export function BlindBoxOriginal({ address, provider }: { address: string | null
         aside={<><a className="pf-btn" href="#vault">Open your boxes</a><a className="pf-btn pf-btn--primary" href="/trade">Trade</a></>}
       />
 
+      <ProgressCard address={address} provider={provider} rules={rules} />
       {meta.error && !meta.data ? (
         <ReadFailed what="The programme's rules" error={meta.error} onRetry={meta.retry} />
       ) : !rules ? (
@@ -74,7 +75,7 @@ export function BlindBoxOriginal({ address, provider }: { address: string | null
         </>
       )}
 
-      <Feed />
+      <section className="sdx-block"><BoxHistory address={address} provider={provider} /></section>
     </ProgrammePage>
   );
 }

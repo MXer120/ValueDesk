@@ -254,7 +254,18 @@ export function mergeAdvice(doc: RewardsDoc | null, from: Level, to: Level, size
 
 /* --- the wallet's Cybereators, from ValueChain's explorer -------------------------------------------------------- */
 
-export interface Cybereator { id: string; name: string; image: string | null; traits: Array<{ type: string; value: string }>; link: string }
+export interface Cybereator { id: string; name: string; image: string | null; traits: Array<{ type: string; value: string }>; link: string; sealed: boolean }
+
+/**
+ * A Cybereator's picture: revealed ones (and the sealed animation) are on cybereator.com's own image store, which the
+ * explorer names as image_url (checked 2026-11-28: .../286623/<opener>/images/4004.png); anything else as other NFTs.
+ */
+export const CYBEREATOR_IMAGES = 'https://cybereator.oss-ap-northeast-1.aliyuncs.com/';
+export function cybereatorPicture(n: Record<string, unknown>): string | null {
+  const u = typeof n.image_url === 'string' ? n.image_url : '';
+  if (u.startsWith(CYBEREATOR_IMAGES) && /\.(png|gif|webp|jpe?g)$/i.test(u)) return u;
+  return nftPicture(n as never);
+}
 const EXPLORER = 'https://main-scan.valuechain.xyz';
 
 /** Every Cybereator the wallet holds (the explorer's instances by holder, 50 a page, at most 20 pages). */
@@ -271,9 +282,10 @@ export async function readCybereators(owner: string, f: Fetch = fetch): Promise<
       const id = String(n.id ?? '');
       out.push({
         id, name: typeof md.name === 'string' && md.name ? `${md.name} #${id}` : `Cybereator #${id}`,
-        image: nftPicture(n as never),
+        image: cybereatorPicture(n),
         traits: (Array.isArray(md.attributes) ? md.attributes : []).map(obj).filter((a) => a.trait_type != null && a.value != null).map((a) => ({ type: String(a.trait_type), value: String(a.value) })),
         link: `${EXPLORER}/token/${CYBEREATOR}/instance/${id}`,
+        sealed: (Array.isArray(md.attributes) ? md.attributes : []).map(obj).some((a) => /^status$/i.test(String(a.trait_type)) && /unopened|sealed/i.test(String(a.value))),
       });
     }
     next = j.next_page_params ?? null;
@@ -292,3 +304,45 @@ export async function fetchMarket(signal?: AbortSignal): Promise<MarketDoc> {
   if (!r.ok) throw new Error(`The server answered ${r.status}`);
   return (await r.json()) as MarketDoc;
 }
+
+/* --- the wallet's record: opens, claims, merges, transfers, referral rewards ------------------------------------- */
+
+export type HistoryKind = 'open' | 'claim' | 'merge' | 'transfer' | 'referral';
+export interface RecordRow { kind: HistoryKind; at: number | null; level: string | null; tokenIds: string[]; usd: number | null; reward: Reward | null; pfpTokenId: string | null; count: number | null; other: string | null; direction: 'in' | 'out' | null }
+
+const LEDGER_KIND: Record<string, HistoryKind> = { treasure: 'claim', transfer: 'transfer', pfp_transfer: 'transfer', merge: 'merge', milestone: 'referral' };
+const timeOf = (h: Record<string, unknown>): number | null => {
+  for (const k of ['tsMs', 'createdAtMs', 'timestamp']) { const n = nOf(h[k]); if (n) return n < 1e12 ? n * 1000 : n; }
+  for (const k of ['settledAt', 'createdAt', 'updatedAt', 'time']) { const v = h[k]; if (typeof v === 'string') { const t = Date.parse(v); if (Number.isFinite(t)) return t; } }
+  return null;
+};
+
+/** One ledger row, read defensively: SoDEX's fields are from its own page code, not a documented API. */
+export function readRecord(kind: HistoryKind, h: Record<string, unknown>, me: string): RecordRow {
+  const ids = Array.isArray(h.tokenIds) ? h.tokenIds.map(String) : h.tokenId != null ? [String(h.tokenId)] : [];
+  const from = typeof h.from === 'string' ? h.from.toLowerCase() : null;
+  const to = typeof h.to === 'string' ? h.to.toLowerCase() : null;
+  const direction = from && from === me.toLowerCase() ? 'out' : to && to === me.toLowerCase() ? 'in' : null;
+  return {
+    kind, at: timeOf(h), level: typeof h.level === 'string' ? h.level : null, tokenIds: ids,
+    usd: nOf(h.rewardUsd ?? h.usd), reward: h.reward && typeof h.reward === 'object' ? (h.reward as Reward) : null,
+    pfpTokenId: h.pfpTokenId == null || String(h.pfpTokenId) === '0' ? null : String(h.pfpTokenId),
+    count: nOf(h.count ?? h.boxes ?? (ids.length || null)), other: direction === 'out' ? to : direction === 'in' ? from : typeof h.friend === 'string' ? h.friend : null, direction,
+  };
+}
+
+/** Opens (history) and the ledger's four kinds, newest first. A kind SoDEX refuses is left out, not fatal. */
+export async function readRecords(address: string, limit = 100): Promise<RecordRow[]> {
+  const opens = readHistory(address, Math.min(limit, 100)).then((xs) => xs.map((x): RecordRow => ({ kind: 'open', at: x.at, level: x.level, tokenIds: [x.tokenId], usd: x.rewardUsd, reward: x.reward, pfpTokenId: x.pfpTokenId, count: 1, other: null, direction: null })));
+  const ledger = Object.entries(LEDGER_KIND).map(([type, kind]) => call<unknown>(address, `/ledger?type=${type}&limit=${Math.min(limit, 100)}&offset=0`).then((d) => {
+    const items = Array.isArray(obj(d).items) ? (obj(d).items as unknown[]).map(obj) : [];
+    return items.map((h) => readRecord(kind, h, address));
+  }));
+  const all = await Promise.allSettled([opens, ...ledger]);
+  if (all[0]!.status === 'rejected' && all.every((r) => r.status === 'rejected')) throw (all[0] as PromiseRejectedResult).reason;
+  return all.flatMap((r) => (r.status === 'fulfilled' ? r.value : [])).sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+}
+
+/** Tells every part of the page that the SoDEX sign-in changed (one signature serves the vault, history and hero). */
+export const SESSION_EVENT = 'vs:sodex-session';
+export const announceSession = (): void => { try { window.dispatchEvent(new Event(SESSION_EVENT)); } catch { /* no window */ } };
