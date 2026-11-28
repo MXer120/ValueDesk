@@ -36,14 +36,20 @@ export const DEMO_ADDED: ReadonlyArray<Watched & { holdings: Array<{ symbol: str
   { family: 'cosmos', address: 'cosmos1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5lzv7xu', label: 'Demo Keplr', holdings: [{ symbol: 'ATOM', name: 'Cosmos Hub', amount: 340 }] },
 ];
 
-/** Sample copy trading figures (useCopies). */
+/** Sample copies (Copy trading tab, the All tab's set-aside): two live, one practice. */
+export const DEMO_COPY_ROWS = [
+  { id: 'dc1', leader: '0xca4903c207a0df58bf37d4bc8bbc5210726f53c8', venue: 'hyperliquid', direction: 'copy' as const, allocationUsd: 1500, pnl: 142.18, pnlPct: 0.0948, paper: false, mode: 'hosted', status: 'running' },
+  { id: 'dc2', leader: '0xb98f118f2d3123226104b47f87c8d8b451de1647', venue: 'sodex', direction: 'counter' as const, allocationUsd: 1000, pnl: 42.09, pnlPct: 0.0421, paper: false, mode: 'hosted', status: 'running' },
+  { id: 'dc3', leader: '0x6e44c0efeca886b546bc2aa85118094b83b87297', venue: 'sodex', direction: 'copy' as const, allocationUsd: 500, pnl: -8.4, pnlPct: -0.0168, paper: true, mode: 'browser', status: 'running' },
+];
+/** Sample copy trading figures (useCopies), from the rows above. */
 export const DEMO_COPIES = { all: 3, live: 2, paper: 1, allocated: 2500, pnl: 184.27 };
 
 /** Sample bots (BotsPanel). */
-export const DEMO_BOTS: ReadonlyArray<{ id: string; symbol: string; strategy: 'maker' | 'grid' | 'hedge'; name: string; paper: boolean; state: 'running' | 'paused' | 'waiting'; volume: number; netPnl: number }> = [
-  { id: 'd1', symbol: 'BTC-USD', strategy: 'maker', name: 'Maker BTC', paper: false, state: 'running', volume: 412_380, netPnl: 96.41 },
-  { id: 'd2', symbol: 'ETH-USD', strategy: 'grid', name: 'Grid ETH', paper: false, state: 'running', volume: 88_120, netPnl: -12.07 },
-  { id: 'd3', symbol: 'SOL-USD', strategy: 'grid', name: 'Grid SOL', paper: true, state: 'paused', volume: 14_960, netPnl: 3.18 },
+export const DEMO_BOTS: ReadonlyArray<{ id: string; symbol: string; strategy: 'maker' | 'grid' | 'hedge'; name: string; paper: boolean; state: 'running' | 'paused' | 'waiting'; volume: number; netPnl: number; allocUsd: number }> = [
+  { id: 'd1', symbol: 'BTC-USD', strategy: 'maker', name: 'Maker BTC', paper: false, state: 'running', volume: 412_380, netPnl: 96.41, allocUsd: 4200 },
+  { id: 'd2', symbol: 'ETH-USD', strategy: 'grid', name: 'Grid ETH', paper: false, state: 'running', volume: 88_120, netPnl: -12.07, allocUsd: 2600 },
+  { id: 'd3', symbol: 'SOL-USD', strategy: 'grid', name: 'Grid SOL', paper: true, state: 'paused', volume: 14_960, netPnl: 3.18, allocUsd: 900 },
 ];
 
 const KEY = 'vs.dev.pf.demo';

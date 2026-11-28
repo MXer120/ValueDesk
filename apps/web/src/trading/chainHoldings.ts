@@ -6,8 +6,8 @@
  * ONE READ PER SOURCE, FROM THE BROWSER. Nothing goes through a ValueDesk server (no load, no egress, no key), each
  * source is asked once per address and minute, and every answer lands the moment it arrives:
  *
- *   EVM address    LI.FI's wallet balances: every EVM chain it supports (Ethereum, Base, Arbitrum, BNB Chain,
- *                  Optimism, Polygon, Avalanche, Linea, zkSync, Scroll, ... about 60), ONE request, with each token's
+ *   EVM address    LI.FI's wallet balances: every EVM chain it supports (64 on 2026-11-28: Ethereum, Base, Arbitrum,
+ *                  BNB Chain, HyperEVM, Lighter, Robinhood Chain, Monad, Polygon, Avalanche, ...), ONE request, with each token's
  *                  USD price and a verified flag. Plus ValueChain's own explorer (Blockscout): its tokens and SOSO.
  *   Bitcoin        mempool.space         Litecoin   litecoinspace.org     Dogecoin  BlockCypher
  *   Solana         a public Solana node (SOL and every SPL token account, one batched request)
@@ -74,6 +74,41 @@ const EVM_CHAINS: Record<number, ChainInfo> = {
   81457: { key: 'BLAST', label: 'Blast', icon: 'BLAST' },
   167000: { key: 'TAIKO', label: 'Taiko', icon: 'TAIKO' },
   534352: { key: 'SCROLL', label: 'Scroll', icon: 'SCR' },
+  // The rest of LI.FI's EVM chains (li.quest/v1/chains, 2026-11-28): its one balance read covers them all.
+  1337: { key: 'HYPERCORE', label: 'Hyperliquid', icon: 'HYPEREVM_HYPE' },
+  3586256: { key: 'LIGHTER', label: 'Lighter', icon: 'LIT' },
+  4663: { key: 'ROBINHOOD_ETH', label: 'Robinhood Chain', icon: 'ROBINHOOD_ETH' },
+  143: { key: 'MONAD', label: 'Monad', icon: 'MON' },
+  4326: { key: 'MEGAETH', label: 'MegaETH', icon: 'ETH' },
+  747474: { key: 'KATANA', label: 'Katana', icon: 'ETH' },
+  9745: { key: 'PLASMA', label: 'Plasma', icon: 'XPL' },
+  988: { key: 'STABLE', label: 'Stable', icon: 'USDT' },
+  33139: { key: 'APECHAIN', label: 'ApeChain', icon: 'APE' },
+  42170: { key: 'ARBITRUM_NOVA', label: 'Arbitrum Nova', icon: 'ARBITRUM_ETH' },
+  5042: { key: 'ARC', label: 'Arc', icon: 'ARC' },
+  16661: { key: 'ZEROG', label: '0G', icon: '0G' },
+  42793: { key: 'ETHERLINK', label: 'Etherlink', icon: 'XTZ' },
+  122: { key: 'FUSE', label: 'Fuse', icon: 'FUSE' },
+  14: { key: 'FLARE', label: 'Flare', icon: 'FLR' },
+  747: { key: 'FLOW', label: 'Flow', icon: 'FLOW' },
+  43111: { key: 'HEMI', label: 'Hemi', icon: 'ETH' },
+  13371: { key: 'IMX', label: 'Immutable zkEVM', icon: 'IMX' },
+  1776: { key: 'INJECTIVE_EVM', label: 'Injective', icon: 'INJ' },
+  8217: { key: 'KAIA', label: 'Kaia', icon: 'KAIA' },
+  2818: { key: 'MORPH', label: 'Morph', icon: 'ETH' },
+  1672: { key: 'PHAROS', label: 'Pharos', icon: 'ETH' },
+  98866: { key: 'PLUME', label: 'Plume', icon: 'PLUME' },
+  2020: { key: 'RONIN', label: 'Ronin', icon: 'RON' },
+  30: { key: 'ROOTSTOCK', label: 'Rootstock', icon: 'RBTC' },
+  1329: { key: 'SEI_EVM', label: 'Sei', icon: 'SEI' },
+  5031: { key: 'SOMNIA', label: 'Somnia', icon: 'SOMI' },
+  40: { key: 'TELOS', label: 'Telos', icon: 'TLOS' },
+  4217: { key: 'TEMPO', label: 'Tempo', icon: 'ETH' },
+  1480: { key: 'VANA', label: 'Vana', icon: 'VANA' },
+  88: { key: 'VICTION', label: 'Viction', icon: 'VIC' },
+  50: { key: 'XDC', label: 'XDC', icon: 'XDC' },
+  196: { key: 'XLAYER', label: 'X Layer', icon: 'OKB' },
+  99901: { key: 'ELYSIUM', label: 'Elysium', icon: 'ETH' },
 };
 export const evmChain = (id: number): ChainInfo => EVM_CHAINS[id] ?? { key: `EVM_${id}`, label: `Chain ${id}`, icon: 'ETH' };
 export const VALUECHAIN: ChainInfo = { key: 'VALUECHAIN', label: 'ValueChain', icon: 'VALUECHAIN' };

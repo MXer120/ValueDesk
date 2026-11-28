@@ -34,6 +34,7 @@ import { AllocBar, AllocLegend, Fig, ViewAll, shortAddr, signedUsd, tone, useMas
 import { ValueMove } from '../portfolio/wallet/Wallet';
 import { OnchainPanel, TokenIcon } from '../portfolio/wallet/Onchain';
 import { useOnchain } from '../portfolio/wallet/useOnchain';
+import { useNftCollections } from '../portfolio/wallet/nfts';
 import type { Bucket, Part } from '../portfolio/wallet/data';
 import { aliasFor } from '../../dashboard/scanAliases';
 import '../bots/kit/kit.css';
@@ -184,6 +185,7 @@ export function VenueWallet({ hl, venue, address, shareAs }: { hl: HlState; venu
   const o = useOnchain({ address, readOnly: true });
   const [open, setOpen] = useState<Bucket | null>('perps');
   const [tab, setTab] = useState<Tab>('venue');
+  const nfts = useNftCollections(address, tab === 'onchain');
   const value = s?.accountValue ?? null;
   const today = s?.pnl['1d'] ?? null;
   const week = useMemo(() => (p?.equity['7d'] ?? []).map((e) => e.accountValue).filter((v): v is number => v !== null && Number.isFinite(v)), [p]);
@@ -307,7 +309,7 @@ export function VenueWallet({ hl, venue, address, shareAs }: { hl: HlState; venu
             </div>
           </div>
           <Panel className={`pfv3-band__body${tab === 'onchain' ? ' is-grow' : ''}`}>
-            {tab === 'venue' ? <div className="pf pfx pfv3-hlband"><VenueBand hl={hl} /></div> : <div className="pfv-pad"><OnchainPanel o={o} /></div>}
+            {tab === 'venue' ? <div className="pf pfx pfv3-hlband"><VenueBand hl={hl} /></div> : <div className="pfv-pad"><OnchainPanel o={o} nfts={nfts} shareAs={shareAs} /></div>}
           </Panel>
         </Shell>
       </div>

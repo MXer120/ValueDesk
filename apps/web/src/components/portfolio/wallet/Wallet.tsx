@@ -35,6 +35,8 @@ import {
 import { Holdings, WealthArea } from './WealthArea';
 import { AllView } from './AllView';
 import { OnchainPanel } from './Onchain';
+import { useReserve } from './reserve';
+import { useNftCollections } from './nfts';
 import type { PortfolioContext } from '../../Portfolio';
 import '../../bots/kit/kit.css';
 import '../../bots/botsPages.css';
@@ -166,6 +168,10 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab, scan }: 
   // All first (owner 2026-11-27): a new key, so a pick stored before the tabs changed does not hold.
   const [storedSection, setSection] = useStored<Section>(scan ? 'vs.scan.section' : 'vs.pfv.section2', 'all');
   const section: Section = SECTIONS.includes(storedSection) ? storedSection : 'all';
+  // What Perps holds and what copies and bots may use of it, read once for the page (reserve.ts).
+  const reserve = useReserve(c, provider);
+  // NFTs are read only while a tab shows them (All, On-chain); the demo shows a ValueChain holder's.
+  const nfts = useNftCollections(d.onchain.nftOwner, section === 'all' || section === 'onchain');
   // A "View all" picks the band's account and one of its tables (positions, balances), then brings the band into view.
   const [select, setSelect] = useState<{ key: string; n: number } | null>(null);
   const bandRef = useRef<HTMLElement>(null);
@@ -270,12 +276,12 @@ export function PortfolioWallet({ c, provider, onOpenMarket, onOpenTab, scan }: 
       </div>
       {(section === 'copy' || section === 'bots') && <div className="pfv3-band__note"><AllocationNote /></div>}
       <Panel className={`pfv3-band__body${section === 'all' || section === 'onchain' ? ' is-grow' : ''}`}>
-        {section === 'all' ? <div className="pfv-pad"><AllView d={d} onSection={(s) => { setSelect(null); setSection(s); }} automation={!scan} /></div>
-          : section === 'onchain' ? <div className="pfv-pad"><OnchainPanel o={d.onchain} /></div>
+        {section === 'all' ? <div className="pfv-pad"><AllView d={d} onSection={(s) => { setSelect(null); setSection(s); }} automation={!scan} reserve={reserve} nfts={nfts} shareAs={scan?.shareAs} /></div>
+          : section === 'onchain' ? <div className="pfv-pad"><OnchainPanel o={d.onchain} nfts={nfts} shareAs={scan?.shareAs} /></div>
           : section === 'perps' || section === 'spot' ? <Band c={c} engine={section} select={select} />
           : section === 'wealth' ? <div className="pfv-scroll pfv-pad"><Holdings w={d.w} address={c.address} provider={provider} onOpenMarket={onOpenMarket} onDone={c.onChanged} readOnly={c.readOnly} picks={4} onAll={goWealth} /></div>
-          : section === 'copy' ? <div className="pfv-scroll pfv-pad"><CopiesPanel onOpenTab={onOpenTab} /></div>
-          : <div className="pfv-scroll pfv-pad"><BotsPanel c={c} provider={provider} botsOpen={d.botsOpen} onOpenTab={onOpenTab} /></div>}
+          : section === 'copy' ? <div className="pfv-scroll pfv-pad"><CopiesPanel onOpenTab={onOpenTab} r={reserve} /></div>
+          : <div className="pfv-scroll pfv-pad"><BotsPanel c={c} botsOpen={d.botsOpen} onOpenTab={onOpenTab} r={reserve} /></div>}
       </Panel>
     </Shell>
   );

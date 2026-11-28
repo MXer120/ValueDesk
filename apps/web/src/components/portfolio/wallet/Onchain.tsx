@@ -16,9 +16,13 @@ import { CoinIcon } from '../../CoinIcon';
 import { chainLogo, coinLogo } from '../../../logos';
 import { DASH, fmt, fmtUsd } from '../../../format';
 import { Private } from '../../../privacy';
-import { NFT_CHAINS, chainOf, detectAddress, readNfts, supportedChains, type ChainHolding, type Detected, type Family, type Nft } from '../../../trading/chainHoldings';
+import { chainOf, detectAddress, supportedChains, type ChainHolding, type Detected, type Family } from '../../../trading/chainHoldings';
 import { share, shortAddr, useMasks, ViewAll } from './blocks';
 import type { OnchainState } from './useOnchain';
+import type { NftState } from './nfts';
+import { NftGrid, NftThumb } from './AllView';
+import { ShareButton } from '../../share/host';
+import type { ShareAs } from '../PortfolioPage';
 
 const cx = (...xs: Array<string | false | null | undefined>) => xs.filter(Boolean).join(' ');
 /** Rows before "Show all". */
@@ -132,11 +136,14 @@ function AddForm({ o, onDone }: { o: OnchainState; onDone: () => void }) {
 
 function ChainSplit({ o }: { o: OnchainState }) {
   const m = useMasks();
+  const [all, setAll] = useState(false);
   const total = o.total ?? 0;
-  const top = o.byChain.slice(0, BAR_CHAINS);
-  const rest = o.byChain.slice(BAR_CHAINS).reduce((s, c) => s + c.usd, 0);
-  const parts = [...top.map((c) => ({ ...c })), ...(rest > 0 ? [{ key: 'OTHER', label: `${o.byChain.length - BAR_CHAINS} more`, icon: 'ETH', usd: rest }] : [])];
   if (!(total > 0)) return null;
+  // Only chains that hold something (owner 2026-11-28); past the first few, "+N more" opens the rest.
+  const chips = all ? o.byChain : o.byChain.slice(0, BAR_CHAINS);
+  const rest = o.byChain.length - BAR_CHAINS;
+  const restUsd = o.byChain.slice(BAR_CHAINS).reduce((t, c) => t + c.usd, 0);
+  const bar = [...o.byChain.slice(0, BAR_CHAINS), ...(rest > 0 ? [{ key: 'OTHER', label: `${rest} more`, icon: '', usd: restUsd }] : [])];
   return (
     <div className="pfo-split">
       <Private k="charts">
@@ -145,19 +152,26 @@ function ChainSplit({ o }: { o: OnchainState }) {
           size="md"
           max={total}
           label="On-chain value by chain"
-          segments={parts.map((p, i) => ({ id: p.key, value: p.usd, label: p.label, color: `var(--pfo-c${Math.min(i, 6)})` }))}
+          segments={bar.map((p, i) => ({ id: p.key, value: p.usd, label: p.label, color: `var(--pfo-c${Math.min(i, 6)})` }))}
         />
       </Private>
-      <ul className="pfo-legend">
-        {parts.map((p, i) => (
-          <li key={p.key}>
+      <ul className="pfo-chips" aria-label="Chains with funds">
+        {chips.map((p, i) => (
+          <li key={p.key} className="pfo-chainchip">
             <i className="pfo-dot" style={{ background: `var(--pfo-c${Math.min(i, 6)})` }} aria-hidden="true" />
-            {p.key !== 'OTHER' && <ChainIcon icon={p.icon} size={14} />}
+            <ChainIcon icon={p.icon} size={16} />
             <span>{p.label}</span>
             <b>{m.funds(fmtUsd(p.usd))}</b>
             <small>{share(p.usd / total)}</small>
           </li>
         ))}
+        {rest > 0 && (
+          <li>
+            <button type="button" className="pfo-chainchip is-more" aria-expanded={all} onClick={() => setAll(!all)}>
+              {all ? 'Fewer' : <><span className="pfo-chainchip__stack" aria-hidden="true">{o.byChain.slice(BAR_CHAINS, BAR_CHAINS + 3).map((c) => <ChainIcon key={c.key} icon={c.icon} size={16} />)}</span>+{rest} more<b>{m.funds(fmtUsd(restUsd))}</b></>}
+            </button>
+          </li>
+        )}
       </ul>
     </div>
   );
@@ -185,11 +199,33 @@ function Rows({ rows, dim }: { rows: ChainHolding[]; dim?: boolean }) {
   );
 }
 
-function Holdings({ o }: { o: OnchainState }) {
+function NftRows({ nfts }: { nfts: NftState }) {
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (k: string) => setOpen((x) => { const n = new Set(x); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  return (
+    <>
+      {nfts.collections.map((c) => [
+        <tr key={c.key} className={cx('is-group', open.has(c.key) && 'is-open')} onClick={() => toggle(c.key)}>
+          <td><div className="pfo-tbl__asset">
+            <span className="pfv-coins__ic"><NftThumb nfts={nfts} k={c.key} icon={c.chainIcon} /></span>
+            <span className="pfo-tbl__t"><b>{c.name}</b><small>NFT collection<span className="pfo-tbl__onchain"> · {c.chainLabel}</span></small></span>
+          </div></td>
+          <td className="pfo-tbl__chain">{c.chainLabel}</td>
+          <td className="pfo-tbl__num"><button type="button" className="pfa-where__more" aria-expanded={open.has(c.key)} onClick={(e) => { e.stopPropagation(); toggle(c.key); }}>{c.count} NFT{c.count === 1 ? '' : 's'}<Icon name="down" size={12} /></button></td>
+          <td className="pfo-tbl__num pfo-tbl__px" title="No source publishes a floor price for this collection yet.">{c.floorUsd === null ? DASH : fmtUsd(c.floorUsd)}<small>{c.floorSource ?? 'floor'}</small></td>
+          <td className="pfo-tbl__num">{c.floorUsd === null ? <span className="pfa-nofloor">No floor price</span> : <b>{fmtUsd(c.floorUsd * c.count)}</b>}</td>
+        </tr>,
+        open.has(c.key) && <tr key={`${c.key}|grid`} className="is-child"><td colSpan={5}><NftGrid nfts={nfts} k={c.key} /></td></tr>,
+      ])}
+    </>
+  );
+}
+
+function Holdings({ o, nfts }: { o: OnchainState; nfts: NftState }) {
   const [all, setAll] = useState(false);
   const [extra, setExtra] = useState<'none' | 'unpriced' | 'hidden'>('none');
   if (o.total === null && o.loading) return <div className="pfv-skels">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="pfv-skel-row" />)}</div>;
-  if (!o.counted.length && !o.unpriced.length && !o.loading) {
+  if (!o.counted.length && !o.unpriced.length && !o.loading && !nfts.collections.length) {
     return <div className="pfv-empty"><EmptyState icon="wallet" title="Nothing on chain" description={o.failed.length ? 'Some chains could not be read just now; they are tried again in a moment.' : 'No coins on the chains read for these addresses.'} /></div>;
   }
   const shown = all ? o.counted : o.counted.slice(0, ROWS);
@@ -200,6 +236,7 @@ function Holdings({ o }: { o: OnchainState }) {
           <thead><tr><th>Asset</th><th className="pfo-tbl__chain">Chain</th><th className="pfo-tbl__num">Amount</th><th className="pfo-tbl__num pfo-tbl__px">Price</th><th className="pfo-tbl__num">Value</th></tr></thead>
           <tbody>
             <Rows rows={shown} />
+            <NftRows nfts={nfts} />
             {extra === 'unpriced' && <Rows rows={o.unpriced} dim />}
             {extra === 'hidden' && <Rows rows={o.hidden} dim />}
           </tbody>
@@ -218,82 +255,15 @@ function Holdings({ o }: { o: OnchainState }) {
           </button>
         )}
         {o.failed.map((f) => <StatusPill key={f.id} tone="warning" size="sm" icon="warning" title={f.error}>{f.label}: not read, retrying</StatusPill>)}
+        {nfts.loading && <StatusPill size="sm" dot pulse>Reading NFTs</StatusPill>}
       </div>
     </div>
   );
 }
 
-// --- NFTs --------------------------------------------------------------------------------------------------------
-
-function NftCard({ n }: { n: Nft }) {
-  const [broken, setBroken] = useState(false);
-  return (
-    <li className="pfo-nft">
-      <a href={n.link} target="_blank" rel="noopener noreferrer" title={`${n.name}, on the ${n.chainLabel} explorer`}>
-        <span className="pfo-nft__img">
-          {n.image && !broken
-            ? <img src={n.image} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setBroken(true)} />
-            : <span className="pfo-nft__none" aria-hidden="true"><ChainIcon icon={n.chainIcon} size={28} /></span>}
-          {n.count > 1 && <span className="pfo-nft__n">×{n.count}</span>}
-        </span>
-        <span className="pfo-nft__t">
-          <b>{n.name}</b>
-          <small><ChainIcon icon={n.chainIcon} size={12} />{n.collection}</small>
-        </span>
-      </a>
-    </li>
-  );
-}
-
-function Nfts({ owner }: { owner: string }) {
-  const [wide, setWide] = useState(false);
-  const [byChain, setByChain] = useState<Record<string, Nft[] | 'loading' | 'failed'>>({});
-  const [filter, setFilter] = useState<string>('all');
-  const chains = wide ? NFT_CHAINS : NFT_CHAINS.slice(0, 1);
-  useEffect(() => {
-    let off = false;
-    for (const c of chains) {
-      if (byChain[c.key] && byChain[c.key] !== 'failed') continue;
-      setByChain((p) => ({ ...p, [c.key]: 'loading' }));
-      readNfts(c.key, owner)
-        .then((list) => { if (!off) setByChain((p) => ({ ...p, [c.key]: list })); })
-        .catch(() => { if (!off) setByChain((p) => ({ ...p, [c.key]: 'failed' })); });
-    }
-    return () => { off = true; };
-  }, [owner, wide]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setByChain({}); setWide(false); setFilter('all'); }, [owner]);
-
-  const lists = chains.map((c) => ({ c, v: byChain[c.key] }));
-  const items = lists.flatMap((x) => (Array.isArray(x.v) ? x.v : []));
-  const withAny = lists.filter((x) => Array.isArray(x.v) && x.v.length > 0);
-  const loading = lists.some((x) => x.v === 'loading' || x.v === undefined);
-  const shown = filter === 'all' ? items : items.filter((n) => n.chain === filter);
-  return (
-    <section className="pfo-nfts" aria-label="NFTs">
-      <header className="pfo-nfts__h">
-        <span><b>NFTs</b><small>{wide ? `ValueChain and ${NFT_CHAINS.length - 1} more EVM chains` : 'On ValueChain'}</small></span>
-        {withAny.length > 1 && (
-          <Segmented
-            options={[{ value: 'all', label: 'All', count: items.length }, ...withAny.map((x) => ({ value: x.c.key, label: x.c.label, count: (x.v as Nft[]).length }))]}
-            value={filter}
-            onChange={setFilter}
-            label="Chain"
-            size="sm"
-          />
-        )}
-      </header>
-      {shown.length > 0 && <ul className="pfo-nftgrid">{shown.map((n) => <NftCard key={`${n.chain}:${n.contract}:${n.id}`} n={n} />)}</ul>}
-      {loading && !shown.length && <div className="pfo-nftgrid is-wait">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="pfo-nft__skel" />)}</div>}
-      {!loading && !items.length && <p className="pfv-quiet pfo-nfts__empty">{wide ? 'No NFTs on these chains.' : 'No NFTs on ValueChain.'}</p>}
-      {lists.some((x) => x.v === 'failed') && <p className="pfv-quiet">{lists.filter((x) => x.v === 'failed').map((x) => x.c.label).join(', ')}: the explorer did not answer.</p>}
-      {!wide && <div className="pfo-nfts__more"><Button variant="secondary" icon="search" onClick={() => setWide(true)}>Look on {NFT_CHAINS.length - 1} more chains</Button></div>}
-    </section>
-  );
-}
-
 // --- the tab -----------------------------------------------------------------------------------------------------
 
-export function OnchainPanel({ o }: { o: OnchainState }) {
+export function OnchainPanel({ o, nfts, shareAs }: { o: OnchainState; nfts: NftState; shareAs?: ShareAs }) {
   const m = useMasks();
   const [adding, setAdding] = useState(false);
   if (!o.watched.length) {
@@ -305,15 +275,18 @@ export function OnchainPanel({ o }: { o: OnchainState }) {
       <div className="pfo-top">
         <AddressChips o={o} adding={adding} onAdd={() => setAdding(true)} />
         <span className="pfo-total">
-          <small>On chain{n ? ` · ${n} chain${n === 1 ? '' : 's'}` : ''}</small>
-          <b>{o.total === null ? (o.loading ? <Skeleton className="pfv-skel-num" /> : DASH) : m.funds(fmtUsd(o.total))}</b>
+          <small>Total value on chain{n ? ` · ${n} chain${n === 1 ? '' : 's'}` : ''}</small>
+          <span className="pfo-total__v">
+            <b>{o.total === null ? (o.loading ? <Skeleton className="pfv-skel-num" /> : DASH) : m.funds(fmtUsd(o.total))}</b>
+            {o.total !== null && o.total > 0 && (
+              <ShareButton label="Share these holdings" make={(b) => b.holdingsCard({ title: shareAs?.title ?? 'My wallets', total: o.total!, parts: o.byChain.map((c) => ({ label: c.label, usd: c.usd })), wallet: o.watched[0]?.address ?? null, link: shareAs?.link, label: shareAs?.label ?? 'On-chain' })} />
+            )}
+          </span>
         </span>
       </div>
       {adding && <AddForm o={o} onDone={() => setAdding(false)} />}
       <ChainSplit o={o} />
-      <Holdings o={o} />
-      {o.nftOwner && <Nfts owner={o.nftOwner} />}
-      <p className="pfo-src"><Icon name="info" size={13} />Read from your browser: LI.FI (EVM chains, prices), ValueChain’s and Blockscout’s explorers, and each chain’s public node. Addresses you add stay in this browser.</p>
+      <Holdings o={o} nfts={nfts} />
     </div>
   );
 }

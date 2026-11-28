@@ -35,6 +35,10 @@ import type { Eip1193Provider } from '../../../wallet';
 import { lazyChunk } from '../../../lazyPage';
 import type { ChartPoint } from '../../../performance';
 import type { Bucket, PfData, Part } from './data';
+import type { Reserve } from './reserve';
+import { Avatar } from '../../copy/TraderCard';
+import { VenueLogo } from '../../VenueLogo';
+import { VENUE_LABEL, type Venue } from '../../../vsApi';
 import { DEMO_BOTS, DEMO_COPIES, useDevDemo } from '../devDemo';
 
 const CopiesDialog = lazyChunk(() => import('../../copy/CopiesDialog'));
@@ -661,11 +665,26 @@ export function Standing({ d }: { d: PfData }) {
   );
 }
 
-export function CopiesPanel({ onOpenTab }: { onOpenTab: (t: Tab) => void }) {
-  const copies = useCopies();
+/** What a copy or bot may use, as a share of the Perps account: a dashed bar (a limit ValueDesk keeps, not money moved). */
+function SetAside({ usd, of, word }: { usd: number; of: number | null; word: string }) {
+  const m = useMasks();
+  const sh = of && of > 0 ? Math.min(1, usd / of) : null;
+  return (
+    <span className="pfv-aside" title={`${word}: a limit ValueDesk keeps, not money moved. Still part of SoDEX's free margin.`}>
+      <small>{word}</small>
+      <b>{usd > 0 ? m.funds(fmtUsd(usd)) : DASH}</b>
+      <Private k="charts"><span className="pfv-aside__bar" aria-hidden="true"><i style={{ width: `${sh === null ? 0 : sh * 100}%` }} /></span></Private>
+    </span>
+  );
+}
+
+/** Every copy as a row (owner 2026-11-28: "it shows ... 2 traders copied 1 paper as well but no row of the copy"): the
+ * trader, copy or counter, live or practice, what it may use of Perps (dashed), its PnL; the total for all of them. */
+export function CopiesPanel({ onOpenTab, r }: { onOpenTab: (t: Tab) => void; r: Reserve }) {
   const m = useMasks();
   const [manage, setManage] = useState(false);
-  if (copies.all === 0) {
+  const rows = r.copies.filter((c) => c.status !== 'stopped');
+  if (rows.length === 0) {
     return (
       <div className="pfv-empty">
         <EmptyState
@@ -677,13 +696,32 @@ export function CopiesPanel({ onOpenTab }: { onOpenTab: (t: Tab) => void }) {
       </div>
     );
   }
+  const live = rows.filter((c) => !c.paper);
+  const pnl = live.reduce((t, c) => t + c.pnl, 0);
   return (
     <div className="pfv-copies">
       <div className="pfv-copies__figs">
-        <Fig k="Traders copied" v={copies.live ? m.counts(fmt(copies.live, 0)) : DASH} sub={copies.paper ? `${copies.paper} paper as well` : 'Live copies'} />
-        <Fig k="Allocated" v={copies.live ? m.funds(fmtUsd(copies.allocated, 0)) : DASH} sub="A size limit, not money set aside" />
-        <Fig k="Copy PnL" v={copies.live ? m.pnl(signedUsd(copies.pnl)) : DASH} cls={copies.live ? tone(copies.pnl) : undefined} sub="Each copy's own books" />
+        <Fig k="Traders copied" v={m.counts(fmt(live.length, 0))} sub={rows.length > live.length ? `${rows.length - live.length} practice as well` : 'Live copies'} />
+        <Fig k={<span className="pfv-figkey"><i className="pfa-key is-perps is-dashed" aria-hidden="true" />May use of Perps</span>} v={m.funds(fmtUsd(r.copyUsd, 0))} sub={r.equity ? `${share(r.copyUsd / r.equity)} of ${m.funds(fmtUsd(r.equity, 0))}` : 'A limit, not money set aside'} />
+        <Fig k="Copy PnL" v={m.pnl(signedUsd(pnl))} cls={tone(pnl)} sub="Live copies, each its own books" />
       </div>
+      <ul className="pfv-botlist pfv-copylist">
+        {rows.map((c) => (
+          <li key={c.id}>
+            <button type="button" onClick={() => (c.demo ? onOpenTab('copy') : setManage(true))}>
+              <Avatar address={c.leader} size={30} />
+              <span className="pfv-botlist__t">
+                <b>{m.address(shortAddr(c.leader))}</b>
+                <small><VenueLogo venue={c.venue as Venue} size={12} /> {VENUE_LABEL[c.venue as Venue] ?? c.venue} · {c.direction === 'counter' ? 'Counter-trade' : 'Copy'}{c.demo ? ' · Demo' : ''}</small>
+              </span>
+              <StatusPill size="sm" tone={c.paper ? 'neutral' : 'positive'} dot={!c.paper}>{c.paper ? 'Practice' : 'Live'}</StatusPill>
+              <SetAside usd={c.paper ? 0 : c.allocationUsd} of={r.equity} word={c.paper ? 'Practice, sets none' : 'May use'} />
+              <span className="pfv-botlist__f"><small>PnL</small><b className={tone(c.pnl)}>{m.pnl(signedUsd(c.pnl))}</b></span>
+              <Icon name="arrowRight" size={14} />
+            </button>
+          </li>
+        ))}
+      </ul>
       <div className="pfv-row-acts">
         <Button variant="secondary" onClick={() => setManage(true)}>Manage copies</Button>
         <Button variant="quiet" icon="search" onClick={() => onOpenTab('copy')}>Find traders to copy</Button>
@@ -693,26 +731,27 @@ export function CopiesPanel({ onOpenTab }: { onOpenTab: (t: Tab) => void }) {
   );
 }
 
-/**
- * The wallet's bots as a list, each with its state, volume and net PnL as the Bots page counts them (useBots, the
- * executor's own read; owner 2026-11-26: "show list on portfolio too, same for bots"). A row opens that bot. With no
- * bot, or before bots are open to this wallet, a centred empty state with the one action.
- */
-export function BotsPanel({ c, provider, botsOpen, onOpenTab }: { c: PortfolioContext; provider: Eip1193Provider | null; botsOpen: boolean; onOpenTab: (t: Tab) => void }) {
+/** Every bot as a row, with what it sets aside of Perps (dashed), and the total for all of them. */
+export function BotsPanel({ c, botsOpen, onOpenTab, r }: { c: PortfolioContext; botsOpen: boolean; onOpenTab: (t: Tab) => void; r: Reserve }) {
   const m = useMasks();
   const owner = c.readOnly ? null : c.address;
-  const live = useLiveCopy(owner, provider);
-  const signedIn = owner !== null && readiness(live, 'hosted').connected;
-  const { bots, loading } = useBots(owner, signedIn);
-  const shown = useMemo(() => [...bots].sort((a, b) => (b.algo.startedAt ?? b.algo.createdAt) - (a.algo.startedAt ?? a.algo.createdAt)), [bots]);
-  const demo = useDevDemo();
+  const shown = useMemo(() => [...r.botViews].sort((a, b) => (b.algo.startedAt ?? b.algo.createdAt) - (a.algo.startedAt ?? a.algo.createdAt)), [r.botViews]);
+  const need = useMemo(() => new Map(r.bots.map((b) => [b.id, b.usd])), [r.bots]);
   const empty = (title: string, line: string, action: ReactNode) => (
     <div className="pfv-empty"><EmptyState icon="robot" title={title} description={line} actions={action} /></div>
   );
-  if (demo) {
+  const total = (
+    <div className="pfv-copies__figs">
+      <Fig k="Bots running" v={m.counts(fmt(r.bots.filter((b) => !b.paper).length, 0))} sub={r.bots.some((b) => b.paper) ? `${r.bots.filter((b) => b.paper).length} practice as well` : 'Real orders'} />
+      <Fig k={<span className="pfv-figkey"><i className="pfa-key is-perps is-dashed" aria-hidden="true" />Set aside of Perps</span>} v={m.funds(fmtUsd(r.botUsd, 0))} sub={r.equity ? `${share(r.botUsd / r.equity)} of ${m.funds(fmtUsd(r.equity, 0))}` : 'What they may hold and quote'} />
+      <Fig k="SoDEX free margin" v={r.free === null ? DASH : m.funds(fmtUsd(r.free, 0))} sub="Free for orders, copies and bots" />
+    </div>
+  );
+  if (r.demo) {
     // Localhost demo (devDemo.ts): sample bots, in the list's own rows.
     return (
       <div className="pfv-bots">
+        {total}
         <ul className="pfv-botlist">
           {DEMO_BOTS.map((b) => (
             <li key={b.id}>
@@ -720,6 +759,7 @@ export function BotsPanel({ c, provider, botsOpen, onOpenTab }: { c: PortfolioCo
                 <BotAvatar symbol={b.symbol} strategy={b.strategy} size={30} />
                 <span className="pfv-botlist__t"><b>{b.name}</b><small>{STRATEGY_INFO[b.strategy].name} · {b.paper ? 'practice' : 'real orders'} · Demo</small></span>
                 <StatePill s={b.state} size="sm" />
+                <SetAside usd={b.paper ? 0 : b.allocUsd} of={r.equity} word={b.paper ? 'Practice, sets none' : 'Sets aside'} />
                 <span className="pfv-botlist__f"><small>Volume</small><b>{m.funds(fmtUsd(b.volume, 0))}</b></span>
                 <span className="pfv-botlist__f"><small>Net PnL</small><b className={tone(b.netPnl)}>{m.pnl(fmtPnl(b.netPnl))}</b></span>
                 <Icon name="arrowRight" size={14} />
@@ -731,16 +771,17 @@ export function BotsPanel({ c, provider, botsOpen, onOpenTab }: { c: PortfolioCo
     );
   }
   if (!botsOpen) return empty('Bots are in beta', 'Market-making and grid strategies that run around the clock from your own accounts.', <Button variant="primary" onClick={applyForBeta}>Get access</Button>);
-  if (signedIn && loading && !bots.length) return <div className="pfv-skels">{[0, 1, 2].map((i) => <Skeleton key={i} className="pfv-skel-row" />)}</div>;
+  if (r.signedIn && r.botsLoading && !shown.length) return <div className="pfv-skels">{[0, 1, 2].map((i) => <Skeleton key={i} className="pfv-skel-row" />)}</div>;
   if (!shown.length) {
     return empty(
       'No bots yet',
-      signedIn || !owner ? 'Market-making and grid strategies that run around the clock from your own accounts.' : 'Sign in on the Bots page to see your bots here.',
+      r.signedIn || !owner ? 'Market-making and grid strategies that run around the clock from your own accounts.' : 'Sign in on the Bots page to see your bots here.',
       <Button variant="primary" icon="robot" onClick={() => onOpenTab('bots')}>Open bots</Button>,
     );
   }
   return (
     <div className="pfv-bots">
+      {total}
       <ul className="pfv-botlist">
         {shown.map((v) => {
           const st = strategyOf(v.algo.spec) ?? 'maker';
@@ -754,6 +795,7 @@ export function BotsPanel({ c, provider, botsOpen, onOpenTab }: { c: PortfolioCo
                   <small>{STRATEGY_INFO[st].name} · {v.algo.spec.paper ? 'practice' : 'real orders'}</small>
                 </span>
                 <StatePill s={botState(v)} size="sm" />
+                <SetAside usd={need.get(v.algo.id) ?? 0} of={r.equity} word={v.algo.spec.paper ? 'Practice, sets none' : 'Sets aside'} />
                 <span className="pfv-botlist__f"><small>Volume</small><b>{m.funds(b ? fmtUsd(b.volume, 0) : DASH)}</b></span>
                 <span className="pfv-botlist__f"><small>Net PnL</small><b className={b ? tone(b.netPnl) : undefined}>{m.pnl(fmtPnl(b?.netPnl))}</b></span>
                 <Icon name="arrowRight" size={14} />

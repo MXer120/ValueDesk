@@ -238,6 +238,24 @@ export function scanShare(address: string, venue: string, venueName: string): Pi
   return { title: `${short} on ${venueName}`, label: 'Scan', link: `${SITE}/scan?address=${address}${venue === 'sodex' ? '' : `&venue=${venue}`}`, foot: venueName };
 }
 
+/**
+ * Where the money is (the Portfolio's All and On-chain tabs, owner 2026-11-28 "Total value & share"): the total, and
+ * each part with its share. No chart: the parts are the picture. Hidden dollars leave the shares only.
+ */
+export function holdingsCard(h: { title: string; total: number; parts: Array<{ label: string; usd: number }>; wallet: string | null; link?: string; label?: string }): CardData | null {
+  if (!(h.total > 0)) return null;
+  const parts = h.parts.filter((x) => x.usd > 0).sort((a, b) => b.usd - a.usd).slice(0, 4);
+  const pct = (v: number) => `${((v / h.total) * 100).toFixed(1)}%`;
+  return {
+    kind: 'portfolio', label: h.label ?? 'Portfolio', when: 'Now', title: h.title, pills: [{ text: 'Total value' }],
+    usd: null, pct: null,
+    lead: { label: 'Total value', big: usdShort(h.total), usdBig: true, sub: '', subRest: '', altLabel: 'Largest part', altBig: parts[0] ? `${parts[0].label} ${pct(parts[0].usd)}` : '', altSub: '', altSubRest: '' },
+    facts: parts.map((x) => ({ label: x.label, value: `${usdShort(x.usd)} · ${pct(x.usd)}`, kind: 'usd' as const })),
+    foot: 'Each dollar counted once', chart: null, link: h.link ?? `${SITE}/portfolio`, second: null, wallet: h.wallet,
+    post: ({ amounts }) => (amounts ? `${h.title} on ValueDesk: ${usdShort(h.total)}.` : `${h.title} on ValueDesk.`),
+  };
+}
+
 export function portfolioCard(p: PortfolioFigures): CardData {
   const facts: CardFact[] = [];
   if (ok(p.value)) facts.push({ label: 'Account value', value: usdShort(p.value), kind: 'usd' });
