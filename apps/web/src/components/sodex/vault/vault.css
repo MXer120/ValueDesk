@@ -358,3 +358,6 @@
 .bv-amt__max:hover { background: rgb(var(--ink) / 0.14); }
 /* SuperRare: its outer glow purple too, the gold glare on the border. */
 .bv-tier.is-SuperRare:hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--tier) 40%, transparent), 0 0 44px -6px color-mix(in srgb, var(--tier) 75%, transparent), 0 0 18px -8px rgb(230 180 60 / 0.6), inset 0 1px 0 rgb(255 215 110 / 0.45); }
+/* Each box in the picker glows in its own tier's light (a Rare out of a merge blue, not the Uncommon's green). */
+.bv-pick__arts { filter: none; }
+.bv-pick__box { display: inline-flex; filter: drop-shadow(0 10px 24px color-mix(in srgb, var(--tier) 50%, transparent)); }

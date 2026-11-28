@@ -55,8 +55,8 @@ export function BoxPicker({ kind, level, ids, mergeSize, perOpen, onGo, onClose 
       <form className="bv-pick" onSubmit={(e) => { e.preventDefault(); if (ok) onGo(chosen, to.trim()); }}>
         <div className={`bv-pick__hero is-${level}`}>
           <span className="bv-pick__arts">
-            <BoxArt level={level} size={84} />
-            {kind === 'merge' && next && <><i aria-hidden="true">→</i><BoxArt level={next} size={84} /></>}
+            <span className={`bv-pick__box is-${level}`}><BoxArt level={level} size={84} /></span>
+            {kind === 'merge' && next && <><i aria-hidden="true">→</i><span className={`bv-pick__box is-${next}`}><BoxArt level={next} size={84} /></span></>}
           </span>
           <b><i className="bv-dot" aria-hidden="true" />{kind === 'merge' && next ? `${name} → ${LEVEL_LABEL[next]}` : name}</b>
           <small>{ids.length > MAX_BOXES ? `${n0(ids.length)} in this wallet, up to ${n0(MAX_BOXES)} at once` : `${n0(ids.length)} in this wallet`}</small>
