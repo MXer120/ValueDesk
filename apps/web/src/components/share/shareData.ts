@@ -283,3 +283,18 @@ export function portfolioCard(p: PortfolioFigures): CardData {
     },
   };
 }
+
+/**
+ * A Blind Box share (owner 2026-11-28: "share buttons for each box, for each rarity of box, for all boxes, for each
+ * cybr"): what is shown, exactly: one box, one tier's boxes, all of them, or one Cybereator, with the facts beside it.
+ */
+export function boxCard(b: { title: string; big: string; bigLabel: string; facts: Array<{ label: string; value: string }>; wallet: string | null; label?: string }): CardData {
+  return {
+    kind: 'portfolio', label: b.label ?? 'Blind Boxes', when: 'Now', title: b.title, pills: [{ text: 'SoDEX' }],
+    usd: null, pct: null,
+    lead: { label: b.bigLabel, big: b.big, sub: '', subRest: '', altLabel: b.facts[0]?.label ?? '', altBig: b.facts[0]?.value ?? '', altSub: '', altSubRest: '' },
+    facts: b.facts.slice(0, 4).map((f) => ({ label: f.label, value: f.value, kind: 'plain' as const })),
+    foot: 'Blind Boxes on ValueDesk', chart: null, link: `${SITE}/blind-boxes`, second: null, wallet: b.wallet,
+    post: () => `${b.title} on ValueDesk.`,
+  };
+}

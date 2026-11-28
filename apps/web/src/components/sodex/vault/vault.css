@@ -268,3 +268,65 @@
   .bv-htable__row { grid-template-columns: minmax(110px, 1.2fr) minmax(80px, 1fr) minmax(76px, 0.9fr) 64px; min-width: 0; gap: 8px; }
   .bv-htable__row > :nth-child(3) { display: none; }
 }
+
+/* 2026-11-28 round 4 ------------------------------------------------------------------------------------------------ */
+.bv-head__t { display: inline-flex; align-items: center; gap: 8px; }
+
+/* A tier opens smoothly to show each box and its number. */
+.bv-tier__hit { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; border-radius: 14px; }
+.bv-tier__hit:disabled { cursor: default; }
+.bv-tier__hit:focus-visible { outline: 2px solid var(--tf-brand); outline-offset: 2px; }
+.bv-tier__name { align-items: center; }
+.bv-tier__name .share-btn { margin-left: auto; margin-right: 4px; opacity: 0.6; }
+.bv-tier__name .share-btn:hover { opacity: 1; }
+.bv-tier__more { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms; opacity: 0; }
+.bv-tier.is-open .bv-tier__more { grid-template-rows: 1fr; opacity: 1; }
+.bv-tier__more > div { min-height: 0; overflow: hidden; }
+.bv-tier__ids { display: flex; flex-wrap: wrap; gap: 4px; max-height: 180px; margin: 0; padding: 2px 0; overflow-y: auto; list-style: none; }
+.bv-chip { display: inline-flex; align-items: center; gap: 2px; padding: 3px 9px; border: 1px solid transparent; border-radius: 999px; background: rgb(var(--ink) / 0.06); color: var(--tf-fg); font: 500 12px var(--font-num); cursor: pointer; transition: background 160ms, border-color 160ms; }
+.bv-chip.is-box { padding-right: 3px; cursor: default; }
+.bv-chip.is-box .share-btn { width: 22px; height: 22px; opacity: 0.5; }
+.bv-chip.is-box:hover .share-btn { opacity: 1; }
+.bv-chip.is-on { border-color: color-mix(in srgb, var(--tf-pos, var(--pos)) 60%, transparent); background: color-mix(in srgb, var(--tf-pos, var(--pos)) 16%, transparent); }
+@media (prefers-reduced-motion: reduce) { .bv-tier__more { transition: none; } }
+
+/* Open / merge popup. */
+.bv-pick { display: flex; flex-direction: column; gap: 8px; }
+.bv-pick__arrow { color: var(--tf-muted); font-style: normal; }
+.bv-pick__slider { width: 100%; height: 6px; margin: 6px 0 2px; border-radius: 999px; background: linear-gradient(90deg, var(--tf-pos, var(--pos)) var(--p), rgb(var(--ink) / 0.12) var(--p)); accent-color: var(--tf-pos, var(--pos)); appearance: none; -webkit-appearance: none; cursor: pointer; }
+.bv-pick__slider::-webkit-slider-thumb { width: 18px; height: 18px; border: 3px solid var(--bg-elevated); border-radius: 50%; background: var(--tf-pos, var(--pos)); box-shadow: 0 1px 4px rgb(0 0 0 / 0.35); -webkit-appearance: none; }
+.bv-pick__slider::-moz-range-thumb { width: 14px; height: 14px; border: 3px solid var(--bg-elevated); border-radius: 50%; background: var(--tf-pos, var(--pos)); }
+.bv-pick__warn { display: flex; gap: 8px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--tf-warn) 14%, transparent); color: var(--tf-fg); font-size: 12.5px; line-height: 1.45; }
+.bv-pick__warn svg { flex: none; margin-top: 2px; color: var(--tf-warn); }
+.bv-pick__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.bv-pick__head small { color: var(--tf-muted); font-size: 12px; }
+.bv-pick__ids { display: flex; flex-wrap: wrap; gap: 5px; max-height: 168px; margin: 0; padding: 2px; overflow-y: auto; list-style: none; }
+
+/* The weekly draw: a tab on the page's right edge, our green. */
+.bv-drawtab { position: fixed; z-index: 40; right: 0; top: 42%; display: flex; flex-direction: column; gap: 4px; width: 96px; padding: 12px 10px 10px 14px; border: 0; border-radius: 16px 0 0 16px; background: linear-gradient(160deg, color-mix(in srgb, var(--tf-pos, var(--pos)) 92%, white), var(--tf-pos, var(--pos))); color: #06120c; text-align: left; box-shadow: -6px 10px 30px -12px color-mix(in srgb, var(--tf-pos, var(--pos)) 70%, transparent); cursor: pointer; transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), width 220ms; }
+.bv-drawtab:hover { transform: translateX(-4px); }
+.bv-drawtab__t { font-size: 12px; font-weight: 700; line-height: 1.15; }
+.bv-drawtab > b { font-size: 26px; line-height: 1.1; }
+.bv-drawtab__c { display: flex; flex-direction: column; padding: 5px 7px; border-radius: 9px; background: rgb(0 0 0 / 0.14); font-size: 11.5px; font-weight: 700; }
+.bv-drawtab__c small { font-size: 10.5px; font-weight: 600; opacity: 0.85; }
+@media (max-width: 700px) { .bv-drawtab { top: auto; bottom: 84px; width: 84px; } }
+.bv-draw { display: flex; flex-direction: column; gap: 12px; }
+.bv-draw__clocks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.bv-draw__clocks > div { display: flex; flex-direction: column; gap: 2px; padding: 12px; border-radius: 14px; background: rgb(var(--ink) / 0.045); }
+.bv-draw__clocks small { color: var(--tf-muted); font-size: 11.5px; }
+.bv-draw__clocks b { font-size: 22px; }
+.bv-draw__clocks em { color: var(--tf-muted); font-size: 11px; font-style: normal; }
+.bv-draw__none, .bv-draw__won { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 14px; background: rgb(var(--ink) / 0.045); font-size: 13px; }
+.bv-draw__won { background: color-mix(in srgb, var(--tf-pos, var(--pos)) 14%, transparent); }
+.bv-draw__none span, .bv-draw__won span { color: var(--tf-muted); font-size: 12.5px; }
+.bv-draw__list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.bv-draw__list li { display: flex; align-items: center; gap: 10px; padding: 6px 10px 6px 6px; border-radius: 12px; background: rgb(var(--ink) / 0.03); }
+.bv-draw__list li.is-won { background: color-mix(in srgb, var(--tf-pos, var(--pos)) 12%, transparent); }
+.bv-draw__list li > span { display: flex; flex: 1 1 auto; flex-direction: column; }
+.bv-draw__list small { color: var(--tf-muted); font-size: 11.5px; }
+
+/* History: a softer header, rows without hard rules. */
+.bv-htable__row { border-bottom: 0; border-radius: 10px; }
+.bv-htable__row:not(.is-head):hover { background: rgb(var(--ink) / 0.035); }
+.bv-htable__row.is-head { margin-bottom: 4px; padding-top: 8px; padding-bottom: 8px; border-radius: 10px; background: rgb(var(--ink) / 0.045); color: var(--tf-muted); font-size: 11.5px; font-weight: 500; letter-spacing: 0.01em; }
+.bv-draw__list li > span.tf-pill { flex: none; }

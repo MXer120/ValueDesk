@@ -19,6 +19,7 @@ import { DASH } from '../../format';
 import type { Eip1193Provider } from '../../wallet';
 import { BoxArt } from './BoxArt';
 import { BoxHistory, MergeMath, PfpLinks, ProgressCard, Vault } from './vault/Vault';
+import { DrawTab } from './vault/Draw';
 import { Pill, ProgrammeHero, ProgrammePage, ReadFailed, SegSwitch, SkelRows, SkelTiles, fmtAgo, fmtTokens, fmtUsdTight, useNow } from './parts';
 
 const FEED_SIZE = LOTTERY_FEED_SIZE;
@@ -62,6 +63,7 @@ export function BlindBoxOriginal({ address, provider }: { address: string | null
           <Tiers rules={rules} meta={meta.data as LotteryMeta} />
           <div id="vault"><Vault address={address} provider={provider} meta={meta.data as LotteryMeta} /></div>
           <MergeMath rules={rules} />
+          <DrawTab address={address} provider={provider} />
           <PfpDrop />
           <Section title="How boxes are earned"><Earned rules={rules} /></Section>
           <Section title="Invite friends, both get boxes" note={rules.newcomerMaxUAtBound != null ? `The friend's own volume must be under ${fmtUsdTight(rules.newcomerMaxUAtBound)} when they bind.` : undefined}>

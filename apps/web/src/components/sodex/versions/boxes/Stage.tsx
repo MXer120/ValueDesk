@@ -7,7 +7,8 @@
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import type { Eip1193Provider } from '../../../../wallet';
 import { BoxHistory, MergeMath, PfpLinks, ProgressCard, Vault, type VaultDemo } from '../../vault/Vault';
-import { sampleVault } from './sample';
+import { sampleDraw, sampleVault } from './sample';
+import { DrawTab } from '../../vault/Draw';
 import { bpsToPct, mergeLadder, type LotteryRules } from '../../../../blindBox';
 import { Skeleton } from '../../../bots/kit/kit';
 import { BoxArt } from '../../BoxArt';
@@ -27,6 +28,7 @@ export function BoxStage({ address, provider, sample }: { address: string | null
           : <Stage rules={rules} hero={<ProgressCard address={address} provider={provider} rules={rules} demo={demo} />} />}
         <div id="vault" className="sxb-vault"><Vault address={address} provider={provider} meta={d.meta.data} demo={demo} /></div>
         <MergeMath rules={rules} />
+        <DrawTab address={address} provider={provider} demo={sample ? sampleDraw() : null} />
         <div className="sxb-desk is-two">
           <BoxHistory address={address} provider={provider} demo={demo} />
           <section className="sxb-desk__inside" aria-label="What is inside">

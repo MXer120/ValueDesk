@@ -32,6 +32,8 @@ import { Button, EmptyState, Icon, IconButton, ProgressBar, Segmented, Skeleton,
 import { BoxArt } from '../BoxArt';
 import { fmtAgo, fmtTokens, fmtUsdTight, useNow } from '../parts';
 import { Holo } from './Holo';
+import { BoxPicker } from './BoxPicker';
+import { ShareButton } from '../../share/host';
 import './vault.css';
 
 const usd = (v: number | null | undefined, d = 2) => (v == null || !Number.isFinite(v) ? DASH : fmtUsdTight(v.toFixed(d)));
@@ -81,7 +83,7 @@ type Session = ReturnType<typeof useSodexSession>;
 
 /* --- a popup in the copy window's shell (Copy.css .cpk) ------------------------------------------------------------ */
 
-function Popup({ label, size, onClose, head, children }: { label: string; size: 'window' | 'small'; onClose: () => void; head: ReactNode; children: ReactNode }) {
+export function Popup({ label, size, onClose, head, children }: { label: string; size: 'window' | 'small'; onClose: () => void; head: ReactNode; children: ReactNode }) {
   const [inView, setIn] = useState(false);
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -177,6 +179,7 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
   useEffect(() => { let off = false; void coinPrices().then((m) => { if (!off) setSosoUsd(priceOf(m, 'SOSO') ?? null); }).catch(() => undefined); return () => { off = true; }; }, []);
   const [tab, setTab] = useState<Tab>('all');
   const [action, setAction] = useState<{ level: Level; kind: 'open' | 'merge' } | null>(null);
+  const [openTier, setOpenTier] = useState<Level | null>(null);
   const [giving, setGiving] = useState<GiftTarget | null>(null);
   const refresh = useCallback(() => { chain.retry(); cybr.retry(); }, [chain, cybr]);
   const queue = useQueue(refresh);
@@ -186,10 +189,9 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
   const ids = boxes?.exact ? boxes.byLevel : null;
   const who = demo ? 'demo' : address;
 
-  const start = (kind: 'open' | 'merge', level: Level, n: number) => {
+  const start = (kind: 'open' | 'merge', level: Level, pool: string[]) => {
     if (!who || (!provider && !demo) || !ids) return;
     const size = kind === 'open' ? perOpen : rules?.mergeSize[level] ?? 0;
-    const pool = ids[level].slice(0, kind === 'open' ? n : n * size);
     const groups = batches(kind, pool, size);
     setAction(null);
     const label = kind === 'open'
@@ -222,8 +224,8 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
               key={l} level={l} ids={ids?.[l] ?? []} market={market.data} sosoUsd={sosoUsd} stats={rewards.data?.levels[l] ?? null}
               mergeSize={rules?.mergeSize[l] ?? 0} perOpen={perOpen}
               canAct={session.signedIn && !busy && (!!provider || !!demo)} canGift={!busy && (!!provider || !!demo)}
-              action={action?.level === l ? action.kind : null} setAction={(k) => setAction(k ? { level: l, kind: k } : null)}
-              onOpen={(n) => start('open', l, n)} onMerge={(n) => start('merge', l, n)}
+              setAction={(k) => setAction(k ? { level: l, kind: k } : null)}
+              expanded={openTier === l} onToggle={() => setOpenTier(openTier === l ? null : l)} wallet={address}
               onGift={() => setGiving({ contract: box, title: `${LEVEL_LABEL[l]} box`, level: l, image: null, ids: ids?.[l] ?? [] })}
             />
           ))}
@@ -234,7 +236,13 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
   return (
     <section className={`tf bv${className ? ` ${className}` : ''}`} aria-label="Your vault">
       <header className="bv-head">
-        <h2>Your vault</h2>
+        <span className="bv-head__t">
+          <h2>Your vault</h2>
+          {boxes && boxes.count > 0 && <ShareButton label="Share all your boxes" make={(b) => b.boxCard({
+            title: 'My SoDEX Blind Boxes', big: fmt(boxes.count, 0), bigLabel: 'Boxes', wallet: address,
+            facts: LEVELS.map((l) => ({ label: LEVEL_LABEL[l], value: fmt(boxes.byLevel[l].length, 0) })).concat(cybr.data?.length ? [{ label: 'Cybereators', value: fmt(cybr.data.length, 0) }] : []),
+          })} />}
+        </span>
         <Segmented<Tab> label="Show" value={tab} onChange={setTab} options={[
           { value: 'all', label: 'All', ...(boxes && cybr.data ? { count: boxes.count + cybr.data.length } : {}) },
           { value: 'boxes', label: 'Boxes', ...(boxes ? { count: boxes.count } : {}) },
@@ -253,6 +261,10 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
           <Cybereators address={cybrOf} list={cybr.data} error={cybr.error} retry={cybr.retry} market={market.data} sosoUsd={sosoUsd} canGift={!busy && (!!provider || !!demo)}
             onGift={(c) => setGiving({ contract: CYBEREATOR, title: c.name, level: null, image: c.image, ids: [c.id] })} />
         </>
+      )}
+      {action && ids && (
+        <BoxPicker kind={action.kind} level={action.level} ids={ids[action.level]} mergeSize={rules?.mergeSize[action.level] ?? 0} perOpen={perOpen}
+          onClose={() => setAction(null)} onGo={(chosen) => start(action.kind, action.level, chosen)} />
       )}
       {giving && <GiftPopup t={giving} onClose={() => setGiving(null)} onSend={(to, n) => sendGift({ ...giving, ids: giving.ids.slice(0, n) }, to)} />}
     </section>
@@ -304,61 +316,57 @@ const SPECKS: Partial<Record<Level, Array<[number, number, number, number]>>> = 
 
 function TierCard(p: {
   level: Level; ids: string[]; market: MarketDoc | null; sosoUsd: number | null; stats: LevelRewards | null; mergeSize: number; perOpen: number;
-  canAct: boolean; canGift: boolean; action: 'open' | 'merge' | null; setAction: (k: 'open' | 'merge' | null) => void;
-  onOpen: (n: number) => void; onMerge: (n: number) => void; onGift: () => void;
+  canAct: boolean; canGift: boolean; setAction: (k: 'open' | 'merge' | null) => void;
+  expanded: boolean; onToggle: () => void; wallet: string | null; onGift: () => void;
 }) {
   const { level, ids } = p;
   const held = ids.length;
   const merges = p.mergeSize > 0 ? Math.floor(held / p.mergeSize) : 0;
   const to = nextLevel(level);
+  const name = LEVEL_LABEL[level];
+  const floor = p.market?.collections[TREASURE_BOX.address]?.tiers[level]?.floor ?? null;
+  const facts = (n: number) => [
+    { label: 'Tier', value: name },
+    ...(p.stats ? [{ label: 'Paid on average', value: usd(p.stats.avg) }] : []),
+    ...(floor != null ? [{ label: 'Floor', value: soso(floor) }] : []),
+    ...(n > 1 && p.stats ? [{ label: 'Worth on average', value: usd(p.stats.avg * n) }] : []),
+  ];
   return (
-    <article className={`bv-tier is-${level}${held ? '' : ' is-none'}`}>
-      <div className="bv-tier__art">
-        <span className="bv-tier__shine" aria-hidden="true" />
-        {SPECKS[level]?.map(([x, y, s, d], i) => (
-          <svg key={i} className={`bv-speck is-${level}`} style={{ left: `${x}%`, top: `${y}%`, width: s * 1.6, height: s * 1.6, animationDelay: `${d}s` }} viewBox="-9 -9 18 18" aria-hidden="true">
-            <path d="M0-9 2.300-2.300 9 0 2.300 2.300 0 9-2.300 2.300-9 0-2.300-2.300z" />
-          </svg>
-        ))}
-        <BoxArt level={level} size={112} />
-      </div>
-      <div className="bv-tier__name"><b>{LEVEL_LABEL[level]}</b><span className="bv-num">{fmt(held, 0)}</span></div>
-      {p.action === null ? (
-        <div className="bv-tier__acts">
-          <Button variant="primary" disabled={!p.canAct || held === 0} onClick={() => p.setAction('open')} title={p.canAct ? undefined : 'Sign in to SoDEX first'}>Open boxes</Button>
-          {to && p.mergeSize > 0 && <Button disabled={!p.canAct || merges === 0} onClick={() => p.setAction('merge')} title={merges === 0 ? `${p.mergeSize} ${LEVEL_LABEL[level]} make 1 ${LEVEL_LABEL[to]}` : undefined}>Merge</Button>}
-          <Button variant="quiet" disabled={!p.canGift || held === 0} onClick={p.onGift}>Gift</Button>
+    <article className={`bv-tier is-${level}${held ? '' : ' is-none'}${p.expanded ? ' is-open' : ''}`}>
+      <button type="button" className="bv-tier__hit" aria-expanded={p.expanded} disabled={held === 0} onClick={p.onToggle} aria-label={`${name} boxes, ${held}: show each`}>
+        <div className="bv-tier__art">
+          <span className="bv-tier__shine" aria-hidden="true" />
+          {SPECKS[level]?.map(([x, y, s, d], i) => (
+            <svg key={i} className={`bv-speck is-${level}`} style={{ left: `${x}%`, top: `${y}%`, width: s * 1.6, height: s * 1.6, animationDelay: `${d}s` }} viewBox="-9 -9 18 18" aria-hidden="true">
+              <path d="M0-9 2.300-2.300 9 0 2.300 2.300 0 9-2.300 2.300-9 0-2.300-2.300z" />
+            </svg>
+          ))}
+          <BoxArt level={level} size={112} />
         </div>
-      ) : (
-        <CountForm
-          max={p.action === 'open' ? held : merges}
-          verb={p.action === 'open' ? 'Open' : 'Merge'}
-          unit={p.action === 'open' ? (n) => (n === 1 ? 'box' : 'boxes') : (n) => `into ${fmt(n, 0)} ${to ? LEVEL_LABEL[to] : ''}`}
-          signatures={(n) => (p.action === 'open' ? Math.ceil(n / p.perOpen) : n)}
-          note={p.action === 'merge' ? (n) => `Uses ${fmt(n * p.mergeSize, 0)} ${LEVEL_LABEL[level]}, burned.` : (n) => (n > p.perOpen ? `${fmt(p.perOpen, 0)} boxes a request, one after another.` : '')}
-          onCancel={() => p.setAction(null)}
-          onGo={(n) => (p.action === 'open' ? p.onOpen(n) : p.onMerge(n))}
-        />
-      )}
+      </button>
+      <div className="bv-tier__name">
+        <b>{name}</b>
+        {held > 0 && <ShareButton label={`Share your ${name} boxes`} make={(b) => b.boxCard({ title: `${fmt(held, 0)} ${name} ${held === 1 ? 'box' : 'boxes'}`, big: fmt(held, 0), bigLabel: `${name} boxes`, wallet: p.wallet, facts: facts(held) })} />}
+        <span className="bv-num">{fmt(held, 0)}</span>
+      </div>
+      <div className="bv-tier__more" aria-hidden={!p.expanded}>
+        <div>
+          <ul className="bv-tier__ids">
+            {ids.map((id) => (
+              <li key={id} className="bv-chip is-box">
+                <span>{`#${id}`}</span>
+                <ShareButton label={`Share box #${id}`} make={(b) => b.boxCard({ title: `${name} box #${id}`, big: `#${id}`, bigLabel: `${name} box`, wallet: p.wallet, facts: facts(1) })} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <div className="bv-tier__acts">
+        <Button variant="primary" disabled={!p.canAct || held === 0} onClick={() => p.setAction('open')} title={p.canAct ? undefined : 'Sign in to SoDEX first'}>Open boxes</Button>
+        {to && p.mergeSize > 0 && <Button disabled={!p.canAct || merges === 0} onClick={() => p.setAction('merge')} title={merges === 0 ? `${p.mergeSize} ${name} make 1 ${LEVEL_LABEL[to]}` : undefined}>Merge</Button>}
+        <Button variant="quiet" disabled={!p.canGift || held === 0} onClick={p.onGift}>Gift</Button>
+      </div>
     </article>
-  );
-}
-
-function CountForm({ max, verb, unit, signatures, note, onCancel, onGo }: { max: number; verb: string; unit: (n: number) => string; signatures: (n: number) => number; note: (n: number) => string; onCancel: () => void; onGo: (n: number) => void }) {
-  const [raw, setRaw] = useState(String(max));
-  const n = Math.max(0, Math.min(max, Math.floor(Number(raw) || 0)));
-  return (
-    <form className="bv-form" onSubmit={(e) => { e.preventDefault(); if (n > 0) onGo(n); }}>
-      <div className="bv-form__row">
-        <TextInput inputMode="numeric" aria-label={`How many to ${verb.toLowerCase()}`} value={raw} onChange={(e) => setRaw(e.target.value.replace(/[^0-9]/g, ''))} />
-        <Button variant="quiet" onClick={() => setRaw(String(max))}>All {fmt(max, 0)}</Button>
-      </div>
-      <small>{n > 0 ? `${plural(signatures(n), 'signature')} in your wallet. ${note(n)}` : `Up to ${fmt(max, 0)}.`}</small>
-      <div className="bv-form__row">
-        <Button variant="primary" type="submit" disabled={n === 0}>{verb === 'Open' ? `Open ${fmt(n, 0)} ${unit(n)}` : `Merge ${unit(n)}`}</Button>
-        <Button variant="quiet" onClick={onCancel}>Cancel</Button>
-      </div>
-    </form>
   );
 }
 
@@ -467,7 +475,7 @@ export function MergeMath({ rules }: { rules: LotteryRules | null }) {
     <section className="tf bv-math" aria-label="Merge math">
       <header className="bv-math__h">
         <h2>Merge math</h2>
-        <StatusPill size="sm" tone="neutral">Estimated</StatusPill>
+        {doc && <StatusPill size="sm" tone="neutral">{`Based on ${fmt(doc.boxes, 0)} opened boxes`}</StatusPill>}
       </header>
       {!doc ? (rewards.error ? <p className="bv-note">{rewards.error}</p> : <div className="bv-math__rows">{[0, 1, 2].map((i) => <Skeleton key={i} className="bv-math__skel" />)}</div>) : (
         <>
@@ -495,7 +503,6 @@ export function MergeMath({ rules }: { rules: LotteryRules | null }) {
               );
             })}
           </ul>
-          <p className="bv-note">{`On-chain payouts · ${fmt(doc.boxes, 0)} boxes`}</p>
         </>
       )}
     </section>
@@ -548,7 +555,10 @@ function Cybereators({ address, list, error, retry, market, sosoUsd, canGift, on
               {c.sealed
                 ? <div className="bv-card__art"><Pic c={c} /></div>
                 : <Holo foil={foilOf(c)} className="bv-card__art"><Pic c={c} /></Holo>}
-              <div className="bv-card__t"><b>{c.name}</b>{c.sealed && <StatusPill size="sm" tone="warning">Sealed</StatusPill>}</div>
+              <div className="bv-card__t"><b>{c.name}</b>{c.sealed && <StatusPill size="sm" tone="warning">Sealed</StatusPill>}<ShareButton label={`Share ${c.name}`} make={(b) => b.boxCard({
+                title: c.name, big: c.sealed ? 'Sealed' : 'Revealed', bigLabel: 'Cybereator', wallet: null, label: 'Cybereator',
+                facts: [...(floorOf(c, col) != null ? [{ label: 'Floor', value: soso(floorOf(c, col)) }] : []), ...c.traits.filter((t) => t.value !== 'None').slice(0, 3).map((t) => ({ label: t.type, value: t.value }))],
+              })} /></div>
               {c.traits.length > 0 && !c.sealed && <ul className="bv-traits">{c.traits.filter((t) => t.value !== 'None').slice(0, 4).map((t) => <li key={t.type}><small>{t.type}</small>{t.value}</li>)}</ul>}
               <dl className="bv-kv">
                 <div><dt>Floor</dt><dd className="bv-num">{soso(floorOf(c, col))}</dd></div>

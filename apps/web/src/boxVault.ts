@@ -346,3 +346,23 @@ export async function readRecords(address: string, limit = 100): Promise<RecordR
 /** Tells every part of the page that the SoDEX sign-in changed (one signature serves the vault, history and hero). */
 export const SESSION_EVENT = 'vs:sodex-session';
 export const announceSession = (): void => { try { window.dispatchEvent(new Event(SESSION_EVENT)); } catch { /* no window */ } };
+
+/* --- the weekly draw: the wallet's tickets and which won (GET /draw/entries) ---------------------------------- */
+
+export interface DrawEntry { tokenId: string | null; level: string | null; won: boolean; prizeLevel: string | null }
+export interface DrawRead { round: string | null; status: string | null; deadlineMs: number | null; tickets: number | null; wins: number | null; entries: DrawEntry[] }
+
+export function readDrawAnswer(raw: unknown): DrawRead {
+  const d = obj(raw);
+  const entries = (Array.isArray(d.entries) ? d.entries : []).map(obj).map((e) => ({
+    tokenId: e.tokenId == null ? null : String(e.tokenId), level: typeof e.level === 'string' ? e.level : null,
+    won: e.won === true || e.won === 'true' || e.status === 'won', prizeLevel: typeof e.prizeLevel === 'string' ? e.prizeLevel : null,
+  }));
+  return { round: d.round == null ? null : String(d.round), status: typeof d.status === 'string' ? d.status : null, deadlineMs: nOf(d.deadlineMs), tickets: nOf(d.tickets), wins: nOf(d.wins), entries };
+}
+
+/** SoDEX answers "no draw yet" with an error code: that is an empty round, not a fault. */
+export const readDraw = (address: string): Promise<DrawRead> => call<unknown>(address, '/draw/entries').then(readDrawAnswer, (e: unknown) => {
+  if (e instanceof BoxApiError && /no draw/i.test(e.message)) return { round: null, status: 'none', deadlineMs: null, tickets: 0, wins: 0, entries: [] };
+  throw e;
+});

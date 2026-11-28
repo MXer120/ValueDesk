@@ -4,7 +4,7 @@
  * invented; the page says "Sample" wherever they show.
  */
 import type { WalletBoxes } from '../../../../blindBox';
-import type { RecordRow } from '../../../../boxVault';
+import type { DrawRead, RecordRow } from '../../../../boxVault';
 import type { VaultDemo } from '../../vault/Vault';
 import { DEMO_NFT_OWNER } from '../../../portfolio/devDemo';
 
@@ -42,5 +42,16 @@ export const sampleVault = (): VaultDemo => ({
     row('claim', 96, { count: 9 }),
     row('referral', 130, { count: 1, other: '0x02bf6e8c1a00000000000000000000000000a90f' }),
     row('open', 160, { tokenIds: ['180960'], usd: 1, reward: { asset: { symbol: 'vsoUSDC' }, amount: '1.0' } }),
+  ],
+});
+
+/** The weekly draw for the Sample: 38 tickets, one won (made-up). */
+export const sampleDraw = (): DrawRead => ({
+  round: '7', status: 'open', deadlineMs: null, tickets: 38, wins: 1,
+  entries: [
+    { tokenId: '180412', level: 'Common', won: false, prizeLevel: null },
+    { tokenId: '181006', level: 'Uncommon', won: true, prizeLevel: 'Rare' },
+    { tokenId: '180549', level: 'Common', won: false, prizeLevel: null },
+    { tokenId: '188431', level: 'Rare', won: false, prizeLevel: null },
   ],
 });
