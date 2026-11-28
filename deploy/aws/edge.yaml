@@ -271,7 +271,7 @@ Resources:
               default-src 'self';
               script-src 'self' 'wasm-unsafe-eval';
               style-src 'self' 'unsafe-inline';
-              img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net;
+              img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net https://nft-prod.blockscout.com https://ipfs.filebase.io https://cybereator.oss-ap-northeast-1.aliyuncs.com;
               font-src 'self';
               frame-src https://verify.walletconnect.org https://www.youtube.com https://player.twitch.tv https://player.kick.com https://player.vimeo.com;
               worker-src 'self';
@@ -290,7 +290,32 @@ Resources:
               https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
               https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
               https://*.boltdns.net https://*.brightcovecdn.com
-              wss://161-97-154-121.sslip.io;
+              wss://161-97-154-121.sslip.io
+              https://api.blockcypher.com
+              https://api.mainnet.aptoslabs.com
+              https://api.trongrid.io
+              https://blockscout.lisk.com
+              https://celo.blockscout.com
+              https://eth.blockscout.com
+              https://explorer.inkonchain.com
+              https://explorer.mode.network
+              https://explorer.optimism.io
+              https://free.rpc.fastnear.com
+              https://graphql.mainnet.sui.io
+              https://horizon.stellar.org
+              https://li.quest
+              https://litecoinspace.org
+              https://mempool.space
+              https://rest.cosmos.directory
+              https://rootstock.blockscout.com
+              https://solana-rpc.publicnode.com
+              https://soneium.blockscout.com
+              https://tonapi.io
+              https://toncenter.com
+              https://unichain.blockscout.com
+              https://worldchain-mainnet.explorer.alchemy.com
+              https://xrplcluster.com
+              https://zksync.blockscout.com;
               form-action 'none';
               base-uri 'none';
               object-src 'none';
@@ -344,7 +369,7 @@ Resources:
               default-src 'self';
               script-src 'self' 'wasm-unsafe-eval' 'sha256-bXJtqdhzu4xrNuZI44nF3t24LtnovVLjGKp0GValFLk=';
               style-src 'self' 'unsafe-inline';
-              img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net;
+              img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net https://nft-prod.blockscout.com https://ipfs.filebase.io https://cybereator.oss-ap-northeast-1.aliyuncs.com;
               font-src 'self';
               frame-src https://verify.walletconnect.org https://www.youtube.com https://player.twitch.tv https://player.kick.com https://player.vimeo.com;
               worker-src 'self';
@@ -363,7 +388,32 @@ Resources:
               https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
               https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
               https://*.boltdns.net https://*.brightcovecdn.com
-              wss://161-97-154-121.sslip.io;
+              wss://161-97-154-121.sslip.io
+              https://api.blockcypher.com
+              https://api.mainnet.aptoslabs.com
+              https://api.trongrid.io
+              https://blockscout.lisk.com
+              https://celo.blockscout.com
+              https://eth.blockscout.com
+              https://explorer.inkonchain.com
+              https://explorer.mode.network
+              https://explorer.optimism.io
+              https://free.rpc.fastnear.com
+              https://graphql.mainnet.sui.io
+              https://horizon.stellar.org
+              https://li.quest
+              https://litecoinspace.org
+              https://mempool.space
+              https://rest.cosmos.directory
+              https://rootstock.blockscout.com
+              https://solana-rpc.publicnode.com
+              https://soneium.blockscout.com
+              https://tonapi.io
+              https://toncenter.com
+              https://unichain.blockscout.com
+              https://worldchain-mainnet.explorer.alchemy.com
+              https://xrplcluster.com
+              https://zksync.blockscout.com;
               form-action 'none';
               base-uri 'none';
               object-src 'none';

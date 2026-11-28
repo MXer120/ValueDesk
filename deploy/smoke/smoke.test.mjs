@@ -77,7 +77,10 @@ test('the header table: one policy per path class, as the edge behaviours are', 
   assert.ok(CSP.scan.includes(SCAN_SCRIPT_HASH) && !CSP.site.includes('sha256-'));
   assert.equal(CSP.scan.replace(` ${SCAN_SCRIPT_HASH}`, ''), CSP.site, 'the scan policy is the site policy plus one hash');
   for (const p of [CSP.site, CSP.scan, CSP.images]) {
-    assert.ok(p.length <= 1783, 'fits a CloudFront response headers policy');
+    // Vercel serves production (CloudFront is the retired path, deploy/release/publish-web.sh): 1783 was CloudFront's
+    // response headers policy limit. Since 2026-11-28 the site policy is longer (Portfolio's on-chain sources, ~2.1k):
+    // edge.yaml would need it shortened before CloudFront could serve the site again. Kept well under any proxy's line limit.
+    assert.ok(p.length <= 4096, 'fits one response header line');
     assert.ok(!/\s{2}|\n/.test(p), 'one line, single spaces');
   }
   assert.match(CSP.site, /frame-ancestors 'none'/);

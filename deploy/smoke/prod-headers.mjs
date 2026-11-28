@@ -36,6 +36,32 @@ const CONNECT_SRC = [
   'wss://api.valuedesk.so',
   // The bots page's live stream (server-sent events), straight to the instance (web copy/executor.ts streamUrlOf).
   'https://api.valuedesk.so',
+  // Portfolio's On-chain tab (portfolio/wallet/useOnchain.ts): balances of every chain read from the browser, LI.FI's token list.
+  'https://api.blockcypher.com',
+  'https://api.mainnet.aptoslabs.com',
+  'https://api.trongrid.io',
+  'https://blockscout.lisk.com',
+  'https://celo.blockscout.com',
+  'https://eth.blockscout.com',
+  'https://explorer.inkonchain.com',
+  'https://explorer.mode.network',
+  'https://explorer.optimism.io',
+  'https://free.rpc.fastnear.com',
+  'https://graphql.mainnet.sui.io',
+  'https://horizon.stellar.org',
+  'https://li.quest',
+  'https://litecoinspace.org',
+  'https://mempool.space',
+  'https://rest.cosmos.directory',
+  'https://rootstock.blockscout.com',
+  'https://solana-rpc.publicnode.com',
+  'https://soneium.blockscout.com',
+  'https://tonapi.io',
+  'https://toncenter.com',
+  'https://unichain.blockscout.com',
+  'https://worldchain-mainnet.explorer.alchemy.com',
+  'https://xrplcluster.com',
+  'https://zksync.blockscout.com',
 ];
 
 /** The inline script of apps/web/public/scan/index.html (the redirect for old links). */
@@ -45,7 +71,8 @@ const sitePolicy = (scriptSrc) => [
   "default-src 'self'",
   `script-src ${scriptSrc}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net",
+  // NFT pictures (Portfolio, Blind Box): Blockscout's NFT store, IPFS, the Cybereator image store.
+  "img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net https://nft-prod.blockscout.com https://ipfs.filebase.io https://cybereator.oss-ap-northeast-1.aliyuncs.com",
   "font-src 'self'",
   'frame-src https://verify.walletconnect.org https://www.youtube.com https://player.twitch.tv https://player.kick.com https://player.vimeo.com',
   "worker-src 'self'",
