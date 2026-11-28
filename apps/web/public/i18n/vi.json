@@ -8798,9 +8798,5 @@
 "wave {0}":"đợt {0}",
 "Your {0} position {1}":"Vị thế {0} của bạn {1}",
 "Your {0} position is about {1}{2}":"Vị thế {0} của bạn khoảng {1}{2}",
-"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"Đồng hồ trên thiết bị của bạn bị lệch nên đăng nhập bị từ chối. Đặt ngày giờ về tự động rồi đăng nhập lại.",
-"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"Chữ ký đến sau khi hết 5 phút hiệu lực. Đăng nhập lại và xác nhận ngay trong ví.",
-"Your bots changed servers while you signed. Sign in again.":"Bot của bạn đã đổi máy chủ trong lúc bạn ký. Đăng nhập lại.",
-"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"Khóa trong ngày của trình duyệt này không còn hiệu lực. Đăng nhập lại; ví sẽ hỏi một lần.",
-"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"Chữ ký đến từ một tài khoản khác chứ không phải tài khoản đã kết nối. Chuyển ví sang địa chỉ đã kết nối rồi đăng nhập lại."
+"The sign-in did not go through. Try again. Code: {0}":"Đăng nhập không thành công. Hãy thử lại. Mã: {0}"
 }

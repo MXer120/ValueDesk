@@ -277,6 +277,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
     const t0 = Date.now();
     // The signed request's action, wallet and digest, for the audit log (never its signature).
     let signed: { action: string | null; owner: string | null; digest: string | null } | null = null;
+    let refusal: { code: string; error: string } | null = null;
     // A request target new URL cannot read ("//[x]/..." is one) must be a 400, never a throw out of
     // this handler: an unhandled rejection stops the executor (main.ts), every wallet's copies with it.
     let url: URL | null;
@@ -441,6 +442,12 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(500, 'internal', 'Something went wrong in the executor.');
       if (!(e instanceof ApiError)) log.error('executor: request failed', { path, error: String(e) });
+      // A refused write, with its exact reason (owner 2026-11-28: "we should have the logs so we know the exact issue" -
+      // a wallet's sign-ins were refused 26 times and nothing said why): in the journal and in the request's audit row.
+      if (req.method === 'POST' && err.status >= 400 && err.status !== 404) {
+        refusal = { code: err.code, error: err.message.slice(0, 300) };
+        log.warn('executor: refused', { path, status: err.status, owner: signed?.owner ?? null, action: signed?.action ?? null, ...refusal });
+      }
       // A refusal's figures (a bot's margin: what it needs, what is free) go with it, for the page to show.
       send(res, err.status, { ok: false, code: err.code, error: err.message, ...(err.detail ? { detail: err.detail } : {}) });
     } finally {
@@ -449,7 +456,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       // (Never throws: while the executor starts, the service is not there yet - nothing to record then.)
       if (!quiet && (req.method === 'POST' || (res.statusCode >= 400 && res.statusCode !== 401 && res.statusCode !== 404))) {
         try {
-          svc.audit({ method: req.method ?? '', path, status: res.statusCode, ms: Date.now() - t0, client: ipPrefix(clientOf(req)), country: cfg.trustEdge ? normaliseCountry(String(req.headers['x-viewer-country'] ?? '')) : null, request: signed });
+          svc.audit({ method: req.method ?? '', path, status: res.statusCode, ms: Date.now() - t0, client: ipPrefix(clientOf(req)), country: cfg.trustEdge ? normaliseCountry(String(req.headers['x-viewer-country'] ?? '')) : null, request: signed, ...(refusal ? { refusal } : {}) });
         } catch {
           /* starting */
         }

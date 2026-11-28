@@ -69,19 +69,49 @@ export class ExecutorError extends Error {
  * device is more than 30 s off. One answer is enough; a later one replaces it.
  */
 let clockOffsetMs = 0;
+let clockSeen = false;
 const CLOCK_TRUST_MS = 30_000;
 export function noteServerTime(dateHeader: string | null, ageHeader: string | null, sentAt: number, receivedAt: number): void {
   const t = dateHeader ? Date.parse(dateHeader) : NaN;
   if (!Number.isFinite(t)) return;
+  clockSeen = true;
   const age = Number(ageHeader ?? 0);
   // Date has whole seconds: the server's time is in [t, t + 1 s) when it answered, between sentAt and receivedAt here.
   const server = t + (Number.isFinite(age) && age > 0 ? age * 1000 : 0) + 500;
   const off = server - (sentAt + receivedAt) / 2;
-  clockOffsetMs = Math.abs(off) > CLOCK_TRUST_MS ? off : 0;
+  clockOffsetMs = Math.abs(off) > CLOCK_TRUST_MS ? Math.round(off) : 0;
 }
+/**
+ * Before the first signature of a page: one read of the executor's /info for its time, when no answer has said it yet
+ * (the terms step of Bot setup can be the very first thing signed - 2026-11-28, the same user: "this request has expired;
+ * sign it again ... check your computer's clock"). Up to 3 s; without an answer the device's clock it is.
+ */
+let clockAsk: Promise<void> | null = null;
+/** Tests: as on a fresh page, no executor answer seen yet. */
+export function _resetServerClockForTests(): void {
+  clockOffsetMs = 0;
+  clockSeen = false;
+  clockAsk = null;
+}
+export function clockReady(): Promise<void> {
+  if (clockSeen) return Promise.resolve();
+  clockAsk ??= (async () => {
+    const sentAt = Date.now();
+    try {
+      const res = await fetch(`${HOSTED_BASE}/info`, { cache: 'no-store', credentials: 'omit', signal: AbortSignal.timeout(3_000) });
+      noteServerTime(res.headers.get('date'), res.headers.get('age'), sentAt, Date.now());
+    } catch {
+      /* no answer: the device's clock */
+    } finally {
+      clockAsk = null;
+    }
+  })();
+  return clockAsk;
+}
+
 /** Now on the executors' clock (the device's when it is within 30 s of theirs, or no answer said yet). */
 export function serverNow(): number {
-  return Date.now() + clockOffsetMs;
+  return Math.round(Date.now() + clockOffsetMs);
 }
 
 /** `http://127.0.0.1:8799` -> `http://127.0.0.1:8799/api/copy/v1`; a full API base is kept. */
@@ -114,6 +144,7 @@ const termsDayKeyExecutors = new Set<string>();
 
 /** Sign one request for `executor` with the connected wallet. */
 export async function signCopy(provider: Eip1193Provider, owner: string, executor: string, action: CopyAction, payload: unknown): Promise<SignedCopyRequest> {
+  await clockReady();
   const chainId = await getChainId(provider);
   const req = buildCopyRequest({ action, owner, executor, payload, chainId, now: serverNow() });
   // Everyday actions (start, stop, pause, save, sign-in...) are signed by this browser's day key: the wallet signs
@@ -221,6 +252,7 @@ async function dayKey(provider: Eip1193Provider, owner: string, executor: string
  * take no further wallet popup for a day. Without WebCrypto / IndexedDB, or for an older executor: the terms alone.
  */
 export async function signTermsWithDayKey(provider: Eip1193Provider, owner: string, termsExecutor: string, payload: Record<string, unknown>, dayKeyFor: string | null): Promise<SignedCopyRequest> {
+  await clockReady();
   const chainId = await getChainId(provider);
   let pair: CryptoKeyPair | null = null;
   let expiresAt = 0;
@@ -256,13 +288,14 @@ function withAnswerTime<T>(p: Promise<T>): Promise<T> {
 }
 
 /** Forget this browser's day keys for a wallet (sign-out, a refused approval): the next action asks the wallet again. */
-export function forgetDayKeys(owner: string): void {
+export function forgetDayKeys(owner: string): Promise<void> {
   const o = owner.toLowerCase();
   for (const k of [...dayKeys.keys()]) if (k.endsWith(`:${o}`)) dayKeys.delete(k);
-  void (async () => {
+  for (const k of [...dayKeyPending.keys()]) if (k.endsWith(`:${o}`)) dayKeyPending.delete(k);
+  return (async () => {
     const keys = (await dayDbDo<IDBValidKey[]>('readonly', (s) => s.getAllKeys())) ?? [];
     for (const k of keys) if (typeof k === 'string' && k.endsWith(`:${o}`)) await dayDbDo('readwrite', (s) => s.delete(k));
-  })();
+  })().catch(() => undefined);
 }
 
 /**
@@ -345,6 +378,11 @@ export class ExecutorClient {
     if (!res.ok) {
       const d = (data ?? {}) as { error?: string; code?: string; detail?: unknown };
       if (res.status === 401 && d.code === 'session') this.forgetSession();
+      // A request this browser's day key signed and the executor refused for its signature (2026-11-28: a wallet's
+      // sign-ins were refused 26 times in a row, 2-10 s apart, all by the same key): the key is dropped, so the next
+      // try asks the wallet for a new one instead of sending the refused key again.
+      const sent = (o.body as { request?: { owner?: unknown; delegation?: unknown } } | undefined)?.request;
+      if (res.status === 401 && d.code === 'signature' && sent?.delegation && typeof sent.owner === 'string') await forgetDayKeys(sent.owner);
       throw new ExecutorError(d.error || `The executor answered HTTP ${res.status}.`, res.status, d.code || 'http', d.detail && typeof d.detail === 'object' ? (d.detail as Record<string, unknown>) : null);
     }
     return data as T;
@@ -417,7 +455,14 @@ export class ExecutorClient {
     const held = this.token(owner);
     if (held) return held;
     const request = await signCopy(provider, owner, executorId, 'session', {});
-    const g = await this.call<SessionGrant>('POST', '/session', { body: { request }, pairing });
+    let g: SessionGrant;
+    try {
+      g = await this.call<SessionGrant>('POST', '/session', { body: { request }, pairing });
+    } catch (e) {
+      // This browser's day key refused (dropped in call() above): once more, on a new key the wallet approves.
+      if (!(e instanceof ExecutorError && e.status === 401 && e.code === 'signature' && request.delegation)) throw e;
+      g = await this.call<SessionGrant>('POST', '/session', { body: { request: await signCopy(provider, owner, executorId, 'session', {}) }, pairing });
+    }
     try {
       localStorage.setItem(sessionKey(this.base, owner, this.id ?? executorId), JSON.stringify(g));
     } catch {

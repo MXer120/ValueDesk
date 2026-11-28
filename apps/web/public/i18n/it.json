@@ -8798,9 +8798,5 @@
 "wave {0}":"ondata {0}",
 "Your {0} position {1}":"La tua posizione {0} {1}",
 "Your {0} position is about {1}{2}":"La tua posizione {0} è di circa {1}{2}",
-"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"L'orologio del tuo dispositivo è sbagliato, quindi l'accesso è stato rifiutato. Imposta data e ora su automatico, poi accedi di nuovo.",
-"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"La firma è arrivata dopo i suoi 5 minuti. Accedi di nuovo e conferma subito nel tuo wallet.",
-"Your bots changed servers while you signed. Sign in again.":"I tuoi bot hanno cambiato server mentre firmavi. Accedi di nuovo.",
-"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"La chiave giornaliera di questo browser non è più valida. Accedi di nuovo; il tuo wallet lo chiede una volta.",
-"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"La firma proviene da un account diverso da quello collegato. Passa il wallet all'indirizzo collegato, poi accedi di nuovo."
+"The sign-in did not go through. Try again. Code: {0}":"L'accesso non è andato a buon fine. Riprova. Codice: {0}"
 }

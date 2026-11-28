@@ -8798,9 +8798,5 @@
 "wave {0}":"fala {0}",
 "Your {0} position {1}":"Twoja pozycja {0} {1}",
 "Your {0} position is about {1}{2}":"Twoja pozycja {0} wynosi ok. {1}{2}",
-"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"Zegar Twojego urządzenia jest przestawiony, dlatego logowanie zostało odrzucone. Ustaw datę i godzinę na automatyczne, a potem zaloguj się ponownie.",
-"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"Podpis dotarł po upływie 5 minut. Zaloguj się ponownie i od razu potwierdź w portfelu.",
-"Your bots changed servers while you signed. Sign in again.":"Twoje boty zmieniły serwer podczas podpisywania. Zaloguj się ponownie.",
-"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"Dzienny klucz tej przeglądarki już nie obowiązuje. Zaloguj się ponownie; portfel zapyta raz.",
-"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"Podpis pochodzi z innego konta niż połączone. Przełącz portfel na połączony adres, a potem zaloguj się ponownie."
+"The sign-in did not go through. Try again. Code: {0}":"Logowanie nie powiodło się. Spróbuj ponownie. Kod: {0}"
 }

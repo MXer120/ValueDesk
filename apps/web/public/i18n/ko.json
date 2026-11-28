@@ -8798,9 +8798,5 @@
 "wave {0}":"웨이브 {0}",
 "Your {0} position {1}":"내 {0} 포지션 {1}",
 "Your {0} position is about {1}{2}":"내 {0} 포지션은 약 {1}{2}",
-"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"기기의 시계가 맞지 않아 로그인이 거부되었습니다. 날짜와 시간을 자동으로 설정한 뒤 다시 로그인하세요.",
-"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"서명이 5분의 유효 시간이 지난 뒤 도착했습니다. 다시 로그인하고 지갑에서 바로 확인하세요.",
-"Your bots changed servers while you signed. Sign in again.":"서명하는 동안 봇의 서버가 바뀌었습니다. 다시 로그인하세요.",
-"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"이 브라우저의 일일 키가 더 이상 유효하지 않습니다. 다시 로그인하세요. 지갑에서 한 번 요청합니다.",
-"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"서명이 연결된 계정이 아닌 다른 계정에서 왔습니다. 지갑을 연결된 주소로 바꾼 뒤 다시 로그인하세요."
+"The sign-in did not go through. Try again. Code: {0}":"로그인이 완료되지 않았어요. 다시 시도하세요. 코드: {0}"
 }

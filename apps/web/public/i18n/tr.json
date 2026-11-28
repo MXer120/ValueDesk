@@ -8798,9 +8798,5 @@
 "wave {0}":"dalga {0}",
 "Your {0} position {1}":"{0} pozisyonunuz {1}",
 "Your {0} position is about {1}{2}":"{0} pozisyonunuz yaklaşık {1}{2}",
-"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"Cihazının saati yanlış olduğu için giriş reddedildi. Tarih ve saati otomatik yap, sonra yeniden giriş yap.",
-"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"İmza, 5 dakikalık süresi dolduktan sonra ulaştı. Yeniden giriş yap ve cüzdanında hemen onayla.",
-"Your bots changed servers while you signed. Sign in again.":"Sen imzalarken botların sunucu değiştirdi. Yeniden giriş yap.",
-"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"Bu tarayıcının günlük anahtarı artık geçerli değil. Yeniden giriş yap; cüzdanın bir kez soracak.",
-"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"İmza bağlı hesaptan değil, başka bir hesaptan geldi. Cüzdanını bağlı adrese geçir, sonra yeniden giriş yap."
+"The sign-in did not go through. Try again. Code: {0}":"Giriş başarısız oldu. Tekrar deneyin. Kod: {0}"
 }

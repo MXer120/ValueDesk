@@ -754,7 +754,7 @@ export class ExecutorService {
   /* ------------------------------------------------------------ audit ----- */
 
   /** One answered request, for the audit log (server.ts): route, status, where from, the signed action and wallet. */
-  audit(r: { method: string; path: string; status: number; ms: number; client: string; country: string | null; request: { action: string | null; owner: string | null; digest: string | null } | null }): void {
+  audit(r: { method: string; path: string; status: number; ms: number; client: string; country: string | null; request: { action: string | null; owner: string | null; digest: string | null } | null; refusal?: { code: string; error: string } }): void {
     this.db.audit('request', r.request?.owner ?? null, r.path, r);
   }
 

@@ -8798,9 +8798,5 @@
 "wave {0}":"волна {0}",
 "Your {0} position {1}":"Ваша позиция {0} {1}",
 "Your {0} position is about {1}{2}":"Ваша позиция {0} составляет около {1}{2}",
-"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"Часы на вашем устройстве идут неверно, поэтому вход отклонён. Включите автоматические дату и время, затем войдите снова.",
-"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"Подпись пришла после того, как истекли её 5 минут. Войдите снова и сразу подтвердите в кошельке.",
-"Your bots changed servers while you signed. Sign in again.":"Пока вы подписывали, ваши боты сменили сервер. Войдите снова.",
-"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"Дневной ключ этого браузера больше не действует. Войдите снова; кошелёк спросит один раз.",
-"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"Подпись пришла с другого аккаунта, а не с подключённого. Переключите кошелёк на подключённый адрес, затем войдите снова."
+"The sign-in did not go through. Try again. Code: {0}":"Вход не прошёл. Попробуйте снова. Код: {0}"
 }

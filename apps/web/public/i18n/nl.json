@@ -8798,9 +8798,5 @@
 "wave {0}":"golf {0}",
 "Your {0} position {1}":"Je {0}-positie {1}",
 "Your {0} position is about {1}{2}":"Je {0}-positie is ongeveer {1}{2}",
-"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"De klok van je apparaat loopt verkeerd, daarom is het inloggen geweigerd. Zet datum en tijd op automatisch en log daarna opnieuw in.",
-"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"De handtekening kwam aan nadat de 5 minuten voorbij waren. Log opnieuw in en bevestig meteen in je wallet.",
-"Your bots changed servers while you signed. Sign in again.":"Je bots wisselden van server terwijl je tekende. Log opnieuw in.",
-"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"De dagsleutel van deze browser is niet meer geldig. Log opnieuw in; je wallet vraagt het één keer.",
-"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"De handtekening kwam van een ander account dan het verbonden account. Zet je wallet op het verbonden adres en log daarna opnieuw in."
+"The sign-in did not go through. Try again. Code: {0}":"Het inloggen is niet gelukt. Probeer het opnieuw. Code: {0}"
 }
