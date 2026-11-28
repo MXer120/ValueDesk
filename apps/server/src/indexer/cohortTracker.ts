@@ -2272,7 +2272,7 @@ export class CohortTracker {
       if (step.log) {
         const ids = await s.putLiqLogSliced(stepT, step.log.fresh, step.log.changed, step.log.closed, () => this.breathe());
         if (full) s.setMeta(LIQ_LOG_FULL_META, String(stepT));
-        this.live.commit(ids);
+        this.live.commit(stepT, ids);
         if (stepT - this.levelPrunedAt >= DAY_MS) {
           if (mayPrune('liq-log')) s.pruneLiqLog(stepT - LIQ_KEEP_MS);
           this.levelPrunedAt = stepT;

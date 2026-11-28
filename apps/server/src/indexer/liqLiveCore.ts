@@ -24,6 +24,8 @@ export const LIQ_LOG_MOVE = 0.0005;
 export const USD_LOG_MOVE = 0.002;
 /** A step's computing gives the thread back this often (the beat and the feed go on between slices). */
 const STEP_SLICE_MS = 30;
+/** Steps' diffs held for their commit at most (pendingLogs): a write let go as stuck holds one, the next step another. */
+const PENDING_LOGS_KEPT = 4;
 /**
  * Every coin whole this often: the deltas leave out moves under 1% (live.ts SEND_MOVE), this puts the API's copy back to
  * exact. A few coins with each send, each once in the interval, not all of them at once (2026-11-09: every coin whole in
@@ -138,8 +140,16 @@ export class LiveCore {
   /** The change log's last logged state per position (aid|coin|venue), and the address ids; null until the first step. */
   private levelState: Map<string, { side: number; liq: number; usd: number }> | null = null;
   private levelAddr: Map<string, number> | null = null;
-  /** The last step's diff, until it is written (commit) or replaced by the next step's. */
-  private pendingLog: { changed: ChangedRow[]; closed: ClosedRow[] } | null = null;
+  /**
+   * Each step's diff by its step time, until that step's write commits it (commit). Kept by step, not as "the last
+   * one": the 2-minute heatmap rows call `step` too, while a step's write is still going, and until 2026-11-28 that call
+   * threw the diff away. Every write longer than ~2 min then committed nothing, the state stayed as it was loaded at the
+   * start, and each step logged again every position that had moved since: 67,577 rows a step on 11-26 00:09 climbing
+   * to 162,000 on 11-28, 69% of them with no move past LIQ_LOG_MOVE / USD_LOG_MOVE, and the writes 5-20 min a step.
+   */
+  private pendingLogs = new Map<number, { changed: ChangedRow[]; closed: ClosedRow[] }>();
+  /** The newest step committed: an older one committed after it moves no state (its rows are older than the state's). */
+  private committedT = Number.NEGATIVE_INFINITY;
 
   constructor(private readonly src: LiveSource, o: {
     crossed?: (venue: Venue, address: string, usd: number) => void;
@@ -228,8 +238,10 @@ export class LiveCore {
   async step(ask: StepAsk, breathe: () => Promise<void>): Promise<StepOut> {
     // Until every book is priced into the engine once (seconds after a start), the last rows stand.
     if (!this.ready) return { ready: false };
-    this.pendingLog = null;
     if (ask.init) {
+      // The state as the store holds it: no diff from before it can still be committed onto it.
+      this.pendingLogs.clear();
+      this.committedT = Number.NEGATIVE_INFINITY;
       this.levelAddr = ask.init.addrs;
       this.levelState = new Map();
       for (const r of ask.init.cur) this.levelState.set(`${r.aid}|${r.coin}|${r.venue}`, { side: r.side, liq: r.liq, usd: r.usd });
@@ -266,7 +278,11 @@ export class LiveCore {
     }
     const layersAt = Date.now();
     const log = this.levelDiff(keep, byCoin, ask.full);
-    this.pendingLog = log ? { changed: log.changed, closed: log.closed } : null;
+    // Asked again for the same step (its write failed): this diff replaces that one.
+    this.pendingLogs.delete(ask.t);
+    if (log) this.pendingLogs.set(ask.t, { changed: log.changed, closed: log.closed });
+    // A write never committed (failed, or let go as stuck): only the last few steps' diffs are held.
+    for (const t of this.pendingLogs.keys()) if (this.pendingLogs.size > PENDING_LOGS_KEPT) this.pendingLogs.delete(t);
     return { ready: true, now, step: { hist, fine, log, positionsMs, layersMs: layersAt - stepAt - positionsMs, diffMs: Date.now() - layersAt } };
   }
 
@@ -316,14 +332,21 @@ export class LiveCore {
     return { fresh: [...fresh], changed, closed };
   }
 
-  /** The last step's change log is written: its state moves, with the ids the new addresses were given. */
-  commit(ids: ReadonlyMap<string, number>): void {
-    const log = this.pendingLog;
-    this.pendingLog = null;
+  /**
+   * Step `t`'s change log is written: its state moves, with the ids the new addresses were given. However long the write
+   * took, and whatever `step` calls came between (the heatmap rows every 2 minutes). Diffs of steps before `t` that were
+   * never committed go too: `t`'s diff was taken after them and holds whatever of theirs still differed.
+   */
+  commit(t: number, ids: ReadonlyMap<string, number>): void {
+    const log = this.pendingLogs.get(t);
+    for (const k of this.pendingLogs.keys()) if (k <= t) this.pendingLogs.delete(k);
     const state = this.levelState;
     const addr = this.levelAddr;
-    if (!log || !state || !addr) return;
+    if (!state || !addr) return;
+    // The ids are the store's whichever step they came with: a later step must not send those addresses as new again.
     for (const [a, id] of ids) addr.set(a, id);
+    if (!log || t < this.committedT) return;
+    this.committedT = t;
     for (const x of log.changed) {
       const aid = typeof x.aid === 'number' ? x.aid : ids.get(x.aid)!;
       state.set(`${aid}|${x.coin}|${x.venue}`, { side: x.side, liq: x.liq, usd: x.usd });
