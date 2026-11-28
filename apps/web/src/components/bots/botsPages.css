@@ -1869,3 +1869,10 @@ html[data-theme='light'] .sv-ladder__rows li.is-vip .sv-ladder__fee { background
   .bots-actbar__act > .bots-stepper__next { flex: 1 1 auto; max-width: 240px; justify-content: center; }
   .bots-actbar__note { color: var(--tf-muted, var(--muted)); font-size: 12px; line-height: 16px; }
 }
+/* SoPoints from this bot (BotPoints.tsx), under Your cost here. */
+.bots-pts { gap: 12px; }
+.bots-pts__v { display: flex; align-items: center; gap: 10px; }
+.bots-est__v.is-md { font-size: 28px; line-height: 1.1; }
+.bots-pts__row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding-top: 12px; border-top: 1px dashed rgb(var(--ink) / 0.12); font-size: 13px; color: var(--tf-muted); }
+.bots-pts__row b { font-family: var(--font-num); font-weight: 500; font-size: 15px; color: var(--tf-fg); }
+.bots-pts__row b.pos { color: var(--tf-pos, var(--pos)); }
