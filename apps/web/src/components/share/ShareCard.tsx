@@ -98,7 +98,7 @@ export function ShareCard({ card, code, onClose, controls }: { card: CardData; c
   };
 
   const foot = (
-    <DlgFoot left={<span className="share-made" role="status">{note ?? <><i aria-hidden="true" />Made on this device, nothing is uploaded</>}</span>}>
+    <DlgFoot left={<span className="share-made" role="status">{note}</span>}>
       {phone ? (
         <>
           <button type="button" className="dlg-btn" disabled={!blob || busy} onClick={() => download('save')}>{ICON.down}Save</button>
