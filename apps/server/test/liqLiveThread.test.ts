@@ -324,8 +324,8 @@ test('the step from the thread equals the step inline and the code it replaced, 
   assert.ok(a.step.log.changed.length > 300 && a.step.fine.length > 0 && a.step.hist.length === 3);
   // The store gives the new addresses ids; both engines and the reference move their state.
   const ids = new Map(a.step.log.fresh.map((x, i) => [x, 100 + i]));
-  inline.commit(ids);
-  thread.commit(ids);
+  inline.commit(ask.t!, ids);
+  thread.commit(ask.t!, ids);
   for (const [x, id] of ids) refAddr.set(x, id);
   for (const x of before.log!.changed as Array<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number }>) {
     state.set(`${typeof x.aid === 'number' ? x.aid : ids.get(x.aid)!}|${x.coin}|${x.venue}`, { side: x.side, liq: x.liq, usd: x.usd });
@@ -347,6 +347,55 @@ test('the step from the thread equals the step inline and the code it replaced, 
   assert.deepEqual(stepPart(b2), stepPart(a2), 'second step: thread = inline');
   assert.deepEqual(stepPart(a2), plain(before2), 'second step: inline = before the thread');
   assert.ok(a2.step?.log && a2.step.log.closed.length > 0 && a2.step.log.changed.length < a.step.log.changed.length);
+});
+
+test('a step written for longer than the heatmap rows still moves the state: the next step logs only what moved (2026-11-28)', async () => {
+  // Production: the 2-minute heatmap rows call `step` (t null) while a step's log is still being written. That call threw
+  // the step's diff away, its commit moved nothing, and every later step logged again all that had moved since the start:
+  // 67,577 rows a step after the 11-25 restart, 162,000 by 11-28, 69% of them with no move past the thresholds.
+  const w = new World();
+  const r = rng(29);
+  const now = Date.now();
+  for (let i = 0; i < 300; i++) w.books.set(`${i % 3 ? 'hyperliquid' : 'lighter'}|0x${(i + 0x3000).toString(16)}`, randomBook(r, now - i));
+  const inline = w.link(false, port());
+  const thread = w.link(true, port());
+  open.push(inline, thread);
+  for (const k of w.books.keys()) w.set(k, w.books.get(k)!);
+  inline.start();
+  thread.start();
+  await inline.drain();
+  await thread.drain();
+  const ask: StepAsk = { now, t: Math.floor(now / 900_000) * 900_000, coins: ['BTC', 'ETH', 'SOL'], ticks: new Map([['BTC', 0.1], ['ETH', 0.01]]), full: false };
+  for (const l of [inline, thread]) {
+    const name = l === inline ? 'inline' : 'thread';
+    const a = await l.step({ ...ask, init: { cur: [], addrs: new Map() } });
+    assert.ok(a.ready && a.step?.log && a.step.log.changed.length > 200, `${name}: the first step logs every position`);
+    // The heatmap rows, twice, while that step's log is written.
+    for (const k of [1, 2]) {
+      const rows = await l.step({ ...ask, now: now + k * 120_000, t: null });
+      assert.ok(rows.ready && rows.now && !rows.step, `${name}: heatmap rows only`);
+    }
+    l.commit(ask.t!, new Map(a.step.log.fresh.map((x, i) => [x, 1_000 + i])));
+    // Nothing moved: the next step has nothing to log.
+    const b = await l.step({ ...ask, now: now + 900_000, t: ask.t! + 900_000 });
+    assert.ok(b.ready, name);
+    assert.equal(b.step?.log ?? null, null, `${name}: nothing logged again (${b.step?.log?.changed.length ?? 0} rows)`);
+    // One book moves: only its positions are logged, by their ids, none sent as a new address.
+    const key = [...w.books.keys()][7]!;
+    const moved = randomBook(r, now + 2);
+    w.set(key, moved);
+    // Both engines take the move (the other one's first step must not read the book half way).
+    await inline.drain();
+    await thread.drain();
+    // A commit for a step that was never asked (or already replaced) moves nothing.
+    l.commit(ask.t! + 450_000, new Map());
+    const c = await l.step({ ...ask, now: now + 1_800_000, t: ask.t! + 1_800_000 });
+    assert.ok(c.step?.log, `${name}: the moved book is logged`);
+    // (An address whose book had no level the first time is new to the log now; one given an id is never sent again.)
+    for (const x of c.step.log.fresh) assert.ok(!a.step.log.fresh.includes(x), `${name}: ${x} was given an id at the first step and is sent as new again`);
+    assert.ok(c.step.log.changed.length + c.step.log.closed.length <= moved.pos.size + 3, `${name}: only the moved book (${c.step.log.changed.length} changed, ${c.step.log.closed.length} closed)`);
+    l.commit(ask.t! + 1_800_000, new Map());
+  }
 });
 
 test('a killed thread is started again, handed every book, and the feed comes back whole', async () => {

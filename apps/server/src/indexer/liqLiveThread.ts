@@ -82,7 +82,8 @@ export interface LiveLink {
   status(): LiveStatus & { thread?: { restarts: number; hangs: number; sent: number; queued: number } };
   readonly needsLevelInit: boolean;
   step(ask: StepAsk): Promise<StepOut>;
-  commit(ids: ReadonlyMap<string, number>): void;
+  /** Step `t`'s change log is written (liqLiveCore.ts commit): the engine's state moves to it. */
+  commit(t: number, ids: ReadonlyMap<string, number>): void;
   totals(): Promise<Totals>;
   /** Tests and tools: every coin whole as the engine holds it, once everything handed in so far is priced. */
   drain(): Promise<Map<string, LiqNow>>;
@@ -149,7 +150,7 @@ class InlineLink implements LiveLink {
   status() { return this.core.status(); }
   get needsLevelInit(): boolean { return this.core.needsLevelInit; }
   step(ask: StepAsk): Promise<StepOut> { return this.core.step(ask, this.d.breathe); }
-  commit(ids: ReadonlyMap<string, number>): void { this.core.commit(ids); }
+  commit(t: number, ids: ReadonlyMap<string, number>): void { this.core.commit(t, ids); }
   async totals(): Promise<Totals> { return this.core.live.totals(); }
   async heapUsed(): Promise<number | null> { return null; }
   async drain(): Promise<Map<string, LiqNow>> {
@@ -168,7 +169,7 @@ type ToThread =
   | { t: 'call'; id: number; op: 'step'; ask: StepAsk }
   | { t: 'call'; id: number; op: 'totals' | 'drain' | 'heap' | 'hang' }
   | { t: 'call'; id: number; op: 'cohort'; ask: CohortAsk }
-  | { t: 'commit'; ids: Map<string, number> }
+  | { t: 'commit'; stepT: number; ids: Map<string, number> }
   | { t: 'coh'; m: CohortIn };
 
 /** Thread -> indexer. */
@@ -318,8 +319,8 @@ class ThreadLink implements LiveLink {
     return out;
   }
 
-  commit(ids: ReadonlyMap<string, number>): void {
-    this.w?.postMessage({ t: 'commit', ids: new Map(ids) } satisfies ToThread);
+  commit(t: number, ids: ReadonlyMap<string, number>): void {
+    this.w?.postMessage({ t: 'commit', stepT: t, ids: new Map(ids) } satisfies ToThread);
   }
 
   totals(): Promise<Totals> { return this.call<Totals>({ t: 'call', id: 0, op: 'totals' }); }
@@ -563,7 +564,7 @@ if (!isMainThread && (workerData as { liqLiveThread?: boolean } | null)?.liqLive
         kick();
         return;
       case 'commit':
-        core.commit(m.ids);
+        core.commit(m.stepT, m.ids);
         return;
       case 'coh':
         cohorts.apply(m.m);
