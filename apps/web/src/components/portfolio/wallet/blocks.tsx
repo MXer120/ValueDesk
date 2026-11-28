@@ -617,6 +617,7 @@ export function Band({ c, engine, select }: { c: PortfolioContext; engine: 'perp
         refreshToken={c.refreshToken}
         onChanged={c.onChanged}
         symbolsFor={(e) => (e === 'perps' ? c.perpsByName : c.spotByName)}
+        spotAccount
       />
     </div>
   );

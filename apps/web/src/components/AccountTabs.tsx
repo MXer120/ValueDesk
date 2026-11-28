@@ -98,8 +98,13 @@ function useBandFilters(): [Record<BandTab, TableFilter>, (tab: BandTab, f: Tabl
 export function AccountTabs({
   engine, address, unlocked, readOnly = false, byName, refreshToken, onChanged,
   market, positionCount, orderCount, onPositionCount, onOrderCount, accountScope = false, symbolsFor,
-  extraTabs, tabsAfter, onTabMenu, select,
+  extraTabs, tabsAfter, onTabMenu, select, spotAccount = false,
 }: AccountTabsProps & {
+  /**
+   * The Portfolio's Spot account (owner 2026-11-28: "Spot tab is bugged, it shows same for perps e.g. positions"):
+   * Balances first, then its orders and history; no Positions (Spot holds coins, not positions).
+   */
+  spotAccount?: boolean;
   /** Tabs a trader added with the + (dashboard/tradeTabs.tsx), after the band's own. */
   extraTabs?: PanelTab[];
   /** The + itself. */
@@ -212,7 +217,7 @@ export function AccountTabs({
   useEffect(() => { if (livePositions !== undefined) onPositionCount?.(livePositions); }, [livePositions, onPositionCount]);
   const labelCount = (hostTracks: number | undefined, live: number | undefined) => (hostTracks === undefined ? undefined : live);
 
-  const tabs: PanelTab[] = [
+  const built: PanelTab[] = [
     {
       key: 'positions',
       label: `Positions${tally(labelCount(positionCount, livePositions))}`,
@@ -327,6 +332,9 @@ export function AccountTabs({
 
   // `?tab=account-history` (the transfer drawer's "View full history") selects that tab once, on mount.
   const bandRef = useRef<HTMLDivElement>(null);
+  const tabs: PanelTab[] = spotAccount && engine === 'spot'
+    ? [...built.filter((t) => t.key === 'balances'), ...built.filter((t) => t.key !== 'balances' && t.key !== 'positions')]
+    : built;
   const tabKeys = useRef(tabs.map((t) => t.key));
   useLayoutEffect(() => {
     const want = new URLSearchParams(window.location.search).get('tab')?.toLowerCase() ?? '';

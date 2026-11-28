@@ -262,6 +262,26 @@ function devSodexAuth(): Plugin {
 }
 
 /**
+ * Dev only: GET /api/vs/nft/floors answered here by the server's own route (apps/server/tools/nftFloors-dev.ts ->
+ * src/routes/nftFloors.ts), so localhost values ValueChain NFTs before the route is released. Never in a build.
+ */
+function devNftFloors(): Plugin {
+  return {
+    name: 'vs-dev-nft-floors',
+    apply: 'serve',
+    configureServer(server) {
+      const file = fileURLToPath(new URL('../server/tools/nftFloors-dev.ts', import.meta.url));
+      server.middlewares.use((req, res, next) => {
+        if (req.method !== 'GET' || req.url !== '/api/vs/nft/floors') return next();
+        void server.ssrLoadModule(file).then((m) => (m as { handle: (u: string) => Promise<{ status: number; body: string; cache: string }> }).handle(req.url!))
+          .then((r) => { res.statusCode = r.status; res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', r.cache); res.end(r.body); })
+          .catch((e: Error) => { res.statusCode = 502; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: false, error: `local floors: ${e.message}` })); });
+      });
+    },
+  };
+}
+
+/**
  * Dev only: POST /api/vs/sopoints/estimate answered here by the server's own route (apps/server/tools/
  * sopointsEstimate-dev.ts -> src/routes/sopointsEstimate.ts) with the private model file on this laptop, so localhost
  * has SoPoints estimates before the route is released. Without the file the request goes on to the usual proxy.
@@ -349,7 +369,7 @@ function siteBuildPlugins(): Plugin[] {
 export default defineConfig({
   customLogger: logger,
   // bootShell after routePreload: it rewrites the theme-boot.js tag routePreload places its own script after.
-  plugins: [react(), trackAppOrigin(), ...(ADMIN_PAGE ? [] : siteBuildPlugins()), bootShell({ webRoot: fileURLToPath(new URL('.', import.meta.url)) }), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), devSopointsEstimate(), botsFixtures()],
+  plugins: [react(), trackAppOrigin(), ...(ADMIN_PAGE ? [] : siteBuildPlugins()), bootShell({ webRoot: fileURLToPath(new URL('.', import.meta.url)) }), thirdPartyLicences(), devTestExecutor(), devInvites(), devSodexAuth(), devSopointsEstimate(), devNftFloors(), botsFixtures()],
   define: { __VS_BUILD__: JSON.stringify(buildId()) },
   /* No sticky hover on a touch screen: every rule styling a hovered element is behind @media (hover: hover)
      (tools/hover-media.mjs says which are left as they are, and why). Identical wherever a pointer can hover. */

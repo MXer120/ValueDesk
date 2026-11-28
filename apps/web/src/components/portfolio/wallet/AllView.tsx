@@ -21,7 +21,7 @@ import { requestConnect } from '../../account/actions';
 import { ShareButton } from '../../share/host';
 import { claimedCoins, shareKey } from '../summary';
 import { BucketIcon, ViewAll, share, useMasks, type Section } from './blocks';
-import { ChainIcon } from './Onchain';
+import { ChainIcon, Chevron } from './Onchain';
 import type { Bucket, PfData } from './data';
 import type { Reserve } from './reserve';
 import type { NftState } from './nfts';
@@ -162,9 +162,10 @@ export function AllView({ d, onSection, automation = true, reserve, nfts, shareA
   const total = d.s.total;
   const segs = useMemo(() => allocationSegments(d, reserve), [d, reserve]);
   // NFT collections as rows after the coins (no published floor yet: they count nothing).
+  // NFT collections after the coins, at their floors (valuemint.store, ValueChain only); not in Total value.
   const nftRows: AssetRow[] = nfts.collections.map((c) => ({
-    key: `#NFT:${c.key}`, symbol: c.name, icon: { chain: c.chainIcon }, name: `${c.count} NFT${c.count === 1 ? '' : 's'} · ${c.chainLabel}`, usd: c.floorUsd ? c.floorUsd * c.count : 0,
-    pieces: [{ bucket: 'evm', where: c.chainLabel, usd: c.floorUsd ? c.floorUsd * c.count : 0, amount: c.count, chainIcon: c.chainIcon }], nft: { count: c.count, floor: c.floorUsd !== null },
+    key: `#NFT:${c.key}`, symbol: c.name, icon: { chain: c.chainIcon }, name: `${c.count} NFT${c.count === 1 ? '' : 's'} · ${c.chainLabel}`, usd: c.valueUsd ?? 0,
+    pieces: [{ bucket: 'evm', where: c.chainLabel, usd: c.valueUsd ?? 0, amount: c.count, chainIcon: c.chainIcon }], nft: { count: c.count, floor: c.valueUsd !== null },
   }));
   const rows = [...assets, ...nftRows];
   const shown = all ? rows : rows.slice(0, ROWS);
@@ -218,10 +219,10 @@ export function AllView({ d, onSection, automation = true, reserve, nfts, shareA
                         <span className="pfo-tbl__t"><b>{r.symbol}</b>{r.name && <small>{r.name}</small>}</span>
                       </div></td>
                       <td className="pfa-where">
-                        {many ? <button type="button" className="pfa-where__more" aria-expanded={isOpen} onClick={(e) => { e.stopPropagation(); toggle(r.key); }}>{r.nft ? `${r.nft.count} to see` : where(r)}<Icon name="down" size={12} /></button>
+                        {many ? <button type="button" className="pfa-where__more" aria-expanded={isOpen} onClick={(e) => { e.stopPropagation(); toggle(r.key); }}>{r.nft ? `${r.nft.count} to see` : where(r)}<Chevron /></button>
                           : <span className="pfa-where__p"><i className={`pfv-dot is-${r.pieces[0]!.bucket}`} aria-hidden="true" />{where(r)}</span>}
                       </td>
-                      <td className="pfo-tbl__num"><b>{r.nft && !r.nft.floor ? <span className="pfa-nofloor" title="No source publishes a floor price for this collection yet: it counts nothing.">No floor price</span> : m.funds(fmtUsd(r.usd))}</b></td>
+                      <td className="pfo-tbl__num"><b>{r.nft && !r.nft.floor ? <span className="pfa-nofloor" title="No source publishes a floor for this collection: shown unvalued.">Unvalued</span> : r.nft ? <span title="At the floor of each NFT's rarity tier on valuemint.store (else the collection's), SOSO at SoDEX's price. A floor is a listing, not a sale: not in Total value.">{m.funds(fmtUsd(r.usd))}</span> : m.funds(fmtUsd(r.usd))}</b></td>
                       <td className="pfa-tbl__share">
                         <Private k="charts">
                           <span className="pfa-share" aria-hidden="true">
@@ -283,7 +284,11 @@ export function NftGrid({ nfts, k }: { nfts: NftState; k: string }) {
               {n.image ? <img src={n.image} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" /> : <span className="pfo-nft__none" aria-hidden="true"><ChainIcon icon={n.chainIcon} size={28} /></span>}
               {n.count > 1 && <span className="pfo-nft__n">×{n.count}</span>}
             </span>
-            <span className="pfo-nft__t"><b>{n.name}</b><small>#{n.id.length > 10 ? `${n.id.slice(0, 8)}…` : n.id} · rarity not published</small></span>
+            <span className="pfo-nft__t">
+              <b>{n.name}</b>
+              <small>{n.tier ? <span className="pfo-nft__tier">{n.tier}</span> : `#${n.id.length > 10 ? `${n.id.slice(0, 8)}…` : n.id}`}</small>
+              {n.floorSoso !== null && <small className="pfo-nft__floor" title={n.floorOf === 'tier' ? `The lowest ${n.tier} listing on valuemint.store` : 'The collection floor on valuemint.store'}>{n.floorOf === 'tier' ? `${n.tier} floor` : 'Floor'} {fmt(n.floorSoso, n.floorSoso >= 100 ? 0 : 2)} SOSO{n.valueUsd !== null ? ` · ${fmtUsd(n.valueUsd)}` : ''}</small>}
+            </span>
           </a>
         </li>
       ))}

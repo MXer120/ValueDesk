@@ -613,6 +613,19 @@ export interface Nft {
   /** ERC-1155: how many of it. */
   count: number;
   link: string;
+  /** Its rarity tier from its own metadata (a Tier, Rarity, Level or Grade trait), when it has one. */
+  tier: string | null;
+}
+
+/** The first Tier, Rarity, Level or Grade trait (the same rule as the server's floors, valuedesk/nftFloors.ts). */
+export function nftTier(attrs: unknown): string | null {
+  if (!Array.isArray(attrs)) return null;
+  for (const want of ['tier', 'rarity', 'level', 'grade']) {
+    for (const a of attrs as Array<{ trait_type?: unknown; value?: unknown }>) {
+      if (String(a?.trait_type ?? '').trim().toLowerCase() === want && a.value !== undefined && a.value !== null && String(a.value).trim()) return String(a.value).trim();
+    }
+  }
+  return null;
 }
 
 /** EVM chains whose Blockscout answers a browser (checked 2026-11-27); ValueChain first. */
@@ -633,7 +646,7 @@ export const NFT_CHAINS: ReadonlyArray<ChainInfo & { host: string }> = [
 
 interface RawNft {
   id?: string; image_url?: string | null; media_url?: string | null; media_type?: string | null; value?: string; token_type?: string;
-  thumbnails?: Record<string, string> | null; metadata?: { name?: string; image?: string } | null;
+  thumbnails?: Record<string, string> | null; metadata?: { name?: string; image?: string; attributes?: unknown } | null;
   token?: { address_hash?: string; name?: string | null; symbol?: string | null; type?: string; reputation?: string | null } | null;
 }
 
@@ -672,6 +685,7 @@ export function parseNfts(chain: ChainInfo & { host: string }, body: { items?: R
       name: n.metadata?.name || `${collection} #${id.length > 10 ? `${id.slice(0, 6)}…` : id}`,
       image: picture(n), standard: n.token_type ?? t.type ?? 'ERC-721', count: Math.max(1, Number(n.value) || 1),
       link: `${chain.host}/token/${t.address_hash}/instance/${id}`,
+      tier: nftTier(n.metadata?.attributes),
     });
   }
   return out;

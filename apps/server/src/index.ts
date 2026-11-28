@@ -34,6 +34,7 @@ import { profileOnSignal } from './indexer/cpuProfile.js';
 import { pointsAuthRoutes } from './routes/pointsAuth.js';
 import { sopointsLogRoutes } from './routes/sopointsLog.js';
 import { sopointsEstimateRoutes } from './routes/sopointsEstimate.js';
+import { nftFloorsRoutes } from './routes/nftFloors.js';
 import { keepValuedeskWarm, liveAskOf, valuedeskRoutes } from './routes/valuedesk.js';
 import { builderRoutes } from './routes/builder.js';
 import { betaRoutes } from './routes/beta.js';
@@ -268,6 +269,8 @@ await app.register(pointsAuthRoutes());
 await app.register(sopointsLogRoutes());
 // SoPoints estimate (routes/sopointsEstimate.ts): the fitted model stays here, its numbers in a private file.
 await app.register(sopointsEstimateRoutes());
+// ValueChain NFT floors per collection and rarity tier, from valuemint.store (routes/nftFloors.ts), ten minutes cached.
+await app.register(nftFloorsRoutes());
 // ValueDesk: multi-venue traders (SoDEX + Hyperliquid) for Explore,
 // Leaderboard, Scan and Copy. Read-only - see routes/valuedesk.ts.
 await app.register(valuedeskRoutes);

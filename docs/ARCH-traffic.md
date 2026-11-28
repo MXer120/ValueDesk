@@ -399,6 +399,10 @@ Against this inventory, HOSTED_ROUTES should be:
   each week's own points in a typical, a busy and a quiet week, made the wallet's own by its past weeks (routes/sopointsEstimate.ts,
   valuedesk/sodex/sopointsModel.ts). The model's numbers come from a private file on the server (VALUESCAN_SOPOINTS_MODEL, else
   `sopoints-model.json` in the data dir), never from the repository; without it, 503. No address is sent, nothing is kept. No upstream.
+- **Add**: `GET /api/vs/nft/floors` (cls `upstream`, cached ten minutes here and five in the browser): ValueChain NFT floor
+  prices per collection and rarity tier, for the Portfolio's NFTs (routes/nftFloors.ts, valuedesk/nftFloors.ts). Upstream: valuemint.store's
+  summary and open listings every ten minutes, and once per listed token its tier (a SoDEX box's token URI on ValueChain's RPC, any other
+  token's metadata on ValueChain's explorer), kept. No address is sent; the answer is the same for everyone.
 - **Add**: `GET /api/vs/sodex/mm-daily?from=` (cls `upstream`, cached an hour): per UTC day, SoDEX accounts 1002 + 23342's volume (from 2026-11-06, our index) and SoDEX's internal pair's open interest (its sizes now x each day's mark close), for the SoPoints difficulty (valuedesk/sodex/mmDaily.ts). Upstream: one mark-candle read per market the pair holds (>= 0.2% of its USD) and one positions read, per hour.
 - **Add**: `POST /api/vs/sodex-auth/nonce` and `POST /api/vs/sodex-auth/verify` (cls `auth`: the site Origin exactly,
   capped per client and overall): the SoPoints sign-in relay (routes/pointsAuth.ts, owner 2026-11-16). SoDEX's two

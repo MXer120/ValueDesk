@@ -62,6 +62,7 @@ const PATHS = {
   expand: <path d="M4 8V4h4M12 4h4v4M16 12v4h-4M8 16H4v-4" />,
   grid: <><path d="M4 7h12M4 10h12M4 13h12" /><circle cx="7" cy="7" r="1" /><circle cx="12" cy="10" r="1" /><circle cx="9" cy="13" r="1" /></>,
   info: <><circle cx="10" cy="10" r="6.5" /><path d="M10 9.2v4.2M10 6.6h.01" /></>,
+  copy: <><rect x="7" y="7" width="9.5" height="9.5" rx="2" /><path d="M13 7V5.5A2 2 0 0 0 11 3.5H5.5a2 2 0 0 0-2 2V11a2 2 0 0 0 2 2H7" /></>,
   /** A panel docked to the right side (copy/TraderPeek.tsx), and a window in the middle. */
   dock: <><rect x="3" y="4" width="14" height="12" rx="2.4" /><path d="M11.5 4v12" /><path d="M13.6 7.4h1.4M13.6 10h1.4" /></>,
   window: <><rect x="3" y="4" width="14" height="12" rx="2.4" /><rect x="6" y="7" width="8" height="6" rx="1.2" /></>,

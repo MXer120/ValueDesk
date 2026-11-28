@@ -10,7 +10,7 @@
  *   prices are listed apart and not counted; tokens a source does not verify (airdropped spam) are hidden.
  * - NFTs: ValueChain's, and on a click the other EVM chains whose explorers answer.
  */
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Button, EmptyState, Icon, IconButton, Segmented, SegmentedBar, Skeleton, StatusPill, TextInput } from '../../bots/kit/kit';
 import { CoinIcon } from '../../CoinIcon';
 import { chainLogo, coinLogo } from '../../../logos';
@@ -38,6 +38,9 @@ const priceText = (v: number | null) => (v === null ? DASH : fmtUsd(v, v >= 1 ? 
  * A chain's icon: its own logo, else its coin's from any of the app's icon sets (Cosmos Hub has no chain logo, ATOM has
  * a coin one), else the app's fallback.
  */
+/** The open/close mark of rows that open: the chart picker's chevron, turned up when open (wallet.css). */
+export const Chevron = () => <svg className="pfa-chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+
 export function ChainIcon({ icon, size, className }: { icon: string; size: number; className?: string }) {
   return chainLogo(icon) || !coinLogo(icon) ? <CoinIcon chain={icon} size={size} className={className} /> : <CoinIcon coin={icon} size={size} className={className} />;
 }
@@ -58,29 +61,54 @@ export function TokenIcon({ symbol, chainIcon, size = 26 }: { symbol: string; ch
 
 // --- addresses ---------------------------------------------------------------------------------------------------
 
-function AddressChips({ o, adding, onAdd }: { o: OnchainState; adding: boolean; onAdd: () => void }) {
+/**
+ * The addresses read, behind one button (owner 2026-11-28: "hide the address at the top, just a button where users get
+ * a drop down where they can copy the address for all chains"): the wallet (every EVM chain), then each added address
+ * with its chain; each copies with one press; added ones can be removed; Add address at the foot.
+ */
+function AddressMenu({ o, onAdd }: { o: OnchainState; onAdd: () => void }) {
   const m = useMasks();
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  const copy = (a: string) => { void navigator.clipboard?.writeText(a).then(() => { setCopied(a); window.setTimeout(() => setCopied((x) => (x === a ? null : x)), 1400); }, () => {}); };
+  const busy = o.reads.some((r) => r.status === 'loading');
   return (
-    <div className="pfo-addrs" role="list" aria-label="Addresses read">
-      {o.watched.map((w, i) => {
-        const ch = chainOf(w);
-        const read = o.reads.filter((r) => r.owner === w.address);
-        const busy = read.some((r) => r.status === 'loading');
-        const failed = read.length > 0 && read.every((r) => r.status === 'failed');
-        return (
-          <span key={`${w.family}:${w.address}`} className={cx('pfo-chip', failed && 'is-failed')} role="listitem" title={w.address}>
-            <ChainIcon icon={i === 0 ? 'VALUECHAIN' : ch.icon} size={16} />
-            <span className="pfo-chip__t">
-              <b>{w.label || (i === 0 ? 'Your wallet' : ch.label)}</b>
-              <small>{i === 0 ? 'EVM chains' : w.label ? ch.label : ''} {m.address(shortAddr(w.address))}</small>
-            </span>
-            {busy && <span className="tf-spin pfo-chip__spin" role="status" aria-label="Reading" />}
-            {failed && <StatusPill tone="negative" size="sm">Not read</StatusPill>}
-            {i > 0 && o.canAdd && <IconButton icon="x" label={`Remove ${ch.label} address`} className="pfo-chip__x" onClick={() => o.remove(w.address)} />}
-          </span>
-        );
-      })}
-      {o.canAdd && !adding && <Button variant="secondary" icon="plus" onClick={onAdd}>Add address</Button>}
+    <div className="pfo-addrmenu" ref={box}>
+      <Button variant="secondary" icon="wallet" aria-expanded={open} onClick={() => setOpen(!open)}>
+        Addresses{o.watched.length > 1 ? ` · ${o.watched.length}` : ''}{busy && <span className="tf-spin pfo-chip__spin" aria-hidden="true" />}
+      </Button>
+      {open && (
+        <div className="pfo-addrmenu__pop tf" role="dialog" aria-label="Addresses read">
+          <ul>
+            {o.watched.map((w, i) => {
+              const ch = chainOf(w);
+              const failed = o.reads.filter((r) => r.owner === w.address).every((r) => r.status === 'failed') && o.reads.some((r) => r.owner === w.address);
+              return (
+                <li key={`${w.family}:${w.address}`}>
+                  <ChainIcon icon={i === 0 ? 'VALUECHAIN' : ch.icon} size={18} />
+                  <span className="pfo-addrmenu__t">
+                    <b>{w.label || (i === 0 ? 'Your wallet' : ch.label)}</b>
+                    <small>{i === 0 ? 'ValueChain and every EVM chain' : ch.label} · {m.address(shortAddr(w.address))}</small>
+                  </span>
+                  {failed && <StatusPill tone="negative" size="sm">Not read</StatusPill>}
+                  <IconButton icon={copied === w.address ? 'check' : 'copy'} label={copied === w.address ? 'Copied' : `Copy the ${i === 0 ? 'EVM' : ch.label} address`} onClick={() => copy(w.address)} />
+                  {i > 0 && o.canAdd && <IconButton icon="x" label={`Remove this ${ch.label} address`} onClick={() => o.remove(w.address)} />}
+                </li>
+              );
+            })}
+          </ul>
+          {o.canAdd && <Button variant="quiet" icon="plus" onClick={() => { setOpen(false); onAdd(); }}>Add an address on another chain</Button>}
+        </div>
+      )}
     </div>
   );
 }
@@ -132,6 +160,21 @@ function AddForm({ o, onDone }: { o: OnchainState; onDone: () => void }) {
   );
 }
 
+/**
+ * Each chain its own colour (owner 2026-11-28: "each chain needs their own color, fitting where possible. E.g. bitcoin
+ * btc orange, soso orange"): its brand's where it has one and it reads on dark; purple brands get a neighbour (no purple
+ * in the app). Chains without one take the On-chain greens in turn.
+ */
+const CHAIN_COLOUR: Record<string, string> = {
+  BTC: '#f7931a', VALUECHAIN: '#ff8a1f', ETH: '#7b8cf0', BASE_ETH: '#2f6bff', ARBITRUM_ETH: '#28a0f0', OPTIMISM: '#ff3b47',
+  BSC_BNB: '#f3ba2f', SOL: '#19c39c', TRX: '#ff2d2d', TON: '#0098ea', XRP: '#9aa7b4', XLM: '#c9d2dc', LTC: '#4f7bc6',
+  DOGE: '#c9a83a', SUI: '#4da2ff', APTOS: '#33d1b2', AVAXC: '#e84142', POLYGON: '#5f7cff', LINEA: '#61dfff', SCROLL: '#f2d2a9',
+  CELO: '#fcff52', GNOSIS: '#3e8e6a', MANTLE: '#b4e06b', HYPEREVM_HYPE: '#7cf2d6', HYPERCORE: '#7cf2d6', LIGHTER: '#e8e8e8',
+  ROBINHOOD_ETH: '#c4f13d', NEAR: '#00d18c', COSMOSHUB: '#8a8fb5', OSMOSIS: '#e05ba8', INJECTIVE: '#26b6ff', UNICHAIN: '#ff5bc0',
+  ZKSYNC: '#a3a4f7', BERACHAIN: '#d9822b', SONIC: '#ff9f5a', WORLDCHAIN: '#e6e6e6', MONAD: '#a59dff', KATANA: '#ffd23f',
+};
+export const chainColour = (key: string, i: number): string => CHAIN_COLOUR[key] ?? `var(--pfo-c${Math.min(i, 6)})`;
+
 // --- where it is, by chain ---------------------------------------------------------------------------------------
 
 function ChainSplit({ o }: { o: OnchainState }) {
@@ -152,13 +195,13 @@ function ChainSplit({ o }: { o: OnchainState }) {
           size="md"
           max={total}
           label="On-chain value by chain"
-          segments={bar.map((p, i) => ({ id: p.key, value: p.usd, label: p.label, color: `var(--pfo-c${Math.min(i, 6)})` }))}
+          segments={bar.map((p, i) => ({ id: p.key, value: p.usd, label: p.label, color: p.key === 'OTHER' ? 'rgb(var(--ink) / 0.18)' : chainColour(p.key, i) }))}
         />
       </Private>
       <ul className="pfo-chips" aria-label="Chains with funds">
         {chips.map((p, i) => (
           <li key={p.key} className="pfo-chainchip">
-            <i className="pfo-dot" style={{ background: `var(--pfo-c${Math.min(i, 6)})` }} aria-hidden="true" />
+            <i className="pfo-dot" style={{ background: chainColour(p.key, i) }} aria-hidden="true" />
             <ChainIcon icon={p.icon} size={16} />
             <span>{p.label}</span>
             <b>{m.funds(fmtUsd(p.usd))}</b>
@@ -211,9 +254,9 @@ function NftRows({ nfts }: { nfts: NftState }) {
             <span className="pfo-tbl__t"><b>{c.name}</b><small>NFT collection<span className="pfo-tbl__onchain"> · {c.chainLabel}</span></small></span>
           </div></td>
           <td className="pfo-tbl__chain">{c.chainLabel}</td>
-          <td className="pfo-tbl__num"><button type="button" className="pfa-where__more" aria-expanded={open.has(c.key)} onClick={(e) => { e.stopPropagation(); toggle(c.key); }}>{c.count} NFT{c.count === 1 ? '' : 's'}<Icon name="down" size={12} /></button></td>
-          <td className="pfo-tbl__num pfo-tbl__px" title="No source publishes a floor price for this collection yet.">{c.floorUsd === null ? DASH : fmtUsd(c.floorUsd)}<small>{c.floorSource ?? 'floor'}</small></td>
-          <td className="pfo-tbl__num">{c.floorUsd === null ? <span className="pfa-nofloor">No floor price</span> : <b>{fmtUsd(c.floorUsd * c.count)}</b>}</td>
+          <td className="pfo-tbl__num"><button type="button" className="pfa-where__more" aria-expanded={open.has(c.key)} onClick={(e) => { e.stopPropagation(); toggle(c.key); }}>{c.count} NFT{c.count === 1 ? '' : 's'}<Chevron /></button></td>
+          <td className="pfo-tbl__num pfo-tbl__px" title={c.floorSoso === null ? 'No source publishes a floor for this collection.' : 'Collection floor on valuemint.store'}>{c.floorSoso === null ? DASH : `${fmt(c.floorSoso, c.floorSoso >= 100 ? 0 : 2)} SOSO`}<small>{c.floorSource ?? 'floor'}</small></td>
+          <td className="pfo-tbl__num">{c.valueUsd === null ? <span className="pfa-nofloor" title="No source publishes a floor for this collection.">Unvalued</span> : <b title="Each NFT at its rarity tier's floor, else the collection's. Not in Total value.">{fmtUsd(c.valueUsd)}</b>}</td>
         </tr>,
         open.has(c.key) && <tr key={`${c.key}|grid`} className="is-child"><td colSpan={5}><NftGrid nfts={nfts} k={c.key} /></td></tr>,
       ])}
@@ -273,7 +316,7 @@ export function OnchainPanel({ o, nfts, shareAs }: { o: OnchainState; nfts: NftS
   return (
     <div className="pfo">
       <div className="pfo-top">
-        <AddressChips o={o} adding={adding} onAdd={() => setAdding(true)} />
+        <AddressMenu o={o} onAdd={() => setAdding(true)} />
         <span className="pfo-total">
           <small>Total value on chain{n ? ` · ${n} chain${n === 1 ? '' : 's'}` : ''}</small>
           <span className="pfo-total__v">

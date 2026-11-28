@@ -794,3 +794,33 @@ button.pfo-chainchip:hover { border-color: rgb(var(--ink) / 0.2); }
   .pfv-aside { display: none; }
   .pfa-tip { width: 220px; }
 }
+
+/* ValueChain NFTs: their tier and the floor they are valued at (valuemint.store). */
+.pfo-nft__tier { display: inline-block; padding: 0 7px; border-radius: 9999px; background: rgb(var(--ink) / 0.08); color: var(--text); font-size: 11px; line-height: 18px; }
+.pfo-nft__floor { font: 400 11.5px var(--font-num); color: var(--tf-muted); }
+
+/* 2026-11-28 round 4 --------------------------------------------------------------------------------------------- */
+/* The chevron of rows that open: down when shut, turned up when open. */
+.pfa-where__more .pfa-chev { transition: transform 180ms var(--ease-view, ease-out); }
+.pfa-where__more[aria-expanded='true'] .pfa-chev { transform: rotate(180deg); }
+.pfa-where__more[aria-expanded='true'] svg:not(.pfa-chev) { transform: none; }
+/* Tables inside the band's rounded panel (owner: "weird on the corners and edges, the header"): the header has no box of
+   its own, the first and last columns keep the panel's inset, the last row no rule under it. */
+.pfo-tbl th { background: transparent; border-bottom: 1px solid var(--pfv-hair); }
+.pfo-tbl thead + tbody tr:first-child td { border-top: 0; }
+.pfo-tbl th:first-child, .pfo-tbl td:first-child { padding-left: 10px; }
+.pfo-tbl th:last-child, .pfo-tbl td:last-child { padding-right: 10px; }
+.pfo-tbl tr.is-group td:first-child, .pfo-tbl tr.is-child td:first-child { border-radius: 10px 0 0 10px; }
+.pfo-tbl tr.is-group td:last-child, .pfo-tbl tr.is-child td:last-child { border-radius: 0 10px 10px 0; }
+.pfa-assets, .pfo-hold { padding: 4px 2px 0; }
+/* The Perps and Spot tables' column header: the rows slide under a blurred header. */
+.pfv3-band .acct-table thead th { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--bg-panel) 70%, transparent); -webkit-backdrop-filter: blur(12px) saturate(1.1); backdrop-filter: blur(12px) saturate(1.1); }
+/* The On-chain addresses: one button, its menu. */
+.pfo-addrmenu { position: relative; }
+.pfo-addrmenu__pop { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; display: flex; flex-direction: column; gap: 4px; width: min(380px, 86vw); padding: 8px; border: 1px solid var(--panel-line); border-radius: 14px; background: var(--bg-elevated); box-shadow: var(--shadow-modal); animation: pfo-in 160ms var(--ease-view, ease-out); }
+.pfo-addrmenu__pop ul { margin: 0; padding: 0; list-style: none; }
+.pfo-addrmenu__pop li { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 4px 4px 8px; border-radius: 10px; }
+.pfo-addrmenu__pop li:hover { background: rgb(var(--ink) / 0.05); }
+.pfo-addrmenu__t { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.pfo-addrmenu__t b { font-size: 13px; }
+.pfo-addrmenu__t small { overflow: hidden; font: 400 11.5px var(--font-num); color: var(--tf-muted); text-overflow: ellipsis; white-space: nowrap; }
