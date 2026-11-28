@@ -208,9 +208,6 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
       ? async (set) => { set('gift'); await sleep(900); return `0x${id.padStart(64, '0')}`; }
       : (set) => { set('gift'); return gift({ provider: provider as Eip1193Provider, from: address as string, to, contract: t.contract, tokenId: id }); })));
   };
-  const claim = (n: number) => void queue.run('claim', `Claiming ${plural(n, 'earned box', 'earned boxes')}`, [demo
-    ? async (set) => { set('wait'); await sleep(1200); return { jobId: 'demo', status: 'done', opened: [], merged: [] }; }
-    : () => claimTreasure(address as string, n)]);
 
   const tiers = !address && !demo ? <ConnectPrompt line="Connect a wallet to see its boxes." />
     : chain.error && !boxes ? <EmptyState icon="warning" title="Your boxes could not be read" description={chain.error} actions={<Button onClick={chain.retry}>Try again</Button>} compact />
@@ -249,7 +246,7 @@ export function Vault({ address, provider, meta, className, demo }: { address: s
 
       {!demo && <SessionBar address={address} provider={provider} session={session} />}
       {queue.q && <QueuePanel q={queue.q} onStop={queue.stop} onClose={queue.clear} />}
-      {session.signedIn && who && <Claim address={who} demo={demo?.treasures ?? null} busy={busy} onClaim={claim} />}
+      {session.signedIn && who && <Claim address={who} demo={demo?.treasures ?? null} onDone={refresh} />}
 
       {tab !== 'cybr' && tiers}
       {tab !== 'boxes' && (
@@ -291,16 +288,49 @@ function SessionBar({ address, provider, session }: { address: string | null; pr
   );
 }
 
-function Claim({ address, demo, busy, onClaim }: { address: string; demo: number | null; busy: boolean; onClaim: (n: number) => void }) {
+const CLAIMED = 'vs:box-claimed';
+
+/**
+ * Earned boxes to claim (owner 2026-11-28: "just make the claim load ... also show it in the trade xyz to unlock more.
+ * If there are any unclaimed it should expand"). The button itself loads while SoDEX claims; no progress panel. In the
+ * vault and in the hero's progress card, which opens smoothly to show it when any are waiting; a claim in one refreshes
+ * both. `onDone` refreshes the wallet's boxes.
+ */
+export function Claim({ address, demo, compact, onDone }: { address: string; demo: number | null; compact?: boolean; onDone?: () => void }) {
   const t = usePolled(demo === null ? `treasures:${address.toLowerCase()}` : null, () => readTreasures(address), 60_000);
-  const n = demo ?? t.data?.total ?? 0;
-  if (!n) return null;
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    const on = () => { t.retry(); if (demo !== null) setDone(true); };
+    window.addEventListener(CLAIMED, on);
+    return () => window.removeEventListener(CLAIMED, on);
+  }, [t, demo]);
+  const n = done ? 0 : demo ?? t.data?.total ?? 0;
   const take = Math.min(n, t.data?.maxPerOpen ?? 100);
+  const go = async () => {
+    setBusy(true); setErr(null);
+    try {
+      if (demo !== null) await sleep(1400); else await claimTreasure(address, take);
+      if (demo !== null) setDone(true);
+      window.dispatchEvent(new Event(CLAIMED));
+      onDone?.();
+    } catch (e) {
+      setErr(e instanceof NeedsPointsToken ? 'Your SoDEX sign-in ran out. Sign in again.' : errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <div className="bv-claim">
-      <BoxArt level="Common" size={34} />
-      <span><b>{plural(n, 'earned box', 'earned boxes')}</b> waiting to be claimed into your wallet{n > take ? ` (${fmt(take, 0)} a claim)` : ''}.</span>
-      <Button variant="go" disabled={busy} onClick={() => onClaim(take)}>Claim {fmt(take, 0)}</Button>
+    <div className={`bv-claimwrap${n > 0 ? ' is-open' : ''}${compact ? ' is-compact' : ''}`} aria-hidden={n === 0}>
+      <div>
+        <div className="bv-claim">
+          <BoxArt level="Common" size={compact ? 28 : 34} />
+          <span><b>{plural(n, 'earned box', 'earned boxes')}</b>{compact ? ' to claim' : ` waiting to be claimed into your wallet${n > take ? ` (${fmt(take, 0)} a claim)` : ''}.`}</span>
+          <Button variant="go" loading={busy} onClick={() => void go()}>{busy ? 'Claiming' : `Claim ${fmt(take, 0)}`}</Button>
+          {err && <small className="bv-err">{err}</small>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -697,6 +727,7 @@ export function ProgressCard({ address, provider, rules, demo }: { address: stri
             {data && <span>Updated {fmtAgo(data.at, now)}</span>}
           </div>
           <a className="tf-btn is-primary is-md bv-hero__go" href="/trade">Keep trading</a>
+          {address || demo ? <Claim address={demo ? 'demo' : (address as string)} demo={demo?.treasures ?? null} compact /> : null}
         </>
       )}
     </div>

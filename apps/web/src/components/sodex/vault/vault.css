@@ -361,3 +361,11 @@
 /* Each box in the picker glows in its own tier's light (a Rare out of a merge blue, not the Uncommon's green). */
 .bv-pick__arts { filter: none; }
 .bv-pick__box { display: inline-flex; filter: drop-shadow(0 10px 24px color-mix(in srgb, var(--tier) 50%, transparent)); }
+/* Earned boxes to claim: opens smoothly when any wait, closes after the claim; in the hero's card too. */
+.bv-claimwrap { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms; }
+.bv-claimwrap.is-open { grid-template-rows: 1fr; opacity: 1; }
+.bv-claimwrap > div { min-height: 0; overflow: hidden; }
+.bv-claimwrap.is-compact .bv-claim { margin-top: 2px; padding: 10px 12px; background: rgb(255 255 255 / 0.07); color: #f4f4f2; }
+.bv-claimwrap.is-compact .bv-claim > span { flex: 1 1 auto; color: rgb(244 244 242 / 0.7); }
+.bv-claimwrap.is-compact .bv-claim b { color: #f4f4f2; }
+@media (prefers-reduced-motion: reduce) { .bv-claimwrap { transition: none; } }
