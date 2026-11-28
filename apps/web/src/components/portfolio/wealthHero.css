@@ -184,4 +184,4 @@ html[data-theme='light'] .wh-card { --wh-c1: #007a58; --wh-c2: #2f63e0; --wh-c3:
 .wh-soon__in { display: flex; flex: 1; min-width: 0; filter: blur(9px) saturate(0.7); opacity: 0.55; pointer-events: none; user-select: none; }
 .wh-soon__in > .pf-card { flex: 1; }
 .wh-soon__veil { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 16px; text-align: center; }
-.wh-soon__veil > span { color: var(--tf-muted, rgba(255, 255, 255, 0.6)); font-size: 13px; }
+.wh-soon__veil > span { color: var(--tf-muted, rgb(var(--ink) / 0.6)); font-size: 13px; }

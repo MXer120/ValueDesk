@@ -418,7 +418,7 @@ html[data-theme='light'] .wp {
 
 /* Details & Review: create now, publish later (owner 2026-11-28). */
 .wp-review { display: flex; flex-direction: column; gap: 12px; }
-.wp-review__opt { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid var(--wv-hair, rgba(255, 255, 255, 0.08)); border-radius: 12px; background: var(--tf-inset); }
+.wp-review__opt { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid var(--wv-hair, rgb(var(--ink) / 0.08)); border-radius: 12px; background: var(--tf-inset); }
 .wp-review__opt > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .wp-review__opt b { display: inline-flex; align-items: center; gap: 8px; color: var(--tf-fg); font-size: 14px; font-weight: 600; }
 .wp-review__opt small { color: var(--tf-muted); font-size: 12.5px; line-height: 1.4; }
@@ -432,11 +432,11 @@ html[data-theme='light'] .wp {
 .pfx-band:has(> .pf-card__body > .wo) { min-height: 0; }
 .wo { display: flex; flex-direction: column; min-width: 0; }
 .wo__head, .wo__r { display: grid; grid-template-columns: minmax(180px, 1.6fr) minmax(150px, 1.3fr) repeat(3, minmax(84px, 0.7fr)) minmax(176px, auto); align-items: center; gap: 16px; padding: 0 16px; }
-.wo__head { height: 36px; border-bottom: 1px solid var(--wv-hair, rgba(255, 255, 255, 0.06)); color: var(--tf-faint); font-size: 12px; }
+.wo__head { height: 36px; border-bottom: 1px solid var(--wv-hair, rgb(var(--ink) / 0.06)); color: var(--tf-faint); font-size: 12px; }
 .wo__head .num, .wo__r .num { text-align: right; justify-content: flex-end; }
 .wo__list { margin: 0; padding: 0; list-style: none; }
 .wo__r { min-height: 64px; padding-block: 10px; transition: background-color 0.12s; }
-.wo__r + .wo__r { border-top: 1px solid var(--wv-hair, rgba(255, 255, 255, 0.06)); }
+.wo__r + .wo__r { border-top: 1px solid var(--wv-hair, rgb(var(--ink) / 0.06)); }
 .wo__r:hover { background: var(--tf-inset); }
 .wo__fund { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .wo__fund > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
