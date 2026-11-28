@@ -29,6 +29,8 @@
   transition: opacity 0.22s, transform 0.3s var(--ease), visibility 0.22s;
 }
 .vd-dd__panel::before { content: ''; position: absolute; left: 0; right: 0; top: -14px; height: 14px; }
+/* Community (X, Discord): one narrow column of the same items. */
+.vd-dd--comm .vd-dd__panel { width: 340px; grid-template-columns: 1fr; }
 .vd-dd.is-open .vd-dd__panel { opacity: 1; visibility: visible; transform: none; }
 .vd-dd__item { display: flex; gap: 14px; padding: 14px; border-radius: 18px; transition: background 0.2s; }
 .vd-dd__item:hover, .vd-dd__item:focus-visible { background: rgba(255, 255, 255, 0.055); outline: none; }

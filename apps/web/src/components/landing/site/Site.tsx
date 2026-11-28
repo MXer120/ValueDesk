@@ -4,6 +4,7 @@
  * the site shares. Root class `h vd`: V1's vocabulary applies; borrowed sections of versions 2-4 go in <Embed>.
  * Paths: the home page is /home (and / on a first visit), the pages /home/<page>.
  */
+import { FEEDBACK_URL } from '../../../feedback/url';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { BrandMark } from '../../BrandMark';
 import { dropBootShell } from '../../../bootShell';
@@ -40,7 +41,16 @@ export const IC = {
   chevron: <svg viewBox="0 0 12 12"><path d="M3 4.5 6 7.5 9 4.5" /></svg>,
   menu: <svg viewBox="0 0 24 24"><path d="M4 8h16M4 16h16" /></svg>,
   close: <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg>,
+  x: <svg viewBox="0 0 24 24"><path d="M4 4l16 16M20 4 4 20" opacity="0" /><path d="M5 4.5h4.2l9.8 15H14.8z" /><path d="M18.6 4.5 13.4 10.4M10.6 13.6 5.4 19.5" /></svg>,
+  chat: <svg viewBox="0 0 24 24"><path d="M7.2 6.2c3.2-1.4 6.4-1.4 9.6 0 1.6 2.6 2.4 5.4 2.2 8.6-1.4 1.2-3 2-4.6 2.4l-1-1.8c-.9.2-1.9.2-2.8 0l-1 1.8c-1.6-.4-3.2-1.2-4.6-2.4-.2-3.2.6-6 2.2-8.6Z" /><circle cx="9.6" cy="12" r="1.1" /><circle cx="14.4" cy="12" r="1.1" /></svg>,
 };
+
+/** The community (owner 2026-11-28: "on landing page, add a community dropdown with X & Discord invite"): the same
+ * accounts the app's More menu links (NavMore.tsx). */
+export const COMMUNITY = [
+  { key: 'x', href: 'https://x.com/ValueDeskdotso', t: 'X', s: 'News, releases and market notes · @ValueDeskdotso', ic: IC.x },
+  { key: 'discord', href: FEEDBACK_URL ?? 'https://discord.gg/TVJKHY9vhK', t: 'Discord', s: 'Join the community: questions, feedback, beta access', ic: IC.chat },
+] as const;
 
 export const PRODUCTS = [
   { key: 'bots', href: PAGE_PATHS.bots, t: 'Bots', s: 'Market makers, grids and hedges on SoDEX perps and spot', ic: IC.bot },
@@ -54,8 +64,11 @@ export const PRODUCTS = [
 export function SiteNav({ current }: { current?: string }) {
   const [solid, setSolid] = useState(false);
   const [open, setOpen] = useState(false);
+  const [comm, setComm] = useState(false);
   const [sheet, setSheet] = useState(false);
   const dd = useRef<HTMLDivElement>(null);
+  const cd = useRef<HTMLDivElement>(null);
+  const commT = useRef(0);
   const closeT = useRef(0);
   useEffect(() => {
     const s = () => setSolid(window.scrollY > 12);
@@ -64,13 +77,16 @@ export function SiteNav({ current }: { current?: string }) {
     return () => window.removeEventListener('scroll', s);
   }, []);
   useEffect(() => {
-    if (!open && !sheet) return;
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); setSheet(false); } };
-    const click = (e: MouseEvent) => { if (dd.current && !dd.current.contains(e.target as Node)) setOpen(false); };
+    if (!open && !comm && !sheet) return;
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); setComm(false); setSheet(false); } };
+    const click = (e: MouseEvent) => {
+      if (dd.current && !dd.current.contains(e.target as Node)) setOpen(false);
+      if (cd.current && !cd.current.contains(e.target as Node)) setComm(false);
+    };
     window.addEventListener('keydown', key);
     window.addEventListener('mousedown', click);
     return () => { window.removeEventListener('keydown', key); window.removeEventListener('mousedown', click); };
-  }, [open, sheet]);
+  }, [open, comm, sheet]);
   useEffect(() => { document.body.style.overflow = sheet ? 'hidden' : ''; return () => { document.body.style.overflow = ''; }; }, [sheet]);
   const enter = () => { window.clearTimeout(closeT.current); setOpen(true); };
   const leave = () => { closeT.current = window.setTimeout(() => setOpen(false), 160); };
@@ -102,6 +118,17 @@ export function SiteNav({ current }: { current?: string }) {
           <a href={PAGE_PATHS.pricing} className={cx(current === 'fees' && 'is-on')}>Fees</a>
           <a href="/points">SoPoints</a>
           <a href={PAGE_PATHS.faq} className={cx(current === 'faq' && 'is-on')}>FAQ</a>
+          <div ref={cd} className={cx('vd-dd vd-dd--comm', comm && 'is-open')} onMouseEnter={() => { window.clearTimeout(commT.current); setComm(true); }} onMouseLeave={() => { commT.current = window.setTimeout(() => setComm(false), 160); }}>
+            <button type="button" className="vd-dd__btn" aria-expanded={comm} aria-controls="vd-community" onClick={() => setComm((o) => !o)}>Community{IC.chevron}</button>
+            <div id="vd-community" className="vd-dd__panel" role="menu">
+              {COMMUNITY.map((c) => (
+                <a key={c.key} href={c.href} target="_blank" rel="noopener noreferrer" className="vd-dd__item" role="menuitem">
+                  <span className="vd-ic">{c.ic}</span>
+                  <div><b>{c.t}</b><span>{c.s}</span></div>
+                </a>
+              ))}
+            </div>
+          </div>
         </nav>
         <div className="vd-nav__cta">
           {cta !== APP && <a href="/trade" className="h-btn is-glass is-sm">Open app</a>}
@@ -118,6 +145,10 @@ export function SiteNav({ current }: { current?: string }) {
           <p className="vd-sheet__k">Products</p>
           {PRODUCTS.map((p) => (
             <a key={p.key} href={p.href} className="vd-dd__item"><span className="vd-ic">{p.ic}</span><div><b>{p.t}</b><span>{p.s}</span></div></a>
+          ))}
+          <p className="vd-sheet__k">Community</p>
+          {COMMUNITY.map((c) => (
+            <a key={c.key} href={c.href} target="_blank" rel="noopener noreferrer" className="vd-dd__item"><span className="vd-ic">{c.ic}</span><div><b>{c.t}</b><span>{c.s}</span></div></a>
           ))}
           <div className="vd-sheet__links">
             <a href={PAGE_PATHS.pricing}>Fees</a><a href="/points">SoPoints</a><a href={PAGE_PATHS.faq}>FAQ</a>
