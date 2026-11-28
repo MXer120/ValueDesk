@@ -12,3 +12,13 @@ test('a failed sign-in reads as words; a cancelled one says nothing', () => {
   assert.equal(signInWords(new Error('Your wallet is locked.')), 'Your wallet is locked.');
   assert.equal(signInWords(new Error('{"error":"x"}')), 'The sign-in did not go through. Try again.');
 });
+
+test('the executor\'s signature refusals each say what to do (owner 2026-11-28); others stay plain, never raw', () => {
+  const sig = (m: string) => signInWords(new ExecutorError(m, 401, 'signature'));
+  assert.match(sig('the request time is too far from now; check your clock')!, /clock is off/);
+  assert.match(sig("this request has expired; sign it again (if it keeps happening, check your computer's clock: it may be behind)")!, /5 minutes ran out/);
+  assert.match(sig('this request was signed for another executor')!, /changed servers/);
+  assert.match(sig("the day key's approval does not hold: expired")!, /daily key/);
+  assert.match(sig('the signature is not from this wallet')!, /another account than the connected one/);
+  assert.equal(sig('payload is not in canonical form'), 'The sign-in did not go through. Try again.');
+});

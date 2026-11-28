@@ -8797,4 +8797,10 @@
 "Waiting for a calm market: the oracle moved {0} bp in the last {1} s (limit {2} bp{3}":"等待平靜行情：預言機在過去 {1} 秒內變動了 {0} bp (上限 {2} bp{3}",
 "wave {0}":"波次 {0}",
 "Your {0} position {1}":"你的 {0} 倉位{1}",
-"Your {0} position is about {1}{2}":"你的 {0} 倉位約為 {1}{2}"}
+"Your {0} position is about {1}{2}":"你的 {0} 倉位約為 {1}{2}",
+"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"你裝置的時鐘不準，所以登入被拒絕。把日期和時間設為自動，然後重新登入。",
+"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"簽名在 5 分鐘有效期過後才到達。請重新登入，並立即在錢包中確認。",
+"Your bots changed servers while you signed. Sign in again.":"你簽名時機器人切換了伺服器。請重新登入。",
+"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"此瀏覽器的每日金鑰已失效。請重新登入；錢包會詢問一次。",
+"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"簽名來自另一個帳戶，而不是已連接的帳戶。請把錢包切換到已連接的位址，然後重新登入。"
+}

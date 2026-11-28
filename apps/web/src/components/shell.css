@@ -272,6 +272,10 @@
   width: auto; max-width: 100%; pointer-events: auto;
 }
 .toasts.is-docked .toasts__live { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+/* The lane shrinks with the bar (min-width 0 down the chain): with the default min-width auto it kept its pills' full
+   width and ran under the globe and the bell when the nav took the room (owner 2026-11-28). A pill too short for its
+   words then shows "…" and opens on hover (.is-clipped below). */
+.toasts.is-docked, .toasts.is-docked .toasts__live { min-width: 0; max-width: 100%; }
 /* The indexing and history cards (toast.tsx #vs-toast-pin) are pinned at the lane's right end, next to the bell; the
    notifications come in on their left, newest nearest (owner 2026-11-07). */
 .toasts.is-docked .toasts__live { order: 1; }

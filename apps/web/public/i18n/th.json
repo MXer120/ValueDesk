@@ -8797,4 +8797,10 @@
 "Waiting for a calm market: the oracle moved {0} bp in the last {1} s (limit {2} bp{3}":"รอตลาดสงบ: ออราเคิลขยับ {0} bp ใน {1} วินาทีที่ผ่านมา (ขีดจำกัด {2} bp{3}",
 "wave {0}":"ระลอก {0}",
 "Your {0} position {1}":"สถานะ {0} ของคุณ {1}",
-"Your {0} position is about {1}{2}":"สถานะ {0} ของคุณประมาณ {1}{2}"}
+"Your {0} position is about {1}{2}":"สถานะ {0} ของคุณประมาณ {1}{2}",
+"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"นาฬิกาของอุปกรณ์คุณไม่ตรง จึงถูกปฏิเสธการลงชื่อเข้าใช้ ตั้งวันที่และเวลาเป็นอัตโนมัติ แล้วลงชื่อเข้าใช้อีกครั้ง",
+"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"ลายเซ็นมาถึงหลังจากหมดเวลา 5 นาทีแล้ว ลงชื่อเข้าใช้อีกครั้งและยืนยันในวอลเล็ตทันที",
+"Your bots changed servers while you signed. Sign in again.":"บอทของคุณย้ายเซิร์ฟเวอร์ระหว่างที่คุณลงนาม ลงชื่อเข้าใช้อีกครั้ง",
+"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"คีย์รายวันของเบราว์เซอร์นี้ใช้ไม่ได้แล้ว ลงชื่อเข้าใช้อีกครั้ง วอลเล็ตจะถามหนึ่งครั้ง",
+"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"ลายเซ็นมาจากบัญชีอื่นที่ไม่ใช่บัญชีที่เชื่อมต่อ เปลี่ยนวอลเล็ตไปที่ที่อยู่ที่เชื่อมต่อ แล้วลงชื่อเข้าใช้อีกครั้ง"
+}

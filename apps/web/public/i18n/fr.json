@@ -8797,4 +8797,10 @@
 "Waiting for a calm market: the oracle moved {0} bp in the last {1} s (limit {2} bp{3}":"En attente d'un marché calme : l'oracle a bougé de {0} bp sur les {1} dernières s (limite {2} bp{3}",
 "wave {0}":"vague {0}",
 "Your {0} position {1}":"Votre position {0} {1}",
-"Your {0} position is about {1}{2}":"Votre position {0} est d'environ {1}{2}"}
+"Your {0} position is about {1}{2}":"Votre position {0} est d'environ {1}{2}",
+"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"L'horloge de ton appareil est décalée, la connexion a donc été refusée. Règle la date et l'heure sur automatique, puis reconnecte-toi.",
+"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"La signature est arrivée après ses 5 minutes. Reconnecte-toi et confirme tout de suite dans ton wallet.",
+"Your bots changed servers while you signed. Sign in again.":"Tes bots ont changé de serveur pendant que tu signais. Reconnecte-toi.",
+"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"La clé du jour de ce navigateur n'est plus valable. Reconnecte-toi ; ton wallet le demande une fois.",
+"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"La signature vient d'un autre compte que celui connecté. Passe ton wallet sur l'adresse connectée, puis reconnecte-toi."
+}

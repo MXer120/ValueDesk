@@ -9468,5 +9468,10 @@
 "Bought through an index on ValueDesk. Each leg is held as the fund itself; sell it there.":"Über einen Index auf ValueDesk gekauft. Jeder Teil wird als der Fonds selbst gehalten; verkaufe ihn dort.",
 "Draft":"Entwurf",
 "Macro data: rates, Fed and market clocks":"Makrodaten: Zinsen, Fed und Marktzeiten",
-"In about a minute, at the vault’s price":"In etwa einer Minute, zum Preis des Vaults"
+"In about a minute, at the vault’s price":"In etwa einer Minute, zum Preis des Vaults",
+"Your device's clock is off, so the sign-in was refused. Set the date and time to automatic, then sign in again.":"Die Uhr deines Geräts geht falsch, deshalb wurde die Anmeldung abgelehnt. Stell Datum und Uhrzeit auf automatisch und melde dich dann erneut an.",
+"The signature arrived after its 5 minutes ran out. Sign in again and confirm in your wallet right away.":"Die Signatur kam nach Ablauf ihrer 5 Minuten an. Melde dich erneut an und bestätige sofort in deiner Wallet.",
+"Your bots changed servers while you signed. Sign in again.":"Deine Bots haben während des Signierens den Server gewechselt. Melde dich erneut an.",
+"This browser's daily key no longer holds. Sign in again; your wallet asks once.":"Der Tagesschlüssel dieses Browsers gilt nicht mehr. Melde dich erneut an; deine Wallet fragt einmal.",
+"The signature came from another account than the connected one. Switch your wallet to the connected address, then sign in again.":"Die Signatur kam von einem anderen Konto als dem verbundenen. Stell deine Wallet auf die verbundene Adresse um und melde dich dann erneut an."
 }
