@@ -16,6 +16,7 @@ import { CoinIcon } from '../CoinIcon';
 import { NoWallet } from '../EmptyState';
 import { requestTransfer } from '../account/actions';
 import { decimalInput } from '../numberInput';
+import { toInputText } from '../../numStyle';
 import { FxSelect, Spinner, useStepLabel, type FxOption } from '../funds/ui';
 import { ViewSeg } from './RangePicker';
 import { DASH, fmt, fmtUsd, num } from '../../format';
@@ -303,23 +304,29 @@ export function BuyRecurring({ ix, w, address, provider, onDone, onClose }: {
   if (!targets) return <div className="fx-stack"><p className="fx-note"><Spinner /> Reading which funds SoDEX buys on a schedule</p></div>;
 
   const markets = [...new Set(legs.map((l) => l.target?.market).filter((m): m is 0 | 1 => m === 0 || m === 1))];
+  // In the index ticket's trade-page look (owner 2026-11-28: "I want the top looking the same, just with an
+  // additional recurring option"): facts, an amount row, the schedule as the ticket's tabs, the read-out, the button.
   return (
-    <div className="fx-stack">
-      <div className="fx-box">
-        <div className="fx-box__head"><span>Amount per purchase</span>{min > 0n && !blocked.length && <span className="fx-max">{`Minimum ${usd(min)}`}</span>}</div>
-        <div className="fx-amount">
-          <input value={amount} onChange={(e) => { setAmount(decimalInput(e.target.value, { prev: amount })); setStates({}); setFinished(false); }} inputMode="decimal" placeholder="0.00" aria-label="Amount per purchase" disabled={busy || !!blocked.length} />
-          <span className="fx-amount__unit pfx-unit"><CoinIcon coin="USDC" size={16} /> USDC</span>
+    <div className="it-body it-rec">
+      <dl className="oe-facts">
+        <div className="oe-facts__row"><dt>Pre-funded balance</dt><dd className={available === null ? 'is-dim' : ''}>{available === null ? <Spinner /> : `${usd(available)} USDC`}</dd></div>
+        <div className="oe-facts__row"><dt>Minimum per purchase</dt><dd>{min > 0n && !blocked.length ? `${usd(min)} USDC` : DASH}</dd></div>
+      </dl>
+      <div className="oe-field">
+        <div className={`oe-inputrow${problem && perRun ? ' is-bad' : ''}`}>
+          <label className="oe-inlabel" htmlFor="it-rec-amt">Per purchase</label>
+          <input id="it-rec-amt" className="oe-input" value={toInputText(amount)} onChange={(e) => { setAmount(decimalInput(e.target.value, { prev: amount })); setStates({}); setFinished(false); }} inputMode="decimal" placeholder={toInputText('0.00')} autoComplete="off" aria-label="Amount per purchase" disabled={busy || !!blocked.length} />
+          <span className="oe-suffix">USDC</span>
         </div>
       </div>
-
-      <div className="rc-field">
-        <span className="rc-field__k">Frequency</span>
-        <ViewSeg value={type} options={PLAN_TYPES.map((p) => [p, PLAN_LABEL[p]] as const)} onChange={pickType} label="Frequency" />
+      <div className="oe-tabs it-rec__freq" role="tablist" aria-label="Frequency">
+        {PLAN_TYPES.map((t) => (
+          <button key={t} type="button" role="tab" aria-selected={type === t} className={`oe-tab${type === t ? ' is-on' : ''}`} onClick={() => pickType(t)} disabled={busy}>{PLAN_LABEL[t]}</button>
+        ))}
       </div>
       {type !== 'DAILY' && (
-        <div className="rc-field">
-          <span className="rc-field__k">{type === 'MONTHLY' ? 'Day of the month' : 'Day'}</span>
+        <div className="it-rec__day">
+          <span>{type === 'MONTHLY' ? 'Day of the month' : 'Day'}</span>
           <FxSelect value={String(day)} options={dayOptions} onChange={(v) => setDay(Number(v))} label={type === 'MONTHLY' ? 'Day of the month' : 'Weekday'} searchable={false} />
         </div>
       )}
@@ -340,42 +347,36 @@ export function BuyRecurring({ ix, w, address, provider, onDone, onClose }: {
       </ul>
 
       {!blocked.length && (
-        <>
-          <div className="fx-kv">
-            <div><span>Schedule</span><b>{scheduleWords(type, day)}</b></div>
-            <div><span>Pre-funded balance</span><b>{available === null ? <Spinner /> : usd(available)}</b></div>
+        <div className="oe-field">
+          <div className="oe-inputrow">
+            <label className="oe-inlabel" htmlFor="it-rec-fund">Top up</label>
+            <button type="button" className="oe-chip" title="Everything in your wallet on ValueChain" disabled={!pf || pf.walletUsdc <= 0n || busy} onClick={() => { setTouchedFund(true); setFund(pf ? formatUnits(pf.walletUsdc, USDC_DP) : ''); }}>MAX</button>
+            <input id="it-rec-fund" className="oe-input" value={toInputText(fund)} onChange={(e) => { setTouchedFund(true); setFund(decimalInput(e.target.value, { prev: fund })); }} inputMode="decimal" placeholder={toInputText('0.00')} autoComplete="off" aria-label="Add to the balance" disabled={busy} />
+            <span className="oe-suffix">USDC</span>
           </div>
-          <div className="fx-box">
-            <div className="fx-box__head">
-              <span>Add to the balance now</span>
-              <span className="fx-max">{pf ? `EVM wallet balance: ${usd(pf.walletUsdc)}` : <Spinner />}</span>
-            </div>
-            <div className="fx-amount">
-              <input value={fund} onChange={(e) => { setTouchedFund(true); setFund(decimalInput(e.target.value, { prev: fund })); }} inputMode="decimal" placeholder="0.00" aria-label="Add to the balance" disabled={busy} />
-              <span className="fx-amount__unit pfx-unit"><CoinIcon coin="USDC" size={16} /> USDC</span>
-            </div>
-          </div>
-          {perRun > 0n && !covered && <p className="fx-note fx-note--warn">The first purchase is not covered. Add funds before creating the plans.</p>}
-          {markets.length > 1 && <p className="fx-note">The plans buy in their own market’s morning: China funds by China time, US funds by US time.</p>}
-        </>
+        </div>
       )}
 
-      {finished && !error ? (
-        <>
-          <p className="fx-note fx-note--ok">{`${legs.length} recurring plans created, one per fund. They show under Recurring Buys on the Wealth page, where you can pause, change or end each.`}</p>
-          {onClose && <button type="button" className="fx-cta" onClick={onClose}>Done</button>}
-        </>
-      ) : !provider ? (
-        <p className="fx-note">Reconnect your wallet: Recurring Buy is set up from your wallet on ValueChain.</p>
-      ) : (
-        <button type="button" className="fx-cta" disabled={busy || !perRun || !!problem || !covered} onClick={() => void run()}>
-          {busy ? <Spinner label="Sending" /> : addUnits > 0n ? `Add funds and start ${legs.length} plans` : `Start ${legs.length} plans`}
-        </button>
-      )}
-      {problem && !busy && <p className="fx-note fx-note--err">{problem}</p>}
-      {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
-      {!blocked.length && <p className="fx-note">{`One SoDEX recurring plan per fund, on one schedule: ${legs.length + (addUnits > 0n ? 1 : 0)} confirmations in your wallet. Each purchase follows SoDEX’s Recurring Buy rules; nothing rebalances.`}</p>}
-      {pf && addUnits > 0n && <p className="fx-note"><button type="button" className="fx-link" onClick={() => requestTransfer({ to: 'evm', coin: 'USDC' })}>Move USDC to your wallet</button></p>}
+      <dl className="oe-out">
+        <div className="oe-out__row"><dt className="oe-out__k">Schedule</dt><dd className="oe-out__v oe-out__v--small">{scheduleWords(type, day)}</dd></div>
+        <div className="oe-out__row"><dt className="oe-out__k">Wallet on ValueChain</dt><dd className="oe-out__v oe-out__v--small">{pf ? `${usd(pf.walletUsdc)} USDC` : DASH}</dd></div>
+        <div className="oe-out__row"><dt className="oe-out__k">Confirmations</dt><dd className="oe-out__v oe-out__v--small">{`${legs.length + (addUnits > 0n ? 1 : 0)}`}</dd></div>
+      </dl>
+
+      {perRun > 0n && !covered && !blocked.length && <p className="it-err">The first purchase is not covered: top up the balance first.</p>}
+      {markets.length > 1 && <p className="it-note">The plans buy in their own market’s morning: China funds by China time, US funds by US time.</p>}
+      {problem && !busy && <p className="it-err" role="alert">{problem}</p>}
+      {error && <p className="it-err" role="alert">{error}</p>}
+      {pf && addUnits > pf.walletUsdc && <button type="button" className="oe-chip it-rec__move" onClick={() => requestTransfer({ to: 'evm', coin: 'USDC' })}>Move USDC to your wallet</button>}
+      {finished && !error ? <p className="it-ok">{`${legs.length} recurring plans created, one per fund. Pause, change or end each below.`}</p> : null}
+      <div className="oe-side">
+        {!provider ? <button type="button" className="oe-side__btn is-buy" disabled>Reconnect your wallet</button> : (
+          <button type="button" className="oe-side__btn is-buy" disabled={busy || !perRun || !!problem || !covered} onClick={() => void run()}>
+            {busy ? <Spinner label="Sending" /> : addUnits > 0n ? `Top up and start ${legs.length} plans` : `Start ${legs.length} plans`}
+          </button>
+        )}
+      </div>
+      {onClose && finished && !error && <button type="button" className="oe-chip" onClick={onClose}>Done</button>}
     </div>
   );
 }

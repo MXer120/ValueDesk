@@ -385,7 +385,8 @@ html[data-theme='light'] .wp {
 .wp-earn__fig b { font-size: 30px; line-height: 36px; }
 
 /* The index ticket (IndexTicket.tsx): the trade page's ticket parts (OrderEntry.css .oe-*), on the page's panel. */
-.oe.it { display: flex; flex-direction: column; gap: 0; height: auto; min-height: 0; padding: 0; background: none; border: 0; box-shadow: none; }
+.oe.it { display: flex; flex-direction: column; gap: 0; height: auto; min-height: 0; }
+.oe.it:not(.panel) { padding: 0; background: none; border: 0; box-shadow: none; }
 .oe.it .oe-tabs { margin: 0 0 var(--sp-3); border-bottom: 1px solid var(--line); }
 .it-body { display: flex; flex-direction: column; gap: 10px; }
 .it-slider { margin-top: 2px; }
@@ -481,3 +482,39 @@ html[data-theme='light'] .wp {
    ticket sets them itself: green on Buy, red on Sell, as the trade ticket does. */
 .oe.it { --oe-tint: var(--pos); --oe-wash: 10%; --oe-edge: 35%; }
 .oe.it:has(.oe-side__btn.is-sell) { --oe-tint: var(--neg); }
+
+/* The index ticket's top as the trade page's (owner 2026-11-28): its direction tabs, three of them. Recurring is
+   marked in the text colour: it is neither a buy now nor a sell. */
+.oe.it .it-dir { grid-template-columns: repeat(3, 1fr); margin-bottom: var(--sp-3); }
+.oe.it .oe-dir--tabs .oe-dir__btn.is-on.is-rec { background: none; color: var(--text); box-shadow: inset 0 -2px 0 var(--text); }
+.oe.it .oe-field { margin-bottom: var(--sp-2); }
+.it-rec__freq { margin: 0 0 var(--sp-2); }
+.it-rec__day { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-2); color: var(--muted); font-size: var(--fs-xs); }
+.it-rec__day > :last-child { min-width: 140px; }
+.it-rec__move { align-self: flex-start; }
+.it-dim { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; color: var(--muted); font-size: var(--fs-xs); }
+
+/* The plans in these funds, in the ticket's width. */
+.it-plans { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+.it-plans__h { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.it-plans__h b { font-size: var(--fs-sm); font-weight: 600; }
+.oe.it .it-plans__seg { margin: 0; border-bottom: 0; }
+.it-plans .oe-facts { margin: 0; }
+.it-plans__acts { display: flex; gap: 6px; }
+.it-plans__acts .oe-chip { margin: 0; }
+.it-plans__list { margin: 0; }
+.it-plan { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; padding: 8px 0; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.it-plan:hover .it-plan__t b { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.it-plan__t { display: flex; flex-direction: column; min-width: 0; }
+.it-plan__t b { overflow: hidden; font-size: var(--fs-sm); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.it-plan__t small { color: var(--muted); font-size: var(--fs-xs); }
+.it-plan__v { font: 500 var(--fs-sm) var(--font-num); }
+/* The recurring fund rows as the Buy tab's: plain rows with a hairline, not boxed. */
+.it-rec .vdi-plan { gap: 0; margin: 2px 0 var(--sp-2); }
+.it-rec .vdi-plan li { padding: 8px 0; border-radius: 0; background: none; }
+.it-rec .vdi-plan li + li { border-top: 1px solid var(--line); }
+
+/* On the index page the ticket is the trade page's card (.panel.oe in OrderEntry.css): its padding, corner and glow. */
+.wp-ticket { min-width: 0; }
+.wp-ticket > .panel.oe.it { padding: var(--sp-2) 16px 16px; }
+.wp-ticket > .panel.oe.it > :not(.oe-fx) { position: relative; z-index: 1; }

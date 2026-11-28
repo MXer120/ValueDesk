@@ -70,7 +70,7 @@ h.test('a custom SSI index: Details & Review, Create, then bought as one market 
   // Buy $20: $10 of each, each a spot market order in USDC.
   const amount = p.locator('#it-amt');
   await amount.waitFor({ timeout: 20_000 });
-  await until(p, async () => /\$100/.test((await p.locator('.oe-out').innerText()) || ''), 'the Spot balance to be read', 20_000);
+  await until(p, async () => /\$100/.test((await p.locator('.it .oe-facts').first().innerText()) || ''), 'the Spot balance to be read', 20_000);
   await typeInto(amount, '20');
   const buy = p.getByRole('button', { name: 'Buy 2 funds' });
   await until(p, () => buy.isEnabled(), 'Buy to be pressable', 10_000);
@@ -205,8 +205,8 @@ h.test('LIVE: a custom SSI index bought for $12 and sold back, nothing left but 
   console.log(`ui-e2e: wealth LIVE bought: ${JSON.stringify(got)}${buyErr ? ` (ticket: ${buyErr})` : ''}`);
 
   // Sell everything back through the ticket's Sell tab, whatever the buy left.
-  await p.getByRole('tab', { name: 'Sell' }).click();
-  await p.locator('.it-pcts').getByRole('button', { name: 'All' }).click();
+  await p.getByRole('radio', { name: 'Sell' }).click();
+  await p.locator('.it').getByRole('button', { name: 'MAX' }).click();
   const sell = p.getByRole('button', { name: 'Sell 100% of each' });
   await until(p, () => sell.isEnabled(), 'Sell to be pressable (the SSI balances read)', 30_000);
   await sell.click();

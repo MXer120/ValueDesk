@@ -133,7 +133,13 @@ export function mustRecreate(type: 'modifyOrder' | 'replaceOrder', engine: Engin
 
 // --- the gate ----------------------------------------------------------------------------------------
 
-function guardOrder(action: SignableAction, b: BuilderConfig, owner: string): void {
+/**
+ * The one fee program an order may carry below the wallet's own fee: a Wealth index leg (owner 2026-11-28, "a general
+ * builder fee for buy & sells of 0.01%"), 10 tenths of a bp. Only placeOrder sets it, only for the index ticket's legs.
+ */
+export const WEALTH_FEE = 10;
+
+function guardOrder(action: SignableAction, b: BuilderConfig, owner: string, program?: 'wealth'): void {
   const engine = action.engine;
   const p = action.params as { builder?: unknown; orders?: unknown };
   const orders: unknown[] = Array.isArray(p.orders) ? p.orders : [];
@@ -160,7 +166,7 @@ function guardOrder(action: SignableAction, b: BuilderConfig, owner: string): vo
     // An optional build: an account that has not approved the fee trades without it.
     return;
   }
-  const owed = feeNow(engine, owner);
+  const owed = program === 'wealth' ? Math.min(feeNow(engine, owner), WEALTH_FEE) : feeNow(engine, owner);
   const top = Math.min(dflt, BUILDER_FEE_CAP[engine]);
   if (String(got.id) !== String(b.id)) {
     throw refuse('This order was not sent: it names another builder than ValueDesk.', { ...base, why: 'not the pinned builder', got, pinned: b.id });
@@ -178,14 +184,14 @@ function guardOrder(action: SignableAction, b: BuilderConfig, owner: string): vo
  * Returns when the action may be signed; throws TradingError('fee-guard') when
  * it may not. `owner` is the wallet the trading key belongs to.
  */
-export function guardAction(action: SignableAction, owner: string): void {
+export function guardAction(action: SignableAction, owner: string, program?: 'wealth'): void {
   const b = activeBuilder(tradingConfig().builder);
   // No builder configured: nothing is enforced, nothing changes.
   if (!b) return;
   const kind = classifyAction(action.type);
   if (kind === 'other') return;
   if (kind === 'order') {
-    guardOrder(action, b, owner);
+    guardOrder(action, b, owner, program);
     return;
   }
   const engine = action.engine;

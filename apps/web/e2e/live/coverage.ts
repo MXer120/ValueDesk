@@ -137,6 +137,7 @@ export const APP_COVERAGE: Readonly<Record<string, Readonly<Record<string, Cover
     mustRecreate: c(['spot-limit-change-price', 'builder-replace-keeps-builder', 'builder-modify-keeps-builder']),
     classifyAction: PURE(['builder-approval-enforced'], 'gate classification'),
     isFeeFreeMarket: no('a fixed list of spot markets SoDEX charges nothing on (the USDT/USDC swap): no live scenario places a swap yet'),
+    WEALTH_FEE: no('a constant: the builder fee of the Wealth index legs, 0.01%; its round trip is e2e/ui/wealth.spec.ts --live (MAG7.ssi + DEFI.ssi bought and sold back)'),
   },
   onboard: {
     sendUsdcDeposit: c(['deposit-*'], 'deposit-external, extra-deposits and the USDC legs of the evm-tour'),

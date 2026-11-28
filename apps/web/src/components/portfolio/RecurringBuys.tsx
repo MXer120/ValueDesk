@@ -100,11 +100,11 @@ export type RecurringSheetTarget =
   | { kind: 'confirm'; plan: RecurringPlan; action: 'pause' | 'resume' | 'cancel' }
   | { kind: 'history'; plan: RecurringPlan };
 
-const nameOf = (funds: readonly WealthFund[] | null, plan: Pick<RecurringPlan, 'fundId' | 'share' | 'target'>): string => {
+export const nameOf = (funds: readonly WealthFund[] | null, plan: Pick<RecurringPlan, 'fundId' | 'share' | 'target'>): string => {
   const f = funds?.find((x) => x.fundId === plan.fundId);
   return f ? fundLabel(f).name : plan.share?.coin ?? plan.target;
 };
-const STATUS_WORD: Readonly<Record<string, string>> = { ACTIVE: 'Active', PAUSED: 'Paused', CANCELLED: 'Ended' };
+export const STATUS_WORD: Readonly<Record<string, string>> = { ACTIVE: 'Active', PAUSED: 'Paused', CANCELLED: 'Ended' };
 
 // --- the panel (Wealth > Recurring buys) ---------------------------------------------------------------
 

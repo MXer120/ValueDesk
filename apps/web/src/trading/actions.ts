@@ -41,7 +41,7 @@ import {
 import { api } from '../api';
 import { activeBuilder, orderBuilder, type BuilderApproval } from './builder';
 import { tradingConfig, writesOffMessage } from './config';
-import { guardAction, mustRecreate, isFeeFreeMarket } from './feeGuard';
+import { guardAction, mustRecreate, isFeeFreeMarket, WEALTH_FEE } from './feeGuard';
 import { guardLegal, isOpening } from './legalGate';
 import { requireTerms } from '../legal/acceptance';
 import { readGateway, sendSigned } from './gateway';
@@ -111,8 +111,9 @@ export async function symbolFor(engine: Engine, ref: string): Promise<MarketSymb
  * covers it, per engine (builder.ts). An order naming an unapproved builder is
  * rejected, so "not listed" means "not sent".
  */
-function builderFor(engine: Engine, owner: string, approved: BuilderApproval | null): BuilderParams | undefined {
-  return orderBuilder(tradingConfig().builder, approved, engine, feeNow(engine, owner));
+function builderFor(engine: Engine, owner: string, approved: BuilderApproval | null, cap?: number): BuilderParams | undefined {
+  const owed = feeNow(engine, owner);
+  return orderBuilder(tradingConfig().builder, approved, engine, cap !== undefined && cap >= 0 ? Math.min(owed, cap) : owed);
 }
 
 /**
@@ -123,16 +124,16 @@ function builderFor(engine: Engine, owner: string, approved: BuilderApproval | n
  * saves a read: remembered as missing, SoDEX is asked; remembered as there when
  * it is not, SoDEX rejects the order - neither ends in an order without it.
  */
-async function builderForOrder(engine: Engine): Promise<BuilderParams | undefined> {
+async function builderForOrder(engine: Engine, cap?: number): Promise<BuilderParams | undefined> {
   const cfg = activeBuilder(tradingConfig().builder);
   if (!cfg || cfg.fee[engine] <= 0) return undefined;
   // A wallet entitled to a lower fee should not pay the default because its terms ran
   // out a moment ago: ask (briefly, never failing the order). No terms: the default.
   await ensureTerms(requireSigner(undefined, engine).meta.owner);
   const { owner, builder: remembered } = requireSigner(undefined, engine).meta;
-  let builder = builderFor(engine, owner, remembered);
+  let builder = builderFor(engine, owner, remembered, cap);
   if (!builder && (cfg.required || builderApprovalPending())) {
-    builder = builderFor(engine, owner, await refreshBuilderApproval());
+    builder = builderFor(engine, owner, await refreshBuilderApproval(), cap);
   }
   if (!builder && cfg.required) {
     throw new TradingError(
@@ -162,7 +163,7 @@ function noteBuilderRejection(e: unknown): void {
  * or create or change an order outside the builder rules (feeGuard.ts), is
  * refused before anything is signed.
  */
-async function signAndSend<T = unknown>(action: SignableAction, what: string): Promise<T> {
+async function signAndSend<T = unknown>(action: SignableAction, what: string, program?: 'wealth'): Promise<T> {
   const s = requireSigner(undefined, action.engine);
   // The operator's brake: nothing that opens or increases a position is signed;
   // cancels, reduce-only orders and exits, transfers and withdrawals still are.
@@ -173,7 +174,7 @@ async function signAndSend<T = unknown>(action: SignableAction, what: string): P
     throw new TradingError('Cancelled: the terms were not accepted, so nothing was sent.', 'legal');
   }
   guardLegal(action, s.meta.owner);
-  guardAction(action, s.meta.owner);
+  guardAction(action, s.meta.owner, program);
   const cfg = tradingConfig();
   const req = await signAndBuildWithNonceManager(action, s.key, { chainId: cfg.chainId, nonces: nonces(), base: '' });
   try {
@@ -211,14 +212,18 @@ function checkBatch(result: unknown, what: string, labels: readonly string[] = [
 
 // --- orders ----------------------------------------------------------------------
 
-export async function placeOrder(engine: Engine, t: OrderTicket) {
+/**
+ * `program: 'wealth'`: a Wealth index leg, at ValueDesk's Wealth fee (feeGuard.ts WEALTH_FEE, 0.01%) or the wallet's own
+ * lower fee. The fee guard accepts that rate for these orders only. SoDEX charges a spot builder fee on sells only.
+ */
+export async function placeOrder(engine: Engine, t: OrderTicket, o: { program?: 'wealth' } = {}) {
   const s = requireSigner(undefined, engine);
   const sym = await symbolFor(engine, t.symbol);
   // No ValueDesk fee where SoDEX itself charges none (feeGuard.ts).
-  const builder = isFeeFreeMarket(engine, sym.id) ? undefined : await builderForOrder(engine);
+  const builder = isFeeFreeMarket(engine, sym.id) ? undefined : await builderForOrder(engine, o.program === 'wealth' ? WEALTH_FEE : undefined);
   const built = placeOrderAction(engine, t, sym, s.meta.accountId, builder);
   const labels = ['the order', ...(t.takeProfit ? ['the take-profit'] : []), ...(t.stopLoss ? ['the stop-loss'] : [])];
-  const result = await signAndSend(built.action, 'order');
+  const result = await signAndSend(built.action, 'order', o.program);
   try {
     checkBatch(result, 'order', labels);
   } catch (e) {

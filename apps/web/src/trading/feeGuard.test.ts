@@ -270,7 +270,7 @@ test('the gate cannot be walked around: the app signs exchange actions in ONE pl
   const actions = readFileSync(join(root, 'trading', 'actions.ts'), 'utf8');
   assert.equal(actions.split('signAndBuildWithNonceManager(').length - 1, 1, 'one signing call in actions.ts');
   const send = actions.slice(actions.indexOf('async function signAndSend'));
-  const guard = send.indexOf('guardAction(action, s.meta.owner)');
+  const guard = send.indexOf('guardAction(action, s.meta.owner');
   const sign = send.indexOf('signAndBuildWithNonceManager(');
   assert.ok(guard > 0 && sign > guard, 'signAndSend calls the guard BEFORE it signs');
   // Between the check and the signing call there is no `await` (the one in front of the call itself aside): nothing can change in between.
@@ -313,4 +313,14 @@ test('the exception is spot on mainnet only', () => {
   configure(REQUIRED);
   const perps = perpsActions.newOrder(AID, 27, [{ clOrdID: 'c', side: OrderSide.SELL, type: OrderType.MARKET, timeInForce: TimeInForce.IOC, price: '1', quantity: '1', reduceOnly: false, modifier: 1, positionSide: 1 } as never]);
   assert.throws(() => guardAction(perps, OWNER), /builder/);
+});
+
+test('a Wealth index leg (program wealth) may carry the Wealth fee, 0.01%, and nothing lower; other orders may not', () => {
+  // The default and owed fee here is 20; the Wealth fee is 10.
+  assert.doesNotThrow(() => guardAction(spotOrder(ours(10)), OWNER, 'wealth'));
+  assert.doesNotThrow(() => guardAction(spotOrder(ours(20)), OWNER, 'wealth'), 'the full fee is never refused');
+  refused(() => guardAction(spotOrder(ours(9)), OWNER, 'wealth'), /not the fee this wallet owes/, 'below the Wealth fee');
+  refused(() => guardAction(spotOrder(ours(0)), OWNER, 'wealth'), /not the fee this wallet owes/, 'no fee');
+  stops(spotOrder(ours(10)), /not the fee this wallet owes/, 'an ordinary order at the Wealth fee');
+  refused(() => guardAction(spotOrder(undefined), OWNER, 'wealth'), /does not carry the ValueDesk builder fee/, 'no builder at all');
 });

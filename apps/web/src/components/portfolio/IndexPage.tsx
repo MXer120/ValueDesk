@@ -172,12 +172,9 @@ function IndexView({ ix, w, address, provider, onDone, onOpenMarket }: {
         </div>
 
         <aside className="wp-main__r">
-          <Shell className="wp-sec">
-            <ShellHeader title="Buy" subtitle={min > 0 ? `Minimum buy ${fmtUsd(min, 0)}${recurringOk === false ? ', once only' : ''}` : 'Once or on a schedule'} />
-            <Panel className="wp-sec__p wp-buy-p pf">
-              <IndexTicket ix={ix} w={w} address={address} provider={provider} onDone={onDone} />
-            </Panel>
-          </Shell>
+          <div className="wp-sec wp-ticket pf">
+            <IndexTicket ix={ix} w={w} address={address} provider={provider} onDone={onDone} card />
+          </div>
           <Shell className="wp-sec">
             <ShellHeader title="Buy methods" subtitle="What this index can be bought with" />
             <Panel className="wp-sec__p"><BuyMethods ix={ix} funds={w.funds} targets={targets} actions={actions} /></Panel>
@@ -293,7 +290,7 @@ function Owner({ ix, own, address, provider }: { ix: VdIndex; own: boolean; addr
   });
   const remove = () => { dropDraft(ix.id); openPath(WEALTH_PATH.indexes); };
   const copyLink = () => {
-    void navigator.clipboard?.writeText(`${window.location.origin}${WEALTH_PATH.index(ix.id)}`).then(() => setNote({ text: 'Link copied.' }), () => setNote({ text: 'Could not copy the link.', bad: true }));
+    void navigator.clipboard?.writeText(`${window.location.origin}${WEALTH_PATH.index(ix.id)}`).then(() => setNote(null), () => setNote({ text: 'Could not copy the link.', bad: true }));
   };
   return (
     <div className="wp-hero__acts">
