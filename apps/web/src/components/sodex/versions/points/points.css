@@ -193,7 +193,7 @@ a.spx-market:hover { background: rgb(var(--ink) / 0.09); }
 .spx-live__n b { font-size: 50px; font-weight: 800; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .spx-live__n span { font-size: 14px; color: var(--tf-muted); }
 .spx-live__band { margin-top: 8px; font-size: 12px; color: var(--tf-muted); }
-.spx-live__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 12px; border-top: 1px solid rgb(255 255 255 / 0.08); }
+.spx-live__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 12px; }
 .spx-live__src { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .spx-live__src > span { font-size: 12px; color: var(--tf-muted); }
 .spx-live__src ul { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
