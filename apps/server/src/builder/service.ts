@@ -156,7 +156,10 @@ export class BuilderService {
 
   private gifts: ((address: string, now: number) => FeeProgram[]) | null = null;
 
-  /** VIP fees a wallet was given without being VIP (invites: the days of a VIP code). They lower its fee; vipProgramOf does not see them. */
+  /**
+   * VIP days a wallet was given by joining with a VIP code (invites). Since 2026-11-28 they are VIP standing for their days
+   * (owner: "users joining with a vip link actually get vip for 7days"): vipProgramOf sees them unless asked without gifts.
+   */
   setGiftPrograms(f: ((address: string, now: number) => FeeProgram[]) | null): void {
     this.gifts = f;
   }
@@ -444,11 +447,12 @@ export class BuilderService {
   /**
    * The VIP program running for this wallet now (a program whose fee is VIP_PROGRAM_FEE: the beta's 30 days from its
    * listing, or one set on the dev page), or null. Of several, the one that lasts longest (no end counts longest).
-   * Told by its fee, never by its label (a label is free text on the dev page).
+   * Told by its fee, never by its label (a label is free text on the dev page). With gifts (default): also a VIP code's days
+   * (invites giftsFor); withGifts false: the wallet's own standing only (what lets its own code give VIP days).
    */
-  vipProgramOf(address: string, now = this.now()): FeeProgram | null {
+  vipProgramOf(address: string, now = this.now(), withGifts = true): FeeProgram | null {
     let best: FeeProgram | null = null;
-    for (const g of this.programsOf(address.toLowerCase(), now, true, false)) {
+    for (const g of this.programsOf(address.toLowerCase(), now, true, withGifts)) {
       if (g.fee !== VIP_PROGRAM_FEE || g.from > now || (g.until !== null && g.until <= now)) continue;
       if (!best || (best.until !== null && (g.until === null || g.until > best.until))) best = g;
     }

@@ -137,10 +137,12 @@ export class InviteService {
 
   /* ------------------------------------------------------------------- VIP codes ----- */
 
-  isVip(address: string): boolean {
+  /** VIP as the app shows it, a VIP code's days included (owner 2026-11-28). ownOnly: not through a VIP code it joined with. */
+  isVip(address: string, ownOnly = false): boolean {
     const a = address.toLowerCase();
     try {
-      return this.o.isVip ? this.o.isVip(a) : this.builder.vipNow(a) || this.builder.vipProgramOf(a) !== null;
+      if (this.o.isVip) return this.o.isVip(a) && !(ownOnly && this.giftsFor(a, this.now()).length > 0);
+      return this.builder.vipNow(a) || this.builder.vipProgramOf(a, this.now(), !ownOnly) !== null;
     } catch {
       return false;
     }
@@ -258,10 +260,10 @@ export class InviteService {
    * owner (a code changed on SoDEX keeps its upgrade: owner 2026-11-26, codes may be customised once).
    */
   vipDaysOf(code: string, owner: string): number {
-    return this.store.isVipCode(code) || this.store.ownsVipCode(owner) || this.isVip(owner) ? VIP_CODE_DAYS : 0;
+    return this.store.isVipCode(code) || this.store.ownsVipCode(owner) || this.isVip(owner, true) ? VIP_CODE_DAYS : 0;
   }
 
-  /** A joined wallet's VIP fee while it lasts (builder programs; never VIP standing, service.ts vipProgramOf). */
+  /** A joined wallet's VIP days while they last: its VIP fee and VIP standing (builder vipProgramOf), not VIP days for its own code. */
   giftsFor(address: string, now: number): FeeProgram[] {
     const a = address.toLowerCase();
     const j = this.store.joinOf(a);

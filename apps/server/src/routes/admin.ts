@@ -742,7 +742,7 @@ export async function adminRoutes(app: FastifyInstance, opts: AdminRouteOptions 
     const svc = inviteService();
     const owner = await svc.ownerOf(code);
     if (owner === undefined) return reply.code(503).send({ ok: false, error: 'SoDEX did not answer' });
-    return { ok: true, code, owner, vip: owner ? svc.isVip(owner) : false, upgraded: svc.store.isVipCode(code), ...svc.store.joinsOfCode(code, now()) };
+    return { ok: true, code, owner, vip: owner ? svc.isVip(owner, true) : false, upgraded: svc.store.isVipCode(code), ...svc.store.joinsOfCode(code, now()) };
   });
   app.post('/api/admin/codes/add', { bodyLimit: 4 * 1024 }, async (req, reply) => {
     const code = normCode(String(bodyOf(req).code ?? ''));

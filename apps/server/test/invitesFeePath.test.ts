@@ -142,7 +142,7 @@ test('VIP credit removed: nobody is given any, and what is left of one already g
   assert.equal(me(used).credits.grantedUsd, 2);
 });
 
-test('VIP codes: who joins a VIP\'s code, or one upgraded on the dev page, pays the VIP fee for 7 days - and is no VIP', async () => {
+test('VIP codes: who joins a VIP\'s code, or one upgraded on the dev page, is VIP for 7 days (fee and standing) - its own code gives no VIP days on', async () => {
   const vip = wallet();
   const plain = wallet();
   const [a, b, c, d] = [wallet(), wallet(), wallet(), wallet()];
@@ -158,10 +158,16 @@ test('VIP codes: who joins a VIP\'s code, or one upgraded on the dev page, pays 
   assert.equal((await post(b, 'PLAIN111')).vipUntil, null);
   assert.equal(w.inv.giftsFor(a.address, w.clock.now())[0]!.fee, VIP_PROGRAM_FEE);
   assert.deepEqual(w.inv.giftsFor(b.address, w.clock.now()), []);
-  // Its own code gives no VIP days on: the days are a fee, not VIP.
-  assert.equal(w.inv.isVip(a.address), false);
-  assert.equal(w.svc.vipProgramOf(a.address), null);
+  // VIP for its days (owner 2026-11-28: "users joining with a vip link actually get vip for 7days"): the app's VIP check,
+  // the referral page's VIP, the bots page's promo. Its own code gives no VIP days on (no chain of VIP codes).
+  assert.equal(w.inv.isVip(a.address), true);
+  assert.equal(w.inv.isVip(a.address, true), false);
+  assert.equal(w.svc.vipProgramOf(a.address)?.until, w.clock.now() + 7 * 86_400_000);
+  assert.equal(w.svc.vipProgramOf(a.address, w.clock.now(), false), null);
+  assert.equal(w.inv.isVip(b.address), false);
+  assert.equal(w.inv.me(a.address).vip, true);
   assert.equal(await check('JOINED11'), 0);
+  assert.equal(w.svc.vipProgramOf(a.address, w.clock.now() + 7 * 86_400_000), null, 'no VIP after its days');
   // The welcome is lower while it lasts; after it the VIP fee holds (standardFee: without welcome and credits).
   assert.equal(progs(a.address).bots!.fee, 0);
   assert.equal(w.svc.standardFee(a.address, 'bots'), 1);
